@@ -19,7 +19,7 @@ Rotonda consists of a set of types of components that can be mixed and matched t
 |---------|-------------|
 | Rotonda-store         | RIB-like in-memory storage data-structures, keyed by prefix |
 | Routecore             | BGP/BMP parsers |
-| rotorotoro            | `rotoro` protocol broker |
+| rotoro                | `rotoro` protocol types |
 
 
 Key:
@@ -54,14 +54,14 @@ Routecore
 | Proposal | ✅ | this document |
 | Experimental | ✅ | |
 | Development | ✅ |  |
-| Feature complete | ✅ | |
+| Feature complete | 🦀 | |
 | Stabilized | 💤 |  [repo](https://github.com/NLnetLabs/routecore) |
 
 Routecore is a library that holds types that are shared between rotonda, routinator, krill, that are related to routing.
 
 
-Rotoro protocol
-===============
+Rotoro
+======
 
 | Stage | State | Artifacts |
 |:----:|:----:|:--------:|
@@ -73,8 +73,8 @@ Rotoro protocol
 
 Rotoro is the protocol that connects Rotonda-runtimes, inpired by the rtr-protocol. Rotoro allows for receiving/sending full state (snapshots) or diffs from runtime to runtime. A rotoro channel sends/receives of one single type, but it can be merged with another into a third type with the aid of a channel operator runtime.
 
-Rotonda-runtimes
-================
+~~Rotonda-runtimes~~ Tannhäuser Gates
+=====================================
 
 | Stage | State | Artifacts |
 |:----:|:----:|:--------:|
@@ -84,11 +84,11 @@ Rotonda-runtimes
 | Feature complete | 💤 | |
 | Stabilized | 💤 |  |
 
-The Rotonda-runtimes are stand-alone binaries that can be run as separate applications that communicate over a dedicated channel with the aid of the internal `rotoro` protocol, a rtr-like protocol. The fall into two categories: storage runtimes and channel operators.
+The Rotonda runtimes ak.a. Tannhäuser Gates are stand-alone binaries that can be run as separate applications that communicate over a dedicated channel with the aid of the internal `rotoro` protocol, a rtr-like protocol. The fall into two categories: storage runtimes and channel operators.
 
 Storage runtimes are applications that wrap a rotonda-store data-structure in a few (JSON-over-HTTP) APIs, that are used for querying and storing prefixes, configuration, metrics, downloading/uploading snapshots, etc. and input and inbound and outbound connections. The Storage runtimes only speak the ro-to-ro internal protocol. Furthermore a single-input runtime can only feature one inbound connection and one outbound connection. A multi-input runtime can have multiple inbound connections and multiple outbound connections. In both cases the connections can only handle one payload type for inbound and outbound connections.
 
-The channel operators are applications that either merge two `rotoro` channels into one, or conversely broadcast one ro-to-ro channel to multiple outputs.
+The channel operators are applications that create pub/sub channels that either merge two `rotoro` channels into one, or conversely broadcast one `rotoro` channel to multiple outputs.
 When merging two or more channels the input channels can be of different types. The output type will be another type that can be the union of all input types, or they can have specialized merge-functions to go from several input types to one output type. The channel operators can also only speak the ro-to-ro internal protocol.
 
 Several runtimes can be combined into one runtime, in that case the ro-to-ro serialization and sending/receiving of messages is superfluous.

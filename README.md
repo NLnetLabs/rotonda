@@ -79,7 +79,7 @@ The single-threaded store is backed by two global `vec`s that host the nodes in 
 | Stage | State | Artifacts |
 |:----:|:----:|:--------:|
 | Proposal | ✅ | this document |
-| Experimental | 💤 | [`roto-ris-live`](https://github.com/NLnetLabs/roto-ris-live) |
+| Experimental | 💤 | [`roto-ris-live`](https://github.com/NLnetLabs/roto-ris-live), [`tannhauser-gate`](https://github.com/NLnetLabs/tannhauser-gate) |
 | Development | 💤  | |
 | Feature complete | 💤 | |
 | Stabilized | 💤 |  |

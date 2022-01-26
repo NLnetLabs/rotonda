@@ -34,12 +34,16 @@ The transport that RTR uses is TCP and TLS-over-TCP. Pros are that it has few de
 
 Cons are that we would have to invent and implement a complete binary format. The payload of RTR is completely geared towards RPKI data, so we would have to invent a new format for the (meta-)data.
 
+**ximon18:** Would one also need to deal with such lower level issues such out-of-order and fragmented packets?
+
 ### Web-Sockets (WS)
 
 Web-sockets offer more connection management facilities than bare TCP and the obvious format for the meta-data would be JSON. Web-sockets would also allow for easy communication with other applications (outside of `Rotonda`).
 There's good support for web-sockets in Rust.
 
 The cons are the overhead and the need for extensive (de-)serialization, both in terms of defining/implementing and taking up CPU/memory resources. Another con is that web-sockets will introduce more dependencies.
+
+**ximon18:** Deserialization would surely also be required if using a raw TCP stream?
 
 Finally, the argument of being able to connect to third-party, external application is a bit moot, since we're talking about an internal protocol here. Having an explicit layer that acts as a gateway between `Rotonda` and the outside world probably is a good idea and having a different protocol to the outside world is therefore a good idea?
 
@@ -48,3 +52,5 @@ Finally, the argument of being able to connect to third-party, external applicat
 MQTT is a well-defined, routable pub/sub messaging protocol. There's good support for relaying it anywhere through a broker (RabbitMQ, ZeroMQ, etc.). MQTT can use TCP, TLS/TCP and web-sockets as transport. It offers the typical things you'd need for a pub/sub system, e.g. managing and tracking subscriptions, QoS (At-most-once, At-least-once, Exactly-once).
 
 The same discussion as for web-sockets applies here. Additionally, I think, it's overkill for `Rotonda` to use MQTT internally.
+
+**ximon18:** Is not the key difference between MQTT and the other proposals above the higher level pub/sub and queueing properties which neither Web-Sockets nor raw TCP streams offer (without re-inventing them ourselves that is), and the deciding factor is thus whether or not these properties are needed or are at least desirable? To turn this on its head, shouldn't the choice of protocol be based on the match to some set of requirements that would need to be defined first?

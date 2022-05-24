@@ -12,7 +12,7 @@ Roadmap
 - unit tests & acceptance tests matrix
 - fuzzer IPv4/IPv6
 
-**~~`Rotonda-runtimes`~~ `Tannhäuser Gates`**
+**`Rotonda-runtimes`**
 
 - ✅ setup `tokio` skeleton with logging etc.
 - keep history window (serials).

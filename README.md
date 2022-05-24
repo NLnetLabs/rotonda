@@ -73,18 +73,18 @@ The single-threaded store is backed by two global `vec`s that host the nodes in 
 
 `Rotoro` is the protocol that connects `Rotonda-runtime`s, inspired by the RTR-protocol. `Rotoro` allows for receiving/sending full state (snapshots) or diffs from runtime to runtime. A `rotoro` channel sends/receives of one single type, but it can be merged with another into a third type with the aid of a channel operator runtime.
 
-~~`Rotonda-runtimes`~~ `Tannhäuser Gates`
-=========================================
+`Rotonda-runtimes`
+==================
 
 | Stage | State | Artifacts |
 |:----:|:----:|:--------:|
 | Proposal | ✅ | this document |
-| Experimental | 💤 | [`roto-ris-live`](https://github.com/NLnetLabs/roto-ris-live), [`tannhauser-gate`](https://github.com/NLnetLabs/tannhauser-gate) |
+| Experimental | 💤 | [`roto-ris-live`](https://github.com/NLnetLabs/roto-ris-live), [`rotonda-runtime`](https://github.com/NLnetLabs/rotonda-runtime) |
 | Development | 💤  | |
 | Feature complete | 💤 | |
 | Stabilized | 💤 |  |
 
-The `Rotonda` runtimes a.k.a. `Tannhäuser Gate`s are stand-alone binaries that can be run as separate applications that communicate over a dedicated channel with the aid of the internal `rotoro` protocol, a RTR-like protocol. The fall into two categories: storage runtimes and channel operators.
+The Rotonda runtimes are stand-alone binaries that can be run as separate applications that communicate over a dedicated channel with the aid of the internal `rotoro` protocol, a RTR-like protocol. The fall into two categories: storage runtimes and channel operators.
 
 Storage runtimes are applications that wrap a `rotonda-store` data-structure in a few (JSON-over-HTTP) APIs, that are used for querying and storing prefixes, configuration, metrics, downloading/uploading snapshots, etc. Next to that they feature inbound and outbound connections. The Storage runtimes only speak the `rotoro` internal protocol. Furthermore a single-input runtime can only feature one inbound connection and one outbound connection. A multi-input runtime can have multiple inbound connections and multiple outbound connections. In both cases the connections can only handle one payload type for inbound and outbound connections.
 
@@ -93,7 +93,7 @@ Storage runtimes have a Shell API that can be used to query and store prefixes, 
 The channel operators are applications that create pub/sub channels that either merge two `rotoro` channels into one, or conversely broadcast one `rotoro` channel to multiple outputs.
 When merging two or more channels the input channels can be of different types. The output type will be another type that can be the union of all input types, or they can have specialized merge-functions to go from several input types to one output type. The channel operators can also only speak the `rotoro` internal protocol.
 
-Several `Tannhäuser Gate`s can be combined into one runtime, in that case the `rotoro` serialization and sending/receiving of messages is superfluous.
+Several Rotonda runtimes can be combined into one runtime, in that case the `rotoro` serialization and sending/receiving of messages is superfluous.
 
 Transformers
 ============

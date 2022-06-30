@@ -211,13 +211,17 @@ Bird's filter DSL is pretty flexible and powerful, but also a bit too terse to m
 ```
 filter-statement MyFilter {
     term filter-as-64500 {
-        from {
-            as-path last-as-64500;
+        if (
+            protocol bgp;
             route-filter 0.0.0.0/0 upto /16;
-        }
+            as-path last-as-64500;
+            protocol internal;
+            router-id 243;
+        )
         then {
-            send-to my-rib;
+            import-rib my-rib;
             send-to stdout;
+            reject;
         }
         last-as-64500: AsPathFilter { last: 64500 };
     }

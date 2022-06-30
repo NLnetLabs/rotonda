@@ -73,7 +73,7 @@ The single-threaded store is backed by two global `vec`s that host the nodes in 
 
 `Rotoro` is the protocol that connects `Rotonda-runtime`s, inspired by the RTR-protocol. `Rotoro` allows for receiving/sending full state (snapshots) or diffs from runtime to runtime. A `rotoro` channel sends/receives of one single type, but it can be merged with another into a third type with the aid of a channel operator runtime.
 
-`Rotonda-runtimes`
+`Rotonda-runtime`
 ==================
 
 | Stage | State | Artifacts |
@@ -84,7 +84,7 @@ The single-threaded store is backed by two global `vec`s that host the nodes in 
 | Feature complete | 💤 | |
 | Stabilized | 💤 |  |
 
-The Rotonda runtimes are stand-alone binaries that can be run as separate applications that communicate over a dedicated channel with the aid of the internal `rotoro` protocol, a RTR-like protocol. The fall into two categories: storage runtimes and channel operators.
+The `Rotonda` runtimes are stand-alone binaries that can be run as separate applications that communicate over a dedicated channel with the aid of the internal `rotoro` protocol, a RTR-like protocol. The fall into two categories: storage runtimes and channel operators.
 
 Storage runtimes are applications that wrap a `rotonda-store` data-structure in a few (JSON-over-HTTP) APIs, that are used for querying and storing prefixes, configuration, metrics, downloading/uploading snapshots, etc. Next to that they feature inbound and outbound connections. The Storage runtimes only speak the `rotoro` internal protocol. Furthermore a single-input runtime can only feature one inbound connection and one outbound connection. A multi-input runtime can have multiple inbound connections and multiple outbound connections. In both cases the connections can only handle one payload type for inbound and outbound connections.
 
@@ -108,4 +108,8 @@ Transformers
 
 Transformers transform the `rotoro` internal protocol into other protocols/formats and vice versa. They can hold state about the protocol, e.g. BGP connection state. The get plugged into any of the `rotonda-runtime`s.
 
+- `connector`: stateful transport+protocol. TCP+BGP, TCP+BMP, Kafka+BGP-over-JSON. rust-native.
+- `filter_map`: per-message stateless programmable filters, can be FFI-like + send to user-defined RIB, or send out. A query is basically a filter_map with send to stdout.
+
 ![descriptors](images/rotonda-examples.png)
+

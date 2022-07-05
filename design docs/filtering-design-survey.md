@@ -6,8 +6,7 @@
 - Bird
 - Junos
 
-IOS (Cisco) / FRR
-===========
+# IOS (Cisco) / FRR
 
 Declarative config files.
 
@@ -39,7 +38,7 @@ Route based. A collection of access-lists plus a filter action (e.g., in or out)
 
 `neighbor <IP_ADDR> distribute-list <ACL_ID> <FILTER_DIRECTION>`
 
-ex.: 
+ex.:
 
 `neighbor 10.100.83.1 ditribute-list 1 out`
 
@@ -119,8 +118,7 @@ FRR does not offer peer templates, only peer groups.
 
 FRR offers an embedded Lua interpreter, that can hook into a callback that gets invoked at the end of each data-plane event. This is a passive (listening) feature only.
 
-Bird
-====
+# Bird
 
 Bird offers a small procedural DSL to create filters. Variables and functions can be created. Next to that it has an object called, well, filters. The DSL has control structures, well it only has `if-then-else`, and it can't do loops.
 
@@ -130,34 +128,33 @@ Another nice feature is that the DSL uses data types for the attributes, e.g. a 
 
 The Bird filter DSL is rather terse (in true C-style), e.g. the Cisco-style notation `10.2.0.0/24 le 26 ge 30` would be `10.2.0.0/24{26, 30}` in Bird. In Juniper-style this would be `10.2.0.0/24 prefix-length-range /26-/30`.
 
-Junos (Juniper)
-===============
+# Junos (Juniper)
 
 Junos calls all of its filtering capabilities: `policy framework`. It's declarative.
 
 All policies are composed of the following components that you configure:
 
- - Match conditions—Criteria against which a route or packets are compared. You can configure one or more criteria. If all criteria match, one or more actions are applied. The match conditions are:
+- Match conditions—Criteria against which a route or packets are compared. You can configure one or more criteria. If all criteria match, one or more actions are applied. The match conditions are:
 
-    - Autonomous system (AS) path expression—A combination of AS numbers and regular expression operators.
+  - Autonomous system (AS) path expression—A combination of AS numbers and regular expression operators.
 
-    - Community—A group of destinations that share a common property.
+  - Community—A group of destinations that share a common property.
 
-    - Prefix list—A named list of prefixes.
+  - Prefix list—A named list of prefixes.
 
-    - Route list—A list of destination prefixes.
+  - Route list—A list of destination prefixes.
 
-    - Subroutine—A routing policy that is called repeatedly from other routing policies.
+  - Subroutine—A routing policy that is called repeatedly from other routing policies.
 
- - Actions—What happens if all criteria match. You can configure one or more actions. Basically you can use *accept* and *reject* here, or a control-flow actions, e.g. *next term*.
+- Actions—What happens if all criteria match. You can configure one or more actions. Basically you can use _accept_ and _reject_ here, or a control-flow actions, e.g. _next term_.
 
- - Terms—Named structures in which match conditions and actions are defined. You can define one or more terms.
+- Terms—Named structures in which match conditions and actions are defined. You can define one or more terms.
 
-In this policy framework there's a strong distinction between *import* and *export* policies.
+In this policy framework there's a strong distinction between _import_ and _export_ policies.
 
 Prefix lists are comparable with the Cisco `prefix-list`, but its syntax is way more powerful, it lets you define ranges of more-specifics in various ways, i.e. with `orLonger`, `range`.
 
-A *subroutine* is a policy that can be called repeatedly from other policies. A policy can also be called from another policy, but only in a chained fashion, a so-called *policy chain*.
+A _subroutine_ is a policy that can be called repeatedly from other policies. A policy can also be called from another policy, but only in a chained fashion, a so-called _policy chain_.
 
 Junos has no data-types, like Cisco. Matching on most attributes happens through regular expressions on strings.
 
@@ -184,6 +181,7 @@ policy-options {
     as-path upstream "^64500 ";
 }
 ```
+
 # Discussion
 
 The Cisco/FRR cli is the arch-version of a router CLI, and it that's both a blessing and a curse. The blessing is the familiarity people have with it, and the curse is all the cruft that has been piled on it. To my taste it's also basically too terse and therefore too cryptic for people not used to it. Also, probably people are more used to the older and maybe deprecated features, instead of the newer ones. The templating system is too rigid and too clunky.
@@ -196,42 +194,41 @@ Bird's filter DSL is pretty flexible and powerful, but also a bit too terse to m
 
 ## Hard Requirements
 
- - filter on all BGP attributes that are available after parsing a BGP message.
- - filter on configurable meta-data, i.e. `router-id`.
- - dynamic runtime adding/removing/modifying filters.
- - re-route BGP messages based on filters to user-specified/created RIBs.
- - use same filters for both incoming streams and routes in RIBs.
- - read prefix-lists from external sources, e.g. files, r(o)t(o)r(o).
+- filter on all BGP attributes that are available after parsing a BGP message.
+- filter on configurable meta-data, i.e. `router-id`.
+- dynamic runtime adding/removing/modifying filters.
+- re-route BGP messages based on filters to user-specified/created RIBs.
+- use same filters for both incoming streams and routes in RIBs.
+- read prefix-lists from external sources, e.g. files, r(o)t(o)r(o).
 
- ## Soft Requirements
+## Soft Requirements
 
- - be as unoriginal as possible.
+- be as unoriginal as possible.
 
 ## Daft Attempts
-
 
 ### Filters
 
 ```
-// A fairly simple example of a filter-statement
+// A fairly simple example of a filter-term
 // with a defined variable.
 define last-as-64500 {
     last_as_64500 = AsPathFilter { last: 64500 };
 }
 
-filter-statement no-as-64500-until-len-16 {
+filter-term no-as-64500-until-len-16 {
         from {
             prefix-filter 0.0.0.0/0 upto /16;
             protocol bgp {
-                as-path last-as-64500;
+                as-path.matches(last-as-64500);
             };
             protocol internal {
-                router-id 243;
+                router-id == 243;
             };
         }
         then {
             // a side-effect is allowed, but you can't
-            // store anywhere in a filter-statement.
+            // store anywhere in a filter-term.
             send-to stdout;
             reject;
         }
@@ -243,14 +240,14 @@ filter-statement no-as-64500-until-len-16 {
 // there is nothing special about a namespace called
 // `global`.
 module global {
-    define our-as {
-        our-as: AsPathFilter { last: OUR_ASN };
+    define our-as for our_asn {
+        our-as = AsPathFilter { last: our_asn };
     }
 
-    term drop-ibgp on route {
+    filter-term drop-ibgp for route {
         from {
             # drop our own AS
-            route.bgp.as-path.contains(global.our-as);
+            route.bgp.as-path.matches(our_asn);
         }
         then {
             send-to standard-logger ibgp;
@@ -268,11 +265,11 @@ rib global.rov as rov {
 }
 
 module rpki {
-    define rov-rib on route {
+    define rov-rib for route {
         found_prefix = rov.longest_match(route.prefix);
     }
 
-    filter-statement rov-valid on route {
+    filter-term rov-valid for route {
         with rov-rib;
         // A rule can have multiple with statements,
         // either named or anonymous.
@@ -290,12 +287,12 @@ module rpki {
         }
     }
 
-    filter-statement rov-invalid-length on prefix {
+    filter-term rov-invalid-length for route {
         with rov-rib;
         from {
             found_prefix.matches;
-            prefix.len > found_prefix.max_len;
-            prefix.origina-asn == found_prefix.asn;
+            route.prefix.len > found_prefix.max_len;
+            route.prefix.origina-asn == found_prefix.asn;
         };
         then {
             route.bgp.communities.add(1000:6);
@@ -303,12 +300,12 @@ module rpki {
         }
     }
 
-    filter-statement rov-invalid-asn on prefix {
+    filter-term rov-invalid-asn for route {
         with rov-rib;
         from {
             found_prefix.matches;
-            prefix.len >= found_prefix.max_len;
-            prefix.origin-asn != found_prefix.asn;
+            route.prefix.len >= found_prefix.max_len;
+            route.prefix.origin-asn != found_prefix.asn;
         };
         then {
             route.bgp.communities.add(1000:5);
@@ -316,7 +313,7 @@ module rpki {
         }
     }
 
-    filter-statement rov-unknown on prefix {
+    filter-term rov-unknown for route {
         with rov-rib;
         from {
             found_prefix.does_not_match;
@@ -327,11 +324,13 @@ module rpki {
         }
     }
 
+    // compose the statements into a filter
+    //
     // `and then` is only run when the
     // compound filter expressions returns `accept`.
     // You could also add a `or` statement, that
-    // run if the outcode is `reject`.
-    filter set-rov-communities {
+    // runs if the return code is `reject`.
+    filter set-rov-communities for route {
         (
             rov-valid or
             ( rov-invalid-length and
@@ -351,13 +350,13 @@ rib global.irr_customers as irr_customers {
 }
 
 module irrdb {
-    define irr-customers-table {
-        found_prefix = irr_customers.longest_match(prefix);
+    define irr-customers-table for route {
+        found_prefix = irr_customers.longest_match(route.prefix);
     }
 
     // only checks if the prefix exists, not if it
     // makes sense.
-    filter-statement irrdb-valid on route {
+    filter-term irrdb-valid for route {
         with irr_customers;
         from {
             found_prefix.matches;
@@ -368,7 +367,7 @@ module irrdb {
         }
     }
 
-    filter-statement more-specific on route {
+    filter-term more-specific for route {
         with irr_customers;
         from {
             found_prefix.matches;
@@ -380,7 +379,7 @@ module irrdb {
         }
     }
 
-    filter-statement prefix-not-in-as-set on route {
+    filter-term prefix-not-in-as-set for route {
         with irr_customers;
         from {
             found_prefix.matches;
@@ -392,7 +391,7 @@ module irrdb {
         }
     }
 
-    filter-statement invalid-origin-as on route {
+    filter-term invalid-origin-as for route {
         with irr_customers;
         from {
             found_prefix.matches;
@@ -404,7 +403,7 @@ module irrdb {
         }
     }
 
-    filter-statement invalid-prefix-origin-as on route {
+    filter-term invalid-prefix-origin-as for route {
         with irr_customers;
         from {
             found_prefix.matches;
@@ -416,7 +415,7 @@ module irrdb {
         }
     }
 
-    filter set-irrdb-communities {
+    filter set-irrdb-communities for route {
         (
             irrdb-valid and
             irrdb-more-specific and
@@ -429,20 +428,18 @@ module irrdb {
     }
 }
 
-filter rpki+irrdb {
+filter rpki+irrdb for route {
     filter rpki.set-rov-communities;
     filter irrdb.set-irrdb-communities;
-} 
+}
 ```
-
-
 
 ### Imports
 
 ```
 prefix-list bogons global.bogons;
 
-table customer-prefixes 
+table customer-prefixes
     from file "/home/user/irr-table.json" {
         prefix: Prefix,
         as_set: [Asn],
@@ -452,21 +449,20 @@ table customer-prefixes
 
 rib global.irr-customers as irr-customers;
 
-filter-statement drop-bogons on record {
+filter-term drop-bogons for prefix {
     with customer-prefixes;
-    filter-statement customer {
-        from {
-            prefix in
-                exact_match(global.bogons);
-        }
-        then {
-            reject;
-        }
+    from {
+        prefix in
+            exact_match(bogons);
     }
+    then {
+        reject;
+    }
+    
 }
 
-import irr-customer from table customer-prefixes on record {
-    drop-bogons
+import irr-customer from table customer-prefixes for record {
+    drop-bogons for record.prefix
     and then {
         destroy_and_create(irr-customers).insert(record);
     }
@@ -474,8 +470,8 @@ import irr-customer from table customer-prefixes on record {
 
 // `rotoro-stream` is not defined here, but would a stream
 // of parsed bgp messages.
-import peer-stream from rotoro-stream on route {
-    drop-ibgp
+import peer-stream from rotoro-stream for route {
+    drop-ibgp for route
     and then {
         rib("global.rib-in-pre").insert_or_replace(route)
     }
@@ -485,89 +481,88 @@ import peer-stream from rotoro-stream on route {
 ### Queries
 
 ```
-// We start with a filter-statement, so it can be
+rib global.rib-in as rib-in {
+    prefix: Prefix,
+    as-path: AsPath,
+    communities: Communities
+}
+
+// We start with a filter-term, so it can be
 // re-used later in a query.
-filter-statement search-my-asn {
+filter-term search-asn for asn {
     from {
-        bgp.as_path.contains(MY_ASN);
+        route.bgp.as_path.contains(asn);
     }
 }
 
-// A literal-only Query with an argument,
-// can be used like so:
-// search-asn(31200);
-query search-asn {
-    // upper-case keys in the with section
-    // are arguments
-    with { 
-        MY_ASN: Asn
-    }
-    query-type created-records {
-        time_span: last_24_hours();
-    }
-    search-my-asn and then {
-        send-to: stdout;
-    }
-}
-
-define my-asn {
-    MY_ASN: Asn = 64500;
-    query_type: QueryType = created-records {
-        time_span: last_24_hours();
-    };
-}
-
-query search-my-asn {
-    with my_asn;
-    search-my-asn;
-}
-```
-
-```
-query-statement SearchMyAsRecords {
-    term query-as {
-        from {
-            bgp.as_path contains-my-as;
-        }
-        then {
-            export-rib to_py_dict();
-        }
-        contains-my-as: AsPathFilter { contains: MY_ASN };
-    }
+// A literal query without arguments
+query search-as3120-in-rib-loc {
     with {
-        MY_ASN: 64500;
-        query_type: created-records {
-            time_span: last_24_hours();
-        };
-    }
-}
-```
-
-```
-query-statement SearchMyAsDif(
-    MY_ASN, 
-    START_TIME, 
-    END_TIME
-) {
-    term query-as;
-    with {
-        query_type: state-diff {
-            start: START_TIME;
-            end: END_TIME;
-        };
-    }
-}
-```
-
-```
-query-statement Search_AS3120 {
-    term query-as;
-    with {
-        MY_ASN: 3120;
         query_type: state-diff {
             start: "01-03-20221T00:00z";
             end: "02-03-2022T00:00z";
         };
+        store: global.rib("rib-loc");
     }
+    from store {
+        route.bgp.as_path.contains(asn);
+    }
+    // implicitly this is added:
+    // and then {
+    //   send-to stdout;
+    // }
+}
+
+// A query function (with an argument),
+// can be used like so:
+// search-asn for 31200;
+query search-asn for asn {
+    with {
+        query-type: created-records {
+            time_span: last_24_hours()
+        };
+        format: json;
+    }
+    search-my-asn for asn and then {
+        send-to: stdout;
+    }
+}
+
+define my-asn-24-hours {
+    asn = AS64500;
+    query_type = created-records {
+        time_span: last_24_hours()
+    };
+    format: json;
+}
+
+query search-my-asn for asn {
+    with my-asn-24-hours;
+    search-asn;
+}
+```
+
+```
+filter-term search-my-asns-records for [asn] {
+    from {
+        bgp.as_path.contains([asn]);
+    }
+    then {
+        send-to py_dict();
+    }
+}
+```
+
+```
+// e.g. query-my-as-dif for AS3120 and with ("02-03-2022T00:00z",
+// "02-03-20T23:59z") in rib("global.rib-ib")
+query search-my-as-dif for [asn] and with (start_time, end_time) in rib {
+    with {
+        query_type: state-diff {
+            start: start_time;
+            end: end_time;
+        };
+    }
+    search-my-asns-records for [asn]
 }
 ```

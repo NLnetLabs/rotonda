@@ -219,7 +219,7 @@ define last-as-64500 {
     last_as_64500 = AsPathFilter { last: 64500 };
 }
 
-filter-statement no-as-64500_until_len_16 {
+filter-statement no-as-64500-until-len-16 {
         from {
             prefix-filter 0.0.0.0/0 upto /16;
             protocol bgp {

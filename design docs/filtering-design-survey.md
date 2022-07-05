@@ -327,7 +327,7 @@ module rpki {
         }
     }
 
-    // `and then` is only ran when the
+    // `and then` is only run when the
     // compound filter expressions returns `accept`.
     // You could also add a `or` statement, that
     // run if the outcode is `reject`.

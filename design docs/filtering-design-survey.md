@@ -210,13 +210,13 @@ Bird's filter DSL is pretty flexible and powerful, but also a bit too terse to m
 ### Filters
 
 ```
-// A fairly simple example of a filter-term
+// A fairly simple example of a term
 // with a defined variable.
 define last-as-64500 {
     last_as_64500 = AsPathFilter { last: 64500 };
 }
 
-filter-term no-as-64500-until-len-16 {
+term no-as-64500-until-len-16 {
         from {
             prefix-filter 0.0.0.0/0 upto /16;
             protocol bgp {
@@ -228,7 +228,7 @@ filter-term no-as-64500-until-len-16 {
         }
         then {
             // a side-effect is allowed, but you can't
-            // store anywhere in a filter-term.
+            // store anywhere in a term.
             send-to stdout;
             reject;
         }
@@ -244,7 +244,7 @@ module global {
         our-as = AsPathFilter { last: our_asn };
     }
 
-    filter-term drop-ibgp for route {
+    term drop-ibgp for route {
         from {
             # drop our own AS
             route.bgp.as-path.matches(our_asn);
@@ -258,25 +258,25 @@ module global {
 ```
 
 ```
-rib global.rov as rov {
+rib global.rov as rov-rib {
     prefix: Prefix,
     max_len: u8,
     asn: Asn,
 }
 
 module rpki {
-    define rov-rib for route {
-        found_prefix = rov.longest_match(route.prefix);
+    define rov-rib-vars for route {
+        found_prefix = rov-rib.longest_match(route.prefix);
     }
 
-    filter-term rov-valid for route {
-        with rov-rib;
+    term rov-valid for route {
+        with rov-rib-vars;
         // A rule can have multiple with statements,
         // either named or anonymous.
         // with {
         //    max_len = 32;
         // }
-        from rov-rib {
+        from {
             found_prefix.matches;
             route.prefix.len <= found_prefix.max_len;
             route.prefix.origin-asn == found_prefix.asn;
@@ -287,8 +287,8 @@ module rpki {
         }
     }
 
-    filter-term rov-invalid-length for route {
-        with rov-rib;
+    term rov-invalid-length for route {
+        with rov-rib-vars;
         from {
             found_prefix.matches;
             route.prefix.len > found_prefix.max_len;
@@ -300,8 +300,8 @@ module rpki {
         }
     }
 
-    filter-term rov-invalid-asn for route {
-        with rov-rib;
+    term rov-invalid-asn for route {
+        with rov-rib-vars;
         from {
             found_prefix.matches;
             route.prefix.len >= found_prefix.max_len;
@@ -313,7 +313,7 @@ module rpki {
         }
     }
 
-    filter-term rov-unknown for route {
+    term rov-unknown for route {
         with rov-rib;
         from {
             found_prefix.does_not_match;
@@ -356,7 +356,7 @@ module irrdb {
 
     // only checks if the prefix exists, not if it
     // makes sense.
-    filter-term irrdb-valid for route {
+    term irrdb-valid for route {
         with irr_customers;
         from {
             found_prefix.matches;
@@ -367,7 +367,7 @@ module irrdb {
         }
     }
 
-    filter-term more-specific for route {
+    term more-specific for route {
         with irr_customers;
         from {
             found_prefix.matches;
@@ -379,7 +379,7 @@ module irrdb {
         }
     }
 
-    filter-term prefix-not-in-as-set for route {
+    term prefix-not-in-as-set for route {
         with irr_customers;
         from {
             found_prefix.matches;
@@ -391,7 +391,7 @@ module irrdb {
         }
     }
 
-    filter-term invalid-origin-as for route {
+    term invalid-origin-as for route {
         with irr_customers;
         from {
             found_prefix.matches;
@@ -403,7 +403,7 @@ module irrdb {
         }
     }
 
-    filter-term invalid-prefix-origin-as for route {
+    term invalid-prefix-origin-as for route {
         with irr_customers;
         from {
             found_prefix.matches;
@@ -449,7 +449,7 @@ table customer-prefixes
 
 rib global.irr-customers as irr-customers;
 
-filter-term drop-bogons for prefix {
+term drop-bogons for prefix {
     with customer-prefixes;
     from {
         prefix in
@@ -468,7 +468,7 @@ import irr-customer from table customer-prefixes for record {
     }
 }
 
-// `rotoro-stream` is not defined here, but would a stream
+// `rotoro-stream` is not defined here, but would be a stream
 // of parsed bgp messages.
 import peer-stream from rotoro-stream for route {
     drop-ibgp for route
@@ -487,14 +487,6 @@ rib global.rib-in as rib-in {
     communities: Communities
 }
 
-// We start with a filter-term, so it can be
-// re-used later in a query.
-filter-term search-asn for asn {
-    from {
-        route.bgp.as_path.contains(asn);
-    }
-}
-
 // A literal query without arguments
 query search-as3120-in-rib-loc {
     with {
@@ -502,15 +494,22 @@ query search-as3120-in-rib-loc {
             start: "01-03-20221T00:00z";
             end: "02-03-2022T00:00z";
         };
-        store: global.rib("rib-loc");
     }
-    from store {
+    from rib {
         route.bgp.as_path.contains(asn);
     }
     // implicitly this is added:
     // and then {
     //   send-to stdout;
     // }
+}
+
+// A term can be reused, just like
+// in a filter.
+term search-asn for asn {
+    from global.rib-in {
+        route.bgp.as_path.contains(asn);
+    }
 }
 
 // A query function (with an argument),
@@ -543,7 +542,7 @@ query search-my-asn for asn {
 ```
 
 ```
-filter-term search-my-asns-records for [asn] {
+term search-my-asns-records for [asn] {
     from {
         bgp.as_path.contains([asn]);
     }

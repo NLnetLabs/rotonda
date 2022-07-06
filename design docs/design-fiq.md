@@ -313,31 +313,33 @@ table customer-prefixes
 
 rib global.irr-customers as irr-customers;
 
-term drop-bogons for prefix {
-    with customer-prefixes;
-    from {
-        prefix in
-            exact_match(bogons);
+module imports {
+    term drop-bogons for prefix {
+        with customer-prefixes;
+        from {
+            prefix in
+                exact_match(bogons);
+        }
+        then {
+            reject;
+        }
+        
     }
-    then {
-        reject;
-    }
-    
-}
 
-import irr-customer from table customer-prefixes for record {
-    drop-bogons for record.prefix
-    and then {
-        destroy_and_create(irr-customers).insert(record);
+    import irr-customer from table customer-prefixes for record {
+        drop-bogons for record.prefix
+        and then {
+            destroy_and_create(irr-customers).insert(record);
+        }
     }
-}
 
-// `rotoro-stream` is not defined here, but would be a stream
-// of parsed bgp messages.
-import peer-stream from rotoro-stream for route {
-    ibgp-dropper.drop-ibgp for route.prefix with AS211321;
-    and then {
-        global.rib-in.insert_or_replace(route)
+    // `rotoro-stream` is not defined here, but would be a stream
+    // of parsed bgp messages.
+    import peer-stream from rotoro-stream for route {
+        ibgp-dropper.drop-ibgp for route.prefix with AS211321;
+        and then {
+            global.rib-in.insert_or_replace(route)
+        }
     }
 }
 ```
@@ -351,81 +353,83 @@ rib global.rib-in as rib-in {
     communities: Communities
 }
 
-// A literal query without arguments
-query search-as3120-in-rib-loc for route in global.rib-in {
-    with {
-        query_type: state-diff {
-            start: "01-03-20221T00:00z";
-            end: "02-03-2022T00:00z";
-        };
+module queries {
+    // A literal query without arguments
+    query search-as3120-in-rib-loc for route in global.rib-in {
+        with {
+            query_type: state-diff {
+                start: "01-03-20221T00:00z";
+                end: "02-03-2022T00:00z";
+            };
+        }
+        from {
+            route.bgp.as_path.contains(asn);
+        }
+        // implicitly this is added:
+        // and then {
+        //   send-to stdout;
+        // }
     }
-    from {
-        route.bgp.as_path.contains(asn);
-    }
-    // implicitly this is added:
-    // and then {
-    //   send-to stdout;
-    // }
-}
 
-// A term can be reused, just like
-// in a filter.
-term search-asn for route with asn {
-    from {
-        route.bgp.as_path.contains(asn);
+    // A term can be reused, just like
+    // in a filter.
+    term search-asn for route with asn {
+        from {
+            route.bgp.as_path.contains(asn);
+        }
     }
-}
 
-// A query function (with an argument),
-// can be used like so:
-// search-asn for 31200;
-query search-asn for asn in global.rib-in {
-    with {
-        query-type: created-records {
+    // A query function (with an argument),
+    // can be used like so:
+    // search-asn for 31200;
+    query search-asn for asn in global.rib-in {
+        with {
+            query-type: created-records {
+                time_span: last_24_hours()
+            };
+            format: json;
+        }
+        search-my-asn for asn and then {
+            send-to: stdout;
+        }
+    }
+
+    define my-asn-24-hours {
+        asn = AS64500;
+        query_type = created-records {
             time_span: last_24_hours()
         };
         format: json;
     }
-    search-my-asn for asn and then {
-        send-to: stdout;
-    }
-}
 
-define my-asn-24-hours {
-    asn = AS64500;
-    query_type = created-records {
-        time_span: last_24_hours()
-    };
-    format: json;
-}
-
-query search-my-asn for asn {
-    with my-asn-24-hours;
-    search-asn;
-}
-```
-
-```
-term search-my-asns-records for route with [asn] {
-    from {
-        route.bgp.as_path.contains([asn]);
+    query search-my-asn for asn {
+        with my-asn-24-hours;
+        search-asn;
     }
-    then {
-        send-to py_dict();
-    }
-}
-```
+    ```
 
-```
-// e.g. query-my-as-dif for AS3120 with ("02-03-2022T00:00z",
-// "02-03-20T23:59z") in global.rib-ib
-query search-my-as-dif for [asn] with (start_time, end_time) in rib {
-    with {
-        query_type: state-diff {
-            start: start_time;
-            end: end_time;
-        };
+    ```
+    term search-my-asns-records for route with [asn] {
+        from {
+            route.bgp.as_path.contains([asn]);
+        }
+        then {
+            send-to py_dict();
+        }
     }
-    search-my-asns-records for [asn]
+    ```
+
+    ```
+    // e.g. query-my-as-dif for AS3120 with ("02-03-2022T00:00z",
+    // "02-03-20T23:59z") in global.rib-ib
+    query search-my-as-dif for [asn] with (start_time, end_time) in rib {
+        with {
+            query_type: state-diff {
+                start: start_time;
+                end: end_time;
+            };
+        }
+        search-my-asns-records for [asn]
+    }
 }
 ```

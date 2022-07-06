@@ -15,58 +15,64 @@
 
 ## Daft Attempts
 
-### Filters
+### Filters-maps and filters.
 
-A filter-map consists of `terms` and a `filter`.
+A filter-map consists of `term` statements and a `filter` statement.
 
 A `term` is a single statement, that consists of one or more conditions that are tested sequentially.
 If all of them are true, then the term executes the actions in the `then` clause. If one of them are false, then the actions in the `or` (if available) clause are executed. The last action in both the `then` and `or` clauses must be the `reject` or the `accept` return-action. 
 If one of the `then` or `or` clause are missing then an `accept` action is returned by default. A `term` is agnostic to the actual RIB it is being filtered against, so it cannot specify the RIB. It can however specify another (external) data-structure, like a table or a prefix-list, to match against by specifying a `with` clause.
 
-```
-// A fairly simple example of a term
-// with a defined variable.
-define last-as-64500-vars {
-    last_as_64500 = AsPathFilter { last: 64500 };
-}
+The `define` is run once per filter call. This multiple references to the 
+vars in `with` clauses are not re-triggering calculation of the values of the variables.
 
-term no-as-64500-until-len-16 for route {
-        with {
-            last-as-64500-vars;
-        }
-        from {
-            prefix-filter 0.0.0.0/0 upto /16;
-            protocol bgp {
-                route.as-path.matches(last-as-64500);
-            };
-            protocol internal {
-                router-id == 243;
-            };
-        }
-        then {
-            // a side-effect is allowed, but you can't
-            // store anywhere in a term.
-            send-to stdout;
-            reject;
+### Term example
+
+```
+module example {
+    // A fairly simple example of a term
+    // with a defined variable.
+    define last-as-64500-vars {
+        last_as_64500 = AsPathFilter { last: 64500 };
+    }
+
+    term no-as-64500-until-len-16 for route {
+            with {
+                last-as-64500-vars;
+            }
+            from {
+                prefix-filter 0.0.0.0/0 upto /16;
+                protocol bgp {
+                    route.as-path.matches(last-as-64500);
+                };
+                protocol internal {
+                    route.router-id == 243;
+                };
+            }
+            then {
+                // a side-effect is allowed, but you can't
+                // store anywhere in a term.
+                send-to stdout;
+                reject;
+            }
         }
     }
 }
 ```
 
 ```
-// there is nothing special about a namespace called
-// `global`.
-module global {
-    define our-as for our_asn {
+module ibgp-dropper {
+    define our-as for route with our_asn {
         our-as = AsPathFilter { last: our_asn };
     }
 
-    term drop-ibgp for route {
+    term drop-ibgp for route with our_asn {
         with {
             our-as;
         }
         from {
-            # drop our own AS
+            // drop if our own AS appears anywhere in
+            // the as-path.
             route.bgp.as-path.matches(our_asn);
         }
         then {
@@ -76,6 +82,20 @@ module global {
     }
 }
 ```
+
+
+### Filter
+
+A filter is a chain of terms, that will be executed based on the return action of the last executed term and the type of joining clause, either a `or` or an `and`. A `accept` return action is evaluated as true, and a `reject` return action is evaluated as false. The filter exits as early as possible and the side-effects of the terms are executed up to the point of the last evaluated term. This means that **order of the terms does matter**.
+
+Like a term a filter ends in a `reject` or `accept` action. The implicit action at the end is `accept`.
+
+Filters can be composed also from other filters.
+
+Special data structures for incoming data all live in the global namespace and can be referenced by `global`. The data-structures are:
+- rib—A hash-map keyed on prefix and that holds routing information as its values. Values fall into two groups: `bgp`, these are the BGP attributes, e.g. as-path, communities, etc. and `internal`, these are values that are specific to a RIB and defined at creation time.
+- table—a hash-map.
+- prefix-list—a list of prefixes.
 
 ```
 rib global.rov as rov-rib {
@@ -105,6 +125,9 @@ module rpki {
         then {
             route.bgp.communities.add(1000:1);
             accept;
+        }
+        or {
+            reject;
         }
     }
 
@@ -151,14 +174,31 @@ module rpki {
     // compound filter expressions returns `accept`.
     // You could also add a `or` statement, that
     // runs if the return code is `reject`.
+    //
+    // Note that this filter will always return `accept`,
+    // regardless of the validation. It's just used to
+    // set the corresponding communities on the route.
     filter set-rov-communities for route {
         (
             rov-valid or
+            // The terms down here will only be run if the
+            // the first term, rov-valid, will return
+            // `reject`.
+            // 
+            // If they run, they will always be run both.
             ( rov-invalid-length and
             rov-invalid-asn )
         ) and then {
             accept;
         };
+        // `accept` is implicit at this point.
+    }
+
+    // This filter will actually drop invalids, since the
+    // only term mentioned returns `reject` when not finding
+    // the correct ROA.
+    filter drop-rpki-invalid for route {
+        rov-valid;
     }
 }
 
@@ -172,6 +212,7 @@ rib global.irr_customers as irr_customers {
 
 module irrdb {
     define irr-customers-table for route {
+        use irr_customers;
         found_prefix = irr_customers.longest_match(route.prefix);
     }
 
@@ -236,6 +277,8 @@ module irrdb {
         }
     }
 
+    // Since all the terms mentioned here always return 
+    // `accept`, all of the chain will be run.
     filter set-irrdb-communities for route {
         (
             irrdb-valid and
@@ -292,9 +335,9 @@ import irr-customer from table customer-prefixes for record {
 // `rotoro-stream` is not defined here, but would be a stream
 // of parsed bgp messages.
 import peer-stream from rotoro-stream for route {
-    drop-ibgp for route
+    ibgp-dropper.drop-ibgp for route.prefix with AS211321;
     and then {
-        rib("global.rib-in-pre").insert_or_replace(route)
+        global.rib-in.insert_or_replace(route)
     }
 }
 ```
@@ -309,14 +352,14 @@ rib global.rib-in as rib-in {
 }
 
 // A literal query without arguments
-query search-as3120-in-rib-loc {
+query search-as3120-in-rib-loc for route in global.rib-in {
     with {
         query_type: state-diff {
             start: "01-03-20221T00:00z";
             end: "02-03-2022T00:00z";
         };
     }
-    from rib {
+    from {
         route.bgp.as_path.contains(asn);
     }
     // implicitly this is added:
@@ -327,19 +370,16 @@ query search-as3120-in-rib-loc {
 
 // A term can be reused, just like
 // in a filter.
-term search-asn for asn {
-    with { 
-        global.rib-in;
-    }
+term search-asn for route with asn {
     from {
-        global.rib-in => route.bgp.as_path.contains(asn);
+        route.bgp.as_path.contains(asn);
     }
 }
 
 // A query function (with an argument),
 // can be used like so:
 // search-asn for 31200;
-query search-asn for asn {
+query search-asn for asn in global.rib-in {
     with {
         query-type: created-records {
             time_span: last_24_hours()
@@ -366,9 +406,9 @@ query search-my-asn for asn {
 ```
 
 ```
-term search-my-asns-records for [asn] {
+term search-my-asns-records for route with [asn] {
     from {
-        bgp.as_path.contains([asn]);
+        route.bgp.as_path.contains([asn]);
     }
     then {
         send-to py_dict();
@@ -377,9 +417,9 @@ term search-my-asns-records for [asn] {
 ```
 
 ```
-// e.g. query-my-as-dif for AS3120 and with ("02-03-2022T00:00z",
-// "02-03-20T23:59z") in rib("global.rib-ib")
-query search-my-as-dif for [asn] and with (start_time, end_time) in rib {
+// e.g. query-my-as-dif for AS3120 with ("02-03-2022T00:00z",
+// "02-03-20T23:59z") in global.rib-ib
+query search-my-as-dif for [asn] with (start_time, end_time) in rib {
     with {
         query_type: state-diff {
             start: start_time;

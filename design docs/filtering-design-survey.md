@@ -209,18 +209,27 @@ Bird's filter DSL is pretty flexible and powerful, but also a bit too terse to m
 
 ### Filters
 
+A filter-map consists of `terms` and a `filter`.
+
+A `term` is a single statement, that consists of one or more conditions that are tested sequentially.
+If all of them are true, then the term executes the actions in the `then` clause. If one of them are false, then the actions in the `or` (if available) clause are executed. The last action in both the `then` and `or` clauses must be the `reject` or the `accept` return-action. 
+If one of the `then` or `or` clause are missing then an `accept` action is returned by default. A `term` is agnostic to the actual RIB it is being filtered against, so it cannot specify the RIB. It can however specify another (external) data-structure, like a table or a prefix-list, to match against by specifying a `with` clause.
+
 ```
 // A fairly simple example of a term
 // with a defined variable.
-define last-as-64500 {
+define last-as-64500-vars {
     last_as_64500 = AsPathFilter { last: 64500 };
 }
 
-term no-as-64500-until-len-16 {
+term no-as-64500-until-len-16 for route {
+        with {
+            last-as-64500-vars;
+        }
         from {
             prefix-filter 0.0.0.0/0 upto /16;
             protocol bgp {
-                as-path.matches(last-as-64500);
+                route.as-path.matches(last-as-64500);
             };
             protocol internal {
                 router-id == 243;
@@ -245,6 +254,9 @@ module global {
     }
 
     term drop-ibgp for route {
+        with {
+            our-as;
+        }
         from {
             # drop our own AS
             route.bgp.as-path.matches(our_asn);
@@ -266,6 +278,7 @@ rib global.rov as rov-rib {
 
 module rpki {
     define rov-rib-vars for route {
+        use rov-rib;
         found_prefix = rov-rib.longest_match(route.prefix);
     }
 
@@ -324,7 +337,7 @@ module rpki {
         }
     }
 
-    // compose the statements into a filter
+    // compose the statements into a `filter`
     //
     // `and then` is only run when the
     // compound filter expressions returns `accept`.
@@ -507,8 +520,11 @@ query search-as3120-in-rib-loc {
 // A term can be reused, just like
 // in a filter.
 term search-asn for asn {
-    from global.rib-in {
-        route.bgp.as_path.contains(asn);
+    with { 
+        global.rib-in;
+    }
+    from {
+        global.rib-in => route.bgp.as_path.contains(asn);
     }
 }
 

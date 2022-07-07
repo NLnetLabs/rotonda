@@ -120,7 +120,7 @@ module rpki {
         from {
             found_prefix.matches;
             route.prefix.len <= found_prefix.max_len;
-            route.prefix.origin-asn == found_prefix.asn;
+            route.prefix.bgp.origin-asn == found_prefix.asn;
         }
         then {
             route.bgp.communities.add(1000:1);
@@ -136,7 +136,7 @@ module rpki {
         from {
             found_prefix.matches;
             route.prefix.len > found_prefix.max_len;
-            route.prefix.origina-asn == found_prefix.asn;
+            route.prefix.bgp.origin-asn == found_prefix.asn;
         };
         then {
             route.bgp.communities.add(1000:6);
@@ -245,7 +245,7 @@ module irrdb {
         with irr_customers;
         from {
             found_prefix.matches;
-            route.prefix not in found_prefix.as_set.prefix;
+            route.prefix not in found_prefix.as_set.[prefix];
         };
         then {
             route.bgp.communities.add(1001:4);
@@ -257,7 +257,7 @@ module irrdb {
         with irr_customers;
         from {
             found_prefix.matches;
-            route.origin-asn not in found_prefix.as_set.asn;
+            route.origin-asn not in found_prefix.as_set.[asn];
         };
         then {
             route.bgp.communities.add(1001:5);
@@ -269,7 +269,7 @@ module irrdb {
         with irr_customers;
         from {
             found_prefix.matches;
-            route.origin-asn not in found_prefix.origin_asn;
+            route.origin-asn !== found_prefix.origin_asn;
         };
         then {
             route.bgp.communities.add(1001:6);

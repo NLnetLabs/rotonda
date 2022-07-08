@@ -1,13 +1,13 @@
 ```
 // An example that performs validation for Flowspec according to RFC8955
 module flowspec-validator {
-    rib global.rib-in as rib-in {
+    rib global.rib-in as rib-in with Route {
         prefix: Prefix,
         originator_id: OriginatorId,
         as_path: AsPath
     }
 
-    rib global.flowspec as rib-flowspec {
+    rib global.flowspec as rib-flowspec with FlowSpecRule {
         dest_prefix: Prefix,
         originator_id: OriginatorId,
         origin_as: As,
@@ -15,13 +15,13 @@ module flowspec-validator {
         action: Action
     }
 
-    define ribs for fs_rule {
+    define ribs for fs_rule: FlowSpecRule {
         use rib-in;
         use rib-flowspec;
         found_prefix = rib-in.longest_match(fs_rule.dest_prefix);
     }
 
-    term validate-flowspec for fs_rule {
+    term validate-flowspec for fs_rule: FlowSpecRule {
         with ribs;
         from {
             // rules from RFC8955 Section 6
@@ -38,7 +38,7 @@ module flowspec-validator {
         }
     }
 
-    filter flowspec with fs_rule {
+    filter flowspec with fs_rule: FlowSpecRule {
         validate-flowspec and then {
             rib-flowspec.store(fs_rule);
         }

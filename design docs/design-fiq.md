@@ -1,4 +1,4 @@
-# Rotonda Filters - The requirements
+# Rotolo filter language - The requirements
 
 ## Hard Requirements
 
@@ -36,7 +36,7 @@ module example {
         last_as_64500 = AsPathFilter { last: 64500 };
     }
 
-    term no-as-64500-until-len-16 for route {
+    term no-as-64500-until-len-16 for route: Route {
             with {
                 last-as-64500-vars;
             }
@@ -62,11 +62,11 @@ module example {
 
 ```
 module ibgp-dropper {
-    define our-as for route with our_asn {
+    define our-as for route: Route with our_asn: Asn {
         our-as = AsPathFilter { last: our_asn };
     }
 
-    term drop-ibgp for route with our_asn {
+    term drop-ibgp for route: Route with our_asn: Asn {
         with {
             our-as;
         }
@@ -98,19 +98,19 @@ Special data structures for incoming data all live in the global namespace and c
 - prefix-list—a list of prefixes.
 
 ```
-rib global.rov as rov-rib {
+rib global.rov as rov-rib with Route {
     prefix: Prefix,
     max_len: u8,
     asn: Asn,
 }
 
 module rpki {
-    define rov-rib-vars for route {
+    define rov-rib-vars for route: Route {
         use rov-rib;
         found_prefix = rov-rib.longest_match(route.prefix);
     }
 
-    term rov-valid for route {
+    term rov-valid for route: Route {
         with rov-rib-vars;
         // A rule can have multiple with statements,
         // either named or anonymous.
@@ -131,7 +131,7 @@ module rpki {
         }
     }
 
-    term rov-invalid-length for route {
+    term rov-invalid-length for route: Route {
         with rov-rib-vars;
         from {
             found_prefix.matches;
@@ -144,7 +144,7 @@ module rpki {
         }
     }
 
-    term rov-invalid-asn for route {
+    term rov-invalid-asn for route: Route {
         with rov-rib-vars;
         from {
             found_prefix.matches;
@@ -157,7 +157,7 @@ module rpki {
         }
     }
 
-    term rov-unknown for route {
+    term rov-unknown for route: Route {
         with rov-rib;
         from {
             found_prefix.does_not_match;
@@ -178,7 +178,7 @@ module rpki {
     // Note that this filter will always return `accept`,
     // regardless of the validation. It's just used to
     // set the corresponding communities on the route.
-    filter set-rov-communities for route {
+    filter set-rov-communities for route: Route {
         (
             rov-valid or
             // The terms down here will only be run if the
@@ -197,12 +197,12 @@ module rpki {
     // This filter will actually drop invalids, since the
     // only term mentioned returns `reject` when not finding
     // the correct ROA.
-    filter drop-rpki-invalid for route {
+    filter drop-rpki-invalid for route: Route {
         rov-valid;
     }
 }
 
-rib global.irr_customers as irr_customers {
+rib global.irr_customers as irr_customers CustomerPrefixRecord {
     id: "global.irr_customers",
     prefix: Prefix,
     origin_asn: [Asn],
@@ -211,14 +211,14 @@ rib global.irr_customers as irr_customers {
 }
 
 module irrdb {
-    define irr-customers-table for route {
+    define irr-customers-table for route: Route {
         use irr_customers;
         found_prefix = irr_customers.longest_match(route.prefix);
     }
 
     // only checks if the prefix exists, not if it
     // makes sense.
-    term irrdb-valid for route {
+    term irrdb-valid for route: Route {
         with irr_customers;
         from {
             found_prefix.matches;
@@ -229,7 +229,7 @@ module irrdb {
         }
     }
 
-    term more-specific for route {
+    term more-specific for route: Route {
         with irr_customers;
         from {
             found_prefix.matches;
@@ -241,7 +241,7 @@ module irrdb {
         }
     }
 
-    term prefix-not-in-as-set for route {
+    term prefix-not-in-as-set for route: Route {
         with irr_customers;
         from {
             found_prefix.matches;
@@ -253,7 +253,7 @@ module irrdb {
         }
     }
 
-    term invalid-origin-as for route {
+    term invalid-origin-as for route: Route {
         with irr_customers;
         from {
             found_prefix.matches;
@@ -265,7 +265,7 @@ module irrdb {
         }
     }
 
-    term invalid-prefix-origin-as for route {
+    term invalid-prefix-origin-as for route: Route {
         with irr_customers;
         from {
             found_prefix.matches;
@@ -279,7 +279,7 @@ module irrdb {
 
     // Since all the terms mentioned here always return 
     // `accept`, all of the chain will be run.
-    filter set-irrdb-communities for route {
+    filter set-irrdb-communities for route: Route {
         (
             irrdb-valid and
             irrdb-more-specific and
@@ -292,7 +292,7 @@ module irrdb {
     }
 }
 
-filter rpki+irrdb for route {
+filter rpki+irrdb for route: Route {
     filter rpki.set-rov-communities;
     filter irrdb.set-irrdb-communities;
 }
@@ -314,7 +314,7 @@ table customer-prefixes
 rib global.irr-customers as irr-customers;
 
 module imports {
-    term drop-bogons for prefix {
+    term drop-bogons for prefix: Prefix {
         with customer-prefixes;
         from {
             prefix in
@@ -326,7 +326,7 @@ module imports {
         
     }
 
-    import irr-customer from table customer-prefixes for record {
+    import irr-customer from table customer-prefixes for record: CustomerPrefixRecord {
         drop-bogons for record.prefix
         and then {
             destroy_and_create(irr-customers).insert(record);
@@ -335,7 +335,7 @@ module imports {
 
     // `rotoro-stream` is not defined here, but would be a stream
     // of parsed bgp messages.
-    import peer-stream from rotoro-stream for route {
+    import peer-stream from rotoro-stream for route: Route {
         ibgp-dropper.drop-ibgp for route.prefix with AS211321;
         and then {
             global.rib-in.insert_or_replace(route)
@@ -355,7 +355,7 @@ rib global.rib-in as rib-in {
 
 module queries {
     // A literal query without arguments
-    query search-as3120-in-rib-loc for route in global.rib-in {
+    query search-as3120-in-rib-loc for route: Route in global.rib-in {
         with {
             query_type: state-diff {
                 start: "01-03-20221T00:00z";
@@ -373,7 +373,7 @@ module queries {
 
     // A term can be reused, just like
     // in a filter.
-    term search-asn for route with asn {
+    term search-asn for route: Route with asn: Asn {
         from {
             route.bgp.as_path.contains(asn);
         }
@@ -382,14 +382,14 @@ module queries {
     // A query function (with an argument),
     // can be used like so:
     // search-asn for 31200;
-    query search-asn for asn in global.rib-in {
+    query search-asn for asn: Asn in global.rib-in {
         with {
             query-type: created-records {
                 time_span: last_24_hours()
             };
             format: json;
         }
-        search-my-asn for asn and then {
+        search-my-asn for asn: Asn and then {
             send-to: stdout;
         }
     }
@@ -402,14 +402,14 @@ module queries {
         format: json;
     }
 
-    query search-my-asn for asn {
+    query search-my-asn for asn: Asn {
         with my-asn-24-hours;
         search-asn;
     }
     ```
 
     ```
-    term search-my-asns-records for route with [asn] {
+    term search-my-asns-records for route: Route with [asn: Asn] {
         from {
             route.bgp.as_path.contains([asn]);
         }
@@ -422,14 +422,14 @@ module queries {
     ```
     // e.g. query-my-as-dif for AS3120 with ("02-03-2022T00:00z",
     // "02-03-20T23:59z") in global.rib-ib
-    query search-my-as-dif for [asn] with (start_time, end_time) in rib {
+    query search-my-as-dif for [asn: Asn] with (start_time, end_time) in rib {
         with {
             query_type: state-diff {
                 start: start_time;
                 end: end_time;
             };
         }
-        search-my-asns-records for [asn]
+        search-my-asns-records for [asn: Asn]
     }
 }
 ```

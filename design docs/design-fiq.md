@@ -392,7 +392,7 @@ component this will look like just another RIB.
 // A `virtual rib` just defines the name under which the other components can
 // address the physical RIB + filters. This example describes a RIB called
 // `rib-in-post-policy` that consists of all entries in the `rib-in` RIB and
-// then has the specified filters applied at request time.
+// then has the specified filters applied to it at request time.
 
 virtual rib rib-in-post-policy for route: Route;
 
@@ -485,7 +485,10 @@ module queries {
     // e.g. `query-my-as-dif for AS3120 with (
     //          "02-03-2022T00:00z",
     //          "02-03-20T23:59z") in rib-in`
-    // python: `query_my_as_dif.for(Asn(AS3120))
+    //
+    // python:
+    //
+    // `query_my_as_dif.for(Asn(AS3120))
     //             .with(Datetime.from("02-03-2022T00:00z"),
     //                   Datetime.from("02-03-20T23:59z"))
     //             .in("rib_in")`

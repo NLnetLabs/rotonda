@@ -1,5 +1,6 @@
 ```
 // An example that performs validation for Flowspec according to RFC8955
+
 module flowspec-validator {
     rib global.rib-in as rib-in with Route {
         prefix: Prefix,
@@ -41,6 +42,78 @@ module flowspec-validator {
     filter flowspec with fs_rule: FlowSpecRule {
         validate-flowspec and then {
             rib-flowspec.store(fs_rule);
+        }
+    }
+}
+```
+
+```
+// Adds the ID of the Route Server to every route.
+// See: https://www.euro-ix.net/en/forixps/large-bgp-communities/
+
+module tracer {
+    define rs-id {
+        my_rs_id: u32 = 1;
+    }
+
+    term add-rs-id for route: Route {
+        with rs-id;
+        then {
+            route.bgp.communities.add(1002: my_rs_id);
+        }
+    }
+
+    filter add-rs-id {
+        add-rs-id;
+    }
+}
+```
+
+```
+// Adds a community with the latency towards that peer for a route,
+// if the peer that sends the route appears in a peer-latency table.
+// See: https://www.euro-ix.net/en/forixps/large-bgp-communities/
+
+rib table global.peer-latencies as peer-latencies with PeerLatency {
+    peer_id: PeerId,
+    latency: u32
+}
+
+virtual rib rib-in-post-policy for route: Route;
+
+module latency-tagger {
+    define tagger for route: Route {
+        use peer-latencies;
+        peer-latency = peer-latencies.match(route.peer_id).latency;
+    }
+
+    term latency-for-peer for route: Route {
+        with tagger;
+        from {
+            route.bgp.communities.add(1003: peer-latency);
+        }
+    }
+
+    filter latency-for-peer for route: Route {
+        with tagger;
+        latency-tagger;
+    }
+}
+```
+
+```
+module rib-in-post-policy {
+    define {
+        use rib-in;
+    }
+
+    filter rib-in-post-policy for route: Route {
+        ( 
+            route-security.rpki+irrdb;
+            tracer.add-rs-id;
+            latency-tagger.latency-for-peer;
+        ) and then {
+            export to rib-in-post-policy;
         }
     }
 }

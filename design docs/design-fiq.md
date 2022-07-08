@@ -1,4 +1,4 @@
-# Rotolo filter-import-query language - The requirements
+# Rotolo filter-impex-query language - The requirements
 
 ## Hard Requirements
 
@@ -19,19 +19,26 @@
 
 A filter-map consists of `term` statements and a `filter` statement.
 
-A `term` is a single statement, that consists of one or more conditions that are tested sequentially.
-If all of them are true, then the term executes the actions in the `then` clause. If one of them are false, then the actions in the `or` (if available) clause are executed. The last action in both the `then` and `or` clauses must be the `reject` or the `accept` return-action. 
-If one of the `then` or `or` clause are missing then an `accept` action is returned by default. A `term` is agnostic to the actual RIB it is being filtered against, so it cannot specify the RIB. It can however specify another (external) data-structure, like a table or a prefix-list, to match against by specifying a `with` clause.
+A `term` is a single statement, that consists of one or more conditions that are
+tested sequentially. If all of them are true, then the term executes the actions
+in the `then` clause. If one of them are false, then the actions in the `or` (if
+available) clause are executed. The last action in both the `then` and `or`
+clauses must be the `reject` or the `accept` return-action. If one of the `then`
+or `or` clause are missing then an `accept` action is returned by default. A
+`term` is agnostic to the actual RIB it is being filtered against, so it cannot
+specify the RIB. It can however specify another (external) data-structure, like
+a table or a prefix-list, to match against by specifying a `with` clause.
 
 The `define` is run once per filter call. This multiple references to the 
-vars in `with` clauses are not re-triggering calculation of the values of the variables.
+vars in `with` clauses are not re-triggering calculation of the values of the
+variables.
 
 ### Term example
 
 ```
 module example {
-    // A fairly simple example of a term
-    // with a defined variable.
+    // A fairly simple example of a term with a defined variable, but without
+    // using any global data-sources.
     define last-as-64500-vars {
         last_as_64500 = AsPathFilter { last: 64500 };
     }
@@ -61,14 +68,32 @@ module example {
 ```
 
 ```
+// A hard-coded ibgp dropper term for AS64496
+module ibg-dropper {
+    term drop-ibgp for route:Route {
+        from {
+            route.bgp.as-path.matches(AsPathFilter { last: AS64496 });
+        }
+        then {
+            reject;
+        }
+    }
+}
+```
+
+```
+// A ibgp-dropper that takes as argument the AS for which we're dropping the
+// iBGPs.
 module ibgp-dropper {
     define our-as for route: Route with our_asn: Asn {
         our-as = AsPathFilter { last: our_asn };
     }
 
-    term drop-ibgp for route: Route with our_asn: Asn {
+    term drop-ibgp for route: Route {
+        // `our-asn` is an argument of type `Asn` that should be defined by
+        // the filter that includes this term.
         with {
-            our-as;
+            our-asn: Asn;
         }
         from {
             // drop if our own AS appears anywhere in
@@ -86,14 +111,24 @@ module ibgp-dropper {
 
 ### Filter
 
-A filter is a chain of terms, that will be executed based on the return action of the last executed term and the type of joining clause, either a `or` or an `and`. A `accept` return action is evaluated as true, and a `reject` return action is evaluated as false. The filter exits as early as possible and the side-effects of the terms are executed up to the point of the last evaluated term. This means that **order of the terms does matter**.
+A filter is a chain of terms, that will be executed based on the return action
+of the last executed term and the type of joining clause, either a `or` or an
+`and`. A `accept` return action is evaluated as true, and a `reject` return
+action is evaluated as false. The filter exits as early as possible and the
+side-effects of the terms are executed up to the point of the last evaluated
+term. This means that **order of the terms does matter**.
 
-Like a term a filter ends in a `reject` or `accept` action. The implicit action at the end is `accept`.
+Like a term a filter ends in a `reject` or `accept` action. The implicit action
+ at the end is `accept`.
 
 Filters can be composed also from other filters.
 
-Special data structures for incoming data all live in the global namespace and can be referenced by `global`. The data-structures are:
-- rib—A hash-map keyed on prefix and that holds routing information as its values. Values fall into two groups: `bgp`, these are the BGP attributes, e.g. as-path, communities, etc. and `internal`, these are values that are specific to a RIB and defined at creation time.
+Special data structures for incoming data all live in the global namespace and
+can be referenced by `global`. The data-structures are:
+- rib—A hash-map keyed on prefix and that holds routing information as its
+  values. Values fall into two groups: `bgp`, these are the BGP attributes, e.g.
+  as-path, communities, etc. and `internal`, these are values that are specific
+  to a RIB and defined at creation time.
 - table—a hash-map.
 - prefix-list—a list of prefixes.
 
@@ -291,9 +326,11 @@ module irrdb {
     }
 }
 
-filter rpki+irrdb for route: Route {
-    filter rpki.set-rov-communities;
-    filter irrdb.set-irrdb-communities;
+module route-security {
+    filter rpki+irrdb for route: Route {
+        filter rpki.set-rov-communities;
+        filter irrdb.set-irrdb-communities;
+    }
 }
 ```
 
@@ -310,9 +347,12 @@ table customer-prefixes
         customer_id: u32
 }
 
-rib global.irr-customers as irr-customers;
-
 module imports {
+    define customer-prefixes {
+        use global.customer-prefixes as customer-prefixes;
+        use global.irr-customers as irr-customers;
+    }
+
     term drop-bogons for prefix: Prefix {
         with customer-prefixes;
         from {
@@ -338,6 +378,34 @@ module imports {
         and then {
             global.rib-in.insert_or_replace(route);
         }
+    }
+}
+```
+
+### Exports
+
+An `export` passes a route on from a RIB in memory to another Rotonda component
+by taking a route and applying the specified filters to it. From the Rotonda
+component this will look like just another RIB.
+
+```
+// A `virtual rib` just defines the name under which the other components can
+// address the physical RIB + filters. This example describes a RIB called
+// `rib-in-post-policy` that consists of all entries in the `rib-in` RIB and
+// then has the specified filters applied at request time.
+
+virtual rib rib-in-post-policy for route: Route;
+
+module rib-in-post-policy {
+    define {
+        use rib-in-post-policy;
+    }
+
+    export rib-in-post-policy for route: Route {
+        route-security.rpki+irrdb;
+        tracer.add-rs-id;
+        latency-tagger.latency-for-peer;
+        // and then { accept; } is implicit here.
     }
 }
 ```
@@ -404,9 +472,7 @@ module queries {
         with my-asn-24-hours;
         search-asn;
     }
-    ```
 
-    ```
     term search-my-asns-records for route: Route with [asn: Asn] {
         from {
             route.bgp.as_path.contains([asn: Asn]);
@@ -415,18 +481,23 @@ module queries {
             send-to py_dict();
         }
     }
-    ```
-
-    ```
-    // e.g. `query-my-as-dif for AS3120 with ("02-03-2022T00:00z","02-03-20T23:59z") in rib-in`
-    query search-my-as-dif for [asn: Asn] with (start_time: DateTime, end_time: DateTime) {
-        with {
-            query_type: state-diff {
-                start: start_time;
-                end: end_time;
-            };
+ 
+    // e.g. `query-my-as-dif for AS3120 with (
+    //          "02-03-2022T00:00z",
+    //          "02-03-20T23:59z") in rib-in`
+    // python: `query_my_as_dif.for(Asn(AS3120))
+    //             .with(Datetime.from("02-03-2022T00:00z"),
+    //                   Datetime.from("02-03-20T23:59z"))
+    //             .in("rib_in")`
+    query search-my-as-dif for [asn: Asn] 
+        with (start_time: DateTime, end_time: DateTime) {
+            with {
+                query_type: state-diff {
+                    start: start_time;
+                    end: end_time;
+                };
+            }
+            search-my-asns-records for [asn: Asn];
         }
-        search-my-asns-records for [asn: Asn];
-    }
 }
 ```

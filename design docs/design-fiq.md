@@ -1,4 +1,4 @@
-# Rotolo filter language - The requirements
+# Rotolo filter-import-query language - The requirements
 
 ## Hard Requirements
 
@@ -202,8 +202,7 @@ module rpki {
     }
 }
 
-rib global.irr_customers as irr_customers CustomerPrefixRecord {
-    id: "global.irr_customers",
+rib global.irr_customers as irr_customers: CustomerPrefixRecord {
     prefix: Prefix,
     origin_asn: [Asn],
     as_set: [{ prefix: Prefix, asn: Asn }],
@@ -285,7 +284,7 @@ module irrdb {
             irrdb-more-specific and
             irrdb-prefix-not-in-as-set and
             irrdb-invalid-origin-as and
-            irrdb-invalid-prefix-origin-as
+            irrdb-invalid-prefix-origin-as;
         ) and then {
             accept;
         };
@@ -301,10 +300,10 @@ filter rpki+irrdb for route: Route {
 ### Imports
 
 ```
-prefix-list bogons global.bogons;
+prefix-list global.bogons as bogons;
 
 table customer-prefixes
-    from file "/home/user/irr-table.json" {
+    from file "/home/user/irr-table.json" with CustomerPrefixRecord {
         prefix: Prefix,
         as_set: [Asn],
         origin_asn: Asn,
@@ -317,8 +316,7 @@ module imports {
     term drop-bogons for prefix: Prefix {
         with customer-prefixes;
         from {
-            prefix in
-                exact_match(bogons);
+            bogons.exact_match(prefix);
         }
         then {
             reject;
@@ -336,9 +334,9 @@ module imports {
     // `rotoro-stream` is not defined here, but would be a stream
     // of parsed bgp messages.
     import peer-stream from rotoro-stream for route: Route {
-        ibgp-dropper.drop-ibgp for route.prefix with AS211321;
+        ibgp-dropper.drop-ibgp for route with AS211321;
         and then {
-            global.rib-in.insert_or_replace(route)
+            global.rib-in.insert_or_replace(route);
         }
     }
 }
@@ -381,8 +379,8 @@ module queries {
 
     // A query function (with an argument),
     // can be used like so:
-    // search-asn for 31200;
-    query search-asn for asn: Asn in global.rib-in {
+    // search-asn-rib-in for 31200;
+    query search-asn-rib for asn: Asn in global.rib-in {
         with {
             query-type: created-records {
                 time_span: last_24_hours()
@@ -411,7 +409,7 @@ module queries {
     ```
     term search-my-asns-records for route: Route with [asn: Asn] {
         from {
-            route.bgp.as_path.contains([asn]);
+            route.bgp.as_path.contains([asn: Asn]);
         }
         then {
             send-to py_dict();
@@ -420,16 +418,15 @@ module queries {
     ```
 
     ```
-    // e.g. query-my-as-dif for AS3120 with ("02-03-2022T00:00z",
-    // "02-03-20T23:59z") in global.rib-ib
-    query search-my-as-dif for [asn: Asn] with (start_time, end_time) in rib {
+    // e.g. `query-my-as-dif for AS3120 with ("02-03-2022T00:00z","02-03-20T23:59z") in rib-in`
+    query search-my-as-dif for [asn: Asn] with (start_time: DateTime, end_time: DateTime) {
         with {
             query_type: state-diff {
                 start: start_time;
                 end: end_time;
             };
         }
-        search-my-asns-records for [asn: Asn]
+        search-my-asns-records for [asn: Asn];
     }
 }
 ```

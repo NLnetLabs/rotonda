@@ -29,7 +29,7 @@ or `or` clause are missing then an `accept` action is returned by default. A
 specify the RIB. It can however specify another (external) data-structure, like
 a table or a prefix-list, to match against by specifying a `with` clause.
 
-The `define` is run once per filter call. This multiple references to the 
+The `define` is run once per filter call. This multiple references to the
 vars in `with` clauses are not re-triggering calculation of the values of the
 variables.
 
@@ -108,7 +108,6 @@ module ibgp-dropper {
 }
 ```
 
-
 ### Filter
 
 A filter is a chain of terms, that will be executed based on the return action
@@ -119,12 +118,13 @@ side-effects of the terms are executed up to the point of the last evaluated
 term. This means that **order of the terms does matter**.
 
 Like a term a filter ends in a `reject` or `accept` action. The implicit action
- at the end is `accept`.
+at the end is `accept`.
 
 Filters can be composed also from other filters.
 
 Special data structures for incoming data all live in the global namespace and
 can be referenced by `global`. The data-structures are:
+
 - rib—A hash-map keyed on prefix and that holds routing information as its
   values. Values fall into two groups: `bgp`, these are the BGP attributes, e.g.
   as-path, communities, etc. and `internal`, these are values that are specific
@@ -145,39 +145,41 @@ module rpki {
         found_prefix = longest_match(rov-rib, route.prefix);
     }
 
-    filter rov-valid for route: Route {
+    term rov-valid for route: Route {
         with rov-rib-vars;
-        matches(found_prefix.prefix);
-        route.prefix.len <= found_prefix.max_len;
-        route.prefix.bgp.origin-asn == found_prefix.asn;
+        match {
+            matches(found_prefix.prefix);
+            route.prefix.len <= found_prefix.max_len;
+            route.prefix.bgp.origin-asn == found_prefix.asn;
+        }
     }
 
-    filter rov-invalid-length for route: Route {
+    term rov-invalid-length for route: Route {
         with rov-rib-vars;
-        from {
+        match {
             found_prefix.matches;
             route.prefix.len > found_prefix.max_len;
             route.prefix.bgp.origin-asn == found_prefix.asn;
         };
     }
 
-    filter rov-invalid-asn for route: Route {
+    term rov-invalid-asn for route: Route {
         with rov-rib-vars;
-        from {
+        match {
             found_prefix.matches;
             route.prefix.len >= found_prefix.max_len;
             route.prefix.origin-asn != found_prefix.asn;
         };
     }
 
-    filter rov-unknown for route: Route {
+    term rov-unknown for route: Route {
         with rov-rib-vars;
-        from {
+        match {
             found_prefix.does_not_match;
         };
     }
 
-    // compose the statements into a `filter`
+    // compose the statements into a `action`
     //
     // `and then` is only run when the
     // compound filter expressions returns `accept`.
@@ -187,30 +189,25 @@ module rpki {
     // Note that this filter will always return `accept`,
     // regardless of the validation. It's just used to
     // set the corresponding communities on the route.
-    action set-rov-communities for route: Route {
-        if rov-valid for route {
-            route.bgp.communities.add(1000:1);
-        }
-        else if rov-unknown for route {
-            route.bgp.communities.add(1000:2);
-        }
-        else { 
-            if rov-invalid-length for route {
-                route.bgp.communities.add(1000:6);
-            }
-            if rov-invalid-asn for route {
-                route.bgp.communities.add(1000:5);
-            }
-        }
-        route.accept;
+    action set-rov-valid-community for route {
+        route.bgp.communities.add(1000:1);
+        send-to standard-logger rov;
+    }
+    action set-rov-unknown-community for route {
+        route.bgp.communities.add(1000:2);
+    }
+    action set-rov-invalid-length-community for route {
+        route.bgp.communities.add(1000:6);
+    }
+    action set-rov-invalid-asn for route {
+        route.bgp.communities.add(1000:5);
     }
 
-    // This filter will actually drop invalids, since the
-    // only term mentioned returns `reject` when not finding
-    // the correct ROA.
-    filter drop-rpki-invalid for route: Route {
-        rov-valid;
-        route.reject;
+    apply for route: Route {
+        filter match rov-valid-community(route) then { set-rov-valid-community; accept; } or >>
+        filter match rov-unkown then { set-rov-unkown-community; accept; } or >>
+        filter match rov-invalid-length then { set-rov-invalid-length-community; } >>
+        filter match rov-invalid-asn then { set-rov-invalid-asn-community; accept; } or accept;
     }
 }
 
@@ -221,26 +218,86 @@ rib global.irr_customers as irr_customers: CustomerPrefixRecord {
     customer_id: u32
 }
 
-rib global.rib-in as rib-in: Route {
+rib global.rib-in as rib-in: set of Route {
     pretix: Prefix,
-    bgp_records: [BgpRecord]
+    bgp_records: set of BgpRecord
+}
+
+virtual shortest-path-rib as rib-in: Route {
+    prefix: Prefix,
+    bgp: BgpRecord
 }
 
 module shortestpath {
-    view shortest-path-rib {
-        prefix: Prefix,
-        record: BgpRecord
-    };
+    filter shortest_path_filter for records: set of BgpRecord {
+        // .select(fn) uses fn as a filter of all the entries in
+        // a collection (prefix-filter, table, rib). So `fn` should take the
+        // type of a single entry in the collection as its argument.
+        records.select_for_attribute("as-path.length", select.Equal(1)).first;
+    }
 
     map store-shortest-path for rib: shortest-path-rib from rib-in {
-       rib-in.select(shortest_path_filter for set of rib-in.bgp_record);
-    }
-
-    filter shortest_path_filter for records: set of BgpRecord {
-        records.select(bgp.as-path.length.min);
-        records.first;
+       rib-in.select_with_fn(shortest_path_filter(rib-in.bgp_records));
     }
 }
+
+module best-path-selection {
+    define best-path for route: Route {
+        use rib-in;
+        found_prefix = rib-in.exact_match(route.prefix);
+    }
+
+    term does-not-exist for route: Route {
+        with best-path;
+        match {
+            found_prefix.matches;
+        };
+    }
+
+    term local-pref for route: Route {
+        some {
+            // localPrefHighest compares the local prefs, or if not present, substitutes with
+            // 100 and then compares.
+            route.bgp_records.select_for_attribute("local_pref", select.LocalPrefHighest);
+        }
+    }
+
+    term originate for route: Route {
+        some {
+            route.bgp_records.select_for_attribute("next-hop", select.Equal(Prefix(0.0.0.0) || Prefix(0::));
+        }
+    }
+
+    term as-path-length for route: Route {
+        some {
+            route.bgp_records.select_for_attribute("as-path.length", select.Min);
+        }
+    }
+
+    action is-best-path for route: Route {
+        send-to standard-logger best-path;
+    }
+    
+    apply for route: Route {
+        with best-path;
+
+        // equals: filter best as-path-length(originate(local-pref(does-not-exist(found_prefix))));
+        filter match does-not-exist(found_prefix) then { is-best-path(route); accept; } or >>
+        filter some {
+            local-pref >>
+            originate >>
+            as-path-length;
+        }
+        then {
+            is-best-path(route);
+            accept;
+        } 
+        or {
+            reject;
+        }
+    }
+}
+
 
 module irrdb {
     view irr-customers-table on global.irr-customers for route: Route {
@@ -308,7 +365,7 @@ module irrdb {
         }
     }
 
-    // Since all the terms mentioned here always return 
+    // Since all the terms mentioned here always return
     // `accept`, all of the chain will be run.
     filter set-irrdb-communities for route: Route {
         from {
@@ -317,7 +374,7 @@ module irrdb {
             irrdb-prefix-not-in-as-set and
             irrdb-invalid-origin-as and
             irrdb-invalid-prefix-origin-as;
-        } 
+        }
         and then {
             accept;
         };
@@ -359,7 +416,7 @@ module imports {
         then {
             reject;
         }
-        
+
     }
 
     import irr-customer from table customer-prefixes for record: CustomerPrefixRecord {
@@ -479,7 +536,7 @@ module queries {
             send-to py_dict();
         }
     }
- 
+
     // e.g. `query-my-as-dif for AS3120 with (
     //          "02-03-2022T00:00z",
     //          "02-03-20T23:59z") in rib-in`

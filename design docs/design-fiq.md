@@ -260,7 +260,7 @@ module best-path-selection {
         found_prefix = rib-in.exact_match(route.prefix);
     }
 
-    term does-not-exist for route: Route {
+    term exists for route: Route {
         with best-path;
         match {
             found_prefix.matches;
@@ -294,7 +294,7 @@ module best-path-selection {
     apply for route: Route {
         with best-path;
 
-        filter match does-not-exist(found_prefix) matching { is-best-path(route); return accept; };
+        filter exactly-one exists(found_prefix) matching { is-best-path(route); return accept; };
         filter some local-pref(route) matching one { is-best-path(route); return accept; } >> 
         filter some originate matching one { is-best-path(route); return accept; } >>
         filter exactly-one as-path-length matching { is-best-path(route); return accept; };

@@ -217,8 +217,8 @@ module rpki {
                 set-rov-unkown-community;
                 return accept;
             } 
-        }>>
-        filter match rov-invalid-length { matching set-rov-invalid-length-community }>>
+        } |>
+        filter match rov-invalid-length { matching set-rov-invalid-length-community } |>
         filter match rov-invalid-asn { matching set-rov-invalid-asn-community };
         return accept;
     }
@@ -295,8 +295,8 @@ module best-path-selection {
         with best-path;
 
         filter exactly-one exists(found_prefix) matching { is-best-path(route); return accept; };
-        filter some local-pref(route) matching one { is-best-path(route); return accept; } >> 
-        filter some originate matching one { is-best-path(route); return accept; } >>
+        filter some local-pref(route) matching one { is-best-path(route); return accept; } |> 
+        filter some originate matching one { is-best-path(route); return accept; } |>
         filter exactly-one as-path-length matching { is-best-path(route); return accept; };
         reject;
     }
@@ -379,80 +379,75 @@ module irrdb {
         view found_prefix on irr-customers-table for route {
             prefix: matches(route.prefix)
         };
-        found_prefix.is_not_empty;
-        //then {
-        //    route.bgp.communities.add(1001:1);
-        //    accept;
-        //}
+        found_prefix.matches;
+    }
+
+    action set-irrdb-valid for route: Route {
+        route.bgp.communities.add(1001:1);
     }
 
     term more-specific for route: Route {
         with irr_customers;
-        from {
+        match {
             found_prefix.matches;
             found_prefix.len < route.prefix.len;
         }
-        then {
-            route.bgp.communities.add(1001:3);
-            accept;
-        }
+    }
+
+    action set-more-specific for route: Route {
+        route.bgp.communities.add(1001:3);
     }
 
     term prefix-not-in-as-set for route: Route {
         with irr_customers;
-        from {
+        match {
             found_prefix.matches;
             route.prefix not in found_prefix.as_set.[prefix];
-        };
-        then {
-            route.bgp.communities.add(1001:4);
-            accept;
         }
+    }
+
+    action prefix-not-in-as-set for route: Route {
+        route.bgp.communities.add(1001:4);
+        accept;
     }
 
     term invalid-origin-as for route: Route {
         with irr_customers;
-        from {
+        match {
             found_prefix.matches;
             route.origin-asn not in found_prefix.as_set.[asn];
         };
-        then {
-            route.bgp.communities.add(1001:5);
-            accept;
-        }
     }
+
+    action invalid-origin-as for route: Route {
+        route.bgp.communities.add(1001:5);
+    } 
 
     term invalid-prefix-origin-as for route: Route {
         with irr_customers;
-        if {
+        match {
             found_prefix.matches;
             route.origin-asn !== found_prefix.origin_asn;
         }
-        then {
-            route.bgp.communities.add(1001:6);
-            route.accept;
-        }
     }
 
-    // Since all the terms mentioned here always return
-    // `accept`, all of the chain will be run.
-    filter set-irrdb-communities for route: Route {
-        from {
-            irrdb-valid and
-            irrdb-more-specific and
-            irrdb-prefix-not-in-as-set and
-            irrdb-invalid-origin-as and
-            irrdb-invalid-prefix-origin-as;
-        }
-        and then {
-            accept;
-        };
+    action invalid-prefix-origin-as for route: Route {
+        route.bgp.communities.add(1001:6);
+    }
+
+    apply for route: Route {
+        filter match irrdb-valid matching { set-irrdb-valid-community(route); } always |>
+        filter match irrdb-more-specific matching { set-irrdb-more-specific-community; } always |>
+        filter match irrdb-prefix-not-in-as-set matching { set-irrdb-prefix-not-in-as-set-community; } always |>
+        filter match irrdb-invalid-origin-as matching { set-irrdb-invalid-origin-as-community; } always |>
+        filter irrdb-invalid-prefix-origin-as matching { set-irrdb-invalid-prefix-origin-as-community; };
+        return accept;
     }
 }
 
 module route-security {
     filter rpki+irrdb for route: Route {
-        filter rpki.set-rov-communities;
+        filter rpki.set-rov-communities |>
         filter irrdb.set-irrdb-communities;
     }
 }

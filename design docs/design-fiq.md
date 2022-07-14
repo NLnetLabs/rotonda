@@ -282,10 +282,10 @@ module best-path-selection {
         with best-path;
 
         // equals: filter best as-path-length(originate(local-pref(does-not-exist(found_prefix))));
-        filter match does-not-exist(found_prefix) then { is-best-path(route); accept; } or >>
-        filter some {
-            local-pref >>
-            originate >>
+        filter match does-not-exist(found_prefix) matching { is-best-path(route); return accept; };
+        filter exactly-one {
+            local-pref matching pipe into next;
+            originate matching pipe into next;
             as-path-length;
         }
         then {
@@ -295,6 +295,56 @@ module best-path-selection {
         or {
             reject;
         }
+    }
+
+
+    // or as in described in https://datatracker.ietf.org/doc/draft-cppy-grow-bmp-path-marking-tlv/
+    // mark: enum Mark { Invalid, Best, NonSelected, Primary, Backup, NonInstalled, BestExternal, AddPath }
+    // reason: enum Reason { LocalPreference, Origin, AsPathLength, NextHop, Invalid }
+    action invalid for route: Route {
+        route.internal.mark.set(Invalid)
+    }
+
+    action set-best for route: Route {
+        route.internal.mark.set(Best);
+    }
+
+    action set-non-selected for route: Route {
+        route.internal.mark.set(NonSelected);
+    }
+
+    action set-primary for route: Route {
+        route.internal.mark.set(Primary);
+    }
+
+    action set-backup for route: Route {
+        route.internal.mark.set(Backup);
+    }
+
+    action set-non-installed for route: Route {
+        route.internal.mark.set(NonInstalled);
+    }
+
+    action set-best-external for route: Route {
+        route.internal.mark.set(BestExternal);
+    }
+
+    action set-add-path for route: Route {
+        route.internal.mark.set(AddPath);
+    }
+
+    action set-best-and-backup for routes: set of Route {
+        routes.last.internal.mark.set(Backup);
+        routes.first.internal.mark.set(Best);
+    }
+
+    apply for route: Route {
+        with best-path;
+
+        filter match does-not-exist(found_prefix) matching { set-best(route); return accept; };
+        filter some local-pref(route.bgp_records) not matching { set-non-selected(LocalPref); } matching pipe into next;
+        filter some originate not matching { set-non-selected(route, Originate); } matching pipe into next;
+        filter exactly-one as-path-length matching { set-best(route); return accept; } not matching { set-best-and-backup; return accept; };
     }
 }
 

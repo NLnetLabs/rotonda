@@ -351,7 +351,7 @@ module best-path-selection {
     apply for route: Route {
         with best-path;
 
-        filter match does-not-exist(found_prefix) matching { set-best(route); return accept; };
+        filter exactly-one exists(found_prefix) matching { set-best(route); return accept; };
         filter some local-pref(route.bgp_records) not matching set-non-selected(LocalPref) matching pipe into next;
         filter some originate not matching set-non-selected(route, Originate) matching pipe into next;
         filter exactly-one as-path-length {

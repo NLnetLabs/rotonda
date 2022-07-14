@@ -204,10 +204,23 @@ module rpki {
     }
 
     apply for route: Route {
-        filter match rov-valid-community(route) then { set-rov-valid-community; accept; } or >>
-        filter match rov-unkown then { set-rov-unkown-community; accept; } or >>
-        filter match rov-invalid-length then { set-rov-invalid-length-community; } >>
-        filter match rov-invalid-asn then { set-rov-invalid-asn-community; accept; } or accept;
+        with best-path;
+
+        filter match rov-valid-community(route) {
+            matching { 
+                set-rov-valid-community;
+                return accept;
+            };
+        };
+        filter match rov-unkown(route) {
+            matching {
+                set-rov-unkown-community;
+                return accept;
+            } 
+        }>>
+        filter match rov-invalid-length { matching set-rov-invalid-length-community }>>
+        filter match rov-invalid-asn { matching set-rov-invalid-asn-community };
+        return accept;
     }
 }
 
@@ -281,20 +294,11 @@ module best-path-selection {
     apply for route: Route {
         with best-path;
 
-        // equals: filter best as-path-length(originate(local-pref(does-not-exist(found_prefix))));
         filter match does-not-exist(found_prefix) matching { is-best-path(route); return accept; };
-        filter exactly-one {
-            local-pref matching pipe into next;
-            originate matching pipe into next;
-            as-path-length;
-        }
-        then {
-            is-best-path(route);
-            accept;
-        } 
-        or {
-            reject;
-        }
+        filter some local-pref(route) matching one { is-best-path(route); return accept; } >> 
+        filter some originate matching one { is-best-path(route); return accept; } >>
+        filter exactly-one as-path-length matching { is-best-path(route); return accept; };
+        reject;
     }
 
 
@@ -309,28 +313,34 @@ module best-path-selection {
         route.internal.mark.set(Best);
     }
 
-    action set-non-selected for route: Route {
+    action set-non-selected for route: Route with reason: Reason {
         route.internal.mark.set(NonSelected);
+        route.internal.mark_reason.set(reason);
     }
 
-    action set-primary for route: Route {
+    action set-primary for route: Route with reason: Reason {
         route.internal.mark.set(Primary);
+        route.internal.mark_reason.set(reason);
     }
 
-    action set-backup for route: Route {
+    action set-backup for route: Route with reason: Reason {
         route.internal.mark.set(Backup);
+        route.internal.mark_reason.set(reason);
     }
 
-    action set-non-installed for route: Route {
+    action set-non-installed for route: Route with reason: Reason {
         route.internal.mark.set(NonInstalled);
+        route.internal.mark_reason.set(reason);
     }
 
-    action set-best-external for route: Route {
+    action set-best-external for route: Route with reason: Reason {
         route.internal.mark.set(BestExternal);
+        route.internal.mark_reason.set(reason);
     }
 
-    action set-add-path for route: Route {
+    action set-add-path for route: Route with reason: Reason {
         route.internal.mark.set(AddPath);
+        route.internal.mark_reason.set(reason);
     }
 
     action set-best-and-backup for routes: set of Route {
@@ -342,9 +352,18 @@ module best-path-selection {
         with best-path;
 
         filter match does-not-exist(found_prefix) matching { set-best(route); return accept; };
-        filter some local-pref(route.bgp_records) not matching { set-non-selected(LocalPref); } matching pipe into next;
-        filter some originate not matching { set-non-selected(route, Originate); } matching pipe into next;
-        filter exactly-one as-path-length matching { set-best(route); return accept; } not matching { set-best-and-backup; return accept; };
+        filter some local-pref(route.bgp_records) not matching set-non-selected(LocalPref) matching pipe into next;
+        filter some originate not matching set-non-selected(route, Originate) matching pipe into next;
+        filter exactly-one as-path-length {
+            matching { 
+                set-best(route);
+                return accept;
+            } 
+            not matching {               
+                set-best-and-backup; 
+                return accept;
+            };
+        }
     }
 }
 

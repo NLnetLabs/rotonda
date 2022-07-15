@@ -43,26 +43,27 @@ module example {
         last_as_64500 = AsPathFilter { last: 64500 };
     }
 
-    term no-as-64500-until-len-16 for route: Route {
-            with {
-                last-as-64500-vars;
-            }
-            from {
-                prefix-filter 0.0.0.0/0 upto /16;
-                protocol bgp {
-                    route.as-path.matches(last-as-64500);
-                };
-                protocol internal {
-                    route.router-id == 243;
-                };
-            }
-            then {
-                // a side-effect is allowed, but you can't
-                // store anywhere in a term.
-                send-to stdout;
-                reject;
-            }
+    term as64500-until-len-16 for route: Route {
+        with last-as-64500-vars;
+        match {
+            prefix-filter 0.0.0.0/0 upto /16;
+            protocol bgp {
+                route.as-path.matches(last-as-64500);
+            };
+            protocol internal {
+                route.router-id == 243;
+            };
         }
+    }
+
+    apply for route: Route {
+        filter match as64500-until-len-16 {
+            not matching { 
+                send-to stdout; 
+                return reject; 
+            };
+        };
+        return accept;
     }
 }
 ```
@@ -71,12 +72,18 @@ module example {
 // A hard-coded ibgp dropper term for AS64496
 module ibg-dropper {
     term drop-ibgp for route:Route {
-        from {
+        match {
             route.bgp.as-path.matches(AsPathFilter { last: AS64496 });
         }
-        then {
-            reject;
-        }
+    }
+
+    apply for route: Route {
+        filter match drop-ibgp {
+            matching {
+                return reject;
+            };
+        };
+        return accept;
     }
 }
 ```
@@ -84,26 +91,30 @@ module ibg-dropper {
 ```
 // A ibgp-dropper that takes as argument the AS for which we're dropping the
 // iBGPs.
-module ibgp-dropper {
+module ibgp-dropper with our_asn: Asn {
     define our-as for route: Route with our_asn: Asn {
-        our-as = AsPathFilter { last: our_asn };
+        our_as = AsPathFilter { last: our_asn };
     }
 
-    term drop-ibgp for route: Route {
+    term drop-ibgp for route: Route with asn: Asn {
         // `our-asn` is an argument of type `Asn` that should be defined by
         // the filter that includes this term.
-        with {
-            our-asn: Asn;
-        }
-        from {
+        with our-asn(asn);
+        match {
             // drop if our own AS appears anywhere in
             // the as-path.
-            route.bgp.as-path.matches(our_asn);
+            route.bgp.as-path.matches(our_as);
         }
-        then {
-            send-to standard-logger ibgp;
-            reject;
-        }
+    }
+
+    apply for route: Route with asn: Asn {
+        filter match drop-ibgp(asn) {
+            matching {
+                send-to standard-logger ibgp;
+                return reject;
+            };
+        };
+        return accept;
     }
 }
 ```
@@ -133,13 +144,13 @@ can be referenced by `global`. The data-structures are:
 - prefix-list—a list of prefixes.
 
 ```
-rib global.rov as rov-rib with Route {
+rib rov-rib contains Route {
     prefix: Prefix,
     max_len: u8,
     asn: Asn,
 }
 
-module rpki {
+module rpki for rov-rib {
     define rov-rib-vars for route: Route {
         use rov-rib;
         found_prefix = longest_match(rov-rib, route.prefix);
@@ -224,37 +235,24 @@ module rpki {
     }
 }
 
-rib global.irr_customers as irr_customers: CustomerPrefixRecord {
+rib irr_customers contains CustomerPrefixRecord {
     prefix: Prefix,
     origin_asn: set of Asn,
     as_set:  list of { prefix: Prefix, asn: Asn },
     customer_id: u32
 }
 
-rib global.rib-in as rib-in: set of Route {
+rib rib-in contains set of Route {
     pretix: Prefix,
     bgp_records: set of BgpRecord
 }
 
-virtual shortest-path-rib as rib-in: Route {
+virtual shortest-path-rib contains Route {
     prefix: Prefix,
     bgp: BgpRecord
 }
 
-module shortestpath {
-    filter shortest_path_filter for records: set of BgpRecord {
-        // .select(fn) uses fn as a filter of all the entries in
-        // a collection (prefix-filter, table, rib). So `fn` should take the
-        // type of a single entry in the collection as its argument.
-        records.select_for_attribute("as-path.length", select.Equal(1)).first;
-    }
-
-    map store-shortest-path for rib: shortest-path-rib from rib-in {
-       rib-in.select_with_fn(shortest_path_filter(rib-in.bgp_records));
-    }
-}
-
-module best-path-selection {
+module best-path-selection for rib-in {
     define best-path for route: Route {
         use rib-in;
         found_prefix = rib-in.exact_match(route.prefix);
@@ -348,11 +346,17 @@ module best-path-selection {
         routes.first.internal.mark.set(Best);
     }
 
+    // Some fairly bogus filter, just to illustrate named filters, and how
+    // they can be referred to (in the apply section).
+    filter more_marks for route: Route {
+        matching not originate set-non-installed(route, NonOriginate);
+    }
+
     apply for route: Route {
         with best-path;
 
         filter exactly-one exists(found_prefix) matching { set-best(route); return accept; };
-        filter some local-pref(route.bgp_records) not matching set-non-selected(LocalPref) matching pipe into next;
+        filter some local-pref(route.bgp_records) not matching { set-non-selected(LocalPref); filter more_marks; } matching pipe into next;
         filter some originate not matching set-non-selected(route, Originate) matching pipe into next;
         filter exactly-one as-path-length {
             matching { 
@@ -368,17 +372,22 @@ module best-path-selection {
 }
 
 
-module irrdb {
-    view irr-customers-table on global.irr-customers for route: Route {
-        prefix: longest_match(route.prefix)
+rib irr-customers-table contains Route {
+    prefix: Prefix,
+    origin_asn: set of Asn,
+    as_set:  list of { prefix: Prefix, asn: Asn },
+    customer_id: u32
+}
+
+module irrdb for irr-customers-table {
+    define irr-customers-table for route: Route {
+        use irr_customers_table;
+        found_prefix = longest_match(route.prefix);
     }
 
     // only checks if the prefix exists, not if it
     // makes sense.
-    filter irrdb-valid for route: Route {
-        view found_prefix on irr-customers-table for route {
-            prefix: matches(route.prefix)
-        };
+    term irrdb-valid for route: Route {
         found_prefix.matches;
     }
 
@@ -436,19 +445,24 @@ module irrdb {
     }
 
     apply for route: Route {
+        // a route can be mutated in place by a filter, so we don't need to
+        // pipe from filter to filter. If you don't want to pipe though, you
+        // will have to feed in the action argument in each filter, e.g.:
+        // filter match irrdb-more-specific matching { set-irrdb-more-specific-community(route); };
+        // filter match irrdb-prefix-not-in-as-set matching { set-irrdb-prefix-not-in-as-set-community(route); };
+
         filter match irrdb-valid matching { set-irrdb-valid-community(route); } always |>
         filter match irrdb-more-specific matching { set-irrdb-more-specific-community; } always |>
         filter match irrdb-prefix-not-in-as-set matching { set-irrdb-prefix-not-in-as-set-community; } always |>
         filter match irrdb-invalid-origin-as matching { set-irrdb-invalid-origin-as-community; } always |>
-        filter irrdb-invalid-prefix-origin-as matching { set-irrdb-invalid-prefix-origin-as-community; };
+        filter match irrdb-invalid-prefix-origin-as matching { set-irrdb-invalid-prefix-origin-as-community; };
         return accept;
     }
 }
 
-module route-security {
-    filter rpki+irrdb for route: Route {
-        filter rpki.set-rov-communities |>
-        filter irrdb.set-irrdb-communities;
+module route-security with (rov-rib, irr-customers-table) {
+    filter compound rpki+irrdb for route: Route { 
+        rpki(rov-rib) |> irrdb(irr-customers-table);
     }
 }
 ```
@@ -456,10 +470,9 @@ module route-security {
 ### Imports
 
 ```
-prefix-list global.bogons as bogons;
+prefix-list bogons;
 
-table customer-prefixes
-    from file "/home/user/irr-table.json" with CustomerPrefixRecord {
+table customer-prefixes contains CustomerPrefixRecord {
         prefix: Prefix,
         as_set: [Asn],
         origin_asn: Asn,
@@ -474,13 +487,9 @@ module imports {
 
     term drop-bogons for prefix: Prefix {
         with customer-prefixes;
-        from {
+        match {
             bogons.exact_match(prefix);
         }
-        then {
-            reject;
-        }
-
     }
 
     import irr-customer from table customer-prefixes for record: CustomerPrefixRecord {
@@ -515,7 +524,7 @@ component this will look like just another RIB.
 
 virtual rib rib-in-post-policy for route: Route;
 
-module rib-in-post-policy {
+module rib-in-post-policy for rib-in-post-policy {
     define {
         use rib-in-post-policy;
     }

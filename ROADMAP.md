@@ -5,11 +5,11 @@ Roadmap
 General Features
 ================
 
-- 🦀 historical records storage + snapshotting ("3 weeks of data")
 - 🦀 filtering (both ingress and policy)
+- 🦀 historical records storage + snapshotting ("3 weeks of data")
 - 🦀 query engine
-- 💤 ingress connectors (e.g. Kafka, WebSockets)
-- 💤 egress connector for time-series database.
+- 💤 Kafka ingress connector
+- 💤 TimescaleDB egress connector and query integration
 
 Development per Component
 =========================

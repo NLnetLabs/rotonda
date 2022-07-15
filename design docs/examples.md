@@ -1,14 +1,14 @@
 ```
 // An example that performs validation for Flowspec according to RFC8955
 
-module flowspec-validator {
-    rib global.rib-in as rib-in with Route {
+module flowspec-validator with (rib-in, rib-flowspec) {
+    rib rib-in contains Route {
         prefix: Prefix,
         originator_id: OriginatorId,
         as_path: AsPath
     }
 
-    rib global.flowspec as rib-flowspec with FlowSpecRule {
+    rib rib-flowspec contains FlowSpecRule {
         dest_prefix: Prefix,
         originator_id: OriginatorId,
         origin_as: As,
@@ -24,7 +24,7 @@ module flowspec-validator {
 
     term validate-flowspec for fs_rule: FlowSpecRule {
         with ribs;
-        from {
+        match {
             // rules from RFC8955 Section 6
             // a. has a destination prefix
             fs_rule.dest_prefix.exists;
@@ -34,15 +34,12 @@ module flowspec-validator {
             // c. no more-specific rules exist from another neighbor AS.
             found_prefix.more-specifics.[as-path.first].every(fs_rule.origin_as);
         }
-        or {
-            reject;
-        }
     }
 
-    filter flowspec with fs_rule: FlowSpecRule {
-        validate-flowspec and then {
-            rib-flowspec.store(fs_rule);
-        }
+    apply for fs_rule: FsRule {
+        use validate-flowspec;
+        filter match validate-flowspec matching { return accept; };
+        return reject;
     }
 }
 ```
@@ -58,15 +55,15 @@ module tracer {
 
     term add-rs-id for route: Route {
         with rs-id;
-        then {
+        match {
             route.bgp.communities.add(1002: my_rs_id);
         }
     }
 
-    filter add-rs-id {
-        add-rs-id;
+    apply for route: Route {
+        filter match add-rs-id matching add-rs-id;
+        return accept;
     }
-}
 ```
 
 ```
@@ -74,14 +71,14 @@ module tracer {
 // if the peer that sends the route appears in a peer-latency table.
 // See: https://www.euro-ix.net/en/forixps/large-bgp-communities/
 
-rib table global.peer-latencies as peer-latencies with PeerLatency {
-    peer_id: PeerId,
-    latency: u32
-}
-
 virtual rib rib-in-post-policy for route: Route;
 
-module latency-tagger {
+module latency-tagger with peer-latencies {
+    rib table peer-latencies contains PeerLatency {
+        peer_id: PeerId,
+        latency: u32
+    }
+
     define tagger for route: Route {
         use peer-latencies;
         peer-latency = peer-latencies.match(route.peer_id).latency;
@@ -94,27 +91,38 @@ module latency-tagger {
         }
     }
 
-    filter latency-for-peer for route: Route {
-        with tagger;
-        latency-tagger;
+    apply for route: Route {
+        filter match latency-peer matching { latency-tagger; };
+        return accept;
     }
 }
 ```
+
+# The Graph part of the language
+
+This is basically a separate language, it describes the flow from storage unit to
+storage unit and the parts in between, e.g. filter units, broadcast units.
 
 ```
 module rib-in-post-policy {
     define {
         use rib-in;
+        use rib-in-post-policy;
     }
 
-    filter rib-in-post-policy for route: Route {
-        ( 
-            route-security.rpki+irrdb;
-            tracer.add-rs-id;
-            latency-tagger.latency-for-peer;
-        ) and then {
-            export to rib-in-post-policy;
-        }
+    graph rib-in-post-policy for route: Route {
+        // Registering an external dataset makes rotonda listen for changes and
+        // making the right calls to update the relevant entries in the RIBs.
+        register global.rov-rib;
+        register global.rib-customers-table;
+        register global.rib-in;
+        register global.peer-latencies;
+
+        rib-in => 
+            route-security.rpki+irrdb(global.rov-rib, global.irr-customers-table) ->
+            tracer.add-rs-id -> 
+            latency-tagger.latency-for-peer(global.peer-latencies)
+        => rib-in-post-policy;
     }
 }
 ```

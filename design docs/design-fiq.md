@@ -29,7 +29,7 @@ or `or` clause are missing then an `accept` action is returned by default. A
 specify the RIB. It can however specify another (external) data-structure, like
 a table or a prefix-list, to match against by specifying a `with` clause.
 
-The `define` is run once per filter call. This multiple references to the 
+The `define` is run once per filter call. This multiple references to the
 vars in `with` clauses are not re-triggering calculation of the values of the
 variables.
 
@@ -43,26 +43,27 @@ module example {
         last_as_64500 = AsPathFilter { last: 64500 };
     }
 
-    term no-as-64500-until-len-16 for route: Route {
-            with {
-                last-as-64500-vars;
-            }
-            from {
-                prefix-filter 0.0.0.0/0 upto /16;
-                protocol bgp {
-                    route.as-path.matches(last-as-64500);
-                };
-                protocol internal {
-                    route.router-id == 243;
-                };
-            }
-            then {
-                // a side-effect is allowed, but you can't
-                // store anywhere in a term.
-                send-to stdout;
-                reject;
-            }
+    term as64500-until-len-16 for route: Route {
+        with last-as-64500-vars;
+        match {
+            prefix-filter 0.0.0.0/0 upto /16;
+            protocol bgp {
+                route.as-path.matches(last-as-64500);
+            };
+            protocol internal {
+                route.router-id == 243;
+            };
         }
+    }
+
+    apply for route: Route {
+        filter match as64500-until-len-16 {
+            not matching { 
+                send-to stdout; 
+                return reject; 
+            };
+        };
+        return accept;
     }
 }
 ```
@@ -71,12 +72,18 @@ module example {
 // A hard-coded ibgp dropper term for AS64496
 module ibg-dropper {
     term drop-ibgp for route:Route {
-        from {
+        match {
             route.bgp.as-path.matches(AsPathFilter { last: AS64496 });
         }
-        then {
-            reject;
-        }
+    }
+
+    apply for route: Route {
+        filter match drop-ibgp {
+            matching {
+                return reject;
+            };
+        };
+        return accept;
     }
 }
 ```
@@ -84,30 +91,33 @@ module ibg-dropper {
 ```
 // A ibgp-dropper that takes as argument the AS for which we're dropping the
 // iBGPs.
-module ibgp-dropper {
+module ibgp-dropper with our_asn: Asn {
     define our-as for route: Route with our_asn: Asn {
-        our-as = AsPathFilter { last: our_asn };
+        our_as = AsPathFilter { last: our_asn };
     }
 
-    term drop-ibgp for route: Route {
+    term drop-ibgp for route: Route with asn: Asn {
         // `our-asn` is an argument of type `Asn` that should be defined by
         // the filter that includes this term.
-        with {
-            our-asn: Asn;
-        }
-        from {
+        with our-asn(asn);
+        match {
             // drop if our own AS appears anywhere in
             // the as-path.
-            route.bgp.as-path.matches(our_asn);
+            route.bgp.as-path.matches(our_as);
         }
-        then {
-            send-to standard-logger ibgp;
-            reject;
-        }
+    }
+
+    apply for route: Route with asn: Asn {
+        filter match drop-ibgp(asn) {
+            matching {
+                send-to standard-logger ibgp;
+                return reject;
+            };
+        };
+        return accept;
     }
 }
 ```
-
 
 ### Filter
 
@@ -119,91 +129,68 @@ side-effects of the terms are executed up to the point of the last evaluated
 term. This means that **order of the terms does matter**.
 
 Like a term a filter ends in a `reject` or `accept` action. The implicit action
- at the end is `accept`.
+at the end is `accept`.
 
 Filters can be composed also from other filters.
 
 Special data structures for incoming data all live in the global namespace and
 can be referenced by `global`. The data-structures are:
+
 - rib—A hash-map keyed on prefix and that holds routing information as its
   values. Values fall into two groups: `bgp`, these are the BGP attributes, e.g.
   as-path, communities, etc. and `internal`, these are values that are specific
   to a RIB and defined at creation time.
-- table—a hash-map.
+- table—a hash-set.
 - prefix-list—a list of prefixes.
 
 ```
-rib global.rov as rov-rib with Route {
+rib rov-rib contains Route {
     prefix: Prefix,
     max_len: u8,
     asn: Asn,
 }
 
-module rpki {
+module rpki for rov-rib {
     define rov-rib-vars for route: Route {
         use rov-rib;
-        found_prefix = rov-rib.longest_match(route.prefix);
+        found_prefix = longest_match(rov-rib, route.prefix);
     }
 
     term rov-valid for route: Route {
         with rov-rib-vars;
-        // A rule can have multiple with statements,
-        // either named or anonymous.
-        // with {
-        //    max_len = 32;
-        // }
-        from {
-            found_prefix.matches;
+        match {
+            matches(found_prefix.prefix);
             route.prefix.len <= found_prefix.max_len;
             route.prefix.bgp.origin-asn == found_prefix.asn;
-        }
-        then {
-            route.bgp.communities.add(1000:1);
-            accept;
-        }
-        or {
-            reject;
         }
     }
 
     term rov-invalid-length for route: Route {
         with rov-rib-vars;
-        from {
+        match {
             found_prefix.matches;
             route.prefix.len > found_prefix.max_len;
             route.prefix.bgp.origin-asn == found_prefix.asn;
         };
-        then {
-            route.bgp.communities.add(1000:6);
-            accept;
-        }
     }
 
     term rov-invalid-asn for route: Route {
         with rov-rib-vars;
-        from {
+        match {
             found_prefix.matches;
             route.prefix.len >= found_prefix.max_len;
             route.prefix.origin-asn != found_prefix.asn;
         };
-        then {
-            route.bgp.communities.add(1000:5);
-            accept;
-        }
     }
 
     term rov-unknown for route: Route {
-        with rov-rib;
-        from {
+        with rov-rib-vars;
+        match {
             found_prefix.does_not_match;
         };
-        then {
-            route.bgp.communities.add(1000:2);
-            accept;
-        }
     }
 
-    // compose the statements into a `filter`
+    // compose the statements into a `action`
     //
     // `and then` is only run when the
     // compound filter expressions returns `accept`.
@@ -213,123 +200,269 @@ module rpki {
     // Note that this filter will always return `accept`,
     // regardless of the validation. It's just used to
     // set the corresponding communities on the route.
-    filter set-rov-communities for route: Route {
-        (
-            rov-valid or
-            // The terms down here will only be run if the
-            // the first term, rov-valid, will return
-            // `reject`.
-            // 
-            // If they run, they will always be run both.
-            ( rov-invalid-length and
-            rov-invalid-asn )
-        ) and then {
-            accept;
-        };
-        // `accept` is implicit at this point.
+    action set-rov-valid-community for route {
+        route.bgp.communities.add(1000:1);
+        send-to standard-logger rov;
+    }
+    action set-rov-unknown-community for route {
+        route.bgp.communities.add(1000:2);
+    }
+    action set-rov-invalid-length-community for route {
+        route.bgp.communities.add(1000:6);
+    }
+    action set-rov-invalid-asn for route {
+        route.bgp.communities.add(1000:5);
     }
 
-    // This filter will actually drop invalids, since the
-    // only term mentioned returns `reject` when not finding
-    // the correct ROA.
-    filter drop-rpki-invalid for route: Route {
-        rov-valid;
+    apply for route: Route {
+        with best-path;
+
+        filter match rov-valid-community(route) {
+            matching { 
+                set-rov-valid-community;
+                return accept;
+            };
+        };
+        filter match rov-unkown(route) {
+            matching {
+                set-rov-unkown-community;
+                return accept;
+            } 
+        } |>
+        filter match rov-invalid-length { matching set-rov-invalid-length-community } |>
+        filter match rov-invalid-asn { matching set-rov-invalid-asn-community };
+        return accept;
     }
 }
 
-rib global.irr_customers as irr_customers: CustomerPrefixRecord {
+rib irr_customers contains CustomerPrefixRecord {
     prefix: Prefix,
-    origin_asn: [Asn],
-    as_set: [{ prefix: Prefix, asn: Asn }],
+    origin_asn: set of Asn,
+    as_set:  list of { prefix: Prefix, asn: Asn },
     customer_id: u32
 }
 
-module irrdb {
+rib rib-in contains set of Route {
+    pretix: Prefix,
+    bgp_records: set of BgpRecord
+}
+
+virtual shortest-path-rib contains Route {
+    prefix: Prefix,
+    bgp: BgpRecord
+}
+
+module best-path-selection for rib-in {
+    define best-path for route: Route {
+        use rib-in;
+        found_prefix = rib-in.exact_match(route.prefix);
+    }
+
+    term exists for route: Route {
+        with best-path;
+        match {
+            found_prefix.matches;
+        };
+    }
+
+    term local-pref for route: Route {
+        some {
+            // localPrefHighest compares the local prefs, or if not present, substitutes with
+            // 100 and then compares.
+            route.bgp_records.select_for_attribute("local_pref", select.LocalPrefHighest);
+        }
+    }
+
+    term originate for route: Route {
+        some {
+            route.bgp_records.select_for_attribute("next-hop", select.Equal(Prefix(0.0.0.0) || Prefix(0::));
+        }
+    }
+
+    term as-path-length for route: Route {
+        some {
+            route.bgp_records.select_for_attribute("as-path.length", select.Min);
+        }
+    }
+
+    action is-best-path for route: Route {
+        send-to standard-logger best-path;
+    }
+    
+    apply for route: Route {
+        with best-path;
+
+        filter exactly-one exists(found_prefix) matching { is-best-path(route); return accept; };
+        filter some local-pref(route) matching one { is-best-path(route); return accept; } |> 
+        filter some originate matching one { is-best-path(route); return accept; } |>
+        filter exactly-one as-path-length matching { is-best-path(route); return accept; };
+        reject;
+    }
+
+
+    // or as in described in https://datatracker.ietf.org/doc/draft-cppy-grow-bmp-path-marking-tlv/
+    // mark: enum Mark { Invalid, Best, NonSelected, Primary, Backup, NonInstalled, BestExternal, AddPath }
+    // reason: enum Reason { LocalPreference, Origin, AsPathLength, NextHop, Invalid }
+    action invalid for route: Route {
+        route.internal.mark.set(Invalid)
+    }
+
+    action set-best for route: Route {
+        route.internal.mark.set(Best);
+    }
+
+    action set-non-selected for route: Route with reason: Reason {
+        route.internal.mark.set(NonSelected);
+        route.internal.mark_reason.set(reason);
+    }
+
+    action set-primary for route: Route with reason: Reason {
+        route.internal.mark.set(Primary);
+        route.internal.mark_reason.set(reason);
+    }
+
+    action set-backup for route: Route with reason: Reason {
+        route.internal.mark.set(Backup);
+        route.internal.mark_reason.set(reason);
+    }
+
+    action set-non-installed for route: Route with reason: Reason {
+        route.internal.mark.set(NonInstalled);
+        route.internal.mark_reason.set(reason);
+    }
+
+    action set-best-external for route: Route with reason: Reason {
+        route.internal.mark.set(BestExternal);
+        route.internal.mark_reason.set(reason);
+    }
+
+    action set-add-path for route: Route with reason: Reason {
+        route.internal.mark.set(AddPath);
+        route.internal.mark_reason.set(reason);
+    }
+
+    action set-best-and-backup for routes: set of Route {
+        routes.last.internal.mark.set(Backup);
+        routes.first.internal.mark.set(Best);
+    }
+
+    // Some fairly bogus filter, just to illustrate named filters, and how
+    // they can be referred to (in the apply section).
+    filter more_marks for route: Route {
+        matching not originate set-non-installed(route, NonOriginate);
+    }
+
+    apply for route: Route {
+        with best-path;
+
+        filter exactly-one exists(found_prefix) matching { set-best(route); return accept; };
+        filter some local-pref(route.bgp_records) not matching { set-non-selected(LocalPref); filter more_marks; } matching pipe into next;
+        filter some originate not matching set-non-selected(route, Originate) matching pipe into next;
+        filter exactly-one as-path-length {
+            matching { 
+                set-best(route);
+                return accept;
+            } 
+            not matching {               
+                set-best-and-backup; 
+                return accept;
+            };
+        }
+    }
+}
+
+
+rib irr-customers-table contains Route {
+    prefix: Prefix,
+    origin_asn: set of Asn,
+    as_set:  list of { prefix: Prefix, asn: Asn },
+    customer_id: u32
+}
+
+module irrdb for irr-customers-table {
     define irr-customers-table for route: Route {
-        use irr_customers;
-        found_prefix = irr_customers.longest_match(route.prefix);
+        use irr_customers_table;
+        found_prefix = longest_match(route.prefix);
     }
 
     // only checks if the prefix exists, not if it
     // makes sense.
     term irrdb-valid for route: Route {
-        with irr_customers;
-        from {
-            found_prefix.matches;
-        }
-        then {
-            route.bgp.communities.add(1001:1);
-            accept;
-        }
+        found_prefix.matches;
+    }
+
+    action set-irrdb-valid for route: Route {
+        route.bgp.communities.add(1001:1);
     }
 
     term more-specific for route: Route {
         with irr_customers;
-        from {
+        match {
             found_prefix.matches;
             found_prefix.len < route.prefix.len;
         }
-        then {
-            route.bgp.communities.add(1001:3);
-            accept;
-        }
+    }
+
+    action set-more-specific for route: Route {
+        route.bgp.communities.add(1001:3);
     }
 
     term prefix-not-in-as-set for route: Route {
         with irr_customers;
-        from {
+        match {
             found_prefix.matches;
             route.prefix not in found_prefix.as_set.[prefix];
-        };
-        then {
-            route.bgp.communities.add(1001:4);
-            accept;
         }
+    }
+
+    action prefix-not-in-as-set for route: Route {
+        route.bgp.communities.add(1001:4);
+        accept;
     }
 
     term invalid-origin-as for route: Route {
         with irr_customers;
-        from {
+        match {
             found_prefix.matches;
             route.origin-asn not in found_prefix.as_set.[asn];
         };
-        then {
-            route.bgp.communities.add(1001:5);
-            accept;
-        }
     }
+
+    action invalid-origin-as for route: Route {
+        route.bgp.communities.add(1001:5);
+    } 
 
     term invalid-prefix-origin-as for route: Route {
         with irr_customers;
-        from {
+        match {
             found_prefix.matches;
             route.origin-asn !== found_prefix.origin_asn;
-        };
-        then {
-            route.bgp.communities.add(1001:6);
-            accept;
         }
     }
 
-    // Since all the terms mentioned here always return 
-    // `accept`, all of the chain will be run.
-    filter set-irrdb-communities for route: Route {
-        (
-            irrdb-valid and
-            irrdb-more-specific and
-            irrdb-prefix-not-in-as-set and
-            irrdb-invalid-origin-as and
-            irrdb-invalid-prefix-origin-as;
-        ) and then {
-            accept;
-        };
+    action invalid-prefix-origin-as for route: Route {
+        route.bgp.communities.add(1001:6);
+    }
+
+    apply for route: Route {
+        // a route can be mutated in place by a filter, so we don't need to
+        // pipe from filter to filter. If you don't want to pipe though, you
+        // will have to feed in the action argument in each filter, e.g.:
+        // filter match irrdb-more-specific matching { set-irrdb-more-specific-community(route); };
+        // filter match irrdb-prefix-not-in-as-set matching { set-irrdb-prefix-not-in-as-set-community(route); };
+
+        filter match irrdb-valid matching { set-irrdb-valid-community(route); } always |>
+        filter match irrdb-more-specific matching { set-irrdb-more-specific-community; } always |>
+        filter match irrdb-prefix-not-in-as-set matching { set-irrdb-prefix-not-in-as-set-community; } always |>
+        filter match irrdb-invalid-origin-as matching { set-irrdb-invalid-origin-as-community; } always |>
+        filter match irrdb-invalid-prefix-origin-as matching { set-irrdb-invalid-prefix-origin-as-community; };
+        return accept;
     }
 }
 
-module route-security {
-    filter rpki+irrdb for route: Route {
-        filter rpki.set-rov-communities;
-        filter irrdb.set-irrdb-communities;
+module route-security with (rov-rib, irr-customers-table) {
+    filter compound rpki+irrdb for route: Route { 
+        rpki(rov-rib) |> irrdb(irr-customers-table);
     }
 }
 ```
@@ -337,10 +470,9 @@ module route-security {
 ### Imports
 
 ```
-prefix-list global.bogons as bogons;
+prefix-list bogons;
 
-table customer-prefixes
-    from file "/home/user/irr-table.json" with CustomerPrefixRecord {
+table customer-prefixes contains CustomerPrefixRecord {
         prefix: Prefix,
         as_set: [Asn],
         origin_asn: Asn,
@@ -355,13 +487,9 @@ module imports {
 
     term drop-bogons for prefix: Prefix {
         with customer-prefixes;
-        from {
+        match {
             bogons.exact_match(prefix);
         }
-        then {
-            reject;
-        }
-        
     }
 
     import irr-customer from table customer-prefixes for record: CustomerPrefixRecord {
@@ -396,7 +524,7 @@ component this will look like just another RIB.
 
 virtual rib rib-in-post-policy for route: Route;
 
-module rib-in-post-policy {
+module rib-in-post-policy for rib-in-post-policy {
     define {
         use rib-in-post-policy;
     }
@@ -481,7 +609,7 @@ module queries {
             send-to py_dict();
         }
     }
- 
+
     // e.g. `query-my-as-dif for AS3120 with (
     //          "02-03-2022T00:00z",
     //          "02-03-20T23:59z") in rib-in`
@@ -492,7 +620,7 @@ module queries {
     //             .with(Datetime.from("02-03-2022T00:00z"),
     //                   Datetime.from("02-03-20T23:59z"))
     //             .in("rib_in")`
-    query search-my-as-dif for [asn: Asn] 
+    query search-my-as-dif for [asn: Asn] {
         with (start_time: DateTime, end_time: DateTime) {
             with {
                 query_type: state-diff {
@@ -502,5 +630,6 @@ module queries {
             }
             search-my-asns-records for [asn: Asn];
         }
+    }
 }
 ```

@@ -101,20 +101,31 @@ module latency-tagger {
 }
 ```
 
+# The Graph part of the language
+
+This is basically a separate language, it describes the flow from storage unit to
+storage unit and the parts in between, e.g. filter units, broadcast units.
+
 ```
 module rib-in-post-policy {
     define {
         use rib-in;
+        use rib-in-post-policy;
     }
 
-    filter rib-in-post-policy for route: Route {
-        ( 
-            route-security.rpki+irrdb;
-            tracer.add-rs-id;
-            latency-tagger.latency-for-peer;
-        ) and then {
-            export to rib-in-post-policy;
-        }
+    graph rib-in-post-policy for route: Route {
+        // Registering an external dataset makes rotonda listen for changes and
+        // making the right calls to update the relevant entries in the RIBs.
+        register global.rov-rib;
+        register global.rib-customers-table;
+        register global.rib-in;
+        register global.peer-latencies;
+
+        rib-in => 
+            route-security.rpki+irrdb(global.rov-rib, global.irr-customers-table) ->
+            tracer.add-rs-id -> 
+            latency-tagger.latency-for-peer(global.peer-latencies)
+        => rib-in-post-policy;
     }
 }
 ```

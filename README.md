@@ -73,6 +73,19 @@ The single-threaded store is backed by two global `vec`s that host the nodes in 
 
 `Rotoro` is the protocol that connects `Rotonda-runtime`s, inspired by the RTR-protocol. `Rotoro` allows for receiving/sending full state (snapshots) or diffs from runtime to runtime. A `rotoro` channel sends/receives of one single type, but it can be merged with another into a third type with the aid of a channel operator runtime.
 
+`Roto`
+======
+
+| Stage | State | Artifacts |
+|:----:|:----:|:--------:|
+| Proposal | ✅ | this document |
+| Experimental | ✅ | |
+| Development | 💤 |  |
+| Feature complete | 💤 | |
+| Stabilized | 💤 | |
+
+`roto` is the dynamic, interpreted language for data modeling (programmable RIBs), querying and filtering routes, used by Rotonda.
+
 `Rotonda-runtime`
 ==================
 

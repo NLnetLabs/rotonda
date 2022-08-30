@@ -1,0 +1,55 @@
+Root ::= (
+    "module" ModuleIdentifier (ForStatement)?  (WithStatement)*  '{' ModuleBody '}' |
+    "rib" RibIdentifier 'contains' TypeIdentifier '{' RibBody '}' | 
+    "view" RibIdentifier 'contains' TypeIdentifier '{' RibBody '}' | 
+    "prefix-list" PrefixListIdentifier '{' PrefixListbody '}' |
+    "table" TableIdentifier '{' TableBody '}' | 
+    Comment
+)+
+
+ModuleBody ::= (
+    'define' (ForStatement)?  (WithStatement)* '{' DefineBody '}' | 
+    ('term' TermIdentifier '{' TermBody '}')* (ForStatement)?  (WithStatement)* '{' DefineBody '}' | 
+    ('action' ActionIndentifier '{' ActionBody '}')* (ForStatement)?  (WithStatement)* '{' DefineBody '}' | 
+    ('import' '{' ImportBody '}')* (ForStatement)? | 
+    'apply' '{' ApplyBody '}' (ForStatement)?  (WithStatement)* '{' DefineBody '}'
+)+
+
+DefineBody ::= ('use' RibIdentifier ';')? ( VariableIdentifier '=' TypeIdentifier ';')+
+
+TermBody ::= ('with' VariableIdentifier ';')? ('some' | 'match') '{' (MatchExpr ';')+ '}' ';'
+
+ActionBody ::= (ActionExpr ';')+
+
+ApplyBody ::= 
+    ('filter' MatchOperator TermIdentifier('(' VariableIdentifier ')')? 'not'? 'matching' ('exactly-one' | 'multiple')?
+    '{' 
+        ( (ActionExpr ';')+ | ('return' ('accept' | 'reject') ';' )? )
+    '}' ( ( ';' 'return'? ( 'accept' | 'reject' ) ';') | ('always'?'|>')) )+
+
+RibBody ::= VariableIdentifier':' TypeIdentifier ','?
+
+RibIdentifier ::= ([a-z]) ([0-9a-z-])*
+TermIdentifier ::= ([a-z]) ([0-9a-z-])*
+PrefixListIdentifier ::= ([a-z]) ([0-9a-z-])*
+TableIdentifier ::= ([a-z]) ([0-9a-z-])*
+ModuleIdentifier ::= ([a-z]) ([0-9a-z-])*
+VariableIdentifier ::= [a-z] ([0-9a-z_])*
+FieldIdentifier ::= VariableIdentifier('.'(VariableIdentifier|EnumVariantIdentifier))?
+EnumVariantIdentifier ::= [A-Z] ([0-9a-zA-Z])*
+TypeIdentifier ::= [A-Z] ([0-9a-zA-Z])*
+
+WithStatement ::= 'with' VariableIdentifier':' TypeIdentifier
+ForStatement ::= 'for' VariableIdentifier':' TypeIdentifier
+
+Arguments ::= ((VariableIdentifier|StringLiteral|EnumVariantIdentifier)','?)+
+
+MatchExpr ::= VariableIdentifier(('.'VariableIdentifier)+MethodCallIdentifier?)?
+MethodCallIdentifier ::= '.'([a-z] ([0-9a-z_])*)'('Arugments?')'
+
+MethodCall ::= VariableIdentifier(('.'FieldIdentifier)+('.'MethodIdentifier'('Arguments')')?)?
+StringLiteral ::= '"' [^"]* '"' | "'" [^']* "'"
+
+ActionExpr ::= ActionIndentifier('(' VariableIdentifier+ ')')
+
+Comment ::= '//' ( [^\n] )* '\n'

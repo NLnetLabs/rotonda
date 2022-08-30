@@ -93,7 +93,7 @@ module ibg-dropper {
 // iBGPs.
 module ibgp-dropper with our_asn: Asn {
     define our-as for route: Route with our_asn: Asn {
-        our_as = AsPathFilter { last: our_asn };
+        our_as = AsPathFilter.last.equals(our_asn);
     }
 
     term drop-ibgp for route: Route with asn: Asn {
@@ -214,6 +214,25 @@ module rpki for rov-rib {
         route.bgp.communities.add(1000:5);
     }
 
+    // THIS IS ALL BULLSHIT! We don't need any pipe operator for these filters,
+    // since they work on individual routes, not a collection of routes.
+    // They may come in handy, though, for query operations.
+
+    // A prefix may hold multiple routes, depending on the metadata for the prefix.
+    // In that case, we have to have methods on the collection-of-routes-type that can do
+    // slicing and dicing.
+
+    // `matching {} |>` is short-hand for `matched pipe into next;`, i.e. all matching
+    // inputs will be piped to the next filter in line, IF AND ONLY IF the
+    // matched routes were not returned!
+    // So: `matching { return accept; } |>` will NOT pipe any routes to the next filter.
+    //
+    // We have three options:
+    // `matching [{ mutation heres}] |>` pipe matching into next
+    // `not matching [{ mutation here }] |>` pipe not-matching into next without any mutation
+    // `[matching [{ mutation here }]] [not matching [{}]] all |>` pipe all into next without any mutation
+    //
+    // `matching |>` is a shorthand for `matching {} |>`
     apply for route: Route {
         with best-path;
 
@@ -221,14 +240,14 @@ module rpki for rov-rib {
             matching { 
                 set-rov-valid-community;
                 return accept;
-            };
-        };
+            }
+        } |>
         filter match rov-unkown(route) {
             matching {
                 set-rov-unkown-community;
                 return accept;
             } 
-        } |>
+        } not matching |>
         filter match rov-invalid-length { matching set-rov-invalid-length-community } |>
         filter match rov-invalid-asn { matching set-rov-invalid-asn-community };
         return accept;
@@ -242,19 +261,19 @@ rib irr_customers contains CustomerPrefixRecord {
     customer_id: u32
 }
 
-rib rib-in contains set of Route {
+rib rib-in-mp contains set of Route {
     pretix: Prefix,
     bgp_records: set of BgpRecord
 }
 
-virtual shortest-path-rib contains Route {
+virtual rib shortest-path-rib contains Route {
     prefix: Prefix,
     bgp: BgpRecord
 }
 
 module best-path-selection for rib-in {
     define best-path for route: Route {
-        use rib-in;
+        use rib-in-mp;
         found_prefix = rib-in.exact_match(route.prefix);
     }
 
@@ -286,15 +305,15 @@ module best-path-selection for rib-in {
     }
 
     action is-best-path for route: Route {
-        send-to standard-logger best-path;
+        send-to(standard-logger, best-path);
     }
     
     apply for route: Route {
         with best-path;
 
         filter exactly-one exists(found_prefix) matching { is-best-path(route); return accept; };
-        filter some local-pref(route) matching one { is-best-path(route); return accept; } |> 
-        filter some originate matching one { is-best-path(route); return accept; } |>
+        filter exactly-one local-pref(route).highest matching { is-best-path(route); return accept; };
+        filter exactly-one originate matching { is-best-path(route); return accept; };
         filter exactly-one as-path-length matching { is-best-path(route); return accept; };
         reject;
     }
@@ -304,7 +323,7 @@ module best-path-selection for rib-in {
     // mark: enum Mark { Invalid, Best, NonSelected, Primary, Backup, NonInstalled, BestExternal, AddPath }
     // reason: enum Reason { LocalPreference, Origin, AsPathLength, NextHop, Invalid }
     action invalid for route: Route {
-        route.internal.mark.set(Invalid)
+        route.internal.mark.set(Invalid);
     }
 
     action set-best for route: Route {
@@ -349,7 +368,7 @@ module best-path-selection for rib-in {
     // Some fairly bogus filter, just to illustrate named filters, and how
     // they can be referred to (in the apply section).
     filter more_marks for route: Route {
-        matching not originate set-non-installed(route, NonOriginate);
+        not matching originate set-non-installed(route, NonOriginate);
     }
 
     apply for route: Route {
@@ -357,7 +376,7 @@ module best-path-selection for rib-in {
 
         filter exactly-one exists(found_prefix) matching { set-best(route); return accept; };
         filter some local-pref(route.bgp_records) not matching { set-non-selected(LocalPref); filter more_marks; } matching pipe into next;
-        filter some originate not matching set-non-selected(route, Originate) matching pipe into next;
+        filter some originate not matching { set-non-selected(route, Originate) } matching |>
         filter exactly-one as-path-length {
             matching { 
                 set-best(route);
@@ -381,7 +400,7 @@ rib irr-customers-table contains Route {
 
 module irrdb for irr-customers-table {
     define irr-customers-table for route: Route {
-        use irr_customers_table;
+        use irr-customers-table;
         found_prefix = longest_match(route.prefix);
     }
 
@@ -451,6 +470,9 @@ module irrdb for irr-customers-table {
         // filter match irrdb-more-specific matching { set-irrdb-more-specific-community(route); };
         // filter match irrdb-prefix-not-in-as-set matching { set-irrdb-prefix-not-in-as-set-community(route); };
 
+        // `always |>` describes an item that we've send to the input of this filter will be piped into
+        // the next filter.
+
         filter match irrdb-valid matching { set-irrdb-valid-community(route); } always |>
         filter match irrdb-more-specific matching { set-irrdb-more-specific-community; } always |>
         filter match irrdb-prefix-not-in-as-set matching { set-irrdb-prefix-not-in-as-set-community; } always |>
@@ -500,7 +522,7 @@ module imports {
     }
 
     // `rotoro-stream` is not defined here, but would be a stream
-    // of parsed bgp messages.
+    // of parsed bgp messages. 
     import peer-stream from rotoro-stream for route: Route {
         ibgp-dropper.drop-ibgp for route with AS211321;
         and then {
@@ -589,11 +611,11 @@ module queries {
     }
 
     define my-asn-24-hours {
-        asn = AS64500;
-        query_type = created-records {
-            time_span: last_24_hours()
+        my-asn-24-hours-query = Query {
+            asn: AS64500,
+            query_type: created-records { time_span: last_24_hours() },
+            format: json
         };
-        format: json;
     }
 
     query search-my-asn for asn: Asn {

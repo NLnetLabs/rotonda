@@ -1,4 +1,4 @@
-# Rotolo filter-impex-query language - The requirements
+# `Rotolo` `filter-impex-query` language - The requirements
 
 ## Hard Requirements
 
@@ -40,7 +40,7 @@ module example {
     // A fairly simple example of a term with a defined variable, but without
     // using any global data-sources.
     define last-as-64500-vars {
-        last_as_64500 = AsPathFilter { last: 64500 };
+        last_as_64500 = AsPathFilter.last(64500);
     }
 
     term as64500-until-len-16 for route: Route {
@@ -200,17 +200,17 @@ module rpki for rov-rib {
     // Note that this filter will always return `accept`,
     // regardless of the validation. It's just used to
     // set the corresponding communities on the route.
-    action set-rov-valid-community for route {
+    action set-rov-valid-community for route: Route {
         route.bgp.communities.add(1000:1);
         send-to standard-logger rov;
     }
-    action set-rov-unknown-community for route {
+    action set-rov-unknown-community for route: Route {
         route.bgp.communities.add(1000:2);
     }
-    action set-rov-invalid-length-community for route {
+    action set-rov-invalid-length-community for route: Route {
         route.bgp.communities.add(1000:6);
     }
-    action set-rov-invalid-asn for route {
+    action set-rov-invalid-asn for route: Route {
         route.bgp.communities.add(1000:5);
     }
 
@@ -305,7 +305,7 @@ module best-path-selection for rib-in {
     }
 
     action is-best-path for route: Route {
-        send-to(standard-logger, best-path);
+        send_to(standard-logger, best-path);
     }
     
     apply for route: Route {
@@ -367,7 +367,7 @@ module best-path-selection for rib-in {
 
     // Some fairly bogus filter, just to illustrate named filters, and how
     // they can be referred to (in the apply section).
-    filter more_marks for route: Route {
+    filter more-marks for route: Route {
         not matching originate set-non-installed(route, NonOriginate);
     }
 

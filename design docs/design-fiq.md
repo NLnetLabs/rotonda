@@ -46,7 +46,7 @@ module example {
     term as64500-until-len-16 for route: Route {
         with last-as-64500-vars;
         match {
-            prefix-filter 0.0.0.0/0 upto /16;
+            route.prefix in (0.0.0.0/0 upto /16);
             protocol bgp {
                 route.as-path.matches(last-as-64500);
             };

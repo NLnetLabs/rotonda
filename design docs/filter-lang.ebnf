@@ -7,7 +7,7 @@ RootExpr ::= Module |
     "table" Identifier '{' TableBody '}' | 
     Comment
 
-Module ::= "module" Identifier ForStatement WithStatement '{' ModuleBody '}'
+Module ::= "module" Identifier 'for' Identifier WithStatement '{' ModuleBody '}'
 ModuleBody ::= Define ModuleExpr+ Apply
 
 ModuleExpr ::= Define |
@@ -38,28 +38,38 @@ ApplyScope ::=
 Rib ::= "rib" Identifier 'contains' TypeIdentifier '{' RibBody '}'
 RibBody ::= ( Identifier ':' TypeIdentifier ','? )+
 
-ForStatement ::= ( 'for' Identifier':' TypeIdentifier )?
+ForStatement ::= ( 'for' Identifier ':' TypeIdentifier )?
 WithStatement ::= ( 'with' ( Identifier ':' TypeIdentifier )+ )*
 
 FieldExpr ::= Identifier ( '.' Identifier )+
-ArgExprList ::= ( ArgExpr ','? )+
+ArgExprList ::= ( ArgExpr ','? )*
 CallReceiver ::= Identifier | FieldExpr
 CallExpr ::= CallReceiver '(' ArgExprList ')' ';'
 
-ArgExpr ::= Identifier | 
-  TypeIdentifier | 
-  StringLiteral | 
-  Bool | 
-  CallExpr | 
-  FieldExpr
-
-Bool ::= 'true' | 'false'
+ArgExpr ::= Identifier | TypeIdentifier | StringLiteral | Bool | CallExpr | FieldExpr | PrefixMatchExpr
 
 MatchOperator ::= 'exactly-one' | 'some' | 'all'
-AcceptReject ::= 'return'? ( 'accept' | 'reject' )
-StringLiteral ::= '"' Identifier '"'
 
-Identifier ::= ([a-z]) ([0-9a-z-_])*
+MatchExpr ::= ArgExpr | GroupedExpr | CompareExpr | AndExpr | OrExpr | SetCompareExpr
+CompareExpr ::= ArgExpr ( '==' | '!=' | '<' | '<=' | '>' | '>=' ) ArgExpr
+
+PrefixMatchExpr ::= Prefix PrefixMatchType
+
+PrefixMatchType ::= ( 'exact' | 'longer' | 'orlonger' | 
+    'prefix-length-range' | 'upto' | 'through' | 'netmask' ) 
+    ( PrefixLength | PrefixLengthRange | IpAddress )
+
+IpAddress ::= IpV4Address | IpV6Address
+Prefix ::= IpAddress PrefixLength
+PrefixLength ::= '/' [0-9]+
+PrefixLengthRange ::= PrefixLength '-' PrefixLength
+
+AcceptReject ::= 'return'? ( 'accept' | 'reject' )
+
+Identifier ::= ([a-z]) ([0-9a-z_-])*
 TypeIdentifier ::= [A-Z] ([0-9a-zA-Z])*
 
 Comment ::= '//' ( [^\n] )* '\n'
+
+StringLiteral ::= '"' Identifier '"'
+Bool ::= 'true' | 'false'

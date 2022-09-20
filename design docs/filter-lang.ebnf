@@ -36,7 +36,10 @@ ApplyScope ::=
      '{' ( ArgExpr ';' ( AcceptReject ';' )? )+ '}' ';'
 
 Rib ::= "rib" Identifier 'contains' TypeIdentifier '{' RibBody '}'
-RibBody ::= ( Identifier ':' ( TypeIdentifier | ( '{' RibBody '}' ) ) ','? )+
+
+RibBody ::= ( Identifier ':' ( TypeIdentifier | '{' RecordTypeIdentifier '}' | '[' TypeIdentifier ']' ) ','?)+
+
+RecordTypeIdentifier ::= '{' ( Identifier ':' TypeIdentifier | '{' RecordTypeIdentifier '}' ','? )+ '}'
 
 ForStatement ::= ( 'for' Identifier ':' TypeIdentifier )?
 WithStatement ::= ( 'with' ( Identifier ':' TypeIdentifier )+ )*

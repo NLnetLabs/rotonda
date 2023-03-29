@@ -39,12 +39,11 @@ variables.
 module example {
     // A fairly simple example of a term with a defined variable, but without
     // using any global data-sources.
-    define last-as-64500-vars {
-        last_as_64500 = AsPathFilter.last(64500);
+    define {
+        last_as_64500 = AsPathFilter.last_equals(AS64500); // type AsPathFilter
     }
 
     term as64500-until-len-16 for route: Route {
-        with last-as-64500-vars;
         match {
             route.prefix in (0.0.0.0/0 upto /16);
             protocol bgp {
@@ -71,9 +70,9 @@ module example {
 ```
 // A hard-coded ibgp dropper term for AS64496
 module ibg-dropper {
-    term drop-ibgp for route:Route {
+    term drop-ibgp for route: Route {
         match {
-            route.bgp.as-path.matches(AsPathFilter { last: AS64496 });
+            route.bgp.as-path.matches(AsPathFilter.last_equal(AS64496));
         }
     }
 
@@ -91,15 +90,14 @@ module ibg-dropper {
 ```
 // A ibgp-dropper that takes as argument the AS for which we're dropping the
 // iBGPs.
-module ibgp-dropper with our_asn: Asn {
-    define our-as for route: Route with our_asn: Asn {
+module ibgp-dropper for route: Route with our_asn: Asn {
+    define for route: Route {
         our_as = AsPathFilter.last.equals(our_asn);
     }
 
-    term drop-ibgp for route: Route with asn: Asn {
+    term drop-ibgp for route: Route {
         // `our-asn` is an argument of type `Asn` that should be defined by
         // the filter that includes this term.
-        with our-asn(asn);
         match {
             // drop if our own AS appears anywhere in
             // the as-path.
@@ -107,7 +105,7 @@ module ibgp-dropper with our_asn: Asn {
         }
     }
 
-    apply for route: Route with asn: Asn {
+    apply for route: Route {
         filter match drop-ibgp(asn) {
             matching {
                 send-to standard-logger ibgp;
@@ -150,14 +148,13 @@ rib rov-rib contains Route {
     asn: Asn,
 }
 
-module rpki for rov-rib {
-    define rov-rib-vars for route: Route {
-        use rov-rib;
+module rpki for route: Route {
+    define {
+        // use rov-rib;
         found_prefix = longest_match(rov-rib, route.prefix);
     }
 
     term rov-valid for route: Route {
-        with rov-rib-vars;
         match {
             matches(found_prefix.prefix);
             route.prefix.len <= found_prefix.max_len;
@@ -166,7 +163,6 @@ module rpki for rov-rib {
     }
 
     term rov-invalid-length for route: Route {
-        with rov-rib-vars;
         match {
             found_prefix.matches;
             route.prefix.len > found_prefix.max_len;
@@ -175,7 +171,6 @@ module rpki for rov-rib {
     }
 
     term rov-invalid-asn for route: Route {
-        with rov-rib-vars;
         match {
             found_prefix.matches;
             route.prefix.len >= found_prefix.max_len;
@@ -184,7 +179,6 @@ module rpki for rov-rib {
     }
 
     term rov-unknown for route: Route {
-        with rov-rib-vars;
         match {
             found_prefix.does_not_match;
         };
@@ -263,7 +257,7 @@ rib irr_customers contains CustomerPrefixRecord {
 
 rib rib-in-mp contains set of Route {
     pretix: Prefix,
-    bgp_records: set of BgpRecord
+    bgp_records: [BgpRecord]
 }
 
 virtual rib shortest-path-rib contains Route {
@@ -272,13 +266,12 @@ virtual rib shortest-path-rib contains Route {
 }
 
 module best-path-selection for rib-in {
-    define best-path for route: Route {
+    define for route: Route {
         use rib-in-mp;
         found_prefix = rib-in.exact_match(route.prefix);
     }
 
     term exists for route: Route {
-        with best-path;
         match {
             found_prefix.matches;
         };
@@ -399,9 +392,9 @@ rib irr-customers-table contains Route {
 }
 
 module irrdb for irr-customers-table {
-    define irr-customers-table for route: Route {
+    define for route: Route {
         use irr-customers-table;
-        found_prefix = longest_match(route.prefix);
+        found_prefix = irr-customres-table.longest_match(route.prefix);
     }
 
     // only checks if the prefix exists, not if it
@@ -502,7 +495,7 @@ table customer-prefixes contains CustomerPrefixRecord {
 }
 
 module imports {
-    define customer-prefixes {
+    define {
         use global.customer-prefixes as customer-prefixes;
         use global.irr-customers as irr-customers;
     }
@@ -610,7 +603,7 @@ module queries {
         }
     }
 
-    define my-asn-24-hours {
+    define {
         my-asn-24-hours-query = Query {
             asn: AS64500,
             query_type: created-records { time_span: last_24_hours() },
@@ -619,7 +612,6 @@ module queries {
     }
 
     query search-my-asn for asn: Asn {
-        with my-asn-24-hours;
         search-asn;
     }
 

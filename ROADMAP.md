@@ -104,7 +104,7 @@ MVP
 - ✅ REST API setup
 - ✅ MQTT OutputConnector
 - 🦀 integrate BGP passive listener (BGP EventSource)
-- 🦀 integrate BGP limited speaker (BGP OutputConnector)
+- 🦀 integrate BGP limited speaker (BGP EventEmitter)
 - 🦀 installation and usage documentation 
 - 🦀 limited packaging
 - 🦀 file OutputConnector
@@ -116,6 +116,7 @@ NEXT RELEASES
 - 💤 create experimental global registry
 - 💤 Kafka connector
 - 💤 split-off EventSource, OutputConnector units
+- 💤 split-off EventEmitter, OutputConnector units
 - 💤 time-series DB OutputConnector
 - 💤 keep history window (serials)
 - 💤 snapshot/restore functionality

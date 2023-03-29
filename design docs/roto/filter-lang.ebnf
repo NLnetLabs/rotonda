@@ -4,7 +4,7 @@ RootExpr ::= Module |
     Rib | 
     "view" Identifier 'contains' TypeIdentifier '{' RibBody '}' | 
     "prefix-list" Identifier '{' PrefixListbody '}' |
-    "table" Identifier '{' TableBody '}' | 
+    "table" Identifier '{' TableBody '}' |
     Comment
 
 Module ::= "module" Identifier 'for' Identifier WithStatement '{' ModuleBody '}'
@@ -16,24 +16,24 @@ ModuleExpr ::= Define |
    'import' ForStatement '{' ImportBody '}'
 
 Define ::= 'define' ForStatement  WithStatement '{' DefineBody '}'
-DefineBody ::= ( ( 'use' Identifier ';' )? ( Identifier '=' CallExpr ';' )+ )+
+DefineBody ::= ( ( 'use' Identifier ';' )? ( Identifier '=' ComputeExpr ';' )+ )+
 
 Term ::= 'term' Identifier '{' TermBody '}' ForStatement WithStatement '{' DefineBody '}'
 TermBody ::= (
       ('use' Identifier ';')?
-      ( MatchOperator '{' (CallExpr ';')+ '}' )+
+      ( MatchOperator '{' (ComputeExpr ';')+ '}' )+
 )+
 
 Action ::= 'action' Identifier '{' ActionBody '}' ForStatement WithStatement '{' ActionBody '}'
-ActionBody ::= ( CallExpr ';' )+
+ActionBody ::= ( ComputeExpr ';' )+
 
 Apply ::= 'apply' ForStatement WithStatement '{' ApplyBody '}'
 ApplyBody ::= ApplyScope+ ( AcceptReject ';' )?
 ApplyScope ::= 
      ( 'use' Identifier ';' )?
-     'filter' MatchOperator ArgExpr
+     'filter' MatchOperator ValueExpr
      'not'? 'matching'
-     '{' ( ArgExpr ';' ( AcceptReject ';' )? )+ '}' ';'
+     '{' ( ValueExpr ';' ( AcceptReject ';' )? )+ '}' ';'
 
 Rib ::= "rib" Identifier 'contains' TypeIdentifier '{' RibBody '}'
 
@@ -45,16 +45,16 @@ ForStatement ::= ( 'for' Identifier ':' TypeIdentifier )?
 WithStatement ::= ( 'with' ( Identifier ':' TypeIdentifier )+ )*
 
 FieldExpr ::= Identifier ( '.' Identifier )+
-ArgExprList ::= ( ArgExpr ','? )*
+ArgExprList ::= ( ValueExpr ','? )*
 CallReceiver ::= Identifier | FieldExpr
-CallExpr ::= CallReceiver '(' ArgExprList ')' ';'
+ComputeExpr ::= CallReceiver '(' ValueExprList ')' ';'
 
-ArgExpr ::= Identifier | TypeIdentifier | StringLiteral | Bool | CallExpr | FieldExpr | PrefixMatchExpr
+ValueExpr ::= Identifier | TypeIdentifier | StringLiteral | Bool | ComputeExpr | FieldExpr | PrefixMatchExpr
 
 MatchOperator ::= 'exactly-one' | 'some' | 'all'
 
-MatchExpr ::= ArgExpr | GroupedExpr | CompareExpr | AndExpr | OrExpr | SetCompareExpr
-CompareExpr ::= ArgExpr ( '==' | '!=' | '<' | '<=' | '>' | '>=' ) ArgExpr
+MatchExpr ::= ValueExpr | GroupedExpr | CompareExpr | AndExpr | OrExpr | SetCompareExpr
+CompareExpr ::= ValueExpr ( '==' | '!=' | '<' | '<=' | '>' | '>=' ) ValueExpr
 
 PrefixMatchExpr ::= Prefix PrefixMatchType
 

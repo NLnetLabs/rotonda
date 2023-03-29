@@ -14,6 +14,11 @@ communicating through the rotoro ("Rotonda to Rotonda") protocol.
          :alt: Mastodon
          :target: https://fosstodon.org/@nlnetlabs
 
+.. image:: img/rotonda-components.png
+   :width: 100%
+   :align: center
+   :alt: Rotonda components
+
 .. toctree::
    :maxdepth: 2
    :hidden:

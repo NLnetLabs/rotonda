@@ -120,3 +120,28 @@ the repository you can use the ``--git`` and ``--branch`` options:
 .. Seealso:: For more installation options refer to the `Cargo book
              <https://doc.rust-lang.org/cargo/commands/cargo-install.html#install-options>`_.
 
+Platform Specific Instructions
+------------------------------
+
+For some platforms, :program:`rustup` cannot provide binary releases to
+install directly. The `Rust Platform Support`_ page lists
+several platforms where official binary releases are not available, but Rust
+is still guaranteed to build. For these platforms, automated tests are not
+run so it’s not guaranteed to produce a working build, but they often work to
+quite a good degree.
+
+.. _Rust Platform Support:  https://doc.rust-lang.org/nightly/rustc/platform-support.html
+
+OpenBSD
+"""""""
+
+On OpenBSD, `patches
+<https://github.com/openbsd/ports/tree/master/lang/rust/patches>`_ are
+required to get Rust running correctly, but these are well maintained and
+offer the latest version of Rust quite quickly.
+
+Rust can be installed on OpenBSD by running:
+
+.. code-block:: bash
+
+   pkg_add rust

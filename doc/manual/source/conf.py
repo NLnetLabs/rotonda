@@ -19,11 +19,6 @@
 import toml
 import datetime
 import sphinx_rtd_theme
-try:
-    import versionwarning
-    versionbanner = True
-except ModuleNotFoundError:
-    versionbanner = False
 
 # -- Project information -----------------------------------------------------
 
@@ -38,14 +33,6 @@ semver = toml.load('../../../Cargo.toml')
 version = semver.get('package').get('version')
 # The full version, including alpha/beta/rc tags
 release = version
-
-# -- Version Warning Banner configuration ------------------------------------
-if versionbanner:
-    versionwarning_messages = {
-        'latest': 'You are reading the <code class="docutils literal notranslate"><span class="pre">latest</span></code> (unstable) version of this documentation, which may describe features which are not available in the <a href="/en/stable/">stable version</a>.',
-    }
-    versionwarning_banner_title = 'Note'
-    versionwarning_body_selector = 'div[itemprop="articleBody"]'
 
 # -- Sphinx Tabs configuration -----------------------------------------------
 
@@ -71,8 +58,6 @@ extensions = [
     'sphinx.ext.autosectionlabel',
     'notfound.extension'
 ]
-if versionbanner:
-    extensions.append('versionwarning.extension')
 
 autosectionlabel_prefix_document = True
 

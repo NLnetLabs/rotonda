@@ -14,6 +14,7 @@ In order of priority:
 MVP
 
 - ✅ BMP listener
+- ✅ BMP proxy
 - ✅ single-threaded RIB implementation
 - ✅ lock-free, multi-threaded RIB implementation
 - ✅ client-specific runtime application with BMP ingress and RIBs
@@ -103,6 +104,7 @@ MVP
 - ✅ setup BMP listener
 - ✅ REST API setup
 - ✅ MQTT OutputConnector
+- ✅ BMP proxy
 - 🦀 integrate BGP passive listener (BGP EventSource)
 - 🦀 integrate BGP limited speaker (BGP EventEmitter)
 - 🦀 installation and usage documentation 

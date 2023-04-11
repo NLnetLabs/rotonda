@@ -1,19 +1,19 @@
 Root ::= RootExpr+
 
-RootExpr ::= Module | 
-    Rib | 
-    "view" Identifier 'contains' TypeIdentifier '{' RibBody '}' | 
-    "prefix-list" Identifier '{' PrefixListbody '}' |
-    "table" Identifier '{' TableBody '}' |
-    Comment
+RootExpr ::= Module |
+     "rib" Identifier 'contains' TypeIdentifier '{' RibBody '}' |
+     "module" Identifier 'contains' TypeIdentifier '{' Module '}' |
+     "table" Identifier '{' TableBody '}' |
+     RecordTypeAssignment |
+     Comment
 
-Module ::= "module" Identifier 'for' Identifier WithStatement '{' ModuleBody '}'
+Module ::= "module" ForStatement WithStatement '{' ModuleBody '}'
 ModuleBody ::= Define ModuleExpr+ Apply
 
 ModuleExpr ::= Define |
    Term+ | 
    Action+ |
-   'import' ForStatement '{' ImportBody '}'
+   /* 'import' ForStatement '{' ImportBody '}' */
 
 Define ::= 'define' ForStatement  WithStatement '{' DefineBody '}'
 DefineBody ::= ( ( 'use' Identifier ';' )? ( Identifier '=' ComputeExpr ';' )+ )+
@@ -39,7 +39,8 @@ Rib ::= "rib" Identifier 'contains' TypeIdentifier '{' RibBody '}'
 
 RibBody ::= ( Identifier ':' ( TypeIdentifier | '{' RecordTypeIdentifier '}' | '[' TypeIdentifier ']' ) ','?)+
 
-RecordTypeIdentifier ::= '{' ( Identifier ':' TypeIdentifier | '{' RecordTypeIdentifier '}' ','? )+ '}'
+RecordTypeIdentifier ::= ( Identifier ':' TypeIdentifier | '{' RecordTypeIdentifier '}' ','? )+
+RecordTypeAssignment ::= "type" Identifier '{' RecordTypeIdentifier '}'
 
 ForStatement ::= ( 'for' Identifier ':' TypeIdentifier )?
 WithStatement ::= ( 'with' ( Identifier ':' TypeIdentifier )+ )*
@@ -51,7 +52,7 @@ ComputeExpr ::= CallReceiver '(' ValueExprList ')' ';'
 
 ValueExpr ::= Identifier | TypeIdentifier | StringLiteral | Bool | ComputeExpr | FieldExpr | PrefixMatchExpr
 
-MatchOperator ::= 'exactly-one' | 'some' | 'all'
+MatchOperator ::= 'exactly-one' | 'some' | 'all' | 'matching'
 
 MatchExpr ::= ValueExpr | GroupedExpr | CompareExpr | AndExpr | OrExpr | SetCompareExpr
 CompareExpr ::= ValueExpr ( '==' | '!=' | '<' | '<=' | '>' | '>=' ) ValueExpr
@@ -71,8 +72,6 @@ AcceptReject ::= 'return'? ( 'accept' | 'reject' )
 
 Identifier ::= ([a-z]) ([0-9a-z_-])*
 TypeIdentifier ::= [A-Z] ([0-9a-zA-Z])*
-
-Comment ::= '//' ( [^\n] )* '\n'
 
 StringLiteral ::= '"' Identifier '"'
 Bool ::= 'true' | 'false'

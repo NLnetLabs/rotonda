@@ -148,5 +148,6 @@ NEXT RELEASES
 - 🦀 stabilize API
 - 🦀 benchmarks matrix IPv4/IPv6 `local_array`/`local_vec`
 - 🦀 unit tests & acceptance tests matrix
+- 💤 optimizations: implement QSBR (replace Ref Counting on update)
 - 💤 optimizations: better hashing, cache padding, etc.
 - 💤 fuzzer IPv4/IPv6

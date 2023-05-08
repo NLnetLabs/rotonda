@@ -72,8 +72,8 @@ NEXT RELEASES
 MVP
 
 - ✅ BMP state machine
-- 🦀 BGP state machine
-- 🦀 BGP passive speaker (session management)
+- ✅ BGP state machine
+- ✅ BGP passive speaker (session management)
 - 🦀 BGP minimal active speaker
 
 NEXT RELEASES
@@ -132,9 +132,9 @@ NEXT RELEASES
 
 NEXT RELEASES
 
-- 💤 design wire protocol or select a layout (AVRO?CBOR?)
+- 🦀 design wire protocol and select a layout (AVRO?CBOR?)
 - 💤 create experimental de/serialization
-- 💤 experimental integration in Rotonda-runtime
+- 💤 experimental integration in `rotonda-runtime`
 
 
 ## `Rotonda-store`

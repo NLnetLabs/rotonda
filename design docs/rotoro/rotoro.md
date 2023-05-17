@@ -24,7 +24,7 @@ Ideally, our `rotoro` protocol will be a superset of RTR and we can re-use the `
 - Configuration data
 - Housekeeping (control/state) messages
 
-## Possible formats and transports
+## Possible transports
 
 Even if we are to partly re-purpose RTR, we will have to decide on a (or more?) transports.
 
@@ -54,3 +54,21 @@ MQTT is a well-defined, routable pub/sub messaging protocol. There's good suppor
 The same discussion as for web-sockets applies here. Additionally, I think, it's overkill for `Rotonda` to use MQTT internally.
 
 **ximon18:** Is not the key difference between MQTT and the other proposals above the higher level pub/sub and queueing properties which neither Web-Sockets nor raw TCP streams offer (without re-inventing them ourselves that is), and the deciding factor is thus whether or not these properties are needed or are at least desirable? To turn this on its head, shouldn't the choice of protocol be based on the match to some set of requirements that would need to be defined first?
+
+## Possible data formats
+
+### Roll our own binary format
+
+Yeah, no.
+
+### CBOR
+
+CBOR is an IETF-defined standard (RFC8949), it tries to be a kind of binary JSON. It doesn't have the concept of a schema.
+
+### AVRO (data format)
+
+AVRO is serialization protocol from the Apache Software Foundation project. It features a schema, that can be send over the wire or that can be fetched out-of-band. It came out of the Hadoop (big-data storage project). Well supported by Rust.
+
+### Arrow
+
+Arrow is a columnar based structured serialization protocol.

@@ -98,6 +98,43 @@ module latency-tagger with peer-latencies {
 }
 ```
 
+
+```
+module my-message-module with my_asn: Asn {
+    define {
+        // specify the types of that this filter receives
+        // and sends.
+        // rx_tx route: StreamRoute;
+        rx route: Route;
+        tx out: Route;
+    }
+
+    term rov-valid for route: Route {
+        match {
+            route.as-path.origin() == my_asn;
+        }
+    }
+    
+    action send-message {
+        mqtt.send({ 
+            message: String.format("🤭 I encountered {}", my_asn),  
+            my_asn: my_asn
+        });
+    }
+
+    apply {
+        filter match rov-valid not matching {  
+            send-message;
+        };
+    }
+}
+
+output-stream mqtt contains Message {
+        message: String,
+        asn: Asn
+}
+```
+
 # The Graph part of the language
 
 This is basically a separate language, it describes the flow from storage unit to

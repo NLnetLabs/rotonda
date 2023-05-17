@@ -32,7 +32,7 @@ Each item may constitute a new release
 - 🦀 egress connectors (e.g. Kafka, MQTT)
 - 💤 create plugin system.
 - 💤 `mrt` file connector from RIBs.
-- 💤 egress connector for time-series database.
+- 💤 egress connector to parquet.
 - 🦀 query engine REST API
 - 💤 query engine CLI
 - 🦀 historical records storage + snapshotting ("3 weeks of data")
@@ -54,6 +54,7 @@ MVP
 - ✅ create experimental virtual machine
 - 🦀 implement all methods on `roto` types
 - 🦀 Integrate into `rotonda-runtime`
+- 🦀 Simple passive data sources use cases
 - 💤 create user-friendly error messaging
 - 🦀 extensive stress testing
 - 💤 create high-level overview documentation
@@ -132,7 +133,7 @@ NEXT RELEASES
 
 NEXT RELEASES
 
-- 🦀 design wire protocol and select a layout (AVRO?CBOR?)
+- 🦀 design wire protocol and select a layout (AVRO?)
 - 💤 create experimental de/serialization
 - 💤 experimental integration in `rotonda-runtime`
 

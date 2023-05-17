@@ -25,7 +25,9 @@ TermBody ::= (
 )+
 
 Action ::= 'action' Identifier '{' ActionBody '}' ForStatement WithStatement '{' ActionBody '}'
-ActionBody ::= ( ComputeExpr ';' )+
+ActionBody ::= ( ActionExpr ';' )+
+ActionExpr ::= ComputeExpr | GlobalMethod
+GlobalMethod ::= MethodComputeExpr
 
 Apply ::= 'apply' ForStatement WithStatement '{' ApplyBody '}'
 ApplyBody ::= ApplyScope+ ( AcceptReject ';' )?
@@ -36,8 +38,10 @@ ApplyScope ::=
      '{' ( ValueExpr ';' ( AcceptReject ';' )? )+ '}' ';'
 
 Rib ::= "rib" Identifier 'contains' TypeIdentifier '{' RibBody '}'
+Table ::= "table" Identifier 'contains' TypeIdentifier '{' TableBody '}'
 
 RibBody ::= ( Identifier ':' ( TypeIdentifier | '{' RecordTypeIdentifier '}' | '[' TypeIdentifier ']' ) ','?)+
+TableBody ::= ( Identifier ':' ( TypeIdentifier | '{' RecordTypeIdentifier '}' | '[' TypeIdentifier ']' ) ','?)+
 
 RecordTypeIdentifier ::= ( Identifier ':' TypeIdentifier | '{' RecordTypeIdentifier '}' ','? )+
 RecordTypeAssignment ::= "type" Identifier '{' RecordTypeIdentifier '}'
@@ -49,8 +53,10 @@ FieldExpr ::= Identifier ( '.' Identifier )+
 ArgExprList ::= ( ValueExpr ','? )*
 CallReceiver ::= Identifier | FieldExpr
 ComputeExpr ::= CallReceiver '(' ValueExprList ')' ';'
+RecordValueExpr ::= ( Identifier ':' ValueExpr ','?)+
 
-ValueExpr ::= Identifier | TypeIdentifier | StringLiteral | Bool | ComputeExpr | FieldExpr | PrefixMatchExpr
+
+ValueExpr ::= Identifier | TypeIdentifier | StringLiteral | Bool | ComputeExpr | FieldExpr | PrefixMatchExpr | RecordValueExpr
 
 MatchOperator ::= 'exactly-one' | 'some' | 'all' | 'matching'
 
@@ -74,4 +80,10 @@ Identifier ::= ([a-z]) ([0-9a-z_-])*
 TypeIdentifier ::= [A-Z] ([0-9a-zA-Z])*
 
 StringLiteral ::= '"' Identifier '"'
-Bool ::= 'true' | 'false'
+BooleanLiteral ::= 'true' | 'false'
+IntegerLiteral ::= (0-9)+
+PrefixLengthLiteral ::= '/' (0-9)+
+HexLiteral ::= '0x' (0-9A-Fa-f)+
+AsnLiteral ::= 'AS' (0-9)+
+FloatLiteral ::= (0-9)+'.'(0-9)+
+ByteStringLiteral ::= '0x'((0-9A-Z)'_'?)+

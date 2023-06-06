@@ -63,11 +63,15 @@ unit bmp-1: BmpConnector with config {
 unit bgp-1: BgpConnector with config {
     // WestEastSplit | WestOnly | EastOnly
     topology: WestEastSplit,
-    listen: 192.168.178.49:178,
-    west_filter: unicast-v4-v6-filter,
-    east_filter: FILTER.none,
+    listen: 192.168.178.49:179,
+    west_pure_filter: unicast-v4-v6-filter,
+    // A Rotonda user should be able to specify a per-bgp-session filter, or the filter should have the capability to differentiate between
+    // session capabilities.
+    east_filter_map: FILTER.none,
 };
 ```
+
+Another `Connector` type could be `PcapConnector`, a Connector that knows how to parse a `pcap` that contains either BGP or BMP, and has some heuristic process to figure out what's in the `pcap` and outputs that as a `Roto TypeValue` in the pipeline.
 
 ## Filter Block
 
@@ -77,8 +81,8 @@ A `Filter` is a part of a `Unit`. There is the `PureFilter` type that only can m
 
 ### inputs
 
-- `rx: RawBgpMessage`
-- `tx|rx_tx: RawBgpMessage`
+- `rx: RawBgpMessage | BmpMessage` (read-only)
+- `tx|rx_tx: RawBgpMessage | BmpMessage` (read-only)
 - `(datasources)`
 
 ### Outputs
@@ -112,12 +116,13 @@ A `Filter` is a part of a `Unit`. There is the `PureFilter` type that only can m
 - `action`
 - `apply`
 
-
 ## DataSource Block
 
-A data source is a block that describes an external read-only data source to be used in a `Filter` block. Note that a Rotonda `Rib` is also considered an external data source, since a `Filter` block doesn't know in which unit it is going to be used.
+A data source is a block that describes an external read-only data source to be used in a `Filter` block. Note that a Rotonda `PhysicalRib` is also considered an external data source, since a `Filter` block doesn't know in which unit it is going to be used.
 
-### DataSource: Rib
+### DataSource: PhysicalRib
+
+Only a physical Rib can be consulted as a external data source, a virtual Rib can't and will not work.
 
 ```
 data-source ds-rib-loc: Rib with config {
@@ -141,9 +146,9 @@ data-source customers-list: Table with config {
 
 ## OutputStream Block
 
-An output stream is a side-channel that `Filter` block can use to send data to.
+An output stream is a side-channel that a `Filter` block can use to send data to.
 
-### OutputStream: Mqtt
+### OutputStream: `Mqtt`
 
 ```
 output-stream mqtt: Mqtt with config {
@@ -165,9 +170,9 @@ output-stream logging: Log with config {
     file: "./rotonda.log"
 };
 ```
-### OutputStream: Kafka
-### OutputStream: File
-### OutputStream: Log
+### OutputStream: `Kafka`
+### OutputStream: `File`
+### OutputStream: `Log`
 
 # Instance Types
 
@@ -175,13 +180,14 @@ An `Instance` block is the over-arching block that defines the `Rotonda` applica
 
 ```
 instance rotonda-1: Daemon with config {
-    graph = [
+    pipelines = [
         Connector(bgp-1) -> Rib(rib-in) -> Rib(rib-loc) -> Rib(rib-out) -> Connector(bgp-1),
         Rib(rib-loc) -> Rib(rib-mon)
     ];
 };
 ```
 
+Beyond the MVP we want to create a CLI that allows a `Rotonda` user to build a pipeline from separate elements in an iterative process in a REPL or CLI.
 
 # Merge Strategies
 

@@ -18,15 +18,15 @@ A `Unit` has an API that can be used by the Rotonda user to query the contents o
 
 A `RIB` is a unit that has a typed input, that receives a stream of data for that input, a `filter-map`, that can take that typed input, create a flow-decision (accept/reject) based on the received data and one or more external data source, transform the typed input into another typed piece of data and store it in a prefix store. Furthermore it can create a stream of typed output data.
 
-(stream -> A) -> (filter-map(A) -> type B) -> store -> type B
+(stream -> type A) -> (filter-map(type A) -> type B) -> store -> type B
 
 ```
 // The `config` variable is an anonymous record, whose type will be converted
 // by Roto to `PhysicalRibConfig`. 
 unit rib-loc: PhysicalRib with config {
     merge_strategy: {
-        hash: (prefix, peer_id, as_path),
-        overwrite: SINGLE_ENTRY
+        hash: (Route::prefix, Route::peer_id, Route::as_path),
+        overwrite: MOST_RECENT
         // other options: 
         // MOVING_WINDOW_COUNT(5)
         // MOVING_WINDOW_TIME_WEEKS(1)
@@ -52,7 +52,7 @@ unit rib-mon: VirtualRib with config {
 
 ### Unit: Connector
 
-A `Connector` is a `unit` that can transform a stream from an external data source into another stream of data that a `Rib` unit can understand on the west side of a Rotonda application. Some connector types can also transform data on the east side of the Rotonda application and transform it back into a stream that the external data source can understand.
+A `Connector` is a `unit` that can transform a stream from an external data source into another stream of data that a `Rib` unit can understand on the west side of a `Rotonda` application. Some connector types can also transform data on the east side of the `Rotonda` application and transform it back into a stream that the external data source can understand.
 
 ```
 unit bmp-1: BmpConnector with config {

@@ -53,14 +53,14 @@ FieldExpr ::= Identifier ( '.' Identifier )+
 ArgExprList ::= ( ValueExpr ','? )*
 CallReceiver ::= Identifier | FieldExpr
 ComputeExpr ::= CallReceiver '(' ValueExprList ')' ';'
-RecordValueExpr ::= ( Identifier ':' ValueExpr ','?)+
+AnonymousRecordValueExpr ::= '{' ( Identifier ':' ValueExpr ','?)+ '}'
+TypedRecordValueExpr ::= TypeIdentifier '{' ( Identifier ':' ValueExpr ','?)+ '}'
 
-
-ValueExpr ::= Identifier | TypeIdentifier | StringLiteral | Bool | ComputeExpr | FieldExpr | PrefixMatchExpr | RecordValueExpr
+ValueExpr ::= Identifier | TypeIdentifier | StringLiteral | Bool | ComputeExpr | FieldExpr | PrefixMatchExpr | AnonymousRecordValueExpr | TypedRecordValueExpr
 
 MatchOperator ::= 'exactly-one' | 'some' | 'all' | 'matching'
 
-MatchExpr ::= ValueExpr | GroupedExpr | CompareExpr | AndExpr | OrExpr | SetCompareExpr
+MatchExpr ::= ValueExpr | GroupedExpr | CompareExpr | AndExpr | OrExpr | ListCompareExpr
 CompareExpr ::= ValueExpr ( '==' | '!=' | '<' | '<=' | '>' | '>=' ) ValueExpr
 
 PrefixMatchExpr ::= Prefix PrefixMatchType

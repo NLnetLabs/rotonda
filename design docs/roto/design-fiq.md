@@ -15,7 +15,7 @@
 
 ## Daft Attempts
 
-### Filters-maps and filters.
+### FilterMap and PureFilter.
 
 A filter-map consists of `term` statements and a `filter` statement.
 
@@ -647,3 +647,4 @@ module queries {
     }
 }
 ```
+

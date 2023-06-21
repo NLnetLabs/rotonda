@@ -11,7 +11,7 @@ use routecore::{
     bmp::message::{Message as BmpMsg, PerPeerHeader, TerminationMessage},
 };
 
-use crate::units::router_rib::state_machine::machine::PeerStates;
+use crate::units::bmp_in::state_machine::machine::PeerStates;
 
 use super::initiating::Initiating;
 
@@ -383,7 +383,7 @@ mod tests {
             Prefixes,
         },
         payload::{Payload, Update},
-        units::router_rib::state_machine::{processing::MessageType, states::updating::Updating},
+        units::bmp_in::state_machine::{processing::MessageType, states::updating::Updating},
     };
 
     use super::*;

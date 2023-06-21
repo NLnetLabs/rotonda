@@ -11,7 +11,7 @@ use routecore::{
     bmp::message::{Message as BmpMsg, PerPeerHeader, TerminationMessage},
 };
 
-use crate::units::router_rib::state_machine::machine::PeerStates;
+use crate::units::bmp_in::state_machine::machine::PeerStates;
 
 use super::super::{
     machine::{BmpState, BmpStateDetails, Initiable, PeerAware},

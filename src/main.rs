@@ -170,7 +170,7 @@ mod tests {
         log_target = "stderr"
         log_level = "trace"
 
-        [units.bmp-in]
+        [units.bmp-tcp-in]
         type = "bmp-tcp-in"
         listen = "127.0.0.1:11019"
 
@@ -183,11 +183,11 @@ mod tests {
 
         [units.filter]
         type = "bmp-pre-filter"
-        sources = ["bmp-in"]
+        sources = ["bmp-tcp-in"]
         asn_to_ignore = 1299
 
         [units.routers]
-        type = "router-rib"
+        type = "bmp-in"
         sources = ["filter"]
 
         [units.global-rib]

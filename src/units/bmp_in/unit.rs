@@ -1,10 +1,10 @@
 use std::{cell::RefCell, net::SocketAddr, sync::Arc, path::PathBuf, time::Instant, fs::read_to_string, ops::ControlFlow};
 
 use super::state_machine::{machine::BmpStateDetails, states::dumping::Dumping};
-use crate::{units::{router_rib::{
-    metrics::RouterRibMetrics,
+use crate::{units::{bmp_in::{
+    metrics::BmpInMetrics,
     state_machine::{machine::BmpState, processing::MessageType},
-    status_reporter::RouterRibStatusReporter,
+    status_reporter::BmpInStatusReporter,
 }}, common::roto::is_filtered_in_vm};
 use crate::{
     common::{
@@ -44,30 +44,30 @@ use super::state_machine::metrics::BmpMetrics;
 use super::util::format_router_id;
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct RouterRib {
+pub struct BmpIn {
     /// The set of units to receive updates from.
     sources: NonEmpty<DirectLink>,
 
     /// The relative path at which we should listen for HTTP query API requests
     #[cfg(feature = "router-list")]
-    #[serde(default = "RouterRib::default_http_api_path")]
+    #[serde(default = "BmpIn::default_http_api_path")]
     http_api_path: Arc<String>,
 
-    #[serde(default = "RouterRib::default_router_id_template")]
+    #[serde(default = "BmpIn::default_router_id_template")]
     pub router_id_template: Arc<String>,
 
     /// Path to roto script to use
     roto_path: Option<PathBuf>,
 }
 
-impl RouterRib {
+impl BmpIn {
     pub async fn run(
         self,
         component: Component,
         gate: Gate,
         waitpoint: WaitPoint,
     ) -> Result<(), Terminated> {
-        RouterRibRunner::new(
+        BmpInRunner::new(
             component,
             gate,
             self.router_id_template,
@@ -89,7 +89,7 @@ impl RouterRib {
     }
 }
 
-struct RouterRibRunner {
+struct BmpInRunner {
     gate: Arc<Gate>,
     #[cfg(feature = "router-list")]
     component: Arc<RwLock<Component>>,
@@ -98,7 +98,7 @@ struct RouterRibRunner {
     #[cfg(feature = "router-list")]
     router_info: Arc<FrimMap<SocketAddr, Arc<RouterInfo>>>,
     router_metrics: Arc<BmpMetrics>,
-    status_reporter: Arc<RouterRibStatusReporter>,
+    status_reporter: Arc<BmpInStatusReporter>,
     #[cfg(feature = "router-list")]
     http_api_path: Arc<String>,
     #[cfg(feature = "router-list")]
@@ -106,7 +106,7 @@ struct RouterRibRunner {
     roto_source: Arc<ArcSwap<(std::time::Instant, String)>>,
 }
 
-impl RouterRibRunner {
+impl BmpInRunner {
     thread_local!(
         #[allow(clippy::type_complexity)]
         static VM: ThreadLocalVM = RefCell::new(None);
@@ -122,11 +122,11 @@ impl RouterRibRunner {
         let unit_name = component.name().clone();
 
         // Setup our metrics
-        let router_metrics = Arc::new(RouterRibMetrics::new(&gate));
+        let router_metrics = Arc::new(BmpInMetrics::new(&gate));
         component.register_metrics(router_metrics.clone());
 
         // Setup our status reporting
-        let status_reporter = Arc::new(RouterRibStatusReporter::new(
+        let status_reporter = Arc::new(BmpInStatusReporter::new(
             &unit_name,
             router_metrics.clone(),
         ));
@@ -210,7 +210,7 @@ impl RouterRibRunner {
                     arc_self.status_reporter.gate_status_announced(&status);
                     match status {
                         GateStatus::Reconfiguring {
-                            new_config: Unit::RouterRib(RouterRib {
+                            new_config: Unit::BmpIn(BmpIn {
                                 sources: new_sources,
                                 roto_path: new_roto_path,
                                 .. /*http_api_path, router_id_template, filters*/ }),
@@ -559,18 +559,18 @@ impl RouterRibRunner {
     }
 }
 
-impl AnyDirectUpdate for RouterRibRunner {}
+impl AnyDirectUpdate for BmpInRunner {}
 
 #[async_trait]
-impl DirectUpdate for RouterRibRunner {
+impl DirectUpdate for BmpInRunner {
     async fn direct_update(&self, update: Update) {
         self.process_update(update).await;
     }
 }
 
-impl std::fmt::Debug for RouterRibRunner {
+impl std::fmt::Debug for BmpInRunner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RouterRibRunner").finish()
+        f.debug_struct("BmpInRunner").finish()
     }
 }
 
@@ -657,7 +657,7 @@ mod tests {
         let raw_bgp_message = mk_filter_input(bgp_update_bytes.clone());
         
         // When the Roto VM executes the filter script with our BGP UPDATE message as input
-        let res = RouterRibRunner::is_filtered(raw_bgp_message, Some(roto_source));
+        let res = BmpInRunner::is_filtered(raw_bgp_message, Some(roto_source));
 
         // Then the same BGP UPDATE message should be returned as output
         // (because the BGP UPDATE message that we created should be acceptable to the filter script)
@@ -667,7 +667,7 @@ mod tests {
 
     // --- Test helpers ------------------------------------------------------
 
-    fn mk_config_from_toml(toml: &str) -> Result<RouterRib, toml::de::Error> {
-        toml::de::from_slice::<RouterRib>(toml.as_bytes())
+    fn mk_config_from_toml(toml: &str) -> Result<BmpIn, toml::de::Error> {
+        toml::de::from_slice::<BmpIn>(toml.as_bytes())
     }
 }

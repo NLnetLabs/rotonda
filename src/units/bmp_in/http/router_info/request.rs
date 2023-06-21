@@ -9,7 +9,7 @@ use hyper::{Method, Request};
 
 use crate::{
     http::PercentDecodedPath,
-    units::router_rib::{metrics::RouterRibMetrics, state_machine::metrics::BmpMetrics},
+    units::bmp_in::{metrics::BmpInMetrics, state_machine::metrics::BmpMetrics},
 };
 
 pub struct RouterInfoApi;
@@ -23,7 +23,7 @@ impl RouterInfoApi {
         sys_name: String,
         sys_desc: String,
         sys_extra: Vec<String>,
-        conn_metrics: Arc<RouterRibMetrics>,
+        conn_metrics: Arc<BmpInMetrics>,
         bmp_metrics: Arc<BmpMetrics>,
         connected_at: DateTime<Utc>,
         last_message_at: Arc<RwLock<DateTime<Utc>>>,

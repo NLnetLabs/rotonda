@@ -796,7 +796,7 @@ mod tests {
 
     use crate::{
         metrics::{OutputFormat, Source},
-        units::router_rib::state_machine::metrics::BmpMetrics,
+        units::bmp_in::state_machine::metrics::BmpMetrics,
     };
 
     use super::*;

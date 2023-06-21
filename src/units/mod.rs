@@ -22,8 +22,7 @@ mod rib_unit;
 mod bmp_filter;
 mod bmp_tcp_in;
 mod roto_filter;
-// mod rotoro;
-mod router_rib;
+mod bmp_in;
 pub use rib_unit::{RibValue, unit::{RibType, RibUnit}};
 
 //------------ Unit ----------------------------------------------------------
@@ -47,8 +46,8 @@ pub enum Unit {
 
     // #[serde(rename = "rotoro-in")]
     // Rotoro(rotoro::unit::RotoroIn),
-    #[serde(rename = "router-rib")]
-    RouterRib(router_rib::unit::RouterRib),
+    #[serde(rename = "bmp-in")]
+    BmpIn(bmp_in::unit::BmpIn),
 
     #[serde(rename = "rib-unit")]
     RibUnit(rib_unit::unit::RibUnit),
@@ -60,7 +59,7 @@ impl Unit {
             Unit::BmpTcpIn(unit) => unit.run(component, gate, waitpoint).await,
             Unit::BmpFilter(unit) => unit.run(component, gate, waitpoint).await,
             Unit::RotoFilter(unit) => unit.run(component, gate, waitpoint).await,
-            Unit::RouterRib(unit) => unit.run(component, gate, waitpoint).await,
+            Unit::BmpIn(unit) => unit.run(component, gate, waitpoint).await,
             Unit::RibUnit(unit) => unit.run(component, gate, waitpoint).await,
             // Unit::Rotoro(unit) => unit.run(component, gate).await,
         };

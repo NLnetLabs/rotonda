@@ -60,7 +60,7 @@ pub enum RawBmpPayload {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Payload {
-    // Still needed by bmp-tcp-in -> router-rib. Should be replaced by TypeValue when it supports raw BMP messages?
+    // Still needed by bmp-tcp-in -> bmp-in. Should be replaced by TypeValue when it supports raw BMP messages?
     // Also still accepted as input by mqtt-out...
     RawBmp {
         received: DateTime<Utc>,

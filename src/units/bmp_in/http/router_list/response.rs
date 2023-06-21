@@ -8,8 +8,8 @@ use indoc::formatdoc;
 
 use crate::{
     common::frim::FrimMap,
-    units::router_rib::{
-        metrics::RouterRibMetrics,
+    units::bmp_in::{
+        metrics::BmpInMetrics,
         state_machine::metrics::BmpMetrics,
         types::RouterInfo,
         util::{calc_u8_pc, format_router_id},
@@ -26,7 +26,7 @@ impl RouterListApi {
         router_info: Arc<FrimMap<SocketAddr, Arc<RouterInfo>>>,
         router_id_template: Arc<String>,
         bmp_metrics: Arc<BmpMetrics>,
-        router_metrics: Arc<RouterRibMetrics>,
+        router_metrics: Arc<BmpInMetrics>,
         http_api_path: std::borrow::Cow<str>,
     ) -> Response<Body> {
         let mut response_body = Self::build_response_header(router_info.clone());
@@ -94,7 +94,7 @@ impl RouterListApi {
         router_info: Arc<FrimMap<SocketAddr, Arc<RouterInfo>>>,
         router_id_template: Arc<String>,
         bmp_metrics: Arc<BmpMetrics>,
-        router_metrics: Arc<RouterRibMetrics>,
+        router_metrics: Arc<BmpInMetrics>,
         http_api_path: std::borrow::Cow<str>,
         response_body: &mut String,
     ) {

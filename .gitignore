@@ -1,6 +1,6 @@
 .DS_Store
 .vscode
-
 Cargo.lock
 /target
 /doc/manual/build
+.devcontainer/

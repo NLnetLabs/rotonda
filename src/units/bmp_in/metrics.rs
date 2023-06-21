@@ -11,7 +11,7 @@ use crate::{
 };
 
 #[derive(Debug, Default)]
-pub struct RouterRibMetrics {
+pub struct BmpInMetrics {
     gate: Option<Arc<GateMetrics>>, // optional to make testing easier
     routers: Arc<FrimMap<Arc<RouterId>, Arc<RouterMetrics>>>,
 }
@@ -22,22 +22,22 @@ pub struct RouterMetrics {
     pub num_invalid_bmp_messages: AtomicUsize,
 }
 
-impl RouterRibMetrics {
+impl BmpInMetrics {
     const CONNECTION_COUNT_METRIC: Metric = Metric::new(
-        "router_rib_connection_count",
+        "bmp_in_connection_count",
         "the number times the BMP initiation message has been seen per router",
         MetricType::Gauge,
         MetricUnit::Total,
     );
     const NUM_INVALID_BMP_MESSAGES_METRIC: Metric = Metric::new(
-        "router_rib_num_invalid_bmp_messages",
+        "bmp_in_num_invalid_bmp_messages",
         "the number of received BMP messages that were invalid (e.g. not RFC compliant, could not be parsed, etc)",
         MetricType::Counter,
         MetricUnit::Total,
     );
 }
 
-impl RouterRibMetrics {
+impl BmpInMetrics {
     pub fn new(gate: &Gate) -> Self {
         Self {
             gate: Some(gate.metrics()),
@@ -61,7 +61,7 @@ impl RouterRibMetrics {
     }
 }
 
-impl metrics::Source for RouterRibMetrics {
+impl metrics::Source for BmpInMetrics {
     fn append(&self, unit_name: &str, target: &mut metrics::Target) {
         if let Some(gate) = &self.gate {
             gate.append(unit_name, target);

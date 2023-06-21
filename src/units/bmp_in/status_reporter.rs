@@ -10,16 +10,16 @@ use crate::{
     payload::RouterId,
 };
 
-use super::metrics::{RouterMetrics, RouterRibMetrics};
+use super::metrics::{RouterMetrics, BmpInMetrics};
 
 #[derive(Debug, Default)]
-pub struct RouterRibStatusReporter {
+pub struct BmpInStatusReporter {
     name: String,
-    metrics: Arc<RouterRibMetrics>,
+    metrics: Arc<BmpInMetrics>,
 }
 
-impl RouterRibStatusReporter {
-    pub fn new<T: Display>(name: T, metrics: Arc<RouterRibMetrics>) -> Self {
+impl BmpInStatusReporter {
+    pub fn new<T: Display>(name: T, metrics: Arc<BmpInMetrics>) -> Self {
         Self {
             name: format!("{}", name),
             metrics,
@@ -27,7 +27,7 @@ impl RouterRibStatusReporter {
     }
 
     #[cfg(feature = "router-list")]
-    pub fn metrics(&self) -> Arc<RouterRibMetrics> {
+    pub fn metrics(&self) -> Arc<BmpInMetrics> {
         self.metrics.clone()
     }
 
@@ -52,17 +52,17 @@ impl RouterRibStatusReporter {
     }
 }
 
-impl UnitStatusReporter for RouterRibStatusReporter {}
+impl UnitStatusReporter for BmpInStatusReporter {}
 
-impl AnyStatusReporter for RouterRibStatusReporter {}
+impl AnyStatusReporter for BmpInStatusReporter {}
 
-impl Chainable for RouterRibStatusReporter {
+impl Chainable for BmpInStatusReporter {
     fn add_child<T: Display>(&self, child_name: T) -> Self {
         Self::new(self.link_names(child_name), self.metrics.clone())
     }
 }
 
-impl Named for RouterRibStatusReporter {
+impl Named for BmpInStatusReporter {
     fn name(&self) -> &str {
         &self.name
     }

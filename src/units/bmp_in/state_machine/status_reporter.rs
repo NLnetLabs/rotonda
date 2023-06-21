@@ -27,7 +27,7 @@ impl BmpStatusReporter {
         }
     }
 
-    // This is done by the owner of the metrics, RouterRibRunner, directly via
+    // This is done by the owner of the metrics, BmpInRunner, directly via
     // the BmpMetrics interface, so it isn't needed here. However, someone has
     // to make sure they call it so leaving this here as a reminder of why it
     // ISN'T done here.

@@ -9,8 +9,8 @@ use hyper::{Method, Request, Response};
 use crate::{
     common::frim::FrimMap,
     http::{extract_params, get_param, MatchedParam, PercentDecodedPath},
-    units::router_rib::{
-        metrics::RouterRibMetrics,
+    units::bmp_in::{
+        metrics::BmpInMetrics,
         state_machine::metrics::BmpMetrics,
         types::RouterInfo,
         util::{calc_u8_pc, format_router_id},
@@ -23,7 +23,7 @@ impl RouterListApi {
     pub fn mk_http_processor(
         http_api_path: Arc<String>,
         router_info: Arc<FrimMap<SocketAddr, Arc<RouterInfo>>>,
-        router_metrics: Arc<RouterRibMetrics>,
+        router_metrics: Arc<BmpInMetrics>,
         bmp_metrics: Arc<BmpMetrics>,
         router_id_template: Arc<String>,
     ) -> Arc<dyn crate::http::ProcessRequest> {
@@ -77,7 +77,7 @@ impl RouterListApi {
         router_info: Arc<FrimMap<SocketAddr, Arc<RouterInfo>>>,
         router_id_template: Arc<String>,
         bmp_metrics: Arc<BmpMetrics>,
-        router_metrics: Arc<RouterRibMetrics>,
+        router_metrics: Arc<BmpInMetrics>,
     ) -> Result<Vec<SocketAddr>, String> {
         let sort_by = sort_by.as_ref().map(MatchedParam::value);
         let mut keys: Vec<SocketAddr> = match sort_by {

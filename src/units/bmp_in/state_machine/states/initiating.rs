@@ -131,7 +131,7 @@ mod tests {
         bgp::encode::{
             mk_initiation_msg, mk_invalid_initiation_message_that_lacks_information_tlvs,
         },
-        units::router_rib::state_machine::states::dumping::Dumping,
+        units::bmp_in::state_machine::states::dumping::Dumping,
     };
 
     use super::*;

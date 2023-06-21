@@ -81,8 +81,8 @@ A `Filter` is a part of a `Unit`. There is the `PureFilter` type that only can m
 
 ### inputs
 
-- `rx: RawBgpMessage | BmpMessage` (read-only)
-- `tx|rx_tx: RawBgpMessage | BmpMessage` (read-only)
+- `rx: BgpUpdateMessage | BmpMessage` (read-only)
+- `tx|rx_tx: BgpUpdateMessage | BmpMessage` (read-only)
 - `(datasources)`
 
 ### Outputs

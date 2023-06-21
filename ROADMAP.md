@@ -20,7 +20,7 @@ MVP
 - ✅ client-specific runtime application with BMP ingress and RIBs
 - 🦀 `roto` filtering language
 - 🦀 BGP passive speaker
-- 🦀 BGP limited active speaker
+- 🦀 ~~BGP limited active speaker~~ POSTPONED
 - 🦀 Documentation
 - 💤 Packaging
 
@@ -88,8 +88,8 @@ MVP
 - ✅ prefix types
 - ✅ route record example types
 - ✅ BGP/BMP types for parsing
-- 🦀 create minimal BGP packet builder: Withdrawal for one prefix
-- 🦀 create minimal BGP packet modifier: Add Community
+- 🦀 ~~create minimal BGP packet builder: Withdrawal for one prefix~~
+- 🦀 ~~create minimal BGP packet modifier: Add Community~~
 
 NEXT RELEASES
 

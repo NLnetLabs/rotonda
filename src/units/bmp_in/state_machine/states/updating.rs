@@ -1,7 +1,7 @@
 use std::ops::ControlFlow;
 
 use bytes::Bytes;
-use roto::types::builtin::{RawBgpMessage, RouteStatus};
+use roto::types::builtin::{BgpUpdateMessage, RouteStatus};
 use routecore::{
     addr::Prefix,
     bgp::{
@@ -66,7 +66,7 @@ impl BmpStateDetails<Updating> {
         filter: F,
     ) -> ProcessingResult
     where
-        F: Fn(RawBgpMessage, Option<D>) -> Result<ControlFlow<(), RawBgpMessage>, String>
+        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>
     {
         match BmpMsg::from_octets(msg_buf).unwrap() {
             // already verified upstream

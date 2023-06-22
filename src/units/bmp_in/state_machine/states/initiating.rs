@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, sync::Arc, ops::ControlFlow};
 
 use bytes::Bytes;
-use roto::types::builtin::RawBgpMessage;
+use roto::types::builtin::BgpUpdateMessage;
 use routecore::bmp::message::Message as BmpMsg;
 
 use crate::payload::RouterId;
@@ -68,7 +68,7 @@ impl BmpStateDetails<Initiating> {
         _filter: F,
     ) -> ProcessingResult
     where
-        F: Fn(RawBgpMessage, Option<D>) -> Result<ControlFlow<(), RawBgpMessage>, String>
+        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>
     {
         match BmpMsg::from_octets(&msg_buf).unwrap() {
             // already verified upstream

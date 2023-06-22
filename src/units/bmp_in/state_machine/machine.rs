@@ -1,7 +1,7 @@
 use atomic_enum::atomic_enum;
 use bytes::{Bytes, BytesMut};
 use futures::FutureExt;
-use roto::types::builtin::{RawBgpMessage, RawRouteWithDeltas, RotondaId, RouteStatus};
+use roto::types::builtin::{RawRouteWithDeltas, RotondaId, RouteStatus, BgpUpdateMessage};
 
 /// RFC 7854 BMP processing.
 ///
@@ -495,7 +495,7 @@ where
             &PerPeerHeader<Bytes>,
             &UpdateMessage<Bytes>,
         ) -> ControlFlow<ProcessingResult, Self>,
-        F: Fn(RawBgpMessage, Option<D>) -> Result<ControlFlow<(), RawBgpMessage>, String>
+        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>
     {
         let mut tried_peer_configs = SmallVec::<[SessionConfig; 4]>::new();
 
@@ -542,9 +542,9 @@ where
 
                     let update_msg = roto::types::builtin::UpdateMessage(update); // clone is cheap here
                     let delta_id = (RotondaId(0), 0); // TODO
-                    let roto_bgp_msg = RawBgpMessage::new(delta_id, update_msg);
+                    let roto_bgp_msg = BgpUpdateMessage::new(delta_id, update_msg);
                     let update = match filter_map(roto_bgp_msg, filter_data) {
-                        Ok(ControlFlow::Continue(new_or_modified_msg)) => new_or_modified_msg.raw_message.0,
+                        Ok(ControlFlow::Continue(new_or_modified_msg)) => new_or_modified_msg.raw_message().0.clone(),
                         _ => return saved_self.mk_other_result(),
                     };
 
@@ -688,7 +688,7 @@ impl BmpState {
     ) -> ProcessingResult
     where
         D: UnwindSafe,
-        F: Fn(RawBgpMessage, Option<D>) -> Result<ControlFlow<(), RawBgpMessage>, String> + UnwindSafe,
+        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String> + UnwindSafe,
     {
         let saved_addr = self.addr();
         let saved_router_id = self.router_id().clone();

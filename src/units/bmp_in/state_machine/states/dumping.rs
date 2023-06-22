@@ -1,7 +1,7 @@
 use std::{fmt::Debug, ops::ControlFlow};
 
 use bytes::Bytes;
-use roto::types::builtin::{RawBgpMessage, RouteStatus};
+use roto::types::builtin::{BgpUpdateMessage, RouteStatus};
 use routecore::{
     addr::Prefix,
     bgp::{
@@ -182,7 +182,7 @@ impl BmpStateDetails<Dumping> {
         filter: F,
     ) -> ProcessingResult
     where
-        F: Fn(RawBgpMessage, Option<D>) -> Result<ControlFlow<(), RawBgpMessage>, String>
+        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>
     {
         match BmpMsg::from_octets(msg_buf).unwrap() {
             // already verified upstream
@@ -631,7 +631,7 @@ mod tests {
                     let materialized_route = MaterializedRoute::from(route);
                     let expected_prefix = Prefix::from_str("127.0.0.1/32").unwrap();
                     let expected_roto_prefix = roto::types::builtin::Prefix::new(expected_prefix);
-                    assert_eq!(materialized_route.prefix, expected_roto_prefix);
+                    assert_eq!(materialized_route.route.prefix.as_ref(), Some(&TypeValue::from(expected_roto_prefix)));
                     assert_eq!(materialized_route.status, RouteStatus::Withdrawn);
                 } else {
                     panic!("Expected TypeValue::Builtin(BuiltinTypeValue::Route(_)");
@@ -846,7 +846,7 @@ mod tests {
         let termination_msg_buf = mk_termination_msg();
 
         let ctr = Arc::new(AtomicU8::new(0));
-        let count_cb = |msg: RawBgpMessage, ctr: Option<Arc<AtomicU8>>| {
+        let count_cb = |msg: BgpUpdateMessage, ctr: Option<Arc<AtomicU8>>| {
             ctr.unwrap().fetch_add(1, Ordering::SeqCst);
             Ok(ControlFlow::Continue(msg))
         };

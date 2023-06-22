@@ -1998,7 +1998,7 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0"
-source = "git+https://github.com/NLnetLabs/roto.git?branch=rotonda-blocks-wip#46f52a235808803695606b3c40719ddf4c754201"
+source = "git+https://github.com/NLnetLabs/roto.git?branch=rotonda-blocks-wip#cdc73af979ffb42c6bbb1af91956c6fc4a03f3f5"
 dependencies = [
  "arc-swap",
  "bytes",

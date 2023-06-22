@@ -1,10 +1,11 @@
 use std::{ops::Deref, str::FromStr, sync::Arc};
 
-use arc_swap::ArcSwap;
+use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
 use hyper::{Body, Method, Request, Response};
 use log::trace;
-use rotonda_store::{epoch, prelude::Prefix, MatchOptions, MultiThreadedStore, QueryResult};
+use roto::types::datasources::Rib;
+use rotonda_store::{epoch, prelude::Prefix, MatchOptions, QueryResult};
 use routecore::{asn::Asn, bgp::communities::Community};
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -30,7 +31,7 @@ use crate::{
 use super::types::{Details, Filter, FilterMode, Filters, Includes, SortKey};
 
 pub struct PrefixesApi {
-    store: Arc<Option<MultiThreadedStore<RibValue>>>,
+    rib: Arc<ArcSwapOption<Rib<RibValue>>>,
     http_api_path: Arc<String>,
     query_limits: Arc<ArcSwap<QueryLimits>>,
     rib_type: RibType,
@@ -41,7 +42,7 @@ pub struct PrefixesApi {
 
 impl PrefixesApi {
     pub fn new(
-        store: Arc<Option<MultiThreadedStore<RibValue>>>,
+        rib: Arc<ArcSwapOption<Rib<RibValue>>>,
         http_api_path: Arc<String>,
         query_limits: Arc<ArcSwap<QueryLimits>>,
         rib_type: RibType,
@@ -51,7 +52,7 @@ impl PrefixesApi {
         >,
     ) -> Self {
         Self {
-            store,
+            rib,
             http_api_path,
             query_limits,
             rib_type,
@@ -144,11 +145,16 @@ impl PrefixesApi {
         let res = match self.rib_type {
             RibType::Physical => {
                 let guard = &epoch::pin();
-                self.store
-                    .deref()
-                    .as_ref()
-                    .unwrap()
-                    .match_prefix(&prefix, &options, guard)
+                if let Some(rib) = self.rib.load().as_ref() {
+                    rib.store.match_prefix(&prefix, &options, guard)
+                } else {
+                    let res = Response::builder()
+                        .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
+                        .header("Content-Type", "text/plain")
+                        .body("Cannot query non-existent RIB".to_string().into())
+                        .unwrap();
+                    return Ok(res);
+                }
             }
             RibType::Virtual(_) => {
                 trace!("Handling virtual RIB query");

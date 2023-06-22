@@ -16,7 +16,7 @@ pub type ThreadLocalVM = RefCell<Option<(Instant, VM, LinearMemory)>>;
 pub fn build_vm(source_code: &str) -> Result<VM, String> {
     let rotolo = Compiler::build(source_code)?;
     let pack = rotolo
-        .retrieve_public_as_arcs("my-module")
+        .retrieve_first_public_as_arcs()
         .map_err(|err| format!("{}", err))?;
     let vm = VmBuilder::new()
         .with_mir_code(pack.mir)

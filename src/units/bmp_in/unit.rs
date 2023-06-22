@@ -623,10 +623,8 @@ mod tests {
         mk_config_from_toml(toml).unwrap();
     }
 
-    // TODO: Test both matching and non-matching inputs against variations of the Roto script in this test such that
-    // all permutations of allowing and rejecting AFIs and SAFIs are tested.
     #[tokio::test]
-    async fn route_monitoring_afi_accept_filtering() {
+    async fn route_monitoring_afi_accepted() {
         const ROTO_FILTER: &str = r###"
         module filter-unicast-v4-v6-only {
             define {
@@ -659,10 +657,47 @@ mod tests {
         // When the Roto VM executes the filter script with our BGP UPDATE message as input
         let res = BmpInRunner::is_filtered(bgp_update_msg, Some(roto_source));
 
-        // Then the same BGP UPDATE message should be returned as output
-        // (because the BGP UPDATE message that we created should be acceptable to the filter script)
+        // Then we should be told that it is okay to proceed and the output of the script should match the BGP UPDATE
+        // message that we passed in (as the script doesn't modify the output).
         let expected_raw_bgp_message = Arc::new(mk_filter_input(bgp_update_bytes));
         assert_eq!(res, Ok(ControlFlow::Continue(TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(expected_raw_bgp_message)))));
+    }
+
+    #[tokio::test]
+    async fn route_monitoring_afi_rejected_not_ipv6() {
+        const ROTO_FILTER: &str = r###"
+        module filter-unicast-v4-v6-only {
+            define {
+                rx_tx bgp_msg: BgpUpdateMessage;
+            }
+
+            term afi-safi-unicast {
+                match {
+                    bgp_msg.nlris.afi in [IPV6];
+                }
+            }
+        
+            apply {
+                filter match afi-safi-unicast matching {
+                    return accept;
+                };
+                reject;
+            }
+        }
+        "###;
+
+        // Given a Roto filter script for matching only IPv6 AFI
+        let roto_source = Arc::new(ArcSwap::from_pointee((Instant::now(), ROTO_FILTER.into())));
+
+        // And an IPv4 BGP UPDATE message to pass as input to the Roto script
+        let bgp_update_bytes = mk_bgp_update_msg();
+        let bgp_update_msg = mk_filter_input(bgp_update_bytes.clone());
+        
+        // When the Roto VM executes the filter script with our BGP UPDATE message as input
+        let res = BmpInRunner::is_filtered(bgp_update_msg, Some(roto_source));
+
+        // Then we should be told to sotp as the filter has rejected the input
+        assert_eq!(res, Ok(ControlFlow::Break(())));
     }
 
     // --- Test helpers ------------------------------------------------------

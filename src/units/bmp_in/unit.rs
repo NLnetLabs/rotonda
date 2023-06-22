@@ -628,25 +628,25 @@ mod tests {
     #[tokio::test]
     async fn route_monitoring_afi_accept_filtering() {
         const ROTO_FILTER: &str = r###"
-            module filter-unicast-v4-v6-only {
-                define {
-                    rx_tx bgp_msg: BgpUpdateMessage
-                }
-            
-                term afi-safi-unicast {
-                    match {
-                        bgp_msg.nlris.afi in [AFI_IPV4, AFI_IPV6];
-                        bgp_msg.nlris.safi == SAFI_UNICAST;
-                    }
-                }
-            
-                apply {
-                    filter match matching afi-safi-unicast {
-                        return accept;
-                    }
-                    reject;
+        module filter-unicast-v4-v6-only {
+            define {
+                rx_tx bgp_msg: BgpUpdateMessage;
+            }
+
+            term afi-safi-unicast {
+                match {
+                    bgp_msg.nlris.afi in [IPV4, IPV6];
+                    bgp_msg.nlris.safi == UNICAST;
                 }
             }
+        
+            apply {
+                filter match afi-safi-unicast matching {
+                    return accept;
+                };
+                reject;
+            }
+        }
         "###;
 
         // Given a Roto filter script for matching all AFIs and SAFIs
@@ -654,10 +654,10 @@ mod tests {
 
         // And a BGP UPDATE message to pass as input to the Roto script
         let bgp_update_bytes = mk_bgp_update_msg();
-        let raw_bgp_message = mk_filter_input(bgp_update_bytes.clone());
+        let bgp_update_msg = mk_filter_input(bgp_update_bytes.clone());
         
         // When the Roto VM executes the filter script with our BGP UPDATE message as input
-        let res = BmpInRunner::is_filtered(raw_bgp_message, Some(roto_source));
+        let res = BmpInRunner::is_filtered(bgp_update_msg, Some(roto_source));
 
         // Then the same BGP UPDATE message should be returned as output
         // (because the BGP UPDATE message that we created should be acceptable to the filter script)

@@ -3,9 +3,19 @@ pub(crate) mod internal {
     use std::sync::Arc;
 
     use chrono::Utc;
+    use env_logger::Env;
     use routecore::{asn::Asn, bgp::types::NextHop};
 
     use crate::payload::Payload;
+
+    /// Tries to enable logging. Intended for use in tests.
+    ///
+    /// Accepts a log level name as a string, e.g. "trace".
+    pub(crate) fn enable_logging(log_level: &str) {
+        let _ = env_logger::Builder::from_env(Env::default().default_filter_or(log_level))
+            .is_test(true)
+            .try_init();
+    }
 
     /// `event_summary` should be a string in the form:
     ///     `<policy>@<router id>>[<peer ip>@<peer asn>] <withdraw> <prefix ip>/<prefix len>`
@@ -551,7 +561,11 @@ pub mod bgp {
         }
 
         #[allow(clippy::vec_init_then_push)]
-        pub fn mk_bgp_update(withdrawals: &Prefixes, announcements: &Announcements, extra_path_attributes: &[u8]) -> Bytes {
+        pub fn mk_bgp_update(
+            withdrawals: &Prefixes,
+            announcements: &Announcements,
+            extra_path_attributes: &[u8],
+        ) -> Bytes {
             // 4.3. UPDATE Message Format
             //
             // "The UPDATE message always includes the fixed-size BGP
@@ -828,7 +842,8 @@ pub mod bgp {
                         }
                     }
 
-                    let num_path_attribute_bytes = u16::try_from(path_attributes.len() + extra_path_attributes.len()).unwrap();
+                    let num_path_attribute_bytes =
+                        u16::try_from(path_attributes.len() + extra_path_attributes.len()).unwrap();
                     buf.extend_from_slice(&num_path_attribute_bytes.to_be_bytes()); // N path attribute bytes
                     buf.extend_from_slice(&path_attributes);
                     buf.extend_from_slice(extra_path_attributes);

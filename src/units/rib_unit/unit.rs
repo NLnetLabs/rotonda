@@ -11,7 +11,7 @@ use crate::{
     payload::{Payload, RouterId, Update},
     units::Unit,
 };
-use arc_swap::ArcSwap;
+use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
 
 use chrono::Utc;
@@ -188,7 +188,7 @@ pub struct RibUnitRunner {
     gate: Arc<Gate>,
     component: Component,
     // TODO: Use the new Rib type here? (we should certainly be using it somewhere...)
-    store: Arc<Option<MultiThreadedStore<RibValue>>>,
+    rib: Arc<ArcSwapOption<Rib<RibValue>>>,
     status_reporter: Option<Arc<RibUnitStatusReporter>>,
     roto_source: Arc<ArcSwap<(std::time::Instant, String)>>,
     pending_vrib_query_results:
@@ -200,14 +200,14 @@ impl DirectUpdate for RibUnitRunner {
     async fn direct_update(&self, update: Update) {
         let gate = self.gate.clone();
         let status_reporter = self.status_reporter.clone().unwrap();
-        let store = self.store.clone();
+        let rib = self.rib.clone();
         let roto_source = self.roto_source.clone();
         let pending_vrib_query_results = self.pending_vrib_query_results.clone();
         Self::process_update(
             gate,
             status_reporter,
             update,
-            store,
+            rib,
             |pfx, meta, store| store.insert(pfx, meta),
             roto_source,
             pending_vrib_query_results,
@@ -249,19 +249,21 @@ impl RibUnitRunner {
         let roto_source = Arc::new(ArcSwap::from_pointee(roto_source));
 
         //
-        // --- Create the Rib based on the Roto script Rib 'contains' type
+        // --- TODO: Create the Rib based on the Roto script Rib 'contains' type
         //
-        let my_rec_type = TypeDef::Route; //mk_rib_record_typedef().unwrap(); // TODO: handle this Err
+        // Until Roto is able to tell us the type to use, hard-code it here for now.
+        // Note that this type does NOT have to match the M: Metadata type in Rib::store<M>.
+        //
+        let roto_script_rec_type = TypeDef::Route; //mk_rib_record_typedef().unwrap(); // TODO: handle this Err
 
         //
         // And then we construct the Rib (and the stores that it owns) based on this record type that we should learn
         // from the roto script:
         //
 
-        // TODO: Use this.
         let rib = Rib::new(
-            "my-rib",
-            my_rec_type,
+            "my-rib", // TODO: Where should this name come from? Is it for lookup and access by other Roto scripts?
+            roto_script_rec_type,
             MultiThreadedStore::<RibValue>::new().unwrap(), // TODO: handle this Err
         );
 
@@ -275,10 +277,12 @@ impl RibUnitRunner {
         // --- End: Create the Rib based on the Roto script Rib 'contains' type
         //
 
+        let rib = Arc::new(ArcSwapOption::from_pointee(rib));
+
         Self {
             gate: Arc::new(gate),
             component,
-            store,
+            rib,
             status_reporter: None,
             roto_source,
             pending_vrib_query_results: Arc::new(FrimMap::default()),
@@ -314,7 +318,7 @@ impl RibUnitRunner {
         };
         let query_limits = Arc::new(ArcSwap::from_pointee(query_limits));
         let processor = PrefixesApi::new(
-            self.store.clone(),
+            self.rib.clone(),
             http_api_path,
             query_limits.clone(),
             rib_type,
@@ -380,13 +384,16 @@ impl RibUnitRunner {
                         GateStatus::Triggered { data: TriggerData::MatchPrefix( uuid, prefix, match_options ) } => {
                             assert!(matches!(rib_type, RibType::Physical));
                             let res = {
-                                let store = arc_self.store.deref().as_ref().unwrap();
-                                let guard = &epoch::pin();
-                                trace!("Performing triggered query {uuid}");
-                                store.match_prefix(&prefix, &match_options, guard)
+                                if let Some(rib) = arc_self.rib.load().as_ref() {
+                                    let guard = &epoch::pin();
+                                    trace!("Performing triggered query {uuid}");
+                                    Ok(rib.store.match_prefix(&prefix, &match_options, guard))
+                                } else {
+                                    Err("Cannot query non-existent RIB".to_string())
+                                }
                             };
                             trace!("Sending query {uuid} results downstream");
-                            arc_self.gate.update_data(Update::QueryResult(uuid, Ok(res))).await;
+                            arc_self.gate.update_data(Update::QueryResult(uuid, res)).await;
                         }
 
                         _ => { /* Nothing to do */ }
@@ -405,7 +412,7 @@ impl RibUnitRunner {
         gate: Arc<Gate>,
         status_reporter: Arc<RibUnitStatusReporter>,
         update: Update,
-        store: Arc<Option<MultiThreadedStore<RibValue>>>,
+        rib: Arc<ArcSwapOption<Rib<RibValue>>>,
         insert: F,
         roto_source: Arc<ArcSwap<(Instant, String)>>,
         pending_vrib_query_results: Arc<
@@ -430,7 +437,7 @@ impl RibUnitRunner {
                 for payload in updates {
                     if let Some(update) = Self::process_update_single(
                         payload,
-                        store.clone(),
+                        rib.clone(),
                         insert,
                         roto_source.clone(),
                         status_reporter.clone(),
@@ -447,8 +454,8 @@ impl RibUnitRunner {
                 //     new_withdrawals,
                 // );
 
-                if let Some(store) = store.as_ref() {
-                    status_reporter.unique_prefix_count_updated(store.prefixes_count());
+                if let Some(rib) = rib.load().as_ref() {
+                    status_reporter.unique_prefix_count_updated(rib.store.prefixes_count());
                 }
             }
 
@@ -456,7 +463,7 @@ impl RibUnitRunner {
                 // TODO: update status reporter/metrics as is done in the bulk case
                 if let Some(update) = Self::process_update_single(
                     payload,
-                    store.clone(),
+                    rib.clone(),
                     insert,
                     roto_source.clone(),
                     status_reporter.clone(),
@@ -497,7 +504,7 @@ impl RibUnitRunner {
 
     pub async fn process_update_single<F>(
         payload: Payload,
-        store: Arc<Option<MultiThreadedStore<RibValue>>>,
+        rib: Arc<ArcSwapOption<Rib<RibValue>>>,
         insert: F,
         roto_source: Arc<ArcSwap<(Instant, String)>>,
         status_reporter: Arc<RibUnitStatusReporter>,
@@ -525,7 +532,7 @@ impl RibUnitRunner {
                             &mut output
                         {
                             // Only physical RIBs have a store to insert into.
-                            if let Some(store) = store.as_ref() {
+                            if let Some(rib) = rib.load().as_ref() {
                                 // TODO: Don't hard code the hash keys here
                                 let hash = mk_user_defined_hash(
                                     route,
@@ -536,7 +543,7 @@ impl RibUnitRunner {
                                 let rib_value = RibValue::from(hashed_route);
 
                                 let pre_insert = Utc::now();
-                                match insert(&route.prefix.into(), rib_value, store) {
+                                match insert(&route.prefix.into(), rib_value, &rib.store) {
                                     Ok((upsert, num_retries)) => {
                                         let post_insert = Utc::now();
                                         let insert_delay = (post_insert - pre_insert)

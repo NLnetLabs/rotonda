@@ -375,6 +375,7 @@ impl ConfigFile {
             if let Value::Table(unit_table) = unit_table_value {
                 let unit_type = unit_table.get("type");
                 let rib_type = unit_table.get("rib_type");
+                #[allow(clippy::collapsible_if)]
                 if unit_type == Some(&Value::String("rib-unit".to_string())) {
                     if Option::is_none(&rib_type) || rib_type == Some(&Value::String("Physical".to_string())) {
                         if let Some(Value::Array(roto_paths)) = unit_table.get("roto_path") {

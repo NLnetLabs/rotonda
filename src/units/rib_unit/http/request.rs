@@ -5,13 +5,12 @@ use async_trait::async_trait;
 use hyper::{Body, Method, Request, Response};
 use log::trace;
 use roto::types::datasources::Rib;
-use rotonda_store::{epoch, prelude::Prefix, MatchOptions, QueryResult};
+use rotonda_store::{epoch, prelude::Prefix, MatchOptions};
 use routecore::{asn::Asn, bgp::communities::Community};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use crate::{
-    common::frim::FrimMap,
     comms::{Link, TriggerData},
     http::{
         extract_params, get_all_params, get_param, MatchedParam, PercentDecodedPath,
@@ -22,7 +21,7 @@ use crate::{
         rib_unit::{
             http::types::{FilterKind, FilterOp},
             rib_value::RibValue,
-            unit::QueryLimits,
+            unit::{PendingVirtualRibQueryResults, QueryLimits},
         },
         RibType,
     },
@@ -36,8 +35,7 @@ pub struct PrefixesApi {
     query_limits: Arc<ArcSwap<QueryLimits>>,
     rib_type: RibType,
     prib_upstream: Option<Link>,
-    pending_vrib_query_results:
-        Arc<FrimMap<Uuid, Arc<oneshot::Sender<Result<QueryResult<RibValue>, String>>>>>,
+    pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
 }
 
 impl PrefixesApi {
@@ -47,9 +45,7 @@ impl PrefixesApi {
         query_limits: Arc<ArcSwap<QueryLimits>>,
         rib_type: RibType,
         prib_upstream: Option<Link>,
-        pending_vrib_query_results: Arc<
-            FrimMap<Uuid, Arc<oneshot::Sender<Result<QueryResult<RibValue>, String>>>>,
-        >,
+        pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
     ) -> Self {
         Self {
             rib,
@@ -160,7 +156,7 @@ impl PrefixesApi {
                 trace!("Handling virtual RIB query");
                 // Generate a unique query ID to tie the request and later response together.
                 let uuid = Uuid::new_v4();
-                let data = TriggerData::MatchPrefix(uuid.clone(), prefix, options);
+                let data = TriggerData::MatchPrefix(uuid, prefix, options);
 
                 // Create a oneshot channel and store the sender to it by the query ID we generated.
                 let (tx, rx) = oneshot::channel();
@@ -182,17 +178,17 @@ impl PrefixesApi {
                     }
 
                     Ok(Err(err)) => {
-                        trace!("Internal error: {}", err.to_string());
+                        trace!("Internal error: {}", err);
                         let res = Response::builder()
                             .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
                             .header("Content-Type", "text/plain")
-                            .body(err.to_string().into())
+                            .body(err.into())
                             .unwrap();
                         return Ok(res);
                     }
 
                     Err(err) => {
-                        trace!("Internal error: {}", err.to_string());
+                        trace!("Internal error: {}", err);
                         let res = Response::builder()
                             .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
                             .header("Content-Type", "text/plain")

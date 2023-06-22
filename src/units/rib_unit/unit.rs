@@ -187,12 +187,10 @@ impl RibUnit {
 pub struct RibUnitRunner {
     gate: Arc<Gate>,
     component: Component,
-    // TODO: Use the new Rib type here? (we should certainly be using it somewhere...)
     rib: Arc<ArcSwapOption<Rib<RibValue>>>,
     status_reporter: Option<Arc<RibUnitStatusReporter>>,
     roto_source: Arc<ArcSwap<(std::time::Instant, String)>>,
-    pending_vrib_query_results:
-        Arc<FrimMap<Uuid, Arc<oneshot::Sender<Result<QueryResult<RibValue>, String>>>>>,
+    pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
 }
 
 #[async_trait]
@@ -224,6 +222,11 @@ impl std::fmt::Debug for RibUnitRunner {
 
 impl AnyDirectUpdate for RibUnitRunner {}
 
+pub type QueryId = Uuid;
+pub type QueryOperationResult = Result<QueryResult<RibValue>, String>;
+pub type QueryOperationResultSender = oneshot::Sender<QueryOperationResult>;
+pub type PendingVirtualRibQueryResults = FrimMap<QueryId, Arc<QueryOperationResultSender>>;
+
 impl RibUnitRunner {
     thread_local!(
         #[allow(clippy::type_complexity)]
@@ -236,48 +239,48 @@ impl RibUnitRunner {
         roto_path: Option<PathBuf>,
         rib_type: RibType,
     ) -> Self {
-        let store = match rib_type {
-            RibType::Physical => Some(MultiThreadedStore::<RibValue>::new().unwrap()),
-            RibType::Virtual(_) => None,
-        };
-        let store = Arc::new(store);
-
         let roto_source_code = roto_path
             .map(|v| read_to_string(v).unwrap())
             .unwrap_or_default();
         let roto_source = (Instant::now(), roto_source_code);
         let roto_source = Arc::new(ArcSwap::from_pointee(roto_source));
 
-        //
-        // --- TODO: Create the Rib based on the Roto script Rib 'contains' type
-        //
-        // Until Roto is able to tell us the type to use, hard-code it here for now.
-        // Note that this type does NOT have to match the M: Metadata type in Rib::store<M>.
-        //
-        let roto_script_rec_type = TypeDef::Route; //mk_rib_record_typedef().unwrap(); // TODO: handle this Err
+        let rib = match rib_type {
+            RibType::Physical => {
+                //
+                // --- TODO: Create the Rib based on the Roto script Rib 'contains' type
+                //
+                // Until Roto is able to tell us the type to use, hard-code it here for now.
+                // Note that this type does NOT have to match the M: Metadata type in Rib::store<M>.
+                //
+                let roto_script_rec_type = TypeDef::Route; //mk_rib_record_typedef().unwrap(); // TODO: handle this Err
 
-        //
-        // And then we construct the Rib (and the stores that it owns) based on this record type that we should learn
-        // from the roto script:
-        //
+                //
+                // And then we construct the Rib (and the stores that it owns) based on this record type that we should learn
+                // from the roto script:
+                //
 
-        let rib = Rib::new(
-            "my-rib", // TODO: Where should this name come from? Is it for lookup and access by other Roto scripts?
-            roto_script_rec_type,
-            MultiThreadedStore::<RibValue>::new().unwrap(), // TODO: handle this Err
-        );
+                let rib = Rib::new(
+                    "my-rib", // TODO: Where should this name come from? Is it for lookup and access by other Roto scripts?
+                    roto_script_rec_type,
+                    MultiThreadedStore::<RibValue>::new().unwrap(), // TODO: handle this Err
+                );
 
-        //
-        // TODO: Meaning also that if the roto script changes we have to be able to detect if the record type changed,
-        // and if it did, recreate the store, dropping the current data, right?
-        //
-        // TOOD: And that also these steps should be done at reconfiguration time as well, not just at initialisation
-        // time (i.e. where we handle GateStatus::Reconfiguring below).
-        //
-        // --- End: Create the Rib based on the Roto script Rib 'contains' type
-        //
+                //
+                // TODO: Meaning also that if the roto script changes we have to be able to detect if the record type changed,
+                // and if it did, recreate the store, dropping the current data, right?
+                //
+                // TOOD: And that also these steps should be done at reconfiguration time as well, not just at initialisation
+                // time (i.e. where we handle GateStatus::Reconfiguring below).
+                //
+                // --- End: Create the Rib based on the Roto script Rib 'contains' type
+                //
 
-        let rib = Arc::new(ArcSwapOption::from_pointee(rib));
+                Arc::new(ArcSwapOption::from_pointee(rib))
+            }
+
+            RibType::Virtual(_) => Default::default(),
+        };
 
         Self {
             gate: Arc::new(gate),
@@ -415,9 +418,7 @@ impl RibUnitRunner {
         rib: Arc<ArcSwapOption<Rib<RibValue>>>,
         insert: F,
         roto_source: Arc<ArcSwap<(Instant, String)>>,
-        pending_vrib_query_results: Arc<
-            FrimMap<Uuid, Arc<oneshot::Sender<Result<QueryResult<RibValue>, String>>>>,
-        >,
+        pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
     ) where
         F: Fn(
                 &Prefix,
@@ -564,7 +565,7 @@ impl RibUnitRunner {
                                         match upsert {
                                             Upsert::Insert => {
                                                 status_reporter.insert_ok(
-                                                    router_id.clone(),
+                                                    router_id,
                                                     insert_delay,
                                                     propagation_delay,
                                                     num_retries,
@@ -577,7 +578,7 @@ impl RibUnitRunner {
                                             }
                                             Upsert::Update => {
                                                 status_reporter.update_ok(
-                                                    router_id.clone(),
+                                                    router_id,
                                                     insert_delay,
                                                     propagation_delay,
                                                     num_retries,
@@ -691,6 +692,7 @@ impl RibUnitRunner {
             )
             .await;
 
+            #[allow(clippy::collapsible_match)]
             if let Some(Update::Single(Payload::TypeValue(type_value))) = processed_update {
                 // Add this processed query result route into the new query result
                 // TODO: Once RibValue stores TypeValue instead of RawRouteWithDelta we

@@ -27,25 +27,24 @@ mod tests {
 
     #[tokio::test]
     async fn process_non_route_update() {
-        let (gate, rib, metrics) = test_init();
+        let (_gate, rib, metrics) = test_init();
 
         // Given an update that is not a route
         let payload = Payload::TypeValue(TypeValue::Unknown);
 
         // When it is processed by this unit
-        let gate_update =
-            run_process_single_update(payload.clone(), gate, rib.clone(), metrics).await;
+        let update = run_process_single_update(payload.clone(), rib.clone(), metrics).await;
 
         // Then it should NOT be added to the route store
         assert_eq!(rib.load().as_ref().unwrap().store.prefixes_count(), 0);
 
         // But should be output for forwarding to downstream units
-        assert!(matches!(gate_update, Some(Update::Single(payload))));
+        assert!(matches!(update, Some(Update::Single(p)) if p == payload));
     }
 
     #[tokio::test]
     async fn process_update_single_route() {
-        let (gate, rib, metrics) = test_init();
+        let (_gate, rib, metrics) = test_init();
 
         // Given a BGP update containing a single route announcement
         let delta_id = (RotondaId(0), 0);
@@ -67,8 +66,7 @@ mod tests {
         );
         let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
         let saved_input_payload = payload.clone();
-        let gate_update =
-            run_process_single_update(payload.clone(), gate, rib.clone(), metrics).await;
+        let gate_update = run_process_single_update(payload.clone(), rib.clone(), metrics).await;
 
         // Then it SHOULD be added to the route store
         assert_eq!(rib.load().as_ref().unwrap().store.prefixes_count(), 1);
@@ -88,7 +86,7 @@ mod tests {
 
     #[tokio::test]
     async fn process_update_same_route_twice() {
-        let (gate, rib, metrics) = test_init();
+        let (_gate, rib, metrics) = test_init();
 
         // Given a BGP update containing a single route announcement
         let delta_id = (RotondaId(0), 0);
@@ -110,10 +108,8 @@ mod tests {
         );
         let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
         let gate_update1 =
-            run_process_single_update(payload.clone(), gate.clone(), rib.clone(), metrics.clone())
-                .await;
-        let gate_update2 =
-            run_process_single_update(payload.clone(), gate, rib.clone(), metrics).await;
+            run_process_single_update(payload.clone(), rib.clone(), metrics.clone()).await;
+        let gate_update2 = run_process_single_update(payload.clone(), rib.clone(), metrics).await;
 
         // Then it SHOULD be added to the route store only once
         assert_eq!(rib.load().as_ref().unwrap().store.prefixes_count(), 1);
@@ -140,7 +136,7 @@ mod tests {
     #[tokio::test]
     async fn process_update_two_routes_to_the_same_prefix() {
         let (match_result, match_result2) = {
-            let (gate, rib, metrics) = test_init();
+            let (_gate, rib, metrics) = test_init();
 
             // Given BGP updates for two different routes to the same prefix
             let delta_id = (RotondaId(0), 0);
@@ -167,8 +163,7 @@ mod tests {
                 let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
                 input_payloads.push(payload.clone());
                 let gate_update =
-                    run_process_single_update(payload, gate.clone(), rib.clone(), metrics.clone())
-                        .await;
+                    run_process_single_update(payload, rib.clone(), metrics.clone()).await;
                 let Some(Update::Single(output_payload)) = gate_update else { unreachable!() };
                 output_payloads.push(output_payload);
             }
@@ -242,9 +237,9 @@ mod tests {
             }
 
             eprintln!("About to drop the store");
-            let store = match Arc::try_unwrap(rib) {
-                Ok(store) => store,
-                Err(_) => unreachable!(),
+            if Arc::try_unwrap(rib).is_err() {
+                // We can't call unwrap() because Rib doesn't implement Debug.
+                unreachable!();
             };
 
             (match_result, match_result2)
@@ -268,7 +263,7 @@ mod tests {
 
     #[tokio::test]
     async fn process_update_two_routes_to_different_prefixes() {
-        let (gate, rib, metrics) = test_init();
+        let (_gate, rib, metrics) = test_init();
 
         // Given BGP updates for two different routes to two different prefixes
         let delta_id = (RotondaId(0), 0);
@@ -299,8 +294,7 @@ mod tests {
             let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
             input_payloads.push(payload.clone());
             let gate_update =
-                run_process_single_update(payload, gate.clone(), rib.clone(), metrics.clone())
-                    .await;
+                run_process_single_update(payload, rib.clone(), metrics.clone()).await;
             let Some(Update::Single(output_payload)) = gate_update else { unreachable!() };
             output_payloads.push(output_payload);
         }
@@ -367,7 +361,6 @@ mod tests {
 
     async fn run_process_single_update(
         payload: Payload,
-        gate: Arc<Gate>,
         rib: Arc<ArcSwapOption<Rib<RibValue>>>,
         metrics: Arc<RibUnitMetrics>,
     ) -> Option<Update> {

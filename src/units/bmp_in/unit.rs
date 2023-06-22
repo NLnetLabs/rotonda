@@ -320,12 +320,12 @@ impl BmpInRunner {
             msg_buf,
             Some(roto_source),
             |raw_bgp_msg, roto_source| {
-                // map the result type from TypeValue to RawBgpMessage
+                // map the result type from TypeValue to BgpUpdateMessage
                 match Self::is_filtered(raw_bgp_msg, roto_source) {
                     Ok(ControlFlow::Break(())) => Ok(ControlFlow::Break(())),
                     // TODO: Modify roto to not output an Arc if the given rx wasn't an Arc, so then we don't have to do the Arc::try_unwrap() dance.
-                    Ok(ControlFlow::Continue(TypeValue::Builtin(BuiltinTypeValue::RawBgpMessage(raw_bgp_msg)))) => Ok(ControlFlow::Continue(Arc::try_unwrap(raw_bgp_msg).unwrap())),
-                    Ok(ControlFlow::Continue(some_unsupported_type)) => Err(format!("Filter result type must be RawBgpMessage, found: {some_unsupported_type}")),
+                    Ok(ControlFlow::Continue(TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(raw_bgp_msg)))) => Ok(ControlFlow::Continue(Arc::try_unwrap(raw_bgp_msg).unwrap())),
+                    Ok(ControlFlow::Continue(some_unsupported_type)) => Err(format!("Filter result type must be BgpUpdateMessage, found: {some_unsupported_type}")),
                     Err(err) => Err(format!("Filter execution failed: {err}")),
                 }
             })
@@ -580,7 +580,7 @@ impl std::fmt::Debug for BmpInRunner {
 mod tests {
     use std::str::FromStr;
 
-    use roto::types::builtin::{RotondaId, RawBgpMessage};
+    use roto::types::builtin::{RotondaId, BgpUpdateMessage};
     use routecore::bgp::message::SessionConfig;
 
     use crate::bgp::encode::{Announcements, mk_bgp_update, Prefixes};
@@ -594,10 +594,10 @@ mod tests {
         mk_bgp_update(&Prefixes::default(), &announcements, &[])
     }
 
-    fn mk_filter_input(bgp_msg: Bytes) -> RawBgpMessage {
+    fn mk_filter_input(bgp_msg: Bytes) -> BgpUpdateMessage {
         let update_msg = roto::types::builtin::UpdateMessage::new(bgp_msg, SessionConfig::modern());
         let delta_id = (RotondaId(0), 0); // TODO
-        RawBgpMessage::new(delta_id, update_msg)
+        BgpUpdateMessage::new(delta_id, update_msg)
     }
 
     #[test]
@@ -630,7 +630,7 @@ mod tests {
         const ROTO_FILTER: &str = r###"
             module filter-unicast-v4-v6-only {
                 define {
-                    rx_tx bgp_msg: RawBgpMessage
+                    rx_tx bgp_msg: BgpUpdateMessage
                 }
             
                 term afi-safi-unicast {
@@ -641,7 +641,7 @@ mod tests {
                 }
             
                 apply {
-                    match matching afi-safi-unicast {
+                    filter match matching afi-safi-unicast {
                         return accept;
                     }
                     reject;
@@ -662,7 +662,7 @@ mod tests {
         // Then the same BGP UPDATE message should be returned as output
         // (because the BGP UPDATE message that we created should be acceptable to the filter script)
         let expected_raw_bgp_message = Arc::new(mk_filter_input(bgp_update_bytes));
-        assert_eq!(res, Ok(ControlFlow::Continue(TypeValue::Builtin(BuiltinTypeValue::RawBgpMessage(expected_raw_bgp_message)))));
+        assert_eq!(res, Ok(ControlFlow::Continue(TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(expected_raw_bgp_message)))));
     }
 
     // --- Test helpers ------------------------------------------------------

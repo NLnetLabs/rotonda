@@ -7,7 +7,7 @@ use crate::units::bmp_in::state_machine::{
 use super::{dumping::Dumping, updating::Updating};
 
 use bytes::Bytes;
-use roto::types::builtin::RawBgpMessage;
+use roto::types::builtin::BgpUpdateMessage;
 use routecore::bmp::message::Message as BmpMsg;
 
 /// BmpState machine state 'Terminated'.
@@ -69,7 +69,7 @@ impl BmpStateDetails<Terminated> {
         _filter: F,
     ) -> ProcessingResult
     where
-        F: Fn(RawBgpMessage, Option<D>) -> Result<ControlFlow<(), RawBgpMessage>, String>
+        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>
     {
         let bmp_msg = BmpMsg::from_octets(&msg_buf).unwrap(); // already verified upstream
         self.mk_invalid_message_result(format!(

@@ -75,7 +75,7 @@ mod tests {
         assert!(matches!(&gate_update, Some(Update::Single(p)) if p == &payload));
 
         // And the BGP UPDATE bytes should be the same for both the input and output route
-        // (at the time of writing the RawBgpMessage PartialEq implementation only compares RawBgpMessage.message_id,
+        // (at the time of writing the BgpUpdateMessage PartialEq implementation only compares BgpUpdateMessage.message_id,
         // not the actual underlying message bytes)
         let Some(Update::Single(output_payload)) = &gate_update else { unreachable!() };
         assert_eq!(
@@ -125,7 +125,7 @@ mod tests {
         assert!(matches!(&gate_update2, Some(Update::Single(p)) if p == &payload));
 
         // And the BGP UPDATE bytes should be the same for both the input and output route
-        // (at the time of writing the RawBgpMessage PartialEq implementation only compares RawBgpMessage.message_id,
+        // (at the time of writing the BgpUpdateMessage PartialEq implementation only compares BgpUpdateMessage.message_id,
         // not the actual underlying message bytes)
         let Some(Update::Single(output_payload)) = gate_update1 else { unreachable!() };
         assert_eq!(
@@ -214,7 +214,7 @@ mod tests {
             assert_eq!(output_payloads.len(), 2);
 
             // And the BGP UPDATE bytes should be the same for both the input and output route
-            // (at the time of writing the RawBgpMessage PartialEq implementation only compares RawBgpMessage.message_id,
+            // (at the time of writing the BgpUpdateMessage PartialEq implementation only compares BgpUpdateMessage.message_id,
             // not the actual underlying message bytes)
             for (input_payload, output_payload) in input_payloads.iter().zip(output_payloads.iter())
             {
@@ -325,7 +325,7 @@ mod tests {
         assert_eq!(output_payloads.len(), 2);
 
         // And the BGP UPDATE bytes should be the same for both the input and output route
-        // (at the time of writing the RawBgpMessage PartialEq implementation only compares RawBgpMessage.message_id,
+        // (at the time of writing the BgpUpdateMessage PartialEq implementation only compares BgpUpdateMessage.message_id,
         // not the actual underlying message bytes)
         for (input_payload, output_payload) in input_payloads.iter().zip(output_payloads.iter()) {
             assert_eq!(
@@ -351,7 +351,7 @@ mod tests {
 
     fn get_payload_bytes(payload: &Payload) -> Option<&[u8]> {
         if let Payload::TypeValue(TypeValue::Builtin(BuiltinTypeValue::Route(route))) = payload {
-            Some(route.raw_message.raw_message.0.as_ref())
+            Some(route.raw_message.raw_message().0.as_ref())
         } else {
             None
         }

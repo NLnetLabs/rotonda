@@ -1,18 +1,19 @@
-use std::{ops::Deref, str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::Arc};
 
-use arc_swap::ArcSwap;
+use arc_swap::{ArcSwap, ArcSwapOption};
 use assert_json_diff::{assert_json_matches_no_panic, CompareMode, Config};
 use hyper::{body::Bytes, Body, Request, StatusCode};
-use roto::types::builtin::{RawRouteWithDeltas, RotondaId, RouteStatus};
+use roto::types::{
+    builtin::{RawRouteWithDeltas, RotondaId, RouteStatus},
+    datasources::Rib,
+    typedef::TypeDef,
+};
 use rotonda_store::MultiThreadedStore;
-use routecore::{
-    addr::Prefix,
-    bgp::{
-        communities::{
-            Community, ExtendedCommunity, LargeCommunity, ParseError, StandardCommunity, Wellknown,
-        },
-        message::SessionConfig,
+use routecore::bgp::{
+    communities::{
+        Community, ExtendedCommunity, LargeCommunity, ParseError, StandardCommunity, Wellknown,
     },
+    message::SessionConfig,
 };
 use serde_json::{json, Value};
 
@@ -36,7 +37,7 @@ use super::PrefixesApi;
 
 #[tokio::test]
 async fn error_with_garbage_prefix() {
-    let store = mk_store();
+    let store = mk_rib();
     assert_query_eq(
         store.clone(),
         "/prefixes/not_a_valid_prefix",
@@ -48,7 +49,7 @@ async fn error_with_garbage_prefix() {
 
 #[tokio::test]
 async fn error_with_prefix_host_bits_set_ipv4() {
-    let store = mk_store();
+    let store = mk_rib();
     assert_query_eq(
         store.clone(),
         "/prefixes/1.2.3.4/24", // that should have been 1.2.3.4/32 or 1.2.3.0/24
@@ -60,7 +61,7 @@ async fn error_with_prefix_host_bits_set_ipv4() {
 
 #[tokio::test]
 async fn no_match_when_store_is_empty() {
-    let store = mk_store();
+    let store = mk_rib();
 
     assert_query_eq(
         store,
@@ -76,7 +77,7 @@ async fn no_match_when_store_is_empty() {
 
 #[tokio::test]
 async fn exact_match_ipv4() {
-    let store = mk_store();
+    let store = mk_rib();
 
     insert_withdrawal(store.clone(), "1.2.3.4/32", 1);
 
@@ -94,7 +95,7 @@ async fn exact_match_ipv4() {
 
 #[tokio::test]
 async fn exact_match_with_more_and_less_specifics_ipv4() {
-    let store = mk_store();
+    let store = mk_rib();
 
     insert_withdrawal(store.clone(), "1.2.0.0/16", 1);
     insert_withdrawal(store.clone(), "1.2.3.0/24", 2);
@@ -154,7 +155,7 @@ async fn exact_match_with_more_and_less_specifics_ipv4() {
 
 #[tokio::test]
 async fn issue_79_exact_match() {
-    let store = mk_store();
+    let store = mk_rib();
 
     insert_withdrawal(store.clone(), "8.8.8.0/24", 1);
     insert_withdrawal(store.clone(), "8.0.0.0/12", 2);
@@ -191,7 +192,7 @@ async fn issue_79_exact_match() {
 
 #[tokio::test]
 async fn prefix_normalization_ipv6() {
-    let store = mk_store();
+    let store = mk_rib();
 
     insert_withdrawal(store.clone(), "2001:DB8:2222::/48", 1);
     insert_withdrawal(store.clone(), "2001:DB8:2222:0000::/64", 2);
@@ -216,7 +217,7 @@ async fn prefix_normalization_ipv6() {
 
 #[tokio::test]
 async fn error_with_too_short_more_specifics_ipv4() {
-    let store = mk_store();
+    let store = mk_rib();
 
     insert_withdrawal(store.clone(), "128.168.0.0/16", 1);
     insert_withdrawal(store.clone(), "128.168.20.16/28", 2);
@@ -249,7 +250,7 @@ async fn error_with_too_short_more_specifics_ipv4() {
 
 #[tokio::test]
 async fn error_with_too_short_more_specifics_ipv6() {
-    let store = mk_store();
+    let store = mk_rib();
 
     insert_withdrawal(store.clone(), "2001:DB8:2222::/48", 1);
     insert_withdrawal(store.clone(), "2001:DB8:2222:0000::/64", 2);
@@ -283,7 +284,7 @@ async fn error_with_too_short_more_specifics_ipv6() {
 
 #[tokio::test]
 async fn exact_match_ipv4_with_normal_communities() {
-    let store = mk_store();
+    let store = mk_rib();
 
     #[rustfmt::skip]
     let normal_communities: Vec<StandardCommunity> = vec![
@@ -355,7 +356,7 @@ async fn exact_match_ipv4_with_normal_communities() {
 
 #[tokio::test]
 async fn exact_match_ipv4_with_extended_communities() {
-    let store = mk_store();
+    let store = mk_rib();
 
     #[rustfmt::skip]
     let extended_communities: Vec<ExtendedCommunity> = vec![
@@ -421,7 +422,7 @@ async fn exact_match_ipv4_with_extended_communities() {
 
 #[tokio::test]
 async fn exact_match_ipv4_with_large_communities() {
-    let store = mk_store();
+    let store = mk_rib();
 
     insert_announcement(
         store.clone(),
@@ -460,7 +461,7 @@ async fn exact_match_ipv4_with_large_communities() {
 #[tokio::test]
 async fn select_and_discard() {
     fn insert_announcement_helper<C: Into<Community>>(
-        store: Arc<Option<MultiThreadedStore<RibValue>>>,
+        store: Arc<ArcSwapOption<Rib<RibValue>>>,
         router_n: u8,
         as_path: &[u32],
         community: Option<C>,
@@ -476,30 +477,30 @@ async fn select_and_discard() {
         );
     }
 
-    let store = mk_store();
+    let rib = mk_rib();
 
     insert_announcement_helper(
-        store.clone(),
+        rib.clone(),
         1,
         &[18, 19, 20],
         Option::<StandardCommunity>::None,
     ); //, PrePolicy);
     insert_announcement_helper(
-        store.clone(),
+        rib.clone(),
         2,
         &[19, 20, 21],
         Some(Wellknown::Blackhole),
         // PostPolicy,
     );
     insert_announcement_helper(
-        store.clone(),
+        rib.clone(),
         3,
         &[19, 20, 21],
         Some(Wellknown::NoExport),
         // PrePolicy,
     );
     insert_announcement_helper(
-        store.clone(),
+        rib.clone(),
         4,
         &[20, 21, 22],
         Some(Wellknown::NoAdvertise),
@@ -507,7 +508,7 @@ async fn select_and_discard() {
     );
 
     assert_query_eq(
-        store.clone(),
+        rib.clone(),
         "/prefixes/1.2.3.4/32?select[as_path]=19,20,21&sort=router_id",
         StatusCode::OK,
         Some(json!({
@@ -521,7 +522,7 @@ async fn select_and_discard() {
     .await;
 
     assert_query_eq(
-        store.clone(),
+        rib.clone(),
         "/prefixes/1.2.3.4/32?select[routing_information_base_name]=Pre-Policy-RIB&sort=router_id",
         StatusCode::OK,
         Some(json!({
@@ -535,7 +536,7 @@ async fn select_and_discard() {
     .await;
 
     assert_query_eq(
-        store.clone(),
+        rib.clone(),
         "/prefixes/1.2.3.4/32?select[routing_information_base_name]=Post-Policy-RIB&sort=router_id",
         StatusCode::OK,
         Some(json!({
@@ -549,7 +550,7 @@ async fn select_and_discard() {
     .await;
 
     assert_query_eq(
-        store.clone(),
+        rib.clone(),
         "/prefixes/1.2.3.4/32?select[source_as]=10003&sort=router_id",
         StatusCode::OK,
         Some(json!({
@@ -560,7 +561,7 @@ async fn select_and_discard() {
     .await;
 
     assert_query_eq(
-        store.clone(),
+        rib.clone(),
         "/prefixes/1.2.3.4/32?select[community]=BLACKHOLE&select[as_path]=19,20,21&filter_op=all",
         StatusCode::OK,
         Some(json!({
@@ -571,7 +572,7 @@ async fn select_and_discard() {
     .await;
 
     assert_query_eq(
-        store.clone(),
+        rib.clone(),
         "/prefixes/1.2.3.4/32?discard[as_path]=19,20,21&sort=router_id",
         StatusCode::OK,
         Some(json!({
@@ -585,7 +586,7 @@ async fn select_and_discard() {
     .await;
 
     assert_query_eq(
-        store.clone(),
+        rib.clone(),
         "/prefixes/1.2.3.4/32?discard[as_path]=18,19,20&discard[as_path]=19,20,21&filter_op=any&sort=router_id",
         StatusCode::OK,
         Some(json!({
@@ -596,7 +597,7 @@ async fn select_and_discard() {
     .await;
 
     assert_query_eq(
-        store.clone(),
+        rib.clone(),
         "/prefixes/1.2.3.4/32?discard[community]=BLACKHOLE&discard[as_path]=19,20,21&filter_op=all&sort=router_id",
         StatusCode::OK,
         Some(json!({
@@ -611,7 +612,7 @@ async fn select_and_discard() {
     .await;
 
     assert_query_eq(
-        store.clone(),
+        rib.clone(),
         "/prefixes/1.2.3.4/32?select[as_path]=19,20,21&discard[community]=BLACKHOLE&discard[community]=NO_EXPORT&filter_op=all&sort=router_id",
         StatusCode::OK,
         Some(json!({
@@ -625,7 +626,7 @@ async fn select_and_discard() {
     .await;
 
     assert_query_eq(
-        store.clone(),
+        rib.clone(),
         "/prefixes/1.2.3.4/32?select[as_path]=19,20,21&discard[community]=BLACKHOLE&discard[community]=NO_EXPORT&sort=router_id",
         StatusCode::OK,
         Some(json!({
@@ -643,7 +644,7 @@ async fn select_and_discard() {
         );
 
         assert_query_eq(
-            store.clone(),
+            rib.clone(),
             &query,
             StatusCode::OK,
             Some(json!({
@@ -662,7 +663,7 @@ async fn select_and_discard() {
 /// --- Helper functions ------------------------------------------------------------------------------------------
 
 async fn do_query(
-    store: Arc<Option<MultiThreadedStore<RibValue>>>,
+    rib: Arc<ArcSwapOption<Rib<RibValue>>>,
     query: &str,
     expected_status_code: StatusCode,
     expected_body: Option<Value>,
@@ -670,7 +671,7 @@ async fn do_query(
     let http_api_path = Arc::new("/prefixes/".to_string());
     let query_limits = Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
     let proc = PrefixesApi::new(
-        store,
+        rib,
         http_api_path,
         query_limits,
         RibType::Physical,
@@ -715,12 +716,12 @@ async fn do_query(
 }
 
 async fn assert_query_eq(
-    store: Arc<Option<MultiThreadedStore<RibValue>>>,
+    rib: Arc<ArcSwapOption<Rib<RibValue>>>,
     query: &str,
     expected_status_code: StatusCode,
     expected_body: Option<Value>,
 ) {
-    match do_query(store, query, expected_status_code, expected_body).await {
+    match do_query(rib, query, expected_status_code, expected_body).await {
         Ok(bytes) => {
             if expected_status_code == 200 {
                 assert_valid_against_schema(&bytes);
@@ -739,11 +740,13 @@ async fn assert_query_eq(
     }
 }
 
-fn mk_store() -> Arc<Option<MultiThreadedStore<RibValue>>> {
-    Arc::new(Some(MultiThreadedStore::<RibValue>::new().unwrap()))
+fn mk_rib() -> Arc<ArcSwapOption<Rib<RibValue>>> {
+    let store = MultiThreadedStore::<RibValue>::new().unwrap();
+    let rib = Rib::new("test-rib", TypeDef::Route, store);
+    Arc::new(ArcSwapOption::from_pointee(rib))
 }
 
-fn insert_routes(store: Arc<Option<MultiThreadedStore<RibValue>>>, announcements: Announcements) {
+fn insert_routes(rib: Arc<ArcSwapOption<Rib<RibValue>>>, announcements: Announcements) {
     let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
     let delta_id = (RotondaId(0), 0); // TODO
     if let Announcements::Some {
@@ -766,17 +769,17 @@ fn insert_routes(store: Arc<Option<MultiThreadedStore<RibValue>>>, announcements
                 RouteStatus::InConvergence,
             );
             let rib_value = RouteWithUserDefinedHash::new(raw_route, 1).into();
-            store
-                .deref()
+            rib.load()
                 .as_ref()
                 .unwrap()
+                .store
                 .insert(&prefix, rib_value)
                 .unwrap();
         }
     }
 }
 
-fn insert_withdrawal(store: Arc<Option<MultiThreadedStore<RibValue>>>, withdrawals: &str, n: u8) {
+fn insert_withdrawal(rib: Arc<ArcSwapOption<Rib<RibValue>>>, withdrawals: &str, n: u8) {
     let prefixes = Prefixes::from_str(withdrawals).unwrap();
     let bgp_update_bytes = mk_bgp_update(&prefixes, &Announcements::None, &[]);
     let delta_id = (RotondaId(0), 0); // TODO
@@ -793,17 +796,17 @@ fn insert_withdrawal(store: Arc<Option<MultiThreadedStore<RibValue>>>, withdrawa
             RouteStatus::Withdrawn,
         );
         let rib_value = RouteWithUserDefinedHash::new(raw_route, 1).into();
-        store
-            .deref()
+        rib.load()
             .as_ref()
             .unwrap()
+            .store
             .insert(&prefix, rib_value)
             .unwrap();
     }
 }
 
 fn insert_announcement<C: Into<Community> + Copy>(
-    store: Arc<Option<MultiThreadedStore<RibValue>>>,
+    rib: Arc<ArcSwapOption<Rib<RibValue>>>,
     prefix: &str,
     n: u8,
     as_path: &[u32],
@@ -831,7 +834,7 @@ fn insert_announcement<C: Into<Community> + Copy>(
             .join(",")
     );
     insert_routes(
-        store,
+        rib,
         Announcements::from_str(&format!("e {} {next_hop} {communities} {prefix}", as_path))
             .unwrap(),
     );

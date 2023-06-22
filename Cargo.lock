@@ -1998,7 +1998,7 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0"
-source = "git+https://github.com/NLnetLabs/roto.git?branch=rotonda-blocks-wip#85c2106d036453c743818609dfc3d0fd733136c3"
+source = "git+https://github.com/NLnetLabs/roto.git#803075b9e250df4dec1d05fc3b49cfb9b8a70f45"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -2077,7 +2077,7 @@ dependencies = [
 [[package]]
 name = "rotonda-store"
 version = "0.3.0-pre.2"
-source = "git+https://github.com/NLnetLabs/rotonda-store.git?branch=more-serde-serialize#59ab05c9201129901274d111bcf75af206b2aa85"
+source = "git+https://github.com/NLnetLabs/rotonda-store.git#26fd3e071b4676b9521c54e6d943ba8dd4f038ca"
 dependencies = [
  "arc-swap",
  "crossbeam-epoch",
@@ -2091,7 +2091,7 @@ dependencies = [
 [[package]]
 name = "routecore"
 version = "0.4.0-dev"
-source = "git+https://github.com/NLnetLabs/routecore.git?branch=more-serde-serialize#31e870fee8cfb12bca32f67c191d22b57b79945b"
+source = "git+https://github.com/NLnetLabs/routecore.git#74791370dd5a2a1ca3a89afba1c40fc8c82ff14e"
 dependencies = [
  "bytes",
  "chrono",

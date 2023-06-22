@@ -1,6 +1,6 @@
 # Blocks
 
-Blocks are the primitives that the Rotonda user defines and combines to create a `Rotonda` application. 
+Blocks are the primitives that the `Rotonda` user defines and combines to create a `Rotonda` application. 
 
 Each block has a type itself, e.g. `Unit`, `Filter`, etc. and most of them have a sub-type, e.g. a `Unit` can have `PhysicalRib` as sub-type. The way they can be combined depends on the types of the blocks involved.
 
@@ -12,7 +12,7 @@ A module is the rug that ties the room together. It acts as a namespace. It does
 
 A `Unit` is the block that defines the flow of the data from west to east and the storage along the way. A `Rotonda` application should have at least one unit for it to function.
 
-A `Unit` has an API that can be used by the Rotonda user to query the contents of the unit.
+A `Unit` has an API that can be used by the `Rotonda` user to query the contents of the unit.
 
 ### Unit: Rib
 
@@ -25,7 +25,7 @@ A `RIB` is a unit that has a typed input, that receives a stream of data for tha
 // by Roto to `PhysicalRibConfig`. 
 unit rib-loc: PhysicalRib with config {
     merge_strategy: {
-        hash: (Route::prefix, Route::peer_id, Route::as_path),
+        key: (Route::peer_id, Route::as_path),
         overwrite: MOST_RECENT
         // other options: 
         // MOVING_WINDOW_COUNT(5)
@@ -118,7 +118,7 @@ A `Filter` is a part of a `Unit`. There is the `PureFilter` type that only can m
 
 ## DataSource Block
 
-A data source is a block that describes an external read-only data source to be used in a `Filter` block. Note that a Rotonda `PhysicalRib` is also considered an external data source, since a `Filter` block doesn't know in which unit it is going to be used.
+A data source is a block that describes an external read-only data source to be used in a `Filter` block. Note that a `Rotonda` `PhysicalRib` is also considered an external data source, since a `Filter` block doesn't know in which unit it is going to be used.
 
 ### DataSource: PhysicalRib
 
@@ -193,7 +193,7 @@ Beyond the MVP we want to create a CLI that allows a `Rotonda` user to build a p
 
 A `merge-strategy` consists of two phases: 
 
-- Establish uniqueness of a Route through a configurable hash, defaults to `(prefix, peer_id, AS_PATH)`.
+- Establish uniqueness of a Route through a configurable hash, defaults to `(peer_id, AS_PATH)`.
 - Overwrite strategy: `upsert` single entry, moving window over a chronological set of entries, set by count or set by time received.
 
 the merge strategy is a property of a RIB unit.

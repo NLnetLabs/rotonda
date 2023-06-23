@@ -19,6 +19,7 @@
 //
 // These contain all the actual unit types grouped by shared functionality.
 mod rib_unit;
+mod bgp_tcp_in;
 mod bmp_filter;
 mod bmp_tcp_in;
 mod roto_filter;
@@ -35,6 +36,9 @@ use serde::Deserialize;
 #[derive(Clone, Debug, Deserialize)]
 #[serde(tag = "type")]
 pub enum Unit {
+    #[serde(rename = "bgp-tcp-in")]
+    BgpTcpIn(bgp_tcp_in::unit::BgpTcpIn),
+
     #[serde(rename = "bmp-tcp-in")]
     BmpTcpIn(bmp_tcp_in::unit::BmpTcpIn),
 
@@ -56,6 +60,7 @@ pub enum Unit {
 impl Unit {
     pub async fn run(self, component: Component, gate: Gate, waitpoint: WaitPoint) {
         let _ = match self {
+            Unit::BgpTcpIn(unit) => unit.run(component, gate, waitpoint).await,
             Unit::BmpTcpIn(unit) => unit.run(component, gate, waitpoint).await,
             Unit::BmpFilter(unit) => unit.run(component, gate, waitpoint).await,
             Unit::RotoFilter(unit) => unit.run(component, gate, waitpoint).await,

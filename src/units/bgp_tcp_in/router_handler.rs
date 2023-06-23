@@ -1,10 +1,15 @@
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
+use bytes::Bytes;
 use log::{debug, warn};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+use roto::types::typevalue::TypeValue;
+use roto::types::builtin::{BuiltinTypeValue, Prefix, RawRouteWithDeltas};
+use roto::types::builtin::{RouteStatus, RotondaId, UpdateMessage};
 use routecore::asn::Asn;
+use routecore::bgp::message::UpdateMessage as UpdatePdu;
 
 use rotonda_fsm::bgp::session::{
     Command,
@@ -25,6 +30,7 @@ use super::unit::BgpTcpIn;
 struct Processor {
     gate: Gate,
     unit_cfg: BgpTcpIn,
+    bgp_ltime: u64, // XXX or should this be on Unit level?
     rx: mpsc::Receiver<Message>,
     tx: mpsc::Sender<Command>,
 }
@@ -36,7 +42,7 @@ impl Processor {
         rx: mpsc::Receiver<Message>,
         tx: mpsc::Sender<Command>
     ) -> Self {
-        Processor { gate, unit_cfg, rx, tx: tx }
+        Processor { gate, unit_cfg, bgp_ltime: 0, rx, tx }
     }
 
 
@@ -135,14 +141,7 @@ impl Processor {
                     match res {
                         None => { break; } 
                         Some(Message::UpdateMessage(pdu)) => {
-                            //let payload = Payload::bgp_msg(
-                            //    peer_addr.unwrap(), peer_asn.unwrap(), pdu
-                            //);
-                            let payload = Payload::TypeValue(
-                                todo!()
-                                //peer_addr.unwrap(), peer_asn.unwrap(), pdu
-                            );
-                            self.gate.update_data(Update::Single(payload)).await;
+                            self.process_update(pdu).await;
                         }
                         Some(Message::NotificationMessage(pdu)) => {
                             debug!(
@@ -174,6 +173,29 @@ impl Processor {
                 }
             }
 
+        }
+    }
+
+    async fn process_update(&self, pdu: UpdatePdu<Bytes>) {
+        for n in pdu.nlris().iter() {
+            let prefix = if let Some(prefix) = n.prefix() {
+                prefix
+            } else {
+                debug!("NLRI without actual prefix");
+                continue
+            };
+
+            let rot_id = RotondaId(0_usize);
+            let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
+            let rrwd = RawRouteWithDeltas::new_with_message(
+                (rot_id, ltime),
+                Prefix::new(prefix),
+                UpdateMessage(pdu.clone()),
+                RouteStatus::InConvergence
+                );
+            let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
+            let payload = Payload::TypeValue(typval);
+            self.gate.update_data(Update::Single(payload)).await;
         }
     }
 

@@ -20,15 +20,10 @@ use log::{error, log_enabled, trace};
 use non_empty_vec::NonEmpty;
 use roto::{
     traits::RotoType,
-    types::{
-        builtin::{BuiltinTypeValue, RawRouteWithDeltas},
-        datasources::Rib,
-        typevalue::TypeValue,
-    },
+    types::{builtin::BuiltinTypeValue, collections::ElementTypeValue, typevalue::TypeValue},
 };
 use rotonda_store::{
-    custom_alloc::Upsert, epoch, prelude::multi::PrefixStoreError, MultiThreadedStore, QueryResult,
-    RecordSet,
+    custom_alloc::Upsert, epoch, prelude::multi::PrefixStoreError, QueryResult, RecordSet,
 };
 
 use routecore::addr::Prefix;
@@ -50,7 +45,7 @@ use uuid::Uuid;
 use super::{
     http::PrefixesApi,
     metrics::RibUnitMetrics,
-    rib_value::{RibValue, RouteWithUserDefinedHash},
+    rib::{PhysicalRib, PreHashedTypeValue, RibValue},
     status_reporter::RibUnitStatusReporter,
 };
 
@@ -187,7 +182,7 @@ impl RibUnit {
 pub struct RibUnitRunner {
     gate: Arc<Gate>,
     component: Component,
-    rib: Arc<ArcSwapOption<Rib<RibValue>>>,
+    rib: Arc<ArcSwapOption<PhysicalRib>>,
     status_reporter: Option<Arc<RibUnitStatusReporter>>,
     roto_source: Arc<ArcSwap<(std::time::Instant, String)>>,
     pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
@@ -250,33 +245,20 @@ impl RibUnitRunner {
                 //
                 // --- TODO: Create the Rib based on the Roto script Rib 'contains' type
                 //
-                // Until Roto is able to tell us the type to use, hard-code it here for now.
-                // Note that this type does NOT have to match the M: Metadata type in Rib::store<M>.
+                // TODO: If the roto script changes we have to be able to detect if the record type changed, and if it
+                // did, recreate the store, dropping the current data, right?
                 //
-                let roto_script_rec_type = TypeDef::Route; //mk_rib_record_typedef().unwrap(); // TODO: handle this Err
-
-                //
-                // And then we construct the Rib (and the stores that it owns) based on this record type that we should learn
-                // from the roto script:
-                //
-
-                let rib = Rib::new(
-                    "my-rib", // TODO: Where should this name come from? Is it for lookup and access by other Roto scripts?
-                    roto_script_rec_type,
-                    MultiThreadedStore::<RibValue>::new().unwrap(), // TODO: handle this Err
-                );
-
-                //
-                // TODO: Meaning also that if the roto script changes we have to be able to detect if the record type changed,
-                // and if it did, recreate the store, dropping the current data, right?
-                //
-                // TOOD: And that also these steps should be done at reconfiguration time as well, not just at initialisation
-                // time (i.e. where we handle GateStatus::Reconfiguring below).
+                // TOOD: And that also these steps should be done at reconfiguration time as well, not just at
+                // initialisation time (i.e. where we handle GateStatus::Reconfiguring below).
                 //
                 // --- End: Create the Rib based on the Roto script Rib 'contains' type
                 //
 
-                Arc::new(ArcSwapOption::from_pointee(rib))
+                let physical_rib = PhysicalRib::new(
+                    "my-rib", // TODO: Where should this name come from? Is it for lookup and access by other Roto
+                );
+
+                Arc::new(ArcSwapOption::from_pointee(physical_rib))
             }
 
             RibType::Virtual(_) => Default::default(),
@@ -390,7 +372,7 @@ impl RibUnitRunner {
                                 if let Some(rib) = arc_self.rib.load().as_ref() {
                                     let guard = &epoch::pin();
                                     trace!("Performing triggered query {uuid}");
-                                    Ok(rib.store.match_prefix(&prefix, &match_options, guard))
+                                    Ok(rib.match_prefix(&prefix, &match_options, guard))
                                 } else {
                                     Err("Cannot query non-existent RIB".to_string())
                                 }
@@ -415,16 +397,12 @@ impl RibUnitRunner {
         gate: Arc<Gate>,
         status_reporter: Arc<RibUnitStatusReporter>,
         update: Update,
-        rib: Arc<ArcSwapOption<Rib<RibValue>>>,
+        rib: Arc<ArcSwapOption<PhysicalRib>>,
         insert: F,
         roto_source: Arc<ArcSwap<(Instant, String)>>,
         pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
     ) where
-        F: Fn(
-                &Prefix,
-                RibValue,
-                &MultiThreadedStore<RibValue>,
-            ) -> Result<(Upsert, u32), PrefixStoreError>
+        F: Fn(&Prefix, RibValue, &PhysicalRib) -> Result<(Upsert, u32), PrefixStoreError>
             + Send
             + Copy,
         F: 'static,
@@ -456,7 +434,7 @@ impl RibUnitRunner {
                 // );
 
                 if let Some(rib) = rib.load().as_ref() {
-                    status_reporter.unique_prefix_count_updated(rib.store.prefixes_count());
+                    status_reporter.unique_prefix_count_updated(rib.prefixes_count());
                 }
             }
 
@@ -505,18 +483,13 @@ impl RibUnitRunner {
 
     pub async fn process_update_single<F>(
         payload: Payload,
-        rib: Arc<ArcSwapOption<Rib<RibValue>>>,
+        rib: Arc<ArcSwapOption<PhysicalRib>>,
         insert: F,
         roto_source: Arc<ArcSwap<(Instant, String)>>,
         status_reporter: Arc<RibUnitStatusReporter>,
     ) -> Option<Update>
     where
-        F: Fn(
-                &Prefix,
-                RibValue,
-                &MultiThreadedStore<RibValue>,
-            ) -> Result<(Upsert, u32), PrefixStoreError>
-            + Send,
+        F: Fn(&Prefix, RibValue, &PhysicalRib) -> Result<(Upsert, u32), PrefixStoreError> + Send,
         F: 'static,
     {
         match payload {
@@ -526,25 +499,142 @@ impl RibUnitRunner {
                         // Nothing to do
                     }
 
-                    Ok(ControlFlow::Continue(mut output)) => {
-                        // TODO: RawBgpMessage should have a "source" indication (the peer which issued the route) so
-                        // that we can work out which route in the RIB a withdraw applies to.
-                        if let TypeValue::Builtin(BuiltinTypeValue::Route(ref mut route)) =
-                            &mut output
-                        {
-                            // Only physical RIBs have a store to insert into.
-                            if let Some(rib) = rib.load().as_ref() {
-                                // TODO: Don't hard code the hash keys here
-                                let hash = mk_user_defined_hash(
-                                    route,
-                                    &[TypeDef::IpAddress, TypeDef::AsPath],
-                                );
-                                let hashed_route =
-                                    RouteWithUserDefinedHash::new(route.clone(), hash);
-                                let rib_value = RibValue::from(hashed_route);
+                    Ok(ControlFlow::Continue(output)) => {
+                        // TODO: Review the comments below. They may be outdated already.
+                        //
+                        // TODO: BgpUpdateMessage should have a "source" indication (the peer from which it came) so
+                        // that we can work out which route in the RIB a withdraw applies to. When withdrawing a
+                        // RawRouteWithDelta we should include this "source" in the hash key used to overwrite/remove
+                        // the existing RawRouteWithDelta inside the RibValue at the prefix.
+                        // TODO: For now could we abuse the RotondaId for this? Probably not, it's only a usize.
+                        //
+                        // What uniquely identifies a peer such that when that peering session goes down (either via
+                        // our BGP-ingress losing its connection, or via our BMP-ingress receiving a Peer Down
+                        // Notification message) we can withdraw the routes that were active (announced but not yet
+                        // withdrawn) over that peering session (aka by that peer)?
+                        //
+                        // For BGP a peering session is a combination of a TCP session and a BGP OPEN message exchange.
+                        // The TCP session defines the connecting peer by source IP address and source port number. The
+                        // BGP OPEN message defines the connecting peer by ASN and 16-bit BGP identifier (historically
+                        // the IPv4 address of the peer). One could also include the local IP address and port number
+                        // tha the BGP session is connected to, in case we are listening on multiple, as these would be
+                        // distinct connections from connections to other local IP address and port numbers.
+                        //
+                        // For BMP a peering session is identified by the contents of the Peer Up Notification message.
+                        // This consists of a Local Address (IPv4 or IPv6 IP address), a Local Port, a Remote Port and
+                        // the received BGP OPEN message. So the Local Address, Local Port and Remote Port are
+                        // replacements for the information we don't have because we aren't ourselves actually
+                        // connected via TCP to the peer. We also have the Per Peer Header for the Peer Up Notification
+                        // message which contains the Peer Address which is the Remote Address we lack from the Peer Up
+                        // Notification message.
+                        //
+                        // So, the TCP connection carrying a single BGP session is between two peers, and thus the peer
+                        // that announces a route is uniquely identified by:
+                        // - For BGP-in: the TCP connection remote address:port -> local address:port tuple.
+                        // - For BMP-in: the Peer UP PPH address:Remote Port -> Peer Up Local Address:Local Port tuple.
+                        // Possibly in combination with the BGP Identifier (in the BGP OPEN message and the BMP PPH):
+                        //   "This 4-octet unsigned integer indicates the BGP Identifier of
+                        //    the sender.  A given BGP speaker sets the value of its BGP
+                        //    Identifier to an IP address that is assigned to that BGP
+                        //    speaker.  The value of the BGP Identifier is determined upon
+                        //    startup and is the same for every local interface and BGP peer."
+                        //
+                        // RFC 2686 relaxes the definition of BGP Identifier so we definitely cannot assume it is an
+                        // IPv4 address as defined by BGP 4271:
+                        //   "The BGP Identifier is a 4-octet, unsigned, non-zero integer that
+                        //    should be unique within an AS.  The value of the BGP Identifier
+                        //    for a BGP speaker is determined on startup and is the same for
+                        //    every local interface and every BGP peer."
+                        // But it still says "is the same for every local interface and every BGP peer".
+                        //
+                        // But the BMP RFC also says:
+                        //   "When a route is
+                        //    withdrawn by a peer, a corresponding withdraw is sent to the
+                        //    monitoring station.  The withdraw MUST have its L flag set to
+                        //    correspond to that of any previous announcement; if the route in
+                        //    question was previously announced with L flag both clear and set, the
+                        //    withdraw MUST similarly be sent twice, with L flag clear and set."
+                        //
+                        // The L flag:
+                        //   "The L flag, if set to 1, indicates that the message reflects
+                        //    the post-policy Adj-RIB-In (i.e., its path attributes reflect
+                        //    the application of inbound policy).  It is set to 0 if the
+                        //    message reflects the pre-policy Adj-RIB-In.  Locally sourced
+                        //    routes also carry an L flag of 1.  See Section 5 for further
+                        //    detail"
+                        //
+                        // And:
+                        //   "A BMP speaker may send pre-policy routes, post-policy routes, or
+                        //    both.  The selection may be due to implementation constraints (it is
+                        //    possible that a BGP implementation may not store, for example, routes
+                        //    that have been filtered out by policy).  Pre-policy routes MUST have
+                        //    their L flag clear in the BMP header (see Section 4), post-policy
+                        //    routes MUST have their L flag set.  When an implementation chooses to
+                        //    send both pre- and post-policy routes, it is effectively multiplexing
+                        //    two update streams onto the BMP session.  The streams are
+                        //    distinguished by their L flags."
+                        //
+                        // And finally, RFC 2858 defines route withdrawals per AFI/SAFI pair:
+                        //
+                        //   "Network Layer Reachability Information:
+                        //    (Ximon: MP_REACH_NLRI - announced routes)
+                        //    A variable length field that lists NLRI for the feasible routes
+                        //    that are being advertised in this attribute. When the
+                        //    Subsequent Address Family Identifier field is set to one of the
+                        //    values defined in this document, each NLRI is encoded as
+                        //    specified in the "NLRI encoding" section of this document."
+                        //
+                        //   "Withdrawn Routes:
+                        //    (Ximon: MP_UNREACH_NLRI - withdrawn routes)
+                        //    A variable length field that lists NLRI for the routes that are
+                        //    being withdrawn from service. When the Subsequent Address
+                        //    Family Identifier field is set to one of the values defined in
+                        //    this document, each NLRI is encoded as specified in the "NLRI
+                        //    encoding" section of this document."
+                        //
+                        // So (S)AFI is also part of the route matching criteria.
+
+                        // Only physical RIBs have a store to insert into.
+                        if let Some(rib) = rib.load().as_ref() {
+                            //
+                            // Where do we get the prefix from?
+                            // When we receive a route, use its prefix. This will always be the case at the start of
+                            // the pipeline. *UPDATE*: DO THIS FOR NOW.
+                            // When we receive a record, we can store it if it has a field named 'prefix' and of type
+                            // Prefix. *UPDATE:* DO _NOT_ DO THIS FOR NOW. INSTEAD ONLY SUPPORT INSERTION OF ROUTES.
+                            //
+                            // And is the operation add or remove?
+                            // Let's assume for now that "remove" only occurs due to some sort of expiration of entries
+                            // and/or maximum number of entries management.
+                            // The roto script can mark a route as withdrawn or for any other type it stores in the RIB
+                            // can similarly overwrite a previous value by the same key and set a non-key field to some
+                            // marker value indicating that this is a "removed" entry.
+                            // *UPDATE:* DO _NOT_ DO THIS FOR NOW. INSTEAD ONLY SUPPORT SPECIAL HANDLING FOR ROUTES.
+                            //
+                            let prefix: Option<Prefix> = match &output {
+                                TypeValue::Builtin(BuiltinTypeValue::Route(route)) => {
+                                    Some(route.prefix.into())
+                                }
+
+                                TypeValue::Record(record) => {
+                                    match record.get_value_for_field("prefix") {
+                                        Some(ElementTypeValue::Primitive(TypeValue::Builtin(
+                                            BuiltinTypeValue::Prefix(prefix),
+                                        ))) => Some((*prefix).into()),
+                                        _ => None,
+                                    }
+                                }
+
+                                _ => None,
+                            };
+
+                            if let Some(prefix) = prefix {
+                                let hash = rib.precompute_hash_code(&output);
+                                let hashed_value = PreHashedTypeValue::new(output.clone(), hash);
+                                let rib_value = RibValue::from(hashed_value);
 
                                 let pre_insert = Utc::now();
-                                match insert(&route.prefix.into(), rib_value, &rib.store) {
+                                match insert(&prefix, rib_value, rib) {
                                     Ok((upsert, num_retries)) => {
                                         let post_insert = Utc::now();
                                         let insert_delay = (post_insert - pre_insert)
@@ -595,7 +685,7 @@ impl RibUnitRunner {
                                         // }
                                     }
 
-                                    Err(err) => status_reporter.insert_failed(route.prefix, err),
+                                    Err(err) => status_reporter.insert_failed(prefix, err),
                                 }
                             }
                         }
@@ -671,15 +761,16 @@ impl RibUnitRunner {
         roto_source: Arc<ArcSwap<(Instant, String)>>,
         status_reporter: Arc<RibUnitStatusReporter>,
     ) -> Option<RibValue> {
-        let mut new_routes = HashedSet::with_capacity_and_hasher(1, HashBuildHasher::default());
+        let mut new_values = HashedSet::with_capacity_and_hasher(1, HashBuildHasher::default());
 
         for route in rib_value.iter() {
             let route_with_user_defined_hash = route.deref();
 
             // TODO: Once RibValue stores TypeValue instead of RawRouteWithDelta we can
             // get rid of this conversion to TypeValue.
+            // TODO: Errm, we're now storing TypeValue, so what do we need to change here?
             let raw_route_with_deltas = route_with_user_defined_hash.deref().clone();
-            let payload = Payload::TypeValue(raw_route_with_deltas.into());
+            let payload = Payload::TypeValue(raw_route_with_deltas);
 
             trace!("Reprocessing route");
 
@@ -693,24 +784,23 @@ impl RibUnitRunner {
             .await;
 
             #[allow(clippy::collapsible_match)]
-            if let Some(Update::Single(Payload::TypeValue(type_value))) = processed_update {
+            if let Some(Update::Single(Payload::TypeValue(mut type_value))) = processed_update {
                 // Add this processed query result route into the new query result
                 // TODO: Once RibValue stores TypeValue instead of RawRouteWithDelta we
                 // can get rid of this conversion from TypeValue.
-                if let TypeValue::Builtin(BuiltinTypeValue::Route(mut route)) = type_value {
-                    // TODO: Don't hard code the hash keys here
-                    let hash =
-                        mk_user_defined_hash(&mut route, &[TypeDef::IpAddress, TypeDef::AsPath]);
-                    let hashed_route = RouteWithUserDefinedHash::new(route.clone(), hash);
-                    new_routes.insert(hashed_route.into());
-                }
+                // TODO: Don't hard code the hash keys here
+                // TODO: Shouldn't this also use the new Rib::precompute_hash_code() here?
+                let hash =
+                    mk_user_defined_hash(&mut type_value, &[TypeDef::IpAddress, TypeDef::AsPath]);
+                let hashed_value = PreHashedTypeValue::new(type_value, hash);
+                new_values.insert(hashed_value.into());
             }
         }
 
-        if new_routes.is_empty() {
+        if new_values.is_empty() {
             None
         } else {
-            Some(RibValue::new(new_routes))
+            Some(RibValue::new(new_values))
         }
     }
 
@@ -759,28 +849,35 @@ impl RibUnitRunner {
     }
 }
 
-fn mk_user_defined_hash(route: &mut RawRouteWithDeltas, hash_keys: &[TypeDef]) -> u64 {
+fn mk_user_defined_hash(value: &mut TypeValue, hash_keys: &[TypeDef]) -> u64 {
     let mut hasher = DefaultHasher::new();
-    let attrs = route.get_latest_attrs();
 
-    for key in hash_keys {
-        match key {
-            TypeDef::AsPath => {
-                let hops = attrs.as_path.as_routecore_hops_vec();
-                for hop in hops {
-                    match hop {
-                        routecore::bgp::aspath::Hop::Asn(asn) => asn.hash(&mut hasher),
-                        routecore::bgp::aspath::Hop::Segment(segment) => segment.hash(&mut hasher),
+    // Temporary behaviour until https://github.com/NLnetLabs/roto/pull/5 is ready
+    // Errm, that PR is merged, what do we need to change here?
+    if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = value {
+        let attrs = route.get_latest_attrs();
+
+        for key in hash_keys {
+            match key {
+                TypeDef::AsPath => {
+                    let hops = attrs.as_path.as_routecore_hops_vec();
+                    for hop in hops {
+                        match hop {
+                            routecore::bgp::aspath::Hop::Asn(asn) => asn.hash(&mut hasher),
+                            routecore::bgp::aspath::Hop::Segment(segment) => {
+                                segment.hash(&mut hasher)
+                            }
+                        }
                     }
                 }
-            }
 
-            TypeDef::IpAddress => {
-                let prefix = Prefix::try_from(attrs.prefix.as_ref().unwrap()).unwrap();
-                prefix.addr().hash(&mut hasher);
-            }
+                TypeDef::IpAddress => {
+                    let prefix = Prefix::try_from(attrs.prefix.as_ref().unwrap()).unwrap();
+                    prefix.addr().hash(&mut hasher);
+                }
 
-            _ => todo!(),
+                _ => todo!(),
+            }
         }
     }
 
@@ -829,3 +926,99 @@ fn mk_user_defined_hash(route: &mut RawRouteWithDeltas, hash_keys: &[TypeDef]) -
 //         ("community", Box::new(my_comms_type)),
 //     ])
 // }
+
+// --- Tests ----------------------------------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use std::{net::IpAddr, str::FromStr};
+
+    use roto::types::builtin::{RawRouteWithDeltas, RotondaId, RouteStatus, UpdateMessage};
+    use routecore::{addr::Prefix, bgp::message::SessionConfig};
+
+    use crate::bgp::encode::{mk_bgp_update, Announcements, Prefixes};
+
+    use super::PhysicalRib;
+
+    #[test]
+    fn test_route_comparison_using_default_hash_key_values() {
+        let rib = PhysicalRib::new("test-rib");
+        let prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32).unwrap();
+        let peer_one = IpAddr::from_str("192.168.0.1").unwrap();
+        let peer_two = IpAddr::from_str("192.168.0.2").unwrap();
+        let announcement_one_from_peer_one =
+            mk_route_announcement(prefix, "123,456").with_peer_ip(peer_one);
+        let announcement_two_from_peer_one =
+            mk_route_announcement(prefix, "789,456").with_peer_ip(peer_one);
+        let announcement_one_from_peer_two =
+            mk_route_announcement(prefix, "123,456").with_peer_ip(peer_two);
+        let announcement_two_from_peer_two =
+            mk_route_announcement(prefix, "789,456").with_peer_ip(peer_two);
+
+        let hash_code_route_one_peer_one =
+            rib.precompute_hash_code(&announcement_one_from_peer_one.into());
+        let hash_code_route_one_peer_two =
+            rib.precompute_hash_code(&announcement_one_from_peer_two.into());
+        let hash_code_route_two_peer_one =
+            rib.precompute_hash_code(&announcement_two_from_peer_one.into());
+        let hash_code_route_two_peer_two =
+            rib.precompute_hash_code(&announcement_two_from_peer_two.into());
+
+        assert_ne!(
+            hash_code_route_one_peer_one, hash_code_route_one_peer_two,
+            "Routes that differ only by peer IP should be considered different"
+        );
+        assert_ne!(
+            hash_code_route_two_peer_one, hash_code_route_two_peer_two,
+            "Routes that differ only by peer IP should be considered different"
+        );
+        assert_ne!(
+            hash_code_route_one_peer_one, hash_code_route_two_peer_one,
+            "Routes that differ only by AS path should be considered different"
+        );
+        assert_ne!(
+            hash_code_route_one_peer_two, hash_code_route_two_peer_two,
+            "Routes that differ only by AS path should be considered different"
+        );
+
+        // Sanity checks
+        assert_eq!(hash_code_route_one_peer_one, hash_code_route_one_peer_one);
+        assert_eq!(hash_code_route_one_peer_two, hash_code_route_one_peer_two);
+        assert_eq!(hash_code_route_two_peer_one, hash_code_route_two_peer_one);
+        assert_eq!(hash_code_route_two_peer_two, hash_code_route_two_peer_two);
+    }
+
+    fn mk_route_announcement(prefix: Prefix, as_path: &str) -> RawRouteWithDeltas {
+        let delta_id = (RotondaId(0), 0);
+        let announcements = Announcements::from_str(&format!(
+            "e [{as_path}] 10.0.0.1 BLACKHOLE,123:44 {}",
+            prefix
+        ))
+        .unwrap();
+        let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
+
+        // When it is processed by this unit
+        let bgp_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        RawRouteWithDeltas::new_with_message(
+            delta_id,
+            prefix.into(),
+            bgp_update_msg,
+            RouteStatus::InConvergence,
+        )
+    }
+
+    fn mk_route_withdrawal(prefix: Prefix) -> RawRouteWithDeltas {
+        let delta_id = (RotondaId(0), 0);
+        let bgp_update_bytes =
+            mk_bgp_update(&Prefixes::new(vec![prefix]), &Announcements::None, &[]);
+
+        // When it is processed by this unit
+        let bgp_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        RawRouteWithDeltas::new_with_message(
+            delta_id,
+            prefix.into(),
+            bgp_update_msg,
+            RouteStatus::Withdrawn,
+        )
+    }
+}

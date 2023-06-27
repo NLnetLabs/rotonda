@@ -48,7 +48,7 @@ layout-rs          = { version = "^0.1", optional = true }
 mqtt               = { version = "0.18.0", package = "rumqttc", default-features = false, optional = true }
 non-empty-vec      = { version = "^0.2", features = ["serde"]}
 percent-encoding   = "^2.2"
-roto               = { version = "0.1.0", git = "https://github.com/NLnetLabs/roto.git" }
+roto               = { version = "0.1.0", git = "https://github.com/NLnetLabs/roto.git", branch = "add-originating-peer-to-route" }
 rotonda-store      = { version = "0.3.0-pre.2", git = "https://github.com/NLnetLabs/rotonda-store.git" }
 serde_with         = "^1.14"
 smallvec           = { version = "^1.10", features = ["const_generics", "const_new", "union"] }

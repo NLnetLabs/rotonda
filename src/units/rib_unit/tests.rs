@@ -1,27 +1,25 @@
 #[cfg(test)]
 mod tests {
-    use arc_swap::{ArcSwap, ArcSwapOption};
-    use roto::types::{
-        builtin::{BuiltinTypeValue, RawRouteWithDeltas, RotondaId, RouteStatus, UpdateMessage},
-        datasources::Rib,
-        typedef::TypeDef,
-        typevalue::TypeValue,
-    };
-    use rotonda_store::{
-        custom_alloc::Upsert, epoch, prelude::multi::PrefixStoreError, MatchOptions, MatchType,
-        MultiThreadedStore,
-    };
-    use routecore::{addr::Prefix, bgp::message::SessionConfig};
-
     use crate::{
         bgp::encode::{mk_bgp_update, Announcements, Prefixes},
         comms::Gate,
         payload::{Payload, Update},
         units::rib_unit::{
-            metrics::RibUnitMetrics, rib_value::RibValue, status_reporter::RibUnitStatusReporter,
+            metrics::RibUnitMetrics,
+            rib::{PhysicalRib, RibValue},
+            status_reporter::RibUnitStatusReporter,
             unit::RibUnitRunner,
         },
     };
+    use arc_swap::{ArcSwap, ArcSwapOption};
+    use roto::types::{
+        builtin::{BuiltinTypeValue, RawRouteWithDeltas, RotondaId, RouteStatus, UpdateMessage},
+        typevalue::TypeValue,
+    };
+    use rotonda_store::{
+        custom_alloc::Upsert, epoch, prelude::multi::PrefixStoreError, MatchOptions, MatchType,
+    };
+    use routecore::{addr::Prefix, bgp::message::SessionConfig};
 
     use std::{str::FromStr, sync::Arc, time::Instant};
 
@@ -36,7 +34,7 @@ mod tests {
         let update = run_process_single_update(payload.clone(), rib.clone(), metrics).await;
 
         // Then it should NOT be added to the route store
-        assert_eq!(rib.load().as_ref().unwrap().store.prefixes_count(), 0);
+        assert_eq!(rib.load().as_ref().unwrap().prefixes_count(), 0);
 
         // But should be output for forwarding to downstream units
         assert!(matches!(update, Some(Update::Single(p)) if p == payload));
@@ -69,7 +67,7 @@ mod tests {
         let gate_update = run_process_single_update(payload.clone(), rib.clone(), metrics).await;
 
         // Then it SHOULD be added to the route store
-        assert_eq!(rib.load().as_ref().unwrap().store.prefixes_count(), 1);
+        assert_eq!(rib.load().as_ref().unwrap().prefixes_count(), 1);
 
         // And SHOULD be output for forwarding to downstream units
         assert!(matches!(&gate_update, Some(Update::Single(p)) if p == &payload));
@@ -112,7 +110,7 @@ mod tests {
         let gate_update2 = run_process_single_update(payload.clone(), rib.clone(), metrics).await;
 
         // Then it SHOULD be added to the route store only once
-        assert_eq!(rib.load().as_ref().unwrap().store.prefixes_count(), 1);
+        assert_eq!(rib.load().as_ref().unwrap().prefixes_count(), 1);
 
         // And SHOULD be output twice for forwarding to downstream units
         assert!(matches!(&gate_update1, Some(Update::Single(p)) if p == &payload));
@@ -169,7 +167,7 @@ mod tests {
             }
 
             // Then only the one common prefix SHOULD be added to the route store
-            assert_eq!(rib.load().as_ref().unwrap().store.prefixes_count(), 1);
+            assert_eq!(rib.load().as_ref().unwrap().prefixes_count(), 1);
 
             // And at that prefix there should be one RibValue containing two routes
             let match_options = MatchOptions {
@@ -179,7 +177,7 @@ mod tests {
                 include_more_specifics: true,
             };
             eprintln!("Querying store match_prefix the first time");
-            let match_result = rib.load().as_ref().unwrap().store.match_prefix(
+            let match_result = rib.load().as_ref().unwrap().match_prefix(
                 &raw_prefix,
                 &match_options,
                 &epoch::pin(),
@@ -221,7 +219,7 @@ mod tests {
             // see that the routes HashSet Arc strong reference count increases from 2 to 3 while the inner items of the
             // HashSet still have a strong reference count of 1.
             eprintln!("Querying store match_prefix the second time");
-            let match_result2 = rib.load().as_ref().unwrap().store.match_prefix(
+            let match_result2 = rib.load().as_ref().unwrap().match_prefix(
                 &raw_prefix,
                 &match_options,
                 &epoch::pin(),
@@ -300,7 +298,7 @@ mod tests {
         }
 
         // Then two separate prefixes SHOULD be added to the route store
-        assert_eq!(rib.load().as_ref().unwrap().store.prefixes_count(), 2);
+        assert_eq!(rib.load().as_ref().unwrap().prefixes_count(), 2);
 
         // And at that prefix there should be two RibValues
         let match_options = MatchOptions {
@@ -311,11 +309,11 @@ mod tests {
         };
 
         for prefix in [raw_prefix1, raw_prefix2] {
-            let match_result = rib.load().as_ref().unwrap().store.match_prefix(
-                &prefix,
-                &match_options,
-                &epoch::pin(),
-            );
+            let match_result =
+                rib.load()
+                    .as_ref()
+                    .unwrap()
+                    .match_prefix(&prefix, &match_options, &epoch::pin());
             assert!(matches!(match_result.match_type, MatchType::ExactMatch));
             let rib_value = match_result.prefix_meta.unwrap(); // TODO: Why do we get the actual value out of the store here and not an Arc?
             assert_eq!(rib_value.len(), 1);
@@ -339,14 +337,14 @@ mod tests {
 
     fn test_init() -> (
         Arc<Gate>,
-        Arc<ArcSwapOption<Rib<RibValue>>>,
+        Arc<ArcSwapOption<PhysicalRib>>,
         Arc<RibUnitMetrics>,
     ) {
         let (gate, _gate_agent) = Gate::new(0);
         let gate = Arc::new(gate);
-        let store = MultiThreadedStore::<RibValue>::new().unwrap();
-        let rib = Rib::new("test-rib", TypeDef::Route, store);
-        let rib = Arc::new(ArcSwapOption::from_pointee(rib));
+        let physical_rib = PhysicalRib::new("test-rib");
+
+        let rib = Arc::new(ArcSwapOption::from_pointee(physical_rib));
         let metrics = Arc::new(RibUnitMetrics::new(&gate));
         (gate, rib, metrics)
     }
@@ -361,7 +359,7 @@ mod tests {
 
     async fn run_process_single_update(
         payload: Payload,
-        rib: Arc<ArcSwapOption<Rib<RibValue>>>,
+        rib: Arc<ArcSwapOption<PhysicalRib>>,
         metrics: Arc<RibUnitMetrics>,
     ) -> Option<Update> {
         let status_reporter = RibUnitStatusReporter::new("test metrics", metrics.clone());
@@ -370,7 +368,7 @@ mod tests {
         fn insert(
             prefix: &Prefix,
             rib_value: RibValue,
-            store: &MultiThreadedStore<RibValue>,
+            store: &PhysicalRib,
         ) -> Result<(Upsert, u32), PrefixStoreError> {
             eprintln!("Inserting {prefix} into the store");
             let res = store.insert(prefix, rib_value);

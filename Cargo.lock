@@ -1998,7 +1998,7 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0"
-source = "git+https://github.com/NLnetLabs/roto.git?branch=add-originating-peer-to-route#777ab9951601fc2dfb09316b77a28119fc4377ac"
+source = "git+https://github.com/NLnetLabs/roto.git?branch=add-originating-peer-to-route#ea3b597c99580e38c9e7903eb4999d7fab81c825"
 dependencies = [
  "arc-swap",
  "bytes",

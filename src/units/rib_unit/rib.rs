@@ -146,7 +146,7 @@ impl MergeUpdate for RibValue {
         Self: std::marker::Sized,
     {
         let new_per_prefix_item: &PreHashedTypeValue =
-            &update_meta.per_prefix_items.iter().next().unwrap();
+            update_meta.per_prefix_items.iter().next().unwrap();
         let new_per_prefix_potential_route: &TypeValue = new_per_prefix_item;
         let new_per_prefix_items = match new_per_prefix_potential_route {
             TypeValue::Builtin(BuiltinTypeValue::Route(new_route))
@@ -169,7 +169,7 @@ impl MergeUpdate for RibValue {
                         // See if it was originated by the same peer as the withdrawal we received:
                         let stored_phtv_ref = Arc::deref(v);
                         let to_update_ty_ref = stored_phtv_ref.deref();
-                        let possibly_modified_route = match to_update_ty_ref {
+                        match to_update_ty_ref {
                             TypeValue::Builtin(BuiltinTypeValue::Route(to_update_route))
                                 if to_update_route.peer_ip() == new_route.peer_ip()
                                     && to_update_route.peer_asn() == new_route.peer_asn() =>
@@ -188,8 +188,7 @@ impl MergeUpdate for RibValue {
                             }
 
                             _ => v.clone(), // clone Arc
-                        };
-                        possibly_modified_route
+                        }
                     })
                     .collect::<HashedSet<Arc<PreHashedTypeValue>>>()
                     .into() // into Arc

@@ -28,11 +28,28 @@ impl std::ops::Deref for PhysicalRib {
 
 impl PhysicalRib {
     pub fn new(name: &str) -> Self {
-        let mut as_path_hash_key_idx: SmallVec<[usize; 8]> = Default::default();
-        as_path_hash_key_idx.push(usize::from(RouteToken::AsPath));
-        let mut peer_ip_hash_key_id: SmallVec<[usize; 8]> = Default::default();
-        peer_ip_hash_key_id.push(usize::from(RouteToken::PeerIp));
-        let route_keys = vec![as_path_hash_key_idx, peer_ip_hash_key_id];
+        // What is the key that uniquely identifies routes to be withdrawn when a BGP peering session is lost?
+        //
+        // A route is an AS path to follow from a given peer to reach a given prefix.
+        // The prefix is not part of the values stored by a RIB as a RIB can be thought of as a mapping of prefix
+        // keys to route values.
+        //
+        // The key that uniquely identifies a route is thus, excluding prefix for a moment, the peer ID and the
+        // AS path to the prefix.
+        //
+        // A peer is uniquely identified by its BGP speaker IP address, but in case a BGP speaker at a given IP
+        // address establishes multiple sessions to us, IP address would not be enough to distinguish routes
+        // announced via one session vs those announced via another session. When one session goes down only its
+        // routes should be withdrawn and not those of the other sessions and so we also distinguish a peer by the
+        // ASN it represents. This allows for the scenario that a BGP speaker is configured for multiple ASNs, e.g.
+        // as part of a migration from one ASN to another.
+        //
+        // TODO: Are there other values from the BGP OPEN message that we may need to consider as disinguishing one
+        // peer from another?
+        let peer_ip_key = vec![RouteToken::PeerIp as usize].into();
+        let peer_asn_key = vec![RouteToken::PeerAsn as usize].into();
+        let as_path_key = vec![RouteToken::AsPath as usize].into();
+        let route_keys = vec![peer_ip_key, peer_asn_key, as_path_key];
 
         Self::with_custom_type(name, TypeDef::Route, route_keys)
     }
@@ -139,7 +156,7 @@ impl MergeUpdate for RibValue {
                         let stored_phtv_ref = Arc::deref(v);
                         let to_update_ty_ref = stored_phtv_ref.deref();
                         let possibly_modified_route = match to_update_ty_ref {
-                            TypeValue::Builtin(BuiltinTypeValue::Route(to_update_route)) if to_update_route.peer_ip() == new_route.peer_ip() => {
+                            TypeValue::Builtin(BuiltinTypeValue::Route(to_update_route)) if to_update_route.peer_ip() == new_route.peer_ip() && to_update_route.peer_asn() == new_route.peer_asn() => {
                                 let delta_id = (RotondaId(0), 0); // TODO
                                 let mut cloned_route = to_update_route.clone();
                                 cloned_route.update_status(delta_id, RouteStatus::Withdrawn);

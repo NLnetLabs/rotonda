@@ -1,9 +1,16 @@
-use std::{collections::hash_set, ops::Deref, sync::Arc, hash::{BuildHasher, Hasher}};
+use std::{
+    collections::hash_set,
+    hash::{BuildHasher, Hasher},
+    ops::Deref,
+    sync::Arc,
+};
 
 use hash_hasher::{HashBuildHasher, HashedSet};
 use roto::types::{
-    builtin::{BuiltinTypeValue, RouteStatus, RotondaId, RouteToken},
-    typevalue::TypeValue, typedef::{TypeDef, RibTypeDef}, datasources::Rib,
+    builtin::{BuiltinTypeValue, RotondaId, RouteStatus, RouteToken},
+    datasources::Rib,
+    typedef::{RibTypeDef, TypeDef},
+    typevalue::TypeValue,
 };
 use rotonda_store::{prelude::MergeUpdate, MultiThreadedStore};
 use serde::Serialize;
@@ -138,30 +145,45 @@ impl MergeUpdate for RibValue {
     where
         Self: std::marker::Sized,
     {
-        let new_per_prefix_item: &PreHashedTypeValue = &update_meta.per_prefix_items.iter().next().unwrap();
+        let new_per_prefix_item: &PreHashedTypeValue =
+            &update_meta.per_prefix_items.iter().next().unwrap();
         let new_per_prefix_potential_route: &TypeValue = new_per_prefix_item;
         let new_per_prefix_items = match new_per_prefix_potential_route {
             TypeValue::Builtin(BuiltinTypeValue::Route(new_route))
                 if new_route.status() == RouteStatus::Withdrawn =>
             {
                 // For routes, if it is an announce we replace or insert an existing route with the same hash key,
-                // but for a withdrawal we instead update the existing route with RouteStatus::Withdrawn instead of
-                // whichever state it currently has. If we were to replace the entire route we would lose information
-                // about it because withdrawal BGP UPDATE messages only state the prefix to withdraw a route to, they
-                // don't say which path that route follows.
+                // just like for any other type of RIB item. For a withdrawal however, we don't replace it but instead
+                // update it with RouteStatus::Withdrawn. If we were to replace the entire route we would lose
+                // information about it because withdrawal BGP UPDATE messages only state the prefix to withdraw a route
+                // to, they don't say which path that route follows.
+
+                // We're withdrawing a route. We can't locate the route to withdraw by its usual hash key as that is
+                // partly based on the AS path which is not part of a withdrawal, for a withdrawal we only know the
+                // originating peer and the prefix to which routes are being withdrawn.
+                //
+                // So: for each route to this prefix:
                 self.per_prefix_items
                     .iter()
                     .map(|v| {
-                        // Yuck.
+                        // See if it was originated by the same peer as the withdrawal we received:
                         let stored_phtv_ref = Arc::deref(v);
                         let to_update_ty_ref = stored_phtv_ref.deref();
                         let possibly_modified_route = match to_update_ty_ref {
-                            TypeValue::Builtin(BuiltinTypeValue::Route(to_update_route)) if to_update_route.peer_ip() == new_route.peer_ip() && to_update_route.peer_asn() == new_route.peer_asn() => {
+                            TypeValue::Builtin(BuiltinTypeValue::Route(to_update_route))
+                                if to_update_route.peer_ip() == new_route.peer_ip()
+                                    && to_update_route.peer_asn() == new_route.peer_asn() =>
+                            {
+                                // It was, so clone the value behind the Arc and mark it as withdrawn (which requires
+                                // mutable access to the route so can't be done via the Arc).
                                 let delta_id = (RotondaId(0), 0); // TODO
                                 let mut cloned_route = to_update_route.clone();
                                 cloned_route.update_status(delta_id, RouteStatus::Withdrawn);
                                 let cloned_tv: TypeValue = cloned_route.into();
-                                let cloned_phtv = PreHashedTypeValue::new(cloned_tv, stored_phtv_ref.precomputed_hash); // TODO: surely cloning the precomputed hash after modifying the value is a bad idea?
+                                let cloned_phtv = PreHashedTypeValue::new(
+                                    cloned_tv,
+                                    stored_phtv_ref.precomputed_hash,
+                                ); // TODO: surely cloning the precomputed hash after modifying the value is a bad idea?
                                 Arc::new(cloned_phtv)
                             }
 
@@ -264,9 +286,12 @@ impl Eq for PreHashedTypeValue {}
 
 #[cfg(test)]
 mod tests {
-    use std::{str::FromStr, sync::Arc, ops::Deref, net::IpAddr};
+    use std::{net::IpAddr, ops::Deref, str::FromStr, sync::Arc};
 
-    use roto::types::{builtin::{RawRouteWithDeltas, RotondaId, RouteStatus, UpdateMessage, BuiltinTypeValue}, typevalue::TypeValue};
+    use roto::types::{
+        builtin::{BuiltinTypeValue, RawRouteWithDeltas, RotondaId, RouteStatus, UpdateMessage},
+        typevalue::TypeValue,
+    };
     use rotonda_store::prelude::MergeUpdate;
     use routecore::{addr::Prefix, bgp::message::SessionConfig};
 
@@ -333,13 +358,19 @@ mod tests {
         let announcement_three = PreHashedTypeValue::new(announcement_three.into(), 3);
         let withdrawal = PreHashedTypeValue::new(withdrawal.into(), 1);
 
-        let rib_value = rib_value.clone_merge_update(&announcement_one.into()).unwrap();
+        let rib_value = rib_value
+            .clone_merge_update(&announcement_one.into())
+            .unwrap();
         assert_eq!(rib_value.len(), 1);
 
-        let rib_value = rib_value.clone_merge_update(&announcement_two.into()).unwrap();
+        let rib_value = rib_value
+            .clone_merge_update(&announcement_two.into())
+            .unwrap();
         assert_eq!(rib_value.len(), 2);
 
-        let rib_value = rib_value.clone_merge_update(&announcement_three.into()).unwrap();
+        let rib_value = rib_value
+            .clone_merge_update(&announcement_three.into())
+            .unwrap();
         assert_eq!(rib_value.len(), 3);
 
         let rib_value = rib_value.clone_merge_update(&withdrawal.into()).unwrap();
@@ -349,25 +380,34 @@ mod tests {
         let first = iter.next();
         assert!(first.is_some());
         let first_ty: &TypeValue = first.unwrap().deref();
-        assert!(matches!(first_ty, TypeValue::Builtin(BuiltinTypeValue::Route(_))));
+        assert!(matches!(
+            first_ty,
+            TypeValue::Builtin(BuiltinTypeValue::Route(_))
+        ));
         if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = first_ty {
             assert_eq!(route.peer_ip(), Some(peer_one));
             assert_eq!(route.status(), RouteStatus::Withdrawn);
         }
- 
+
         let next = iter.next();
         assert!(next.is_some());
         let next_ty: &TypeValue = next.unwrap().deref();
-        assert!(matches!(next_ty, TypeValue::Builtin(BuiltinTypeValue::Route(_))));
+        assert!(matches!(
+            next_ty,
+            TypeValue::Builtin(BuiltinTypeValue::Route(_))
+        ));
         if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = next_ty {
             assert_eq!(route.peer_ip(), Some(peer_one));
             assert_eq!(route.status(), RouteStatus::Withdrawn);
         }
- 
+
         let next = iter.next();
         assert!(next.is_some());
         let next_ty: &TypeValue = next.unwrap().deref();
-        assert!(matches!(next_ty, TypeValue::Builtin(BuiltinTypeValue::Route(_))));
+        assert!(matches!(
+            next_ty,
+            TypeValue::Builtin(BuiltinTypeValue::Route(_))
+        ));
         if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = next_ty {
             assert_eq!(route.peer_ip(), Some(peer_two));
             assert_eq!(route.status(), RouteStatus::InConvergence);

@@ -508,6 +508,12 @@ impl BmpInRunner {
                     // Run the state machine resulting in a new state.
                     let next_state = self.process_msg(&router_addr, this_state, bytes).await;
 
+                    // TODO: if the next_state is Aborted, we have no way of feeding that back to the TCP connection
+                    // handler... we can only sit here and uselessly pump any future messages into the dead state
+                    // machine ... The TCP handling architecture created for the domain crate may serve us better here
+                    // as it has a means for feeding back down from the application specific network handling layer to
+                    // the TCP handling layer.
+
                     // Store the new state machine state.
                     bmp_state.replace(next_state);
                 }

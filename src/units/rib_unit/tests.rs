@@ -37,7 +37,10 @@ mod tests {
         assert_eq!(rib.load().as_ref().unwrap().prefixes_count(), 0);
 
         // But should be output for forwarding to downstream units
-        assert!(matches!(update, Some(Update::Single(p)) if p == payload));
+        assert!(matches!(
+            update,
+            Some(Update::Single(Payload::TypeValue(TypeValue::Unknown)))
+        ));
     }
 
     #[tokio::test]

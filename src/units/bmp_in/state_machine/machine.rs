@@ -1,6 +1,7 @@
 use atomic_enum::atomic_enum;
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::FutureExt;
+use log::error;
 use roto::types::builtin::{BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus};
 
 /// RFC 7854 BMP processing.
@@ -448,13 +449,26 @@ where
         if let Some(prefixes_to_withdraw) = self.details.get_announced_prefixes(&pph) {
             if prefixes_to_withdraw.clone().peekable().next().is_some() {
                 let bgp_update = mk_bgp_update(prefixes_to_withdraw.clone());
-                let update =
-                    UpdateMessage::from_octets(bgp_update, SessionConfig::modern()).unwrap();
-                for prefix in prefixes_to_withdraw {
-                    let route =
-                        Self::mk_route_for_prefix(update.clone(), *prefix, RouteStatus::Withdrawn)
+                match UpdateMessage::from_octets(bgp_update.clone(), SessionConfig::modern()) {
+                    Ok(update) => {
+                        for prefix in prefixes_to_withdraw {
+                            let route = Self::mk_route_for_prefix(
+                                update.clone(),
+                                *prefix,
+                                RouteStatus::Withdrawn,
+                            )
                             .into();
-                    routes.push(route);
+                            routes.push(route);
+                        }
+                    }
+
+                    Err(err) => {
+                        let mut pcap_text = "000000 ".to_string();
+                        for b in bgp_update.as_ref() {
+                            pcap_text.push_str(&format!("{:02x} ", b));
+                        }
+                        error!("Internal error: Failed to issue internal BGP UPDATE to withdraw routes for a down peer. Reason: BGP UPDATE encoding error: {err}. PCAP TEXT: {pcap_text}");
+                    }
                 }
             }
         }

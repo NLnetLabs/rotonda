@@ -1,6 +1,6 @@
 use hyper::{Body, Response};
 
-use crate::{units::rib_unit::{http::PrefixesApi, rib_value::RibValue}};
+use crate::{units::rib_unit::{http::PrefixesApi, rib::RibValue}};
 
 impl PrefixesApi {
     pub fn mk_dump_response(res: &rotonda_store::QueryResult<RibValue>) -> Response<Body> {

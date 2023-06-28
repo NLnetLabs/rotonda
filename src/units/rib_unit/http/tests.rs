@@ -3,12 +3,7 @@ use std::{str::FromStr, sync::Arc};
 use arc_swap::{ArcSwap, ArcSwapOption};
 use assert_json_diff::{assert_json_matches_no_panic, CompareMode, Config};
 use hyper::{body::Bytes, Body, Request, StatusCode};
-use roto::types::{
-    builtin::{RawRouteWithDeltas, RotondaId, RouteStatus},
-    datasources::Rib,
-    typedef::TypeDef,
-};
-use rotonda_store::MultiThreadedStore;
+use roto::types::builtin::{RawRouteWithDeltas, RotondaId, RouteStatus};
 use routecore::bgp::{
     communities::{
         Community, ExtendedCommunity, LargeCommunity, ParseError, StandardCommunity, Wellknown,
@@ -26,7 +21,7 @@ use crate::{
     http::ProcessRequest,
     units::{
         rib_unit::{
-            rib_value::{RibValue, RouteWithUserDefinedHash},
+            rib::{PhysicalRib, PreHashedTypeValue},
             unit::{MoreSpecifics, QueryLimits},
         },
         RibType,
@@ -461,7 +456,7 @@ async fn exact_match_ipv4_with_large_communities() {
 #[tokio::test]
 async fn select_and_discard() {
     fn insert_announcement_helper<C: Into<Community>>(
-        store: Arc<ArcSwapOption<Rib<RibValue>>>,
+        store: Arc<ArcSwapOption<PhysicalRib>>,
         router_n: u8,
         as_path: &[u32],
         community: Option<C>,
@@ -663,7 +658,7 @@ async fn select_and_discard() {
 /// --- Helper functions ------------------------------------------------------------------------------------------
 
 async fn do_query(
-    rib: Arc<ArcSwapOption<Rib<RibValue>>>,
+    rib: Arc<ArcSwapOption<PhysicalRib>>,
     query: &str,
     expected_status_code: StatusCode,
     expected_body: Option<Value>,
@@ -716,7 +711,7 @@ async fn do_query(
 }
 
 async fn assert_query_eq(
-    rib: Arc<ArcSwapOption<Rib<RibValue>>>,
+    rib: Arc<ArcSwapOption<PhysicalRib>>,
     query: &str,
     expected_status_code: StatusCode,
     expected_body: Option<Value>,
@@ -740,13 +735,12 @@ async fn assert_query_eq(
     }
 }
 
-fn mk_rib() -> Arc<ArcSwapOption<Rib<RibValue>>> {
-    let store = MultiThreadedStore::<RibValue>::new().unwrap();
-    let rib = Rib::new("test-rib", TypeDef::Route, store);
-    Arc::new(ArcSwapOption::from_pointee(rib))
+fn mk_rib() -> Arc<ArcSwapOption<PhysicalRib>> {
+    let physical_rib = PhysicalRib::new("test-rib");
+    Arc::new(ArcSwapOption::from_pointee(physical_rib))
 }
 
-fn insert_routes(rib: Arc<ArcSwapOption<Rib<RibValue>>>, announcements: Announcements) {
+fn insert_routes(rib: Arc<ArcSwapOption<PhysicalRib>>, announcements: Announcements) {
     let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
     let delta_id = (RotondaId(0), 0); // TODO
     if let Announcements::Some {
@@ -768,18 +762,17 @@ fn insert_routes(rib: Arc<ArcSwapOption<Rib<RibValue>>>, announcements: Announce
                 roto_update_msg,
                 RouteStatus::InConvergence,
             );
-            let rib_value = RouteWithUserDefinedHash::new(raw_route, 1).into();
+            let rib_value = PreHashedTypeValue::new(raw_route.into(), 1).into();
             rib.load()
                 .as_ref()
                 .unwrap()
-                .store
                 .insert(&prefix, rib_value)
                 .unwrap();
         }
     }
 }
 
-fn insert_withdrawal(rib: Arc<ArcSwapOption<Rib<RibValue>>>, withdrawals: &str, n: u8) {
+fn insert_withdrawal(rib: Arc<ArcSwapOption<PhysicalRib>>, withdrawals: &str, n: u8) {
     let prefixes = Prefixes::from_str(withdrawals).unwrap();
     let bgp_update_bytes = mk_bgp_update(&prefixes, &Announcements::None, &[]);
     let delta_id = (RotondaId(0), 0); // TODO
@@ -795,18 +788,17 @@ fn insert_withdrawal(rib: Arc<ArcSwapOption<Rib<RibValue>>>, withdrawals: &str, 
             roto_update_msg,
             RouteStatus::Withdrawn,
         );
-        let rib_value = RouteWithUserDefinedHash::new(raw_route, 1).into();
+        let rib_value = PreHashedTypeValue::new(raw_route.into(), 1).into();
         rib.load()
             .as_ref()
             .unwrap()
-            .store
             .insert(&prefix, rib_value)
             .unwrap();
     }
 }
 
 fn insert_announcement<C: Into<Community> + Copy>(
-    rib: Arc<ArcSwapOption<Rib<RibValue>>>,
+    rib: Arc<ArcSwapOption<PhysicalRib>>,
     prefix: &str,
     n: u8,
     as_path: &[u32],

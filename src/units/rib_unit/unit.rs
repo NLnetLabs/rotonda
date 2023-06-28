@@ -30,9 +30,7 @@ use routecore::addr::Prefix;
 use serde::Deserialize;
 use std::{
     cell::RefCell,
-    collections::hash_map::DefaultHasher,
     fs::read_to_string,
-    hash::{Hash, Hasher},
     ops::{ControlFlow, Deref},
     path::PathBuf,
     str::FromStr,
@@ -49,7 +47,6 @@ use super::{
     status_reporter::RibUnitStatusReporter,
 };
 
-use roto::types::typedef::TypeDef;
 use std::time::Instant;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -457,6 +454,7 @@ impl RibUnitRunner {
                 trace!("Re-processing received query {uuid} result");
                 let processed_res = match upstream_query_result {
                     Ok(res) => Ok(Self::reprocess_query_results(
+                        rib.clone(),
                         res,
                         roto_source,
                         status_reporter.clone(),
@@ -500,117 +498,8 @@ impl RibUnitRunner {
                     }
 
                     Ok(ControlFlow::Continue(output)) => {
-                        // TODO: Review the comments below. They may be outdated already.
-                        //
-                        // TODO: BgpUpdateMessage should have a "source" indication (the peer from which it came) so
-                        // that we can work out which route in the RIB a withdraw applies to. When withdrawing a
-                        // RawRouteWithDelta we should include this "source" in the hash key used to overwrite/remove
-                        // the existing RawRouteWithDelta inside the RibValue at the prefix.
-                        // TODO: For now could we abuse the RotondaId for this? Probably not, it's only a usize.
-                        //
-                        // What uniquely identifies a peer such that when that peering session goes down (either via
-                        // our BGP-ingress losing its connection, or via our BMP-ingress receiving a Peer Down
-                        // Notification message) we can withdraw the routes that were active (announced but not yet
-                        // withdrawn) over that peering session (aka by that peer)?
-                        //
-                        // For BGP a peering session is a combination of a TCP session and a BGP OPEN message exchange.
-                        // The TCP session defines the connecting peer by source IP address and source port number. The
-                        // BGP OPEN message defines the connecting peer by ASN and 16-bit BGP identifier (historically
-                        // the IPv4 address of the peer). One could also include the local IP address and port number
-                        // tha the BGP session is connected to, in case we are listening on multiple, as these would be
-                        // distinct connections from connections to other local IP address and port numbers.
-                        //
-                        // For BMP a peering session is identified by the contents of the Peer Up Notification message.
-                        // This consists of a Local Address (IPv4 or IPv6 IP address), a Local Port, a Remote Port and
-                        // the received BGP OPEN message. So the Local Address, Local Port and Remote Port are
-                        // replacements for the information we don't have because we aren't ourselves actually
-                        // connected via TCP to the peer. We also have the Per Peer Header for the Peer Up Notification
-                        // message which contains the Peer Address which is the Remote Address we lack from the Peer Up
-                        // Notification message.
-                        //
-                        // So, the TCP connection carrying a single BGP session is between two peers, and thus the peer
-                        // that announces a route is uniquely identified by:
-                        // - For BGP-in: the TCP connection remote address:port -> local address:port tuple.
-                        // - For BMP-in: the Peer UP PPH address:Remote Port -> Peer Up Local Address:Local Port tuple.
-                        // Possibly in combination with the BGP Identifier (in the BGP OPEN message and the BMP PPH):
-                        //   "This 4-octet unsigned integer indicates the BGP Identifier of
-                        //    the sender.  A given BGP speaker sets the value of its BGP
-                        //    Identifier to an IP address that is assigned to that BGP
-                        //    speaker.  The value of the BGP Identifier is determined upon
-                        //    startup and is the same for every local interface and BGP peer."
-                        //
-                        // RFC 2686 relaxes the definition of BGP Identifier so we definitely cannot assume it is an
-                        // IPv4 address as defined by BGP 4271:
-                        //   "The BGP Identifier is a 4-octet, unsigned, non-zero integer that
-                        //    should be unique within an AS.  The value of the BGP Identifier
-                        //    for a BGP speaker is determined on startup and is the same for
-                        //    every local interface and every BGP peer."
-                        // But it still says "is the same for every local interface and every BGP peer".
-                        //
-                        // But the BMP RFC also says:
-                        //   "When a route is
-                        //    withdrawn by a peer, a corresponding withdraw is sent to the
-                        //    monitoring station.  The withdraw MUST have its L flag set to
-                        //    correspond to that of any previous announcement; if the route in
-                        //    question was previously announced with L flag both clear and set, the
-                        //    withdraw MUST similarly be sent twice, with L flag clear and set."
-                        //
-                        // The L flag:
-                        //   "The L flag, if set to 1, indicates that the message reflects
-                        //    the post-policy Adj-RIB-In (i.e., its path attributes reflect
-                        //    the application of inbound policy).  It is set to 0 if the
-                        //    message reflects the pre-policy Adj-RIB-In.  Locally sourced
-                        //    routes also carry an L flag of 1.  See Section 5 for further
-                        //    detail"
-                        //
-                        // And:
-                        //   "A BMP speaker may send pre-policy routes, post-policy routes, or
-                        //    both.  The selection may be due to implementation constraints (it is
-                        //    possible that a BGP implementation may not store, for example, routes
-                        //    that have been filtered out by policy).  Pre-policy routes MUST have
-                        //    their L flag clear in the BMP header (see Section 4), post-policy
-                        //    routes MUST have their L flag set.  When an implementation chooses to
-                        //    send both pre- and post-policy routes, it is effectively multiplexing
-                        //    two update streams onto the BMP session.  The streams are
-                        //    distinguished by their L flags."
-                        //
-                        // And finally, RFC 2858 defines route withdrawals per AFI/SAFI pair:
-                        //
-                        //   "Network Layer Reachability Information:
-                        //    (Ximon: MP_REACH_NLRI - announced routes)
-                        //    A variable length field that lists NLRI for the feasible routes
-                        //    that are being advertised in this attribute. When the
-                        //    Subsequent Address Family Identifier field is set to one of the
-                        //    values defined in this document, each NLRI is encoded as
-                        //    specified in the "NLRI encoding" section of this document."
-                        //
-                        //   "Withdrawn Routes:
-                        //    (Ximon: MP_UNREACH_NLRI - withdrawn routes)
-                        //    A variable length field that lists NLRI for the routes that are
-                        //    being withdrawn from service. When the Subsequent Address
-                        //    Family Identifier field is set to one of the values defined in
-                        //    this document, each NLRI is encoded as specified in the "NLRI
-                        //    encoding" section of this document."
-                        //
-                        // So (S)AFI is also part of the route matching criteria.
-
                         // Only physical RIBs have a store to insert into.
                         if let Some(rib) = rib.load().as_ref() {
-                            //
-                            // Where do we get the prefix from?
-                            // When we receive a route, use its prefix. This will always be the case at the start of
-                            // the pipeline. *UPDATE*: DO THIS FOR NOW.
-                            // When we receive a record, we can store it if it has a field named 'prefix' and of type
-                            // Prefix. *UPDATE:* DO _NOT_ DO THIS FOR NOW. INSTEAD ONLY SUPPORT INSERTION OF ROUTES.
-                            //
-                            // And is the operation add or remove?
-                            // Let's assume for now that "remove" only occurs due to some sort of expiration of entries
-                            // and/or maximum number of entries management.
-                            // The roto script can mark a route as withdrawn or for any other type it stores in the RIB
-                            // can similarly overwrite a previous value by the same key and set a non-key field to some
-                            // marker value indicating that this is a "removed" entry.
-                            // *UPDATE:* DO _NOT_ DO THIS FOR NOW. INSTEAD ONLY SUPPORT SPECIAL HANDLING FOR ROUTES.
-                            //
                             let prefix: Option<Prefix> = match &output {
                                 TypeValue::Builtin(BuiltinTypeValue::Route(route)) => {
                                     Some(route.prefix.into())
@@ -709,6 +598,7 @@ impl RibUnitRunner {
     }
 
     async fn reprocess_query_results(
+        rib: Arc<ArcSwapOption<PhysicalRib>>,
         res: QueryResult<RibValue>,
         roto_source: Arc<arc_swap::ArcSwapAny<Arc<(Instant, String)>>>,
         status_reporter: Arc<RibUnitStatusReporter>,
@@ -721,24 +611,41 @@ impl RibUnitRunner {
             more_specifics: None,
         };
 
-        if let Some(v) = &res.prefix_meta {
-            processed_res.prefix_meta =
-                Self::reprocess_rib_value(v, roto_source.clone(), status_reporter.clone()).await;
+        let is_in_prefix_meta_set = res.prefix_meta.is_some();
+
+        if let Some(rib_value) = res.prefix_meta {
+            processed_res.prefix_meta = Self::reprocess_rib_value(
+                rib.clone(),
+                rib_value,
+                roto_source.clone(),
+                status_reporter.clone(),
+            )
+            .await;
         }
 
         if let Some(record_set) = &res.less_specifics {
-            processed_res.less_specifics =
-                Self::reprocess_record_set(record_set, &roto_source, status_reporter.clone()).await;
+            processed_res.less_specifics = Self::reprocess_record_set(
+                rib.clone(),
+                record_set,
+                &roto_source,
+                status_reporter.clone(),
+            )
+            .await;
         }
 
         if let Some(record_set) = &res.more_specifics {
-            processed_res.more_specifics =
-                Self::reprocess_record_set(record_set, &roto_source, status_reporter.clone()).await;
+            processed_res.more_specifics = Self::reprocess_record_set(
+                rib.clone(),
+                record_set,
+                &roto_source,
+                status_reporter.clone(),
+            )
+            .await;
         }
 
         if log_enabled!(log::Level::Trace) {
-            let exact_match_diff =
-                (res.prefix_meta.is_some() as u8) - (processed_res.prefix_meta.is_some() as u8);
+            let is_out_prefix_meta_set = processed_res.prefix_meta.is_some();
+            let exact_match_diff = (is_in_prefix_meta_set as u8) - (is_out_prefix_meta_set as u8);
             let less_specifics_diff = res.less_specifics.map_or(0, |v| v.len())
                 - processed_res.less_specifics.as_ref().map_or(0, |v| v.len());
             let more_specifics_diff = res.more_specifics.map_or(0, |v| v.len())
@@ -757,20 +664,16 @@ impl RibUnitRunner {
     /// Used by virtual RIBs when a query result flows through them from West to East as a result of a query from a virtual
     /// RIB to the East made against a physical RIB to the West.
     async fn reprocess_rib_value(
-        rib_value: &RibValue,
+        rib: Arc<ArcSwapOption<PhysicalRib>>,
+        rib_value: RibValue,
         roto_source: Arc<ArcSwap<(Instant, String)>>,
         status_reporter: Arc<RibUnitStatusReporter>,
     ) -> Option<RibValue> {
         let mut new_values = HashedSet::with_capacity_and_hasher(1, HashBuildHasher::default());
 
         for route in rib_value.iter() {
-            let route_with_user_defined_hash = route.deref();
-
-            // TODO: Once RibValue stores TypeValue instead of RawRouteWithDelta we can
-            // get rid of this conversion to TypeValue.
-            // TODO: Errm, we're now storing TypeValue, so what do we need to change here?
-            let raw_route_with_deltas = route_with_user_defined_hash.deref().clone();
-            let payload = Payload::TypeValue(raw_route_with_deltas);
+            let in_type_value: &TypeValue = route.deref();
+            let payload = Payload::TypeValue(in_type_value.clone()); // TODO: Do we really want to clone here? Or pass the Arc on?
 
             trace!("Reprocessing route");
 
@@ -784,15 +687,14 @@ impl RibUnitRunner {
             .await;
 
             #[allow(clippy::collapsible_match)]
-            if let Some(Update::Single(Payload::TypeValue(mut type_value))) = processed_update {
+            if let Some(Update::Single(Payload::TypeValue(out_type_value))) = processed_update {
                 // Add this processed query result route into the new query result
-                // TODO: Once RibValue stores TypeValue instead of RawRouteWithDelta we
-                // can get rid of this conversion from TypeValue.
-                // TODO: Don't hard code the hash keys here
-                // TODO: Shouldn't this also use the new Rib::precompute_hash_code() here?
-                let hash =
-                    mk_user_defined_hash(&mut type_value, &[TypeDef::IpAddress, TypeDef::AsPath]);
-                let hashed_value = PreHashedTypeValue::new(type_value, hash);
+                let hash = rib
+                    .load()
+                    .as_ref()
+                    .unwrap()
+                    .precompute_hash_code(&out_type_value);
+                let hashed_value = PreHashedTypeValue::new(out_type_value, hash);
                 new_values.insert(hashed_value.into());
             }
         }
@@ -805,6 +707,7 @@ impl RibUnitRunner {
     }
 
     async fn reprocess_record_set(
+        rib: Arc<ArcSwapOption<PhysicalRib>>,
         record_set: &RecordSet<RibValue>,
         roto_source: &Arc<arc_swap::ArcSwapAny<Arc<(Instant, String)>>>,
         status_reporter: Arc<RibUnitStatusReporter>,
@@ -813,9 +716,13 @@ impl RibUnitRunner {
 
         for record in record_set.iter() {
             let rib_value = record.meta;
-            if let Some(rib_value) =
-                Self::reprocess_rib_value(&rib_value, roto_source.clone(), status_reporter.clone())
-                    .await
+            if let Some(rib_value) = Self::reprocess_rib_value(
+                rib.clone(),
+                rib_value,
+                roto_source.clone(),
+                status_reporter.clone(),
+            )
+            .await
             {
                 new_record_set.push(record.prefix, rib_value);
             }
@@ -847,41 +754,6 @@ impl RibUnitRunner {
             }
         }
     }
-}
-
-fn mk_user_defined_hash(value: &mut TypeValue, hash_keys: &[TypeDef]) -> u64 {
-    let mut hasher = DefaultHasher::new();
-
-    // Temporary behaviour until https://github.com/NLnetLabs/roto/pull/5 is ready
-    // Errm, that PR is merged, what do we need to change here?
-    if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = value {
-        let attrs = route.get_latest_attrs();
-
-        for key in hash_keys {
-            match key {
-                TypeDef::AsPath => {
-                    let hops = attrs.as_path.as_routecore_hops_vec();
-                    for hop in hops {
-                        match hop {
-                            routecore::bgp::aspath::Hop::Asn(asn) => asn.hash(&mut hasher),
-                            routecore::bgp::aspath::Hop::Segment(segment) => {
-                                segment.hash(&mut hasher)
-                            }
-                        }
-                    }
-                }
-
-                TypeDef::IpAddress => {
-                    let prefix = Prefix::try_from(attrs.prefix.as_ref().unwrap()).unwrap();
-                    prefix.addr().hash(&mut hasher);
-                }
-
-                _ => todo!(),
-            }
-        }
-    }
-
-    hasher.finish()
 }
 
 // fn mk_rib_record_typedef() -> Result<TypeDef, CompileError> {

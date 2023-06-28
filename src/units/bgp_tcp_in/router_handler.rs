@@ -2,7 +2,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 
 use bytes::Bytes;
-use log::{debug, warn};
+use log::{debug, error, warn};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use roto::types::typevalue::TypeValue;
@@ -33,6 +33,7 @@ struct Processor {
     bgp_ltime: u64, // XXX or should this be on Unit level?
     rx: mpsc::Receiver<Message>,
     tx: mpsc::Sender<Command>,
+    status_reporter: Arc<BgpTcpInStatusReporter>,
 }
 
 impl Processor {
@@ -40,34 +41,48 @@ impl Processor {
         gate: Gate,
         unit_cfg: BgpTcpIn,
         rx: mpsc::Receiver<Message>,
-        tx: mpsc::Sender<Command>
+        tx: mpsc::Sender<Command>,
+        status_reporter: Arc<BgpTcpInStatusReporter>,
     ) -> Self {
-        Processor { gate, unit_cfg, bgp_ltime: 0, rx, tx }
+        Processor { gate, unit_cfg, bgp_ltime: 0, rx, tx, status_reporter }
     }
 
 
-    async fn process(&mut self, session: BgpSession) {
+    async fn process(&mut self, mut session: BgpSession) {
         let (peer_addr, peer_asn) = session.details();
-        debug!("peer_addr peer_asn {:?} {:?}", peer_addr, peer_asn);
+        debug!("peer_addr peer_asn {:?} {}", peer_addr, peer_asn);
         let peer_addr_cfg = session.config.remote_addr;
         let current_config = session.config.clone();
+
+        // attempt to select! on session.tick() instead of passing the
+        // ownership into session.process()
+        /*
         tokio::spawn(async {
             session.process().await;
         });
+        */
 
         // XXX is this all OK cancel-safety-wise? 
         loop {
             tokio::select! {
+                fsm_res = session.tick() => {
+                    match fsm_res {
+                        Ok(()) => { },
+                        Err(e) => {
+                            error!("error from fsm: {e}");
+                            break;
+                        }
+                    }
+                }
                 res = self.gate.process() => {
                     match res {
                         Err(Terminated) => {
-                            debug!("TODO log via status_reporter");
-                            let _ = self.tx.send(
-                                Command::Disconnect(
+                            self.status_reporter.disconnect(peer_addr_cfg);
+                            let _ = self.tx.send(Command::Disconnect(
                                     DisconnectReason::Shutdown
-                                    )).await;
+                            )).await;
                             debug!("TODO send Payload::bgp_eof");
-                            break;
+                            //break;
                         }
                         Ok(status) => match status {
                             GateStatus::Reconfiguring {
@@ -100,11 +115,11 @@ impl Processor {
                                         )).await;
                                     break;
                                 } else {
-                                    // main unit has not changed, check for
-                                    // this specific peer
+                                    // Main unit has not changed, check for
+                                    // this specific peer.
                                     // A peer might have been removed from the
                                     // config, which results in a specific
-                                    // NOTIFICATION
+                                    // NOTIFICATION.
                                     if let Some(new_peer_config) = new_unit.peers.get(&peer_addr_cfg) {
                                         if new_peer_config.remote_asn != current_config.remote_asn ||
                                             new_peer_config.hold_time != current_config.hold_time {
@@ -119,6 +134,7 @@ impl Processor {
 
                                     } else {
                                         // disconnect, de-configured
+                                        self.status_reporter.disconnect(peer_addr_cfg);
                                         let _ = self.tx.send(
                                             Command::Disconnect(
                                                 DisconnectReason::Deconfigured
@@ -145,17 +161,18 @@ impl Processor {
                         }
                         Some(Message::NotificationMessage(pdu)) => {
                             debug!(
-                                "NOTIFICATION (TODO parse PDU): {:X?}",
-                                pdu.as_ref()
+                                "received NOTIFICATION: {:?}",
+                                pdu.details()
                             );
                         }
                         Some(Message::ConnectionLost) => {
                             //TODO clean up RIB etc?
                             if let Some(peer_addr) = peer_addr {
+                                self.status_reporter
+                                    .peer_connection_lost(peer_addr);
                                 debug!(
                                     "Connection lost: {}@{}",
-                                    peer_asn.map(|a| a.to_string())
-                                    .as_ref().map_or("no_ASN", String::as_str),
+                                    peer_asn,
                                     peer_addr
                                 );
                             } else {
@@ -176,6 +193,11 @@ impl Processor {
         }
     }
 
+    // For every NLRI and every withdrawal, send out a Single Payload to the
+    // next unit.
+    // TODO properly batch these per Action (one batch for announcements one
+    // batch for withdrawals). Should we switch to
+    // RawRouteWithDeltas::new_with_message_ref for that?
     async fn process_update(&self, pdu: UpdatePdu<Bytes>) {
         for n in pdu.nlris().iter() {
             let prefix = if let Some(prefix) = n.prefix() {
@@ -192,6 +214,26 @@ impl Processor {
                 Prefix::new(prefix),
                 UpdateMessage(pdu.clone()),
                 RouteStatus::InConvergence
+                );
+            let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
+            let payload = Payload::TypeValue(typval);
+            self.gate.update_data(Update::Single(payload)).await;
+        }
+        for w in pdu.withdrawals().iter() {
+            let prefix = if let Some(prefix) = w.prefix() {
+                prefix
+            } else {
+                debug!("Withdrawal without actual prefix");
+                continue
+            };
+
+            let rot_id = RotondaId(0_usize);
+            let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
+            let rrwd = RawRouteWithDeltas::new_with_message(
+                (rot_id, ltime),
+                Prefix::new(prefix),
+                UpdateMessage(pdu.clone()),
+                RouteStatus::Withdrawn
                 );
             let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
             let payload = Payload::TypeValue(typval);
@@ -236,9 +278,9 @@ pub async fn handle_router(
     match BgpSession::try_for_connection(
         config, tcp_stream, tx_sess
     ).await {
-        Ok((session, tx_cmds)) => {
+        Ok((mut session, tx_cmds)) => {
             debug!("session with {}", peer_addr);
-            let mut p = Processor::new(gate, unit_cfg, rx_sess, tx_cmds);
+            let mut p = Processor::new(gate, unit_cfg, rx_sess, tx_cmds, status_reporter);
             p.process(session).await;
         }
         Err(e) => {

@@ -78,7 +78,7 @@ impl PartialEq for BgpTcpIn {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct PeerConfig {
     pub name: String,
-    pub remote_asn: Option<Asn>,
+    pub remote_asn: Asn,
     pub hold_time: Option<u16>,
 }
 
@@ -180,16 +180,16 @@ impl BgpTcpInRunner {
                         }
 
                         UnitActivity::InputError(err) => {
-                            //TODO status_reporter.listener_io_error(&err);
+                            status_reporter.listener_io_error(&err);
                             break;
                         }
 
-                        UnitActivity::InputReceived((tcp_stream, router_addr)) => {
-                            //TODO status_reporter.listener_connection_accepted(router_addr);
+                        UnitActivity::InputReceived((tcp_stream, peer_addr)) => {
+                            status_reporter.listener_connection_accepted(peer_addr);
                             // do we actually need router_addr as a separate
                             // thing here?
                             accept_fut = Box::pin(listener.accept());
-                            Some((tcp_stream, router_addr))
+                            Some((tcp_stream, peer_addr))
                         }
 
                         UnitActivity::Terminated => {

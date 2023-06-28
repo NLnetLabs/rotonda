@@ -10,7 +10,7 @@ pub struct BgpTcpInMetrics {
     gate: Option<Arc<GateMetrics>>,
     pub listener_bound_count: Arc<AtomicUsize>,
     pub connection_accepted_count: Arc<AtomicUsize>,
-    pub session_count: Arc<AtomicUsize>,
+    pub established_session_count: Arc<AtomicUsize>,
     pub connection_lost_count: Arc<AtomicUsize>,
     pub disconnect_count: Arc<AtomicUsize>,
 }
@@ -26,15 +26,16 @@ impl BgpTcpInMetrics {
 
 impl GraphStatus for BgpTcpInMetrics {
     fn status_text(&self) -> String {
-        let num_sessions = self.session_count.load(Ordering::Relaxed);
+        //let num_sessions = self.established_session_count.load(Ordering::Relaxed);
         let num_msgs_out = self.gate.as_ref()
             .map(|gate| gate.num_updates.load(Ordering::Relaxed))
             .unwrap_or_default();
 
         format!(
-            "sessions: {}\nout: {}",
+            "out: {}",
+            //"sessions: {}\nout: {}",
+            //num_sessions, // TODO
             num_msgs_out,
-            num_sessions,
         )
     }
 }

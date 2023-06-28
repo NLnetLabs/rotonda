@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::{atomic::Ordering::Relaxed, Arc};
 
 use log::{debug, trace, warn};
@@ -26,7 +27,25 @@ impl BgpTcpInStatusReporter {
         sr_log!(trace: self, "Listening for connections on: {}", server_uri);
         self.metrics.listener_bound_count.fetch_add(1, Relaxed);
     }
-    
+
+    pub fn listener_connection_accepted(&self, router_addr: SocketAddr) {
+        sr_log!(debug: self, "Router connected from: {}", router_addr);
+        self.metrics.connection_accepted_count.fetch_add(1, Relaxed);
+    }
+
+    pub fn listener_io_error(&self, err: &std::io::Error) {
+        sr_log!(warn: self, "Error while listening for connections: {}", err);
+    }
+
+    pub fn peer_connection_lost(&self, peer_addr: SocketAddr) {
+        sr_log!(debug: self, "Router connection lost: {}", peer_addr);
+        self.metrics.connection_lost_count.fetch_add(1, Relaxed);
+    }
+
+    pub fn disconnect(&self, peer_addr: IpAddr) {
+        sr_log!(debug: self, "Disconnected from: {}", peer_addr);
+        self.metrics.disconnect_count.fetch_add(1, Relaxed);
+    }
 }
 
 impl UnitStatusReporter for BgpTcpInStatusReporter { }

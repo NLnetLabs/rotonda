@@ -393,8 +393,6 @@ where
             .capabilities()
             .any(|cap| cap.typ() == CapabilityType::GracefulRestart);
 
-        eprintln!("{pph} peer up [{}]", self.router_id);
-
         if !self.details.add_peer_config(pph, config, eor_capable) {
             // This is unexpected. How can we already have an entry in
             // the map for a peer which is currently up (i.e. we have

@@ -127,7 +127,7 @@ impl RibValue {
 
 #[cfg(test)]
 impl RibValue {
-    pub fn inner(&self) -> &Arc<HashedSet<Arc<PreHashedTypeValue>>> {
+    pub fn test_inner(&self) -> &Arc<HashedSet<Arc<PreHashedTypeValue>>> {
         &self.per_prefix_items
     }
 }

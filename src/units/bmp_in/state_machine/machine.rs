@@ -225,13 +225,13 @@ impl BmpState {
         }
     }
 
-    pub fn status_reporter(&self) -> Arc<BmpStatusReporter> {
+    pub fn status_reporter(&self) -> Option<Arc<BmpStatusReporter>> {
         match self {
-            BmpState::Initiating(v) => v.status_reporter.clone(),
-            BmpState::Dumping(v) => v.status_reporter.clone(),
-            BmpState::Updating(v) => v.status_reporter.clone(),
-            BmpState::Terminated(v) => v.status_reporter.clone(),
-            BmpState::Aborted(_, _) => todo!(),
+            BmpState::Initiating(v) => Some(v.status_reporter.clone()),
+            BmpState::Dumping(v) => Some(v.status_reporter.clone()),
+            BmpState::Updating(v) => Some(v.status_reporter.clone()),
+            BmpState::Terminated(v) => Some(v.status_reporter.clone()),
+            BmpState::Aborted(_, _) => None,
         }
     }
 }
@@ -729,11 +729,13 @@ impl BmpState {
         match may_panic_res {
             Ok(process_res) => {
                 if process_res.next_state.state_idx() != saved_state_idx {
-                    process_res.next_state.status_reporter().change_state(
-                        process_res.next_state.router_id(),
-                        saved_state_idx,
-                        process_res.next_state.state_idx(),
-                    );
+                    if let Some(reporter) = process_res.next_state.status_reporter() {
+                        reporter.change_state(
+                            process_res.next_state.router_id(),
+                            saved_state_idx,
+                            process_res.next_state.state_idx(),
+                        );
+                    }
                 }
 
                 process_res

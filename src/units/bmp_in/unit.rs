@@ -334,8 +334,9 @@ impl BmpInRunner {
         match res.processing_result {
             MessageType::InvalidMessage { err, known_peer, msg_bytes } => {
                 self.status_reporter.invalid_bmp_message_received(res.next_state.router_id());
-                res.next_state.status_reporter().bgp_update_parse_hard_fail(
-                    res.next_state.router_id(), known_peer, err, msg_bytes);
+                if let Some(reporter) = res.next_state.status_reporter() {
+                    reporter.bgp_update_parse_hard_fail(res.next_state.router_id(), known_peer, err, msg_bytes);
+                }
             }
 
             MessageType::StateTransition => {

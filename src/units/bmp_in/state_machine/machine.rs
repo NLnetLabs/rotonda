@@ -1,7 +1,7 @@
 use atomic_enum::atomic_enum;
-use bytes::{Bytes, BytesMut};
+use bytes::{BufMut, Bytes, BytesMut};
 use futures::FutureExt;
-use roto::types::builtin::{RawRouteWithDeltas, RotondaId, RouteStatus, BgpUpdateMessage};
+use roto::types::builtin::{BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus};
 
 /// RFC 7854 BMP processing.
 ///
@@ -33,7 +33,7 @@ use routecore::{
             update::{AddPath, FourOctetAsn},
             SessionConfig, UpdateMessage,
         },
-        types::{AFI, SAFI},
+        types::{PathAttributeType, AFI, SAFI},
     },
     bmp::message::{
         InformationTlvType, InitiationMessage, PeerDownNotification, PeerUpNotification,
@@ -393,6 +393,8 @@ where
             .capabilities()
             .any(|cap| cap.typ() == CapabilityType::GracefulRestart);
 
+        eprintln!("{pph} peer up [{}]", self.router_id);
+
         if !self.details.add_peer_config(pph, config, eor_capable) {
             // This is unexpected. How can we already have an entry in
             // the map for a peer which is currently up (i.e. we have
@@ -446,13 +448,16 @@ where
 
         let mut routes = SmallVec::new();
         if let Some(prefixes_to_withdraw) = self.details.get_announced_prefixes(&pph) {
-            let bgp_update = mk_bgp_update(prefixes_to_withdraw.clone());
-            let update = UpdateMessage::from_octets(bgp_update, SessionConfig::modern()).unwrap();
-            for prefix in prefixes_to_withdraw {
-                let route =
-                    Self::mk_route_for_prefix(update.clone(), *prefix, RouteStatus::Withdrawn)
-                        .into();
-                routes.push(route);
+            if prefixes_to_withdraw.clone().peekable().next().is_some() {
+                let bgp_update = mk_bgp_update(prefixes_to_withdraw.clone());
+                let update =
+                    UpdateMessage::from_octets(bgp_update, SessionConfig::modern()).unwrap();
+                for prefix in prefixes_to_withdraw {
+                    let route =
+                        Self::mk_route_for_prefix(update.clone(), *prefix, RouteStatus::Withdrawn)
+                            .into();
+                    routes.push(route);
+                }
             }
         }
 
@@ -495,7 +500,7 @@ where
             &PerPeerHeader<Bytes>,
             &UpdateMessage<Bytes>,
         ) -> ControlFlow<ProcessingResult, Self>,
-        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>
+        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>,
     {
         let mut tried_peer_configs = SmallVec::<[SessionConfig; 4]>::new();
 
@@ -544,7 +549,9 @@ where
                     let delta_id = (RotondaId(0), 0); // TODO
                     let roto_bgp_msg = BgpUpdateMessage::new(delta_id, update_msg);
                     let update = match filter_map(roto_bgp_msg, filter_data) {
-                        Ok(ControlFlow::Continue(new_or_modified_msg)) => new_or_modified_msg.raw_message().0.clone(),
+                        Ok(ControlFlow::Continue(new_or_modified_msg)) => {
+                            new_or_modified_msg.raw_message().0.clone()
+                        }
                         _ => return saved_self.mk_other_result(),
                     };
 
@@ -676,7 +683,8 @@ impl BmpState {
 
     #[allow(dead_code)]
     pub async fn process_msg(self, msg_buf: Bytes) -> ProcessingResult {
-        self.process_msg_with_filter(msg_buf, None::<()>, |msg, _| Ok(ControlFlow::Continue(msg))).await
+        self.process_msg_with_filter(msg_buf, None::<()>, |msg, _| Ok(ControlFlow::Continue(msg)))
+            .await
     }
 
     /// `filter` should return true if the BGP message should be ignored, i.e. be filtered out.
@@ -688,7 +696,8 @@ impl BmpState {
     ) -> ProcessingResult
     where
         D: UnwindSafe,
-        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String> + UnwindSafe,
+        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>
+            + UnwindSafe,
     {
         let saved_addr = self.addr();
         let saved_router_id = self.router_id().clone();
@@ -1145,17 +1154,33 @@ where
     //
     // From: https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
     let mut withdrawn_routes = BytesMut::new();
+    let mut mp_unreach_nlri = BytesMut::new();
+
     for prefix in withdrawals.into_iter() {
         let (addr, len) = prefix.addr_and_len();
-        withdrawn_routes.extend_from_slice(&[len]);
-        if len > 0 {
-            let min_bytes = div_ceil(len, 8) as usize;
-            match addr {
-                IpAddr::V4(v) => withdrawn_routes.extend_from_slice(&v.octets()[..min_bytes]),
-                IpAddr::V6(v) => withdrawn_routes.extend_from_slice(&v.octets()[..min_bytes]),
+        match addr {
+            IpAddr::V4(addr) => {
+                withdrawn_routes.extend_from_slice(&[len]);
+                if len > 0 {
+                    let min_bytes = div_ceil(len, 8) as usize;
+                    withdrawn_routes.extend_from_slice(&addr.octets()[..min_bytes]);
+                }
+            }
+            IpAddr::V6(addr) => {
+                // https://datatracker.ietf.org/doc/html/rfc4760#section-4
+                if mp_unreach_nlri.is_empty() {
+                    mp_unreach_nlri.put_u16(AFI::Ipv6.into());
+                    mp_unreach_nlri.put_u8(u8::from(SAFI::Unicast));
+                }
+                mp_unreach_nlri.extend_from_slice(&[len]);
+                if len > 0 {
+                    let min_bytes = div_ceil(len, 8) as usize;
+                    mp_unreach_nlri.extend_from_slice(&addr.octets()[..min_bytes]);
+                }
             }
         }
     }
+
     let num_withdrawn_route_bytes = u16::try_from(withdrawn_routes.len()).unwrap();
     buf.extend_from_slice(&num_withdrawn_route_bytes.to_be_bytes());
     // N withdrawn route bytes
@@ -1163,7 +1188,20 @@ where
         buf.extend(&withdrawn_routes); // the withdrawn routes
     }
 
-    buf.extend_from_slice(&0u16.to_be_bytes()); // 0 path attributes and no NLRI field
+    if !mp_unreach_nlri.is_empty() {
+        if mp_unreach_nlri.len() > u8::MAX.into() {
+            buf.put_u16(4u16 + u16::try_from(mp_unreach_nlri.len()).unwrap()); // num path attribute bytes
+            buf.put_u8(0b1001_0000); // optional (1), non-transitive (0), complete (0), extended (1)
+            buf.put_u8(u8::from(PathAttributeType::MpUnreachNlri)); // attr. type
+            buf.put_u16(mp_unreach_nlri.len().try_into().unwrap());
+        } else {
+            buf.put_u16(3u16 + u16::try_from(mp_unreach_nlri.len()).unwrap()); // num path attribute bytes
+            buf.put_u8(0b1000_0000); // optional (1), non-transitive (0), complete (0), non-extended (0)
+            buf.put_u8(15); // MP_UNREACH_NLRI attribute type code per RFC 4760
+            buf.put_u8(mp_unreach_nlri.len().try_into().unwrap());
+        }
+        buf.extend(&mp_unreach_nlri); // the withdrawn routes
+    }
 
     // Finalize BGP message
     finalize_bgp_msg_len(&mut buf);

@@ -20,24 +20,17 @@ use log::{error, log_enabled, trace};
 use non_empty_vec::NonEmpty;
 use roto::{
     traits::RotoType,
-    types::{
-        builtin::{BuiltinTypeValue, RawRouteWithDeltas},
-        datasources::Rib,
-        typevalue::TypeValue,
-    },
+    types::{builtin::BuiltinTypeValue, collections::ElementTypeValue, typevalue::TypeValue},
 };
 use rotonda_store::{
-    custom_alloc::Upsert, epoch, prelude::multi::PrefixStoreError, MultiThreadedStore, QueryResult,
-    RecordSet,
+    custom_alloc::Upsert, epoch, prelude::multi::PrefixStoreError, QueryResult, RecordSet,
 };
 
 use routecore::addr::Prefix;
 use serde::Deserialize;
 use std::{
     cell::RefCell,
-    collections::hash_map::DefaultHasher,
     fs::read_to_string,
-    hash::{Hash, Hasher},
     ops::{ControlFlow, Deref},
     path::PathBuf,
     str::FromStr,
@@ -50,11 +43,10 @@ use uuid::Uuid;
 use super::{
     http::PrefixesApi,
     metrics::RibUnitMetrics,
-    rib_value::{RibValue, RouteWithUserDefinedHash},
+    rib::{PhysicalRib, PreHashedTypeValue, RibValue},
     status_reporter::RibUnitStatusReporter,
 };
 
-use roto::types::typedef::TypeDef;
 use std::time::Instant;
 
 #[derive(Clone, Debug, Deserialize)]
@@ -187,7 +179,7 @@ impl RibUnit {
 pub struct RibUnitRunner {
     gate: Arc<Gate>,
     component: Component,
-    rib: Arc<ArcSwapOption<Rib<RibValue>>>,
+    rib: Arc<ArcSwapOption<PhysicalRib>>,
     status_reporter: Option<Arc<RibUnitStatusReporter>>,
     roto_source: Arc<ArcSwap<(std::time::Instant, String)>>,
     pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
@@ -250,33 +242,20 @@ impl RibUnitRunner {
                 //
                 // --- TODO: Create the Rib based on the Roto script Rib 'contains' type
                 //
-                // Until Roto is able to tell us the type to use, hard-code it here for now.
-                // Note that this type does NOT have to match the M: Metadata type in Rib::store<M>.
+                // TODO: If the roto script changes we have to be able to detect if the record type changed, and if it
+                // did, recreate the store, dropping the current data, right?
                 //
-                let roto_script_rec_type = TypeDef::Route; //mk_rib_record_typedef().unwrap(); // TODO: handle this Err
-
-                //
-                // And then we construct the Rib (and the stores that it owns) based on this record type that we should learn
-                // from the roto script:
-                //
-
-                let rib = Rib::new(
-                    "my-rib", // TODO: Where should this name come from? Is it for lookup and access by other Roto scripts?
-                    roto_script_rec_type,
-                    MultiThreadedStore::<RibValue>::new().unwrap(), // TODO: handle this Err
-                );
-
-                //
-                // TODO: Meaning also that if the roto script changes we have to be able to detect if the record type changed,
-                // and if it did, recreate the store, dropping the current data, right?
-                //
-                // TOOD: And that also these steps should be done at reconfiguration time as well, not just at initialisation
-                // time (i.e. where we handle GateStatus::Reconfiguring below).
+                // TOOD: And that also these steps should be done at reconfiguration time as well, not just at
+                // initialisation time (i.e. where we handle GateStatus::Reconfiguring below).
                 //
                 // --- End: Create the Rib based on the Roto script Rib 'contains' type
                 //
 
-                Arc::new(ArcSwapOption::from_pointee(rib))
+                let physical_rib = PhysicalRib::new(
+                    "my-rib", // TODO: Where should this name come from? Is it for lookup and access by other Roto
+                );
+
+                Arc::new(ArcSwapOption::from_pointee(physical_rib))
             }
 
             RibType::Virtual(_) => Default::default(),
@@ -390,7 +369,7 @@ impl RibUnitRunner {
                                 if let Some(rib) = arc_self.rib.load().as_ref() {
                                     let guard = &epoch::pin();
                                     trace!("Performing triggered query {uuid}");
-                                    Ok(rib.store.match_prefix(&prefix, &match_options, guard))
+                                    Ok(rib.match_prefix(&prefix, &match_options, guard))
                                 } else {
                                     Err("Cannot query non-existent RIB".to_string())
                                 }
@@ -415,16 +394,12 @@ impl RibUnitRunner {
         gate: Arc<Gate>,
         status_reporter: Arc<RibUnitStatusReporter>,
         update: Update,
-        rib: Arc<ArcSwapOption<Rib<RibValue>>>,
+        rib: Arc<ArcSwapOption<PhysicalRib>>,
         insert: F,
         roto_source: Arc<ArcSwap<(Instant, String)>>,
         pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
     ) where
-        F: Fn(
-                &Prefix,
-                RibValue,
-                &MultiThreadedStore<RibValue>,
-            ) -> Result<(Upsert, u32), PrefixStoreError>
+        F: Fn(&Prefix, RibValue, &PhysicalRib) -> Result<(Upsert, u32), PrefixStoreError>
             + Send
             + Copy,
         F: 'static,
@@ -456,7 +431,7 @@ impl RibUnitRunner {
                 // );
 
                 if let Some(rib) = rib.load().as_ref() {
-                    status_reporter.unique_prefix_count_updated(rib.store.prefixes_count());
+                    status_reporter.unique_prefix_count_updated(rib.prefixes_count());
                 }
             }
 
@@ -479,6 +454,7 @@ impl RibUnitRunner {
                 trace!("Re-processing received query {uuid} result");
                 let processed_res = match upstream_query_result {
                     Ok(res) => Ok(Self::reprocess_query_results(
+                        rib.clone(),
                         res,
                         roto_source,
                         status_reporter.clone(),
@@ -505,18 +481,13 @@ impl RibUnitRunner {
 
     pub async fn process_update_single<F>(
         payload: Payload,
-        rib: Arc<ArcSwapOption<Rib<RibValue>>>,
+        rib: Arc<ArcSwapOption<PhysicalRib>>,
         insert: F,
         roto_source: Arc<ArcSwap<(Instant, String)>>,
         status_reporter: Arc<RibUnitStatusReporter>,
     ) -> Option<Update>
     where
-        F: Fn(
-                &Prefix,
-                RibValue,
-                &MultiThreadedStore<RibValue>,
-            ) -> Result<(Upsert, u32), PrefixStoreError>
-            + Send,
+        F: Fn(&Prefix, RibValue, &PhysicalRib) -> Result<(Upsert, u32), PrefixStoreError> + Send,
         F: 'static,
     {
         match payload {
@@ -526,25 +497,33 @@ impl RibUnitRunner {
                         // Nothing to do
                     }
 
-                    Ok(ControlFlow::Continue(mut output)) => {
-                        // TODO: RawBgpMessage should have a "source" indication (the peer which issued the route) so
-                        // that we can work out which route in the RIB a withdraw applies to.
-                        if let TypeValue::Builtin(BuiltinTypeValue::Route(ref mut route)) =
-                            &mut output
-                        {
-                            // Only physical RIBs have a store to insert into.
-                            if let Some(rib) = rib.load().as_ref() {
-                                // TODO: Don't hard code the hash keys here
-                                let hash = mk_user_defined_hash(
-                                    route,
-                                    &[TypeDef::IpAddress, TypeDef::AsPath],
-                                );
-                                let hashed_route =
-                                    RouteWithUserDefinedHash::new(route.clone(), hash);
-                                let rib_value = RibValue::from(hashed_route);
+                    Ok(ControlFlow::Continue(output)) => {
+                        // Only physical RIBs have a store to insert into.
+                        if let Some(rib) = rib.load().as_ref() {
+                            let prefix: Option<Prefix> = match &output {
+                                TypeValue::Builtin(BuiltinTypeValue::Route(route)) => {
+                                    Some(route.prefix.into())
+                                }
+
+                                TypeValue::Record(record) => {
+                                    match record.get_value_for_field("prefix") {
+                                        Some(ElementTypeValue::Primitive(TypeValue::Builtin(
+                                            BuiltinTypeValue::Prefix(prefix),
+                                        ))) => Some((*prefix).into()),
+                                        _ => None,
+                                    }
+                                }
+
+                                _ => None,
+                            };
+
+                            if let Some(prefix) = prefix {
+                                let hash = rib.precompute_hash_code(&output);
+                                let hashed_value = PreHashedTypeValue::new(output.clone(), hash);
+                                let rib_value = RibValue::from(hashed_value);
 
                                 let pre_insert = Utc::now();
-                                match insert(&route.prefix.into(), rib_value, &rib.store) {
+                                match insert(&prefix, rib_value, rib) {
                                     Ok((upsert, num_retries)) => {
                                         let post_insert = Utc::now();
                                         let insert_delay = (post_insert - pre_insert)
@@ -595,7 +574,7 @@ impl RibUnitRunner {
                                         // }
                                     }
 
-                                    Err(err) => status_reporter.insert_failed(route.prefix, err),
+                                    Err(err) => status_reporter.insert_failed(prefix, err),
                                 }
                             }
                         }
@@ -619,6 +598,7 @@ impl RibUnitRunner {
     }
 
     async fn reprocess_query_results(
+        rib: Arc<ArcSwapOption<PhysicalRib>>,
         res: QueryResult<RibValue>,
         roto_source: Arc<arc_swap::ArcSwapAny<Arc<(Instant, String)>>>,
         status_reporter: Arc<RibUnitStatusReporter>,
@@ -631,24 +611,41 @@ impl RibUnitRunner {
             more_specifics: None,
         };
 
-        if let Some(v) = &res.prefix_meta {
-            processed_res.prefix_meta =
-                Self::reprocess_rib_value(v, roto_source.clone(), status_reporter.clone()).await;
+        let is_in_prefix_meta_set = res.prefix_meta.is_some();
+
+        if let Some(rib_value) = res.prefix_meta {
+            processed_res.prefix_meta = Self::reprocess_rib_value(
+                rib.clone(),
+                rib_value,
+                roto_source.clone(),
+                status_reporter.clone(),
+            )
+            .await;
         }
 
         if let Some(record_set) = &res.less_specifics {
-            processed_res.less_specifics =
-                Self::reprocess_record_set(record_set, &roto_source, status_reporter.clone()).await;
+            processed_res.less_specifics = Self::reprocess_record_set(
+                rib.clone(),
+                record_set,
+                &roto_source,
+                status_reporter.clone(),
+            )
+            .await;
         }
 
         if let Some(record_set) = &res.more_specifics {
-            processed_res.more_specifics =
-                Self::reprocess_record_set(record_set, &roto_source, status_reporter.clone()).await;
+            processed_res.more_specifics = Self::reprocess_record_set(
+                rib.clone(),
+                record_set,
+                &roto_source,
+                status_reporter.clone(),
+            )
+            .await;
         }
 
         if log_enabled!(log::Level::Trace) {
-            let exact_match_diff =
-                (res.prefix_meta.is_some() as u8) - (processed_res.prefix_meta.is_some() as u8);
+            let is_out_prefix_meta_set = processed_res.prefix_meta.is_some();
+            let exact_match_diff = (is_in_prefix_meta_set as u8) - (is_out_prefix_meta_set as u8);
             let less_specifics_diff = res.less_specifics.map_or(0, |v| v.len())
                 - processed_res.less_specifics.as_ref().map_or(0, |v| v.len());
             let more_specifics_diff = res.more_specifics.map_or(0, |v| v.len())
@@ -667,19 +664,16 @@ impl RibUnitRunner {
     /// Used by virtual RIBs when a query result flows through them from West to East as a result of a query from a virtual
     /// RIB to the East made against a physical RIB to the West.
     async fn reprocess_rib_value(
-        rib_value: &RibValue,
+        rib: Arc<ArcSwapOption<PhysicalRib>>,
+        rib_value: RibValue,
         roto_source: Arc<ArcSwap<(Instant, String)>>,
         status_reporter: Arc<RibUnitStatusReporter>,
     ) -> Option<RibValue> {
-        let mut new_routes = HashedSet::with_capacity_and_hasher(1, HashBuildHasher::default());
+        let mut new_values = HashedSet::with_capacity_and_hasher(1, HashBuildHasher::default());
 
         for route in rib_value.iter() {
-            let route_with_user_defined_hash = route.deref();
-
-            // TODO: Once RibValue stores TypeValue instead of RawRouteWithDelta we can
-            // get rid of this conversion to TypeValue.
-            let raw_route_with_deltas = route_with_user_defined_hash.deref().clone();
-            let payload = Payload::TypeValue(raw_route_with_deltas.into());
+            let in_type_value: &TypeValue = route.deref();
+            let payload = Payload::TypeValue(in_type_value.clone()); // TODO: Do we really want to clone here? Or pass the Arc on?
 
             trace!("Reprocessing route");
 
@@ -693,28 +687,27 @@ impl RibUnitRunner {
             .await;
 
             #[allow(clippy::collapsible_match)]
-            if let Some(Update::Single(Payload::TypeValue(type_value))) = processed_update {
+            if let Some(Update::Single(Payload::TypeValue(out_type_value))) = processed_update {
                 // Add this processed query result route into the new query result
-                // TODO: Once RibValue stores TypeValue instead of RawRouteWithDelta we
-                // can get rid of this conversion from TypeValue.
-                if let TypeValue::Builtin(BuiltinTypeValue::Route(mut route)) = type_value {
-                    // TODO: Don't hard code the hash keys here
-                    let hash =
-                        mk_user_defined_hash(&mut route, &[TypeDef::IpAddress, TypeDef::AsPath]);
-                    let hashed_route = RouteWithUserDefinedHash::new(route.clone(), hash);
-                    new_routes.insert(hashed_route.into());
-                }
+                let hash = rib
+                    .load()
+                    .as_ref()
+                    .unwrap()
+                    .precompute_hash_code(&out_type_value);
+                let hashed_value = PreHashedTypeValue::new(out_type_value, hash);
+                new_values.insert(hashed_value.into());
             }
         }
 
-        if new_routes.is_empty() {
+        if new_values.is_empty() {
             None
         } else {
-            Some(RibValue::new(new_routes))
+            Some(RibValue::new(new_values))
         }
     }
 
     async fn reprocess_record_set(
+        rib: Arc<ArcSwapOption<PhysicalRib>>,
         record_set: &RecordSet<RibValue>,
         roto_source: &Arc<arc_swap::ArcSwapAny<Arc<(Instant, String)>>>,
         status_reporter: Arc<RibUnitStatusReporter>,
@@ -723,9 +716,13 @@ impl RibUnitRunner {
 
         for record in record_set.iter() {
             let rib_value = record.meta;
-            if let Some(rib_value) =
-                Self::reprocess_rib_value(&rib_value, roto_source.clone(), status_reporter.clone())
-                    .await
+            if let Some(rib_value) = Self::reprocess_rib_value(
+                rib.clone(),
+                rib_value,
+                roto_source.clone(),
+                status_reporter.clone(),
+            )
+            .await
             {
                 new_record_set.push(record.prefix, rib_value);
             }
@@ -757,34 +754,6 @@ impl RibUnitRunner {
             }
         }
     }
-}
-
-fn mk_user_defined_hash(route: &mut RawRouteWithDeltas, hash_keys: &[TypeDef]) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    let attrs = route.get_latest_attrs();
-
-    for key in hash_keys {
-        match key {
-            TypeDef::AsPath => {
-                let hops = attrs.as_path.as_routecore_hops_vec();
-                for hop in hops {
-                    match hop {
-                        routecore::bgp::aspath::Hop::Asn(asn) => asn.hash(&mut hasher),
-                        routecore::bgp::aspath::Hop::Segment(segment) => segment.hash(&mut hasher),
-                    }
-                }
-            }
-
-            TypeDef::IpAddress => {
-                let prefix = Prefix::try_from(attrs.prefix.as_ref().unwrap()).unwrap();
-                prefix.addr().hash(&mut hasher);
-            }
-
-            _ => todo!(),
-        }
-    }
-
-    hasher.finish()
 }
 
 // fn mk_rib_record_typedef() -> Result<TypeDef, CompileError> {
@@ -829,3 +798,99 @@ fn mk_user_defined_hash(route: &mut RawRouteWithDeltas, hash_keys: &[TypeDef]) -
 //         ("community", Box::new(my_comms_type)),
 //     ])
 // }
+
+// --- Tests ----------------------------------------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use std::{net::IpAddr, str::FromStr};
+
+    use roto::types::builtin::{RawRouteWithDeltas, RotondaId, RouteStatus, UpdateMessage};
+    use routecore::{addr::Prefix, bgp::message::SessionConfig};
+
+    use crate::bgp::encode::{mk_bgp_update, Announcements, Prefixes};
+
+    use super::PhysicalRib;
+
+    #[test]
+    fn test_route_comparison_using_default_hash_key_values() {
+        let rib = PhysicalRib::new("test-rib");
+        let prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32).unwrap();
+        let peer_one = IpAddr::from_str("192.168.0.1").unwrap();
+        let peer_two = IpAddr::from_str("192.168.0.2").unwrap();
+        let announcement_one_from_peer_one =
+            mk_route_announcement(prefix, "123,456").with_peer_ip(peer_one);
+        let announcement_two_from_peer_one =
+            mk_route_announcement(prefix, "789,456").with_peer_ip(peer_one);
+        let announcement_one_from_peer_two =
+            mk_route_announcement(prefix, "123,456").with_peer_ip(peer_two);
+        let announcement_two_from_peer_two =
+            mk_route_announcement(prefix, "789,456").with_peer_ip(peer_two);
+
+        let hash_code_route_one_peer_one =
+            rib.precompute_hash_code(&announcement_one_from_peer_one.into());
+        let hash_code_route_one_peer_two =
+            rib.precompute_hash_code(&announcement_one_from_peer_two.into());
+        let hash_code_route_two_peer_one =
+            rib.precompute_hash_code(&announcement_two_from_peer_one.into());
+        let hash_code_route_two_peer_two =
+            rib.precompute_hash_code(&announcement_two_from_peer_two.into());
+
+        assert_ne!(
+            hash_code_route_one_peer_one, hash_code_route_one_peer_two,
+            "Routes that differ only by peer IP should be considered different"
+        );
+        assert_ne!(
+            hash_code_route_two_peer_one, hash_code_route_two_peer_two,
+            "Routes that differ only by peer IP should be considered different"
+        );
+        assert_ne!(
+            hash_code_route_one_peer_one, hash_code_route_two_peer_one,
+            "Routes that differ only by AS path should be considered different"
+        );
+        assert_ne!(
+            hash_code_route_one_peer_two, hash_code_route_two_peer_two,
+            "Routes that differ only by AS path should be considered different"
+        );
+
+        // Sanity checks
+        assert_eq!(hash_code_route_one_peer_one, hash_code_route_one_peer_one);
+        assert_eq!(hash_code_route_one_peer_two, hash_code_route_one_peer_two);
+        assert_eq!(hash_code_route_two_peer_one, hash_code_route_two_peer_one);
+        assert_eq!(hash_code_route_two_peer_two, hash_code_route_two_peer_two);
+    }
+
+    fn mk_route_announcement(prefix: Prefix, as_path: &str) -> RawRouteWithDeltas {
+        let delta_id = (RotondaId(0), 0);
+        let announcements = Announcements::from_str(&format!(
+            "e [{as_path}] 10.0.0.1 BLACKHOLE,123:44 {}",
+            prefix
+        ))
+        .unwrap();
+        let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
+
+        // When it is processed by this unit
+        let bgp_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        RawRouteWithDeltas::new_with_message(
+            delta_id,
+            prefix.into(),
+            bgp_update_msg,
+            RouteStatus::InConvergence,
+        )
+    }
+
+    fn mk_route_withdrawal(prefix: Prefix) -> RawRouteWithDeltas {
+        let delta_id = (RotondaId(0), 0);
+        let bgp_update_bytes =
+            mk_bgp_update(&Prefixes::new(vec![prefix]), &Announcements::None, &[]);
+
+        // When it is processed by this unit
+        let bgp_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        RawRouteWithDeltas::new_with_message(
+            delta_id,
+            prefix.into(),
+            bgp_update_msg,
+            RouteStatus::Withdrawn,
+        )
+    }
+}

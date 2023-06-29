@@ -1200,7 +1200,9 @@ where
         buf.extend(&withdrawn_routes); // the withdrawn routes
     }
 
-    if !mp_unreach_nlri.is_empty() {
+    if mp_unreach_nlri.is_empty() {
+        buf.put_u16(0u16); // no path attributes
+    } else {
         if mp_unreach_nlri.len() > u8::MAX.into() {
             buf.put_u16(4u16 + u16::try_from(mp_unreach_nlri.len()).unwrap()); // num path attribute bytes
             buf.put_u8(0b1001_0000); // optional (1), non-transitive (0), complete (0), extended (1)

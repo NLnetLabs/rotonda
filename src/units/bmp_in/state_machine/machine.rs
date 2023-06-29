@@ -450,28 +450,28 @@ where
             if prefixes_to_withdraw.clone().peekable().next().is_some() {
                 match mk_bgp_update(prefixes_to_withdraw.clone()) {
                     Ok(bgp_update) => {
-                match UpdateMessage::from_octets(bgp_update.clone(), SessionConfig::modern()) {
-                    Ok(update) => {
-                        for prefix in prefixes_to_withdraw {
-                            let route = Self::mk_route_for_prefix(
-                                update.clone(),
-                                *prefix,
-                                RouteStatus::Withdrawn,
-                            )
-                            .into();
-                            routes.push(route);
-                        }
-                    }
+                        match UpdateMessage::from_octets(bgp_update.clone(), SessionConfig::modern()) {
+                            Ok(update) => {
+                                for prefix in prefixes_to_withdraw {
+                                    let route = Self::mk_route_for_prefix(
+                                        update.clone(),
+                                        *prefix,
+                                        RouteStatus::Withdrawn,
+                                    )
+                                    .into();
+                                    routes.push(route);
+                                }
+                            }
 
-                    Err(err) => {
-                        let mut pcap_text = "000000 ".to_string();
-                        for b in bgp_update.as_ref() {
-                            pcap_text.push_str(&format!("{:02x} ", b));
+                            Err(err) => {
+                                let mut pcap_text = "000000 ".to_string();
+                                for b in bgp_update.as_ref() {
+                                    pcap_text.push_str(&format!("{:02x} ", b));
+                                }
+                                error!("Internal error: Failed to issue internal BGP UPDATE to withdraw routes for a down peer. Reason: BGP UPDATE encoding error: {err}. PCAP TEXT: {pcap_text}");
+                            }
                         }
-                        error!("Internal error: Failed to issue internal BGP UPDATE to withdraw routes for a down peer. Reason: BGP UPDATE encoding error: {err}. PCAP TEXT: {pcap_text}");
                     }
-                }
-            }
 
                     Err(err) => {
                         error!("Internal error: Failed to issue internal BGP UPDATE to withdraw routes for a down peer. Reason: BGP UPDATE construction error: {err}");
@@ -1097,9 +1097,9 @@ where
         } else if buf.len() > 4096 {
             Err("Cannot finalize BGP message: message would be too long")
         } else {
-        let len_bytes: [u8; 2] = (buf.len() as u16).to_be_bytes();
-        buf[16] = len_bytes[0];
-        buf[17] = len_bytes[1];
+            let len_bytes: [u8; 2] = (buf.len() as u16).to_be_bytes();
+            buf[16] = len_bytes[0];
+            buf[17] = len_bytes[1];
             Ok(())
         }
     }
@@ -1205,7 +1205,7 @@ where
         }
     }
 
-    let num_withdrawn_route_bytes = u16::try_from(withdrawn_routes.len()).unwrap();
+    let num_withdrawn_route_bytes = u16::try_from(withdrawn_routes.len()).unwrap(); // TODO
     buf.extend_from_slice(&num_withdrawn_route_bytes.to_be_bytes());
     // N withdrawn route bytes
     if num_withdrawn_route_bytes > 0 {

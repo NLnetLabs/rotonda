@@ -225,8 +225,6 @@ mod tests {
         let runtime =
             run_with_config(&mut manager, config).expect("The application failed to start");
 
-        std::thread::sleep(Duration::from_secs(600));
-
         // ---
 
         let mqttd_config = r#"

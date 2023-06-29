@@ -1076,7 +1076,7 @@ impl PeerAware for PeerStates {
 
 // based on code in tests/util.rs:
 #[allow(clippy::vec_init_then_push)]
-fn mk_bgp_update<'a, W>(withdrawals: W) -> Result<Bytes, &'static str>
+fn mk_bgp_update<'a, W>(withdrawals: W) -> Result<Bytes, String>
 where
     W: IntoIterator<Item = &'a Prefix>,
 {
@@ -1205,7 +1205,7 @@ where
         }
     }
 
-    let num_withdrawn_route_bytes = u16::try_from(withdrawn_routes.len()).unwrap(); // TODO
+    let num_withdrawn_route_bytes = u16::try_from(withdrawn_routes.len()).map_err(|err| format!("{err}"))?;
     buf.extend_from_slice(&num_withdrawn_route_bytes.to_be_bytes());
     // N withdrawn route bytes
     if num_withdrawn_route_bytes > 0 {
@@ -1216,15 +1216,15 @@ where
         buf.put_u16(0u16); // no path attributes
     } else {
         if mp_unreach_nlri.len() > u8::MAX.into() {
-            buf.put_u16(4u16 + u16::try_from(mp_unreach_nlri.len()).unwrap()); // num path attribute bytes
+            buf.put_u16(4u16 + u16::try_from(mp_unreach_nlri.len()).map_err(|err| format!("{err}"))?); // num path attribute bytes
             buf.put_u8(0b1001_0000); // optional (1), non-transitive (0), complete (0), extended (1)
             buf.put_u8(u8::from(PathAttributeType::MpUnreachNlri)); // attr. type
-            buf.put_u16(mp_unreach_nlri.len().try_into().unwrap());
+            buf.put_u16(mp_unreach_nlri.len().try_into().map_err(|err| format!("{err}"))?);
         } else {
-            buf.put_u16(3u16 + u16::try_from(mp_unreach_nlri.len()).unwrap()); // num path attribute bytes
+            buf.put_u16(3u16 + u16::try_from(mp_unreach_nlri.len()).map_err(|err| format!("{err}"))?); // num path attribute bytes
             buf.put_u8(0b1000_0000); // optional (1), non-transitive (0), complete (0), non-extended (0)
             buf.put_u8(15); // MP_UNREACH_NLRI attribute type code per RFC 4760
-            buf.put_u8(mp_unreach_nlri.len().try_into().unwrap());
+            buf.put_u8(mp_unreach_nlri.len().try_into().map_err(|err| format!("{err}"))?);
         }
         buf.extend(&mp_unreach_nlri); // the withdrawn routes
     }

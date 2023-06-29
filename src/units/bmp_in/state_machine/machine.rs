@@ -448,7 +448,8 @@ where
         let mut routes = SmallVec::new();
         if let Some(prefixes_to_withdraw) = self.details.get_announced_prefixes(&pph) {
             if prefixes_to_withdraw.clone().peekable().next().is_some() {
-                let bgp_update = mk_bgp_update(prefixes_to_withdraw.clone());
+                match mk_bgp_update(prefixes_to_withdraw.clone()) {
+                    Ok(bgp_update) => {
                 match UpdateMessage::from_octets(bgp_update.clone(), SessionConfig::modern()) {
                     Ok(update) => {
                         for prefix in prefixes_to_withdraw {
@@ -468,6 +469,12 @@ where
                             pcap_text.push_str(&format!("{:02x} ", b));
                         }
                         error!("Internal error: Failed to issue internal BGP UPDATE to withdraw routes for a down peer. Reason: BGP UPDATE encoding error: {err}. PCAP TEXT: {pcap_text}");
+                    }
+                }
+            }
+
+                    Err(err) => {
+                        error!("Internal error: Failed to issue internal BGP UPDATE to withdraw routes for a down peer. Reason: BGP UPDATE construction error: {err}");
                     }
                 }
             }
@@ -1068,7 +1075,7 @@ impl PeerAware for PeerStates {
 
 // based on code in tests/util.rs:
 #[allow(clippy::vec_init_then_push)]
-fn mk_bgp_update<'a, W>(withdrawals: W) -> Bytes
+fn mk_bgp_update<'a, W>(withdrawals: W) -> Result<Bytes, &'static str>
 where
     W: IntoIterator<Item = &'a Prefix>,
 {
@@ -1083,13 +1090,17 @@ where
         }
     }
 
-    fn finalize_bgp_msg_len(buf: &mut BytesMut) {
-        assert!(buf.len() >= 19);
-        assert!(buf.len() <= 4096);
-
+    fn finalize_bgp_msg_len(buf: &mut BytesMut) -> Result<(), &'static str> {
+        if buf.len() < 19 {
+            Err("Cannot finalize BGP message: message would be too short")
+        } else if buf.len() > 4096 {
+            Err("Cannot finalize BGP message: message would be too long")
+        } else {
         let len_bytes: [u8; 2] = (buf.len() as u16).to_be_bytes();
         buf[16] = len_bytes[0];
         buf[17] = len_bytes[1];
+            Ok(())
+        }
     }
 
     // 4.3. UPDATE Message Format
@@ -1218,8 +1229,8 @@ where
     }
 
     // Finalize BGP message
-    finalize_bgp_msg_len(&mut buf);
-    buf.freeze()
+    finalize_bgp_msg_len(&mut buf)?;
+    Ok(buf.freeze())
 }
 
 // --------- END TEMPORARY CODE TO BE REPLACED BY ROUTECORE WHEN READY ------------------------------------------------

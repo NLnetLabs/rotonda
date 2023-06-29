@@ -679,7 +679,8 @@ where
     ) -> RawRouteWithDeltas {
         let delta_id = (RotondaId(0), 0); // TODO
         let roto_update_msg = roto::types::builtin::UpdateMessage(update);
-        RawRouteWithDeltas::new_with_message(delta_id, prefix.into(), roto_update_msg, route_status)
+        let raw_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        RawRouteWithDeltas::new_with_message_ref(delta_id, prefix.into(), &raw_msg, route_status)
     }
 }
 

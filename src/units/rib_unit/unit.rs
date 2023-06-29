@@ -9,6 +9,7 @@ use crate::{
     },
     manager::{Component, WaitPoint},
     payload::{Payload, RouterId, Update},
+    tokio::TokioTaskMetrics,
     units::Unit,
 };
 use arc_swap::{ArcSwap, ArcSwapOption};
@@ -183,6 +184,7 @@ pub struct RibUnitRunner {
     status_reporter: Option<Arc<RibUnitStatusReporter>>,
     roto_source: Arc<ArcSwap<(std::time::Instant, String)>>,
     pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
+    process_metrics: Arc<TokioTaskMetrics>,
 }
 
 #[async_trait]
@@ -193,6 +195,7 @@ impl DirectUpdate for RibUnitRunner {
         let rib = self.rib.clone();
         let roto_source = self.roto_source.clone();
         let pending_vrib_query_results = self.pending_vrib_query_results.clone();
+        let process_metrics = self.process_metrics.clone();
         Self::process_update(
             gate,
             status_reporter,
@@ -201,6 +204,7 @@ impl DirectUpdate for RibUnitRunner {
             |pfx, meta, store| store.insert(pfx, meta),
             roto_source,
             pending_vrib_query_results,
+            process_metrics,
         )
         .await;
     }
@@ -227,7 +231,7 @@ impl RibUnitRunner {
 
     fn new(
         gate: Gate,
-        component: Component,
+        mut component: Component,
         roto_path: Option<PathBuf>,
         rib_type: RibType,
     ) -> Self {
@@ -261,6 +265,9 @@ impl RibUnitRunner {
             RibType::Virtual(_) => Default::default(),
         };
 
+        let process_metrics = Arc::new(TokioTaskMetrics::new());
+        component.register_metrics(process_metrics.clone());
+
         Self {
             gate: Arc::new(gate),
             component,
@@ -268,6 +275,7 @@ impl RibUnitRunner {
             status_reporter: None,
             roto_source,
             pending_vrib_query_results: Arc::new(FrimMap::default()),
+            process_metrics,
         }
     }
 
@@ -398,6 +406,7 @@ impl RibUnitRunner {
         insert: F,
         roto_source: Arc<ArcSwap<(Instant, String)>>,
         pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
+        process_metrics: Arc<TokioTaskMetrics>,
     ) where
         F: Fn(&Prefix, RibValue, &PhysicalRib) -> Result<(Upsert, u32), PrefixStoreError>
             + Send
@@ -411,14 +420,15 @@ impl RibUnitRunner {
                 // let mut new_withdrawals = 0;
 
                 for payload in updates {
-                    if let Some(update) = Self::process_update_single(
-                        payload,
-                        rib.clone(),
-                        insert,
-                        roto_source.clone(),
-                        status_reporter.clone(),
-                    )
-                    .await
+                    if let Some(update) = process_metrics
+                        .instrument(Self::process_update_single(
+                            payload,
+                            rib.clone(),
+                            insert,
+                            roto_source.clone(),
+                            status_reporter.clone(),
+                        ))
+                        .await
                     {
                         gate.update_data(update).await;
                     }
@@ -437,14 +447,15 @@ impl RibUnitRunner {
 
             Update::Single(payload) => {
                 // TODO: update status reporter/metrics as is done in the bulk case
-                if let Some(update) = Self::process_update_single(
-                    payload,
-                    rib.clone(),
-                    insert,
-                    roto_source.clone(),
-                    status_reporter.clone(),
-                )
-                .await
+                if let Some(update) = process_metrics
+                    .instrument(Self::process_update_single(
+                        payload,
+                        rib.clone(),
+                        insert,
+                        roto_source.clone(),
+                        status_reporter.clone(),
+                    ))
+                    .await
                 {
                     gate.update_data(update).await;
                 }

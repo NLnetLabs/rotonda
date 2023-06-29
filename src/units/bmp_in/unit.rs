@@ -5,7 +5,7 @@ use crate::{units::{bmp_in::{
     metrics::BmpInMetrics,
     state_machine::{machine::BmpState, processing::MessageType},
     status_reporter::BmpInStatusReporter,
-}}, common::roto::is_filtered_in_vm};
+}}, common::roto::is_filtered_in_vm, tokio::TokioTaskMetrics};
 use crate::{
     common::{
         frim::FrimMap,
@@ -104,6 +104,7 @@ struct BmpInRunner {
     #[cfg(feature = "router-list")]
     _api_processor: Arc<dyn ProcessRequest>,
     roto_source: Arc<ArcSwap<(std::time::Instant, String)>>,
+    state_machine_metrics: Arc<TokioTaskMetrics>,
 }
 
 impl BmpInRunner {
@@ -135,6 +136,9 @@ impl BmpInRunner {
         // to make sense of the BMP data per router that supplies it.
         let bmp_metrics = Arc::new(BmpMetrics::new());
         component.register_metrics(bmp_metrics.clone());
+
+        let state_machine_metrics = Arc::new(TokioTaskMetrics::new());
+        component.register_metrics(state_machine_metrics.clone());
 
         // Setup REST API endpoint
         #[cfg(feature = "router-list")]
@@ -180,6 +184,7 @@ impl BmpInRunner {
             #[cfg(feature = "router-list")]
             _api_processor,
             roto_source,
+            state_machine_metrics,
         }
     }
 
@@ -506,7 +511,7 @@ impl BmpInRunner {
                     let this_state = bmp_state.take().unwrap();
 
                     // Run the state machine resulting in a new state.
-                    let next_state = self.process_msg(&router_addr, this_state, bytes).await;
+                    let next_state = self.state_machine_metrics.instrument(self.process_msg(&router_addr, this_state, bytes)).await;
 
                     // TODO: if the next_state is Aborted, we have no way of feeding that back to the TCP connection
                     // handler... we can only sit here and uselessly pump any future messages into the dead state

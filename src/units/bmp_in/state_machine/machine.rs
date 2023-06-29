@@ -1095,6 +1095,7 @@ where
         if buf.len() < 19 {
             Err("Cannot finalize BGP message: message would be too short")
         } else if buf.len() > 4096 {
+            // TOOD: If we can support RFC 8654 we can increase this to 65,535
             Err("Cannot finalize BGP message: message would be too long")
         } else {
             let len_bytes: [u8; 2] = (buf.len() as u16).to_be_bytes();

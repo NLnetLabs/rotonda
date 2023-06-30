@@ -493,6 +493,7 @@ where
                                 for prefix in prefixes_to_withdraw {
                                     let route = Self::mk_route_for_prefix(
                                         update.clone(),
+                                        &pph,
                                         *prefix,
                                         RouteStatus::Withdrawn,
                                     )
@@ -662,7 +663,9 @@ where
                 }
 
                 // clone is cheap due to use of Bytes
-                routes.push(Self::mk_route_for_prefix(update.clone(), prefix, route_status).into());
+                routes.push(
+                    Self::mk_route_for_prefix(update.clone(), &pph, prefix, route_status).into(),
+                );
             }
         }
 
@@ -678,7 +681,12 @@ where
                 if nlris.iter().all(|nlri| nlri.prefix() != Some(prefix)) {
                     // clone is cheap due to use of Bytes
                     routes.push(
-                        Self::mk_route_for_prefix(update.clone(), prefix, RouteStatus::Withdrawn)
+                        Self::mk_route_for_prefix(
+                            update.clone(),
+                            &pph,
+                            prefix,
+                            RouteStatus::Withdrawn,
+                        )
                             .into(),
                     );
                 } else {
@@ -692,6 +700,7 @@ where
 
     fn mk_route_for_prefix(
         update: UpdateMessage<Bytes>,
+        pph: &PerPeerHeader<Bytes>,
         prefix: Prefix,
         route_status: RouteStatus,
     ) -> RawRouteWithDeltas {
@@ -699,6 +708,8 @@ where
         let roto_update_msg = roto::types::builtin::UpdateMessage(update);
         let raw_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
         RawRouteWithDeltas::new_with_message_ref(delta_id, prefix.into(), &raw_msg, route_status)
+            .with_peer_ip(pph.address())
+            .with_peer_asn(pph.asn())
     }
 }
 

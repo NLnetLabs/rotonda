@@ -839,6 +839,8 @@ mod tests {
             mk_route_announcement(prefix, "789,456").with_peer_ip(peer_two);
 
         let hash_code_route_one_peer_one =
+            rib.precompute_hash_code(&announcement_one_from_peer_one.clone().into());
+        let hash_code_route_one_peer_one_again =
             rib.precompute_hash_code(&announcement_one_from_peer_one.into());
         let hash_code_route_one_peer_two =
             rib.precompute_hash_code(&announcement_one_from_peer_two.into());
@@ -846,6 +848,10 @@ mod tests {
             rib.precompute_hash_code(&announcement_two_from_peer_one.into());
         let hash_code_route_two_peer_two =
             rib.precompute_hash_code(&announcement_two_from_peer_two.into());
+
+        // Hashing sanity checks
+        assert_ne!(hash_code_route_one_peer_one, 0);
+        assert_eq!(hash_code_route_one_peer_one, hash_code_route_one_peer_one_again);
 
         assert_ne!(
             hash_code_route_one_peer_one, hash_code_route_one_peer_two,

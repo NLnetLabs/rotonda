@@ -6,14 +6,17 @@ mod tests {
         payload::{Payload, Update},
         units::rib_unit::{
             metrics::RibUnitMetrics,
-            rib::{PhysicalRib, RibValue},
+            rib::{PhysicalRib, RibMergeUpdateStatistics, RibValue},
             status_reporter::RibUnitStatusReporter,
             unit::RibUnitRunner,
         },
     };
     use arc_swap::{ArcSwap, ArcSwapOption};
     use roto::types::{
-        builtin::{BuiltinTypeValue, RawRouteWithDeltas, RotondaId, RouteStatus, UpdateMessage},
+        builtin::{
+            BgpUpdateMessage, BuiltinTypeValue, RawRouteWithDeltas, RotondaId, RouteStatus,
+            UpdateMessage,
+        },
         typevalue::TypeValue,
     };
     use rotonda_store::{
@@ -58,11 +61,12 @@ mod tests {
         let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
 
         // When it is processed by this unit
-        let bgp_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-        let route = RawRouteWithDeltas::new_with_message(
+        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        let route = RawRouteWithDeltas::new_with_message_ref(
             delta_id,
             prefix,
-            bgp_update_msg,
+            &bgp_update_msg,
             RouteStatus::InConvergence,
         );
         let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
@@ -100,11 +104,12 @@ mod tests {
         let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
 
         // When it is processed by this unit
-        let bgp_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-        let route = RawRouteWithDeltas::new_with_message(
+        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        let route = RawRouteWithDeltas::new_with_message_ref(
             delta_id,
             prefix,
-            bgp_update_msg,
+            &bgp_update_msg,
             RouteStatus::InConvergence,
         );
         let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
@@ -154,11 +159,12 @@ mod tests {
             let mut input_payloads = vec![];
             let mut output_payloads = vec![];
             for bgp_update_bytes in [bgp_update_bytes1, bgp_update_bytes2] {
-                let bgp_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-                let route = RawRouteWithDeltas::new_with_message(
+                let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+                let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+                let route = RawRouteWithDeltas::new_with_message_ref(
                     delta_id,
                     prefix,
-                    bgp_update_msg,
+                    &bgp_update_msg,
                     RouteStatus::InConvergence,
                 );
                 let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
@@ -280,11 +286,12 @@ mod tests {
         for (prefix, bgp_update_bytes) in
             [(prefix1, bgp_update_bytes1), (prefix2, bgp_update_bytes2)]
         {
-            let bgp_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-            let route = RawRouteWithDeltas::new_with_message(
+            let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+            let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+            let route = RawRouteWithDeltas::new_with_message_ref(
                 delta_id,
                 prefix,
-                bgp_update_msg,
+                &bgp_update_msg,
                 RouteStatus::InConvergence,
             );
             let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
@@ -341,9 +348,10 @@ mod tests {
         let (gate, _gate_agent) = Gate::new(0);
         let gate = Arc::new(gate);
         let physical_rib = PhysicalRib::new("test-rib");
+        let stats = Arc::new(RibMergeUpdateStatistics::default());
 
         let rib = Arc::new(ArcSwapOption::from_pointee(physical_rib));
-        let metrics = Arc::new(RibUnitMetrics::new(&gate));
+        let metrics = Arc::new(RibUnitMetrics::new(&gate, stats.clone()));
         (gate, rib, metrics)
     }
 
@@ -382,6 +390,7 @@ mod tests {
             insert,
             roto_source,
             status_reporter,
+            metrics.rib_merge_update_stats.clone(),
         )
         .await
     }

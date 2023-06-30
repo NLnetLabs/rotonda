@@ -33,7 +33,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Based on samples taken at infrequent intervals.",
+      "description": "Based on samples taken at infrequent intervals.\nDoesn't include multiple invocations caused by RCU conflicts.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -120,7 +120,7 @@
           "refId": "A"
         }
       ],
-      "title": "RIB insert durations",
+      "title": "RIB insert merge-update durations",
       "transparent": true,
       "type": "heatmap"
     },
@@ -129,7 +129,7 @@
         "type": "prometheus",
         "uid": "prometheus"
       },
-      "description": "Based on samples taken at infrequent intervals.",
+      "description": "Based on samples taken at infrequent intervals.\nBased on samples taken at infrequent intervals.\nDoesn't include multiple invocations caused by RCU conflicts.",
       "fieldConfig": {
         "defaults": {
           "custom": {
@@ -218,7 +218,7 @@
           "refId": "A"
         }
       ],
-      "title": "RIB withdrawal durations",
+      "title": "RIB withdrawal merge-update durations",
       "transparent": true,
       "type": "heatmap"
     },
@@ -1922,7 +1922,7 @@
     ]
   },
   "time": {
-    "from": "now-5m",
+    "from": "2023-06-30T11:35:23.000Z",
     "to": "now"
   },
   "timepicker": {},

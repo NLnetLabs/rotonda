@@ -877,7 +877,10 @@ mod tests {
 
         // Hashing sanity checks
         assert_ne!(hash_code_route_one_peer_one, 0);
-        assert_eq!(hash_code_route_one_peer_one, hash_code_route_one_peer_one_again);
+        assert_eq!(
+            hash_code_route_one_peer_one,
+            hash_code_route_one_peer_one_again
+        );
 
         assert_ne!(
             hash_code_route_one_peer_one, hash_code_route_one_peer_two,

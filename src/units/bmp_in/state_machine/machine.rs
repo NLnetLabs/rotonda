@@ -38,7 +38,7 @@ use routecore::{
     },
     bmp::message::{
         InformationTlvType, InitiationMessage, PeerDownNotification, PeerUpNotification,
-        PerPeerHeader, RibType, RouteMonitoring, TerminationMessage,
+        PerPeerHeader, RibType, RouteMonitoring,
     },
 };
 use smallvec::SmallVec;
@@ -53,7 +53,7 @@ use std::{
 
 use crate::{
     common::{routecore_extra::generate_alternate_config, status_reporter::AnyStatusReporter},
-    payload::{RouterId, Update, Payload},
+    payload::{Payload, RouterId, Update},
 };
 
 use super::{
@@ -236,6 +236,7 @@ impl BmpState {
         }
     }
 
+    #{rustfmt::skip}
     pub async fn terminate(self) -> ProcessingResult {
         match self {
             BmpState::Initiating(v) => v.terminate(Option::<TerminationMessage<Bytes>>::None),
@@ -275,7 +276,10 @@ where
         ProcessingResult::new(MessageType::RoutingUpdate { update }, self.into())
     }
 
-    pub fn mk_final_routing_update_result(next_state: BmpState, update: Update) -> ProcessingResult {
+    pub fn mk_final_routing_update_result(
+        next_state: BmpState,
+        update: Update,
+    ) -> ProcessingResult {
         ProcessingResult::new(MessageType::RoutingUpdate { update }, next_state)
     }
 
@@ -449,9 +453,7 @@ where
             // corresponding prior Peer Up Notification for the same
             // peer?
             return self.mk_invalid_message_result(
-                format!(
-                    "PeerDownNotification received for peer that was not 'up'",
-                ),
+                format!("PeerDownNotification received for peer that was not 'up'",),
                 Some(false),
                 // TODO: Silly to_copy the bytes, but PDN won't give us the octets back..
                 Some(Bytes::copy_from_slice(msg.as_ref())),
@@ -488,7 +490,10 @@ where
             if prefixes_to_withdraw.clone().peekable().next().is_some() {
                 match mk_bgp_update(prefixes_to_withdraw.clone()) {
                     Ok(bgp_update) => {
-                        match UpdateMessage::from_octets(bgp_update.clone(), SessionConfig::modern()) {
+                        match UpdateMessage::from_octets(
+                            bgp_update.clone(),
+                            SessionConfig::modern(),
+                        ) {
                             Ok(update) => {
                                 for prefix in prefixes_to_withdraw {
                                     let route = Self::mk_route_for_prefix(
@@ -687,7 +692,7 @@ where
                             prefix,
                             RouteStatus::Withdrawn,
                         )
-                            .into(),
+                        .into(),
                     );
                 } else {
                     num_withdrawals -= 1;
@@ -1235,7 +1240,8 @@ where
         }
     }
 
-    let num_withdrawn_route_bytes = u16::try_from(withdrawn_routes.len()).map_err(|err| format!("{err}"))?;
+    let num_withdrawn_route_bytes =
+        u16::try_from(withdrawn_routes.len()).map_err(|err| format!("{err}"))?;
     buf.extend_from_slice(&num_withdrawn_route_bytes.to_be_bytes());
     // N withdrawn route bytes
     if num_withdrawn_route_bytes > 0 {
@@ -1246,15 +1252,29 @@ where
         buf.put_u16(0u16); // no path attributes
     } else {
         if mp_unreach_nlri.len() > u8::MAX.into() {
-            buf.put_u16(4u16 + u16::try_from(mp_unreach_nlri.len()).map_err(|err| format!("{err}"))?); // num path attribute bytes
+            buf.put_u16(
+                4u16 + u16::try_from(mp_unreach_nlri.len()).map_err(|err| format!("{err}"))?,
+            ); // num path attribute bytes
             buf.put_u8(0b1001_0000); // optional (1), non-transitive (0), complete (0), extended (1)
             buf.put_u8(u8::from(PathAttributeType::MpUnreachNlri)); // attr. type
-            buf.put_u16(mp_unreach_nlri.len().try_into().map_err(|err| format!("{err}"))?);
+            buf.put_u16(
+                mp_unreach_nlri
+                    .len()
+                    .try_into()
+                    .map_err(|err| format!("{err}"))?,
+            );
         } else {
-            buf.put_u16(3u16 + u16::try_from(mp_unreach_nlri.len()).map_err(|err| format!("{err}"))?); // num path attribute bytes
+            buf.put_u16(
+                3u16 + u16::try_from(mp_unreach_nlri.len()).map_err(|err| format!("{err}"))?,
+            ); // num path attribute bytes
             buf.put_u8(0b1000_0000); // optional (1), non-transitive (0), complete (0), non-extended (0)
             buf.put_u8(15); // MP_UNREACH_NLRI attribute type code per RFC 4760
-            buf.put_u8(mp_unreach_nlri.len().try_into().map_err(|err| format!("{err}"))?);
+            buf.put_u8(
+                mp_unreach_nlri
+                    .len()
+                    .try_into()
+                    .map_err(|err| format!("{err}"))?,
+            );
         }
         buf.extend(&mp_unreach_nlri); // the withdrawn routes
     }

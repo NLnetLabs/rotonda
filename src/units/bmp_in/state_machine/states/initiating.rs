@@ -2,7 +2,7 @@ use std::{net::SocketAddr, sync::Arc, ops::ControlFlow};
 
 use bytes::Bytes;
 use roto::types::builtin::BgpUpdateMessage;
-use routecore::bmp::message::Message as BmpMsg;
+use routecore::bmp::message::{Message as BmpMsg, TerminationMessage};
 
 use crate::payload::RouterId;
 
@@ -105,6 +105,11 @@ impl BmpStateDetails<Initiating> {
                 )
             }
         }
+    }
+
+    pub fn terminate(self, _msg: Option<TerminationMessage<Bytes>>) -> ProcessingResult {
+        let next_state = BmpState::Terminated(self.into());
+        Self::mk_state_transition_result(next_state)
     }
 }
 

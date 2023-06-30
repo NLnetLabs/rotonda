@@ -4,7 +4,7 @@ use crate::units::bmp_in::state_machine::{
     machine::BmpStateDetails, processing::ProcessingResult,
 };
 
-use super::{dumping::Dumping, updating::Updating};
+use super::{dumping::Dumping, updating::Updating, initiating::Initiating};
 
 use bytes::Bytes;
 use roto::types::builtin::BgpUpdateMessage;
@@ -22,6 +22,17 @@ use routecore::bmp::message::Message as BmpMsg;
 /// > -- <https://datatracker.ietf.org/doc/html/rfc7854#section-4.5>
 #[derive(Default, Debug)]
 pub struct Terminated;
+
+impl From<BmpStateDetails<Initiating>> for BmpStateDetails<Terminated> {
+    fn from(v: BmpStateDetails<Initiating>) -> Self {
+        Self {
+            addr: v.addr,
+            router_id: v.router_id,
+            status_reporter: v.status_reporter,
+            details: v.details.into(),
+        }
+    }
+}
 
 impl From<BmpStateDetails<Dumping>> for BmpStateDetails<Terminated> {
     fn from(v: BmpStateDetails<Dumping>) -> Self {
@@ -42,6 +53,12 @@ impl From<BmpStateDetails<Updating>> for BmpStateDetails<Terminated> {
             status_reporter: v.status_reporter,
             details: v.details.into(),
         }
+    }
+}
+
+impl From<Initiating> for Terminated {
+    fn from(_: Initiating) -> Self {
+        Self
     }
 }
 

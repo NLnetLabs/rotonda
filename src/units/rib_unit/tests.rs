@@ -1,12 +1,13 @@
 #[cfg(test)]
 mod tests {
+    use crate::units::rib_unit::statistics::RibMergeUpdateStatistics;
     use crate::{
         bgp::encode::{mk_bgp_update, Announcements, Prefixes},
         comms::Gate,
         payload::{Payload, Update},
         units::rib_unit::{
             metrics::RibUnitMetrics,
-            rib::{PhysicalRib, RibMergeUpdateStatistics, RibValue},
+            rib::{PhysicalRib, RibValue},
             status_reporter::RibUnitStatusReporter,
             unit::RibUnitRunner,
         },

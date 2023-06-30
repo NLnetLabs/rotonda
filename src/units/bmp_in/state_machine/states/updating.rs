@@ -10,8 +10,9 @@ use routecore::{
     },
     bmp::message::{Message as BmpMsg, PerPeerHeader, TerminationMessage},
 };
+use smallvec::SmallVec;
 
-use crate::units::bmp_in::state_machine::machine::PeerStates;
+use crate::{units::bmp_in::state_machine::machine::PeerStates, payload::{Payload, Update}};
 
 use super::super::{
     machine::{BmpState, BmpStateDetails, Initiable, PeerAware},
@@ -87,7 +88,7 @@ impl BmpStateDetails<Updating> {
                 .await
             }
 
-            BmpMsg::TerminationMessage(msg) => self.terminate(msg).await,
+            BmpMsg::TerminationMessage(msg) => self.terminate(Some(msg)).await,
 
             _ => {
                 // We ignore these. TODO: Should we count them?
@@ -114,15 +115,20 @@ impl BmpStateDetails<Updating> {
         ControlFlow::Continue(self)
     }
 
-    pub async fn terminate(self, _msg: TerminationMessage<Bytes>) -> ProcessingResult {
+    pub async fn terminate(mut self, _msg: Option<TerminationMessage<Bytes>>) -> ProcessingResult {
         // let reason = msg
         //     .information()
         //     .map(|tlv| tlv.to_string())
         //     .collect::<Vec<_>>()
         //     .join("|");
-
+        let peers = self.details.get_peers().iter().map(|&v| v.clone()).collect::<Vec<_>>();
+        let routes: SmallVec<[Payload; 8]> = peers.iter().flat_map(|pph| self.do_peer_down(pph)).collect();
         let next_state = BmpState::Terminated(self.into());
-        Self::mk_state_transition_result(next_state)
+        if routes.is_empty() {
+            Self::mk_state_transition_result(next_state)
+        } else {
+            Self::mk_final_routing_update_result(next_state, Update::Bulk(routes.into()))
+        }
     }
 }
 

@@ -1,6 +1,6 @@
 use std::{cell::RefCell, net::SocketAddr, sync::Arc, path::PathBuf, time::Instant, fs::read_to_string, ops::ControlFlow};
 
-use super::state_machine::{machine::BmpStateDetails, states::dumping::Dumping};
+use super::state_machine::{machine::BmpStateDetails, states::dumping::Dumping, processing::ProcessingResult};
 use crate::{units::{bmp_in::{
     metrics::BmpInMetrics,
     state_machine::{machine::BmpState, processing::MessageType},
@@ -321,7 +321,7 @@ impl BmpInRunner {
         }
 
         let roto_source = self.roto_source.clone();
-        let mut res = bmp_state.process_msg_with_filter(
+        let res = bmp_state.process_msg_with_filter(
             msg_buf,
             Some(roto_source),
             |raw_bgp_msg, roto_source| {
@@ -336,6 +336,10 @@ impl BmpInRunner {
             })
             .await;
 
+        self.process_result(res, router_addr).await
+    }
+
+    pub async fn process_result(&self, mut res: ProcessingResult, router_addr: &SocketAddr) -> BmpState {
         match res.processing_result {
             MessageType::InvalidMessage { err, known_peer, msg_bytes } => {
                 self.status_reporter.invalid_bmp_message_received(res.next_state.router_id());
@@ -482,7 +486,7 @@ impl BmpInRunner {
         match update {
             Update::Single(Payload::RawBmp {
                 router_addr,
-                msg: RawBmpPayload::Msg(bytes),
+                msg,
                 ..
             }) => {
                 let entry = self.router_states.entry(router_addr);
@@ -510,8 +514,21 @@ impl BmpInRunner {
                     // Obtain the current state machine state.
                     let this_state = bmp_state.take().unwrap();
 
-                    // Run the state machine resulting in a new state.
-                    let next_state = self.state_machine_metrics.instrument(self.process_msg(&router_addr, this_state, bytes)).await;
+                    let next_state = match msg {
+                        RawBmpPayload::Eof => {
+                            // The connection to the router has been lost so drop the
+                            // connection state machine we have for it, if any.
+                            let res = this_state.terminate().await;
+                            let next_state = self.process_result(res, &router_addr).await;
+                            self.router_disconnected(&router_addr);
+                            next_state
+                        }
+
+                        RawBmpPayload::Msg(msg_bytes) => {
+                            // Run the state machine resulting in a new state.
+                            self.state_machine_metrics.instrument(self.process_msg(&router_addr, this_state, msg_bytes)).await
+                        }
+                    };
 
                     // TODO: if the next_state is Aborted, we have no way of feeding that back to the TCP connection
                     // handler... we can only sit here and uselessly pump any future messages into the dead state
@@ -522,16 +539,6 @@ impl BmpInRunner {
                     // Store the new state machine state.
                     bmp_state.replace(next_state);
                 }
-            }
-
-            Update::Single(Payload::RawBmp {
-                router_addr,
-                msg: RawBmpPayload::Eof,
-                ..
-            }) => {
-                // The connection to the router has been lost so drop the
-                // connection state machine we have for it, if any.
-                self.router_disconnected(&router_addr);
             }
 
             Update::Single(_) => {

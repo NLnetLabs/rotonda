@@ -38,7 +38,7 @@ use routecore::{
     },
     bmp::message::{
         InformationTlvType, InitiationMessage, PeerDownNotification, PeerUpNotification,
-        PerPeerHeader, RibType, RouteMonitoring,
+        PerPeerHeader, RibType, RouteMonitoring, TerminationMessage,
     },
 };
 use smallvec::SmallVec;
@@ -53,7 +53,7 @@ use std::{
 
 use crate::{
     common::{routecore_extra::generate_alternate_config, status_reporter::AnyStatusReporter},
-    payload::{RouterId, Update},
+    payload::{RouterId, Update, Payload},
 };
 
 use super::{
@@ -235,6 +235,16 @@ impl BmpState {
             BmpState::Aborted(_, _) => None,
         }
     }
+
+    pub async fn terminate(self) -> ProcessingResult {
+        match self {
+            BmpState::Initiating(v) => v.terminate(Option::<TerminationMessage<Bytes>>::None),
+            BmpState::Dumping(v) => v.terminate(Option::<TerminationMessage<Bytes>>::None).await,
+            BmpState::Updating(v) => v.terminate(Option::<TerminationMessage<Bytes>>::None).await,
+            BmpState::Terminated(_) => BmpStateDetails::<Terminated>::mk_state_transition_result(self),
+            BmpState::Aborted(..) => BmpStateDetails::<Terminated>::mk_state_transition_result(self),
+        }
+    }
 }
 
 impl<T> BmpStateDetails<T>
@@ -263,6 +273,10 @@ where
 
     pub fn mk_routing_update_result(self, update: Update) -> ProcessingResult {
         ProcessingResult::new(MessageType::RoutingUpdate { update }, self.into())
+    }
+
+    pub fn mk_final_routing_update_result(next_state: BmpState, update: Update) -> ProcessingResult {
+        ProcessingResult::new(MessageType::RoutingUpdate { update }, next_state)
     }
 
     pub fn mk_state_transition_result(next_state: BmpState) -> ProcessingResult {
@@ -426,7 +440,31 @@ where
         // packet captures so it seems that it is indeed sent.
         let pph = msg.per_peer_header();
 
-        let eor_capable = self.details.is_peer_eor_capable(&pph);
+        let routes = self.do_peer_down(&pph);
+
+        if !self.details.remove_peer_config(&pph) {
+            // This is unexpected, we should have had configuration
+            // stored for this peer but apparently don't. Did we
+            // receive a Peer Down Notification without a
+            // corresponding prior Peer Up Notification for the same
+            // peer?
+            return self.mk_invalid_message_result(
+                format!(
+                    "PeerDownNotification received for peer that was not 'up'",
+                ),
+                Some(false),
+                // TODO: Silly to_copy the bytes, but PDN won't give us the octets back..
+                Some(Bytes::copy_from_slice(msg.as_ref())),
+            );
+        } else if routes.is_empty() {
+            self.mk_other_result()
+        } else {
+            self.mk_routing_update_result(Update::Bulk(routes))
+        }
+    }
+
+    pub fn do_peer_down(&mut self, pph: &PerPeerHeader<Bytes>) -> SmallVec<[Payload; 8]> {
+        let eor_capable = self.details.is_peer_eor_capable(pph);
 
         // From https://datatracker.ietf.org/doc/html/rfc7854#section-4.9
         //
@@ -446,7 +484,7 @@ where
             .peer_down(self.router_id.clone(), eor_capable);
 
         let mut routes = SmallVec::new();
-        if let Some(prefixes_to_withdraw) = self.details.get_announced_prefixes(&pph) {
+        if let Some(prefixes_to_withdraw) = self.details.get_announced_prefixes(pph) {
             if prefixes_to_withdraw.clone().peekable().next().is_some() {
                 match mk_bgp_update(prefixes_to_withdraw.clone()) {
                     Ok(bgp_update) => {
@@ -480,27 +518,7 @@ where
             }
         }
 
-        if !self.details.remove_peer_config(&pph) {
-            // This is unexpected, we should have had configuration
-            // stored for this peer but apparently don't. Did we
-            // receive a Peer Down Notification without a
-            // corresponding prior Peer Up Notification for the same
-            // peer?
-            return self.mk_invalid_message_result(
-                format!(
-                    "PeerDownNotification received for peer that was not 'up': {}",
-                    msg.per_peer_header()
-                ),
-                Some(false),
-                Some(Bytes::copy_from_slice(msg.as_ref())),
-            ); // TODO: Silly to_copy the bytes, but PDN won't give us the octets back..
-        }
-
-        if routes.is_empty() {
-            self.mk_other_result()
-        } else {
-            self.mk_routing_update_result(Update::Bulk(routes))
-        }
+        routes
     }
 
     /// `filter` should return `None` if the BGP message should be ignored, i.e. be filtered out, otherwise `Some(msg)`

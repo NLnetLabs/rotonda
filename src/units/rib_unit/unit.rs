@@ -41,10 +41,11 @@ use std::{
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
+use super::statistics::RibMergeUpdateStatistics;
 use super::{
     http::PrefixesApi,
     metrics::RibUnitMetrics,
-    rib::{PhysicalRib, PreHashedTypeValue, RibMergeUpdateStatistics, RibValue},
+    rib::{PhysicalRib, PreHashedTypeValue, RibValue},
     status_reporter::RibUnitStatusReporter,
 };
 

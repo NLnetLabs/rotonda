@@ -15,7 +15,7 @@ use crate::{
     payload::RouterId,
 };
 
-use super::rib::RibMergeUpdateStatistics;
+use super::statistics::RibMergeUpdateStatistics;
 
 #[derive(Debug, Default)]
 pub struct RibUnitMetrics {
@@ -157,7 +157,8 @@ impl metrics::Source for RibUnitMetrics {
         target.append_simple(
             &Self::NUM_MODIFIED_ROUTE_ANNOUNCEMENTS_METRIC,
             Some(unit_name),
-            self.num_modified_route_announcements.load(atomic::Ordering::Relaxed),
+            self.num_modified_route_announcements
+                .load(atomic::Ordering::Relaxed),
         );
         target.append_simple(
             &Self::NUM_WITHDRAWN_ROUTES_METRIC,
@@ -167,7 +168,8 @@ impl metrics::Source for RibUnitMetrics {
         target.append_simple(
             &Self::NUM_WITHDRAWN_ROUTES_WITHOUT_ANNOUNCEMENTS_METRIC,
             Some(unit_name),
-            self.num_route_withdrawals_without_announcement.load(atomic::Ordering::Relaxed),
+            self.num_route_withdrawals_without_announcement
+                .load(atomic::Ordering::Relaxed),
         );
         target.append_simple(
             &Self::LAST_INSERT_DURATION_METRIC,
@@ -195,6 +197,6 @@ impl metrics::Source for RibUnitMetrics {
             );
         }
 
-        eprintln!("Rib stats: {}", self.rib_merge_update_stats);
+        self.rib_merge_update_stats.append(unit_name, target);
     }
 }

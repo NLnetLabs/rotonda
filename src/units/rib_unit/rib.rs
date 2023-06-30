@@ -4,7 +4,7 @@ use std::{
     hash::{BuildHasher, Hasher},
     net::IpAddr,
     ops::Deref,
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
 
 use chrono::Utc;
@@ -19,6 +19,8 @@ use rotonda_store::{prelude::MergeUpdate, MultiThreadedStore};
 use routecore::asn::Asn;
 use serde::Serialize;
 use smallvec::SmallVec;
+
+use super::statistics::RibMergeUpdateStatistics;
 
 // -------- PhysicalRib -----------------------------------------------------------------------------------------------
 
@@ -112,89 +114,6 @@ impl PhysicalRib {
 /// and not hard-coded in Rust types. We therefore precompute a hash code value and store it with the actual metadata
 /// value and the Hash trait impl passes the precomputed hash code to the HashedSet hasher which uses it effectively
 /// as-is, to avoid pointlessly calculating yet another hash code as would happen with the default Hasher.
-#[derive(Debug, Default)]
-pub struct CumAvg {
-    ca: f64,
-    n: u64,
-}
-
-impl CumAvg {
-    pub fn add(&mut self, v: u64) {
-        let v = v as f64;
-        let n = self.n as f64;
-        self.ca = (v + (n * self.ca)) / (n + 1.0);
-        self.n += 1;
-    }
-
-    pub fn value(&self) -> f64 {
-        self.ca
-    }
-}
-
-impl std::fmt::Display for CumAvg {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} µs", self.value() as u64)
-    }
-}
-
-// The cumulative average per bucket where the bucket value is average time taken and the bucket range denotes the
-// size of the HashSet that was being MergeUpdate'd into at the time.
-#[derive(Debug, Default)]
-pub struct TimingBuckets {
-    le1: CumAvg,
-    le10: CumAvg,
-    le50: CumAvg,
-    le100: CumAvg,
-    leInf: CumAvg,
-}
-
-impl std::fmt::Display for TimingBuckets {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "le1: {}, le10: {}, le50: {}, le100: {}, leInf: {}",
-            self.le1, self.le10, self.le50, self.le100, self.leInf
-        )
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct RibMergeUpdateStatistics {
-    withdraw: RwLock<TimingBuckets>,
-    other: RwLock<TimingBuckets>,
-}
-
-impl RibMergeUpdateStatistics {
-    pub fn add(&self, microseconds: u64, hashset_size: usize, withdraw: bool) {
-        let bucket = match withdraw {
-            true => &self.withdraw,
-            false => &self.other,
-        };
-
-        let mut unlocked_bucket = bucket.write().unwrap();
-
-        let range = match hashset_size {
-            0..=1 => &mut unlocked_bucket.le1,
-            2..=10 => &mut unlocked_bucket.le10,
-            11..=50 => &mut unlocked_bucket.le50,
-            51..=100 => &mut unlocked_bucket.le100,
-            _ => &mut unlocked_bucket.leInf,
-        };
-
-        range.add(microseconds);
-    }
-}
-
-impl std::fmt::Display for RibMergeUpdateStatistics {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "withdraw: [{}], other: [{}]",
-            self.withdraw.read().unwrap(),
-            self.other.read().unwrap()
-        )
-    }
-}
 
 #[derive(Debug, Clone, Default)]
 pub struct RibValue {

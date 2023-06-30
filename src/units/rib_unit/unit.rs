@@ -44,7 +44,7 @@ use uuid::Uuid;
 use super::{
     http::PrefixesApi,
     metrics::RibUnitMetrics,
-    rib::{PhysicalRib, PreHashedTypeValue, RibValue},
+    rib::{PhysicalRib, PreHashedTypeValue, RibMergeUpdateStatistics, RibValue},
     status_reporter::RibUnitStatusReporter,
 };
 
@@ -185,6 +185,7 @@ pub struct RibUnitRunner {
     roto_source: Arc<ArcSwap<(std::time::Instant, String)>>,
     pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
     process_metrics: Arc<TokioTaskMetrics>,
+    rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
 }
 
 #[async_trait]
@@ -196,6 +197,7 @@ impl DirectUpdate for RibUnitRunner {
         let roto_source = self.roto_source.clone();
         let pending_vrib_query_results = self.pending_vrib_query_results.clone();
         let process_metrics = self.process_metrics.clone();
+        let rib_merge_update_stats = self.rib_merge_update_stats.clone();
         Self::process_update(
             gate,
             status_reporter,
@@ -205,6 +207,7 @@ impl DirectUpdate for RibUnitRunner {
             roto_source,
             pending_vrib_query_results,
             process_metrics,
+            rib_merge_update_stats,
         )
         .await;
     }
@@ -268,6 +271,8 @@ impl RibUnitRunner {
         let process_metrics = Arc::new(TokioTaskMetrics::new());
         component.register_metrics(process_metrics.clone());
 
+        let rib_merge_update_stats = Default::default();
+
         Self {
             gate: Arc::new(gate),
             component,
@@ -276,6 +281,7 @@ impl RibUnitRunner {
             roto_source,
             pending_vrib_query_results: Arc::new(FrimMap::default()),
             process_metrics,
+            rib_merge_update_stats,
         }
     }
 
@@ -292,7 +298,10 @@ impl RibUnitRunner {
         let unit_name = component.name().clone();
 
         // Setup metrics
-        let metrics = Arc::new(RibUnitMetrics::new(&self.gate));
+        let metrics = Arc::new(RibUnitMetrics::new(
+            &self.gate,
+            self.rib_merge_update_stats.clone(),
+        ));
         component.register_metrics(metrics.clone());
 
         // Setup status reporting
@@ -407,6 +416,7 @@ impl RibUnitRunner {
         roto_source: Arc<ArcSwap<(Instant, String)>>,
         pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
         process_metrics: Arc<TokioTaskMetrics>,
+        rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
     ) where
         F: Fn(&Prefix, RibValue, &PhysicalRib) -> Result<(Upsert, u32), PrefixStoreError>
             + Send
@@ -427,6 +437,7 @@ impl RibUnitRunner {
                             insert,
                             roto_source.clone(),
                             status_reporter.clone(),
+                            rib_merge_update_stats.clone(),
                         ))
                         .await
                     {
@@ -454,6 +465,7 @@ impl RibUnitRunner {
                         insert,
                         roto_source.clone(),
                         status_reporter.clone(),
+                        rib_merge_update_stats,
                     ))
                     .await
                 {
@@ -469,6 +481,7 @@ impl RibUnitRunner {
                         res,
                         roto_source,
                         status_reporter.clone(),
+                        rib_merge_update_stats,
                     )
                     .await),
                     Err(err) => Err(err),
@@ -496,6 +509,7 @@ impl RibUnitRunner {
         insert: F,
         roto_source: Arc<ArcSwap<(Instant, String)>>,
         status_reporter: Arc<RibUnitStatusReporter>,
+        rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
     ) -> Option<Update>
     where
         F: Fn(&Prefix, RibValue, &PhysicalRib) -> Result<(Upsert, u32), PrefixStoreError> + Send,
@@ -531,7 +545,8 @@ impl RibUnitRunner {
                             if let Some(prefix) = prefix {
                                 let hash = rib.precompute_hash_code(&output);
                                 let hashed_value = PreHashedTypeValue::new(output.clone(), hash);
-                                let rib_value = RibValue::from(hashed_value);
+                                let rib_value =
+                                    RibValue::from((hashed_value, rib_merge_update_stats));
 
                                 let pre_insert = Utc::now();
                                 match insert(&prefix, rib_value, rib) {
@@ -613,6 +628,7 @@ impl RibUnitRunner {
         res: QueryResult<RibValue>,
         roto_source: Arc<arc_swap::ArcSwapAny<Arc<(Instant, String)>>>,
         status_reporter: Arc<RibUnitStatusReporter>,
+        rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
     ) -> QueryResult<RibValue> {
         let mut processed_res = QueryResult::<RibValue> {
             match_type: res.match_type,
@@ -630,6 +646,7 @@ impl RibUnitRunner {
                 rib_value,
                 roto_source.clone(),
                 status_reporter.clone(),
+                rib_merge_update_stats.clone(),
             )
             .await;
         }
@@ -640,6 +657,7 @@ impl RibUnitRunner {
                 record_set,
                 &roto_source,
                 status_reporter.clone(),
+                rib_merge_update_stats.clone(),
             )
             .await;
         }
@@ -650,6 +668,7 @@ impl RibUnitRunner {
                 record_set,
                 &roto_source,
                 status_reporter.clone(),
+                rib_merge_update_stats,
             )
             .await;
         }
@@ -679,6 +698,7 @@ impl RibUnitRunner {
         rib_value: RibValue,
         roto_source: Arc<ArcSwap<(Instant, String)>>,
         status_reporter: Arc<RibUnitStatusReporter>,
+        rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
     ) -> Option<RibValue> {
         let mut new_values = HashedSet::with_capacity_and_hasher(1, HashBuildHasher::default());
 
@@ -694,6 +714,7 @@ impl RibUnitRunner {
                 |_, _, _| unreachable!(),
                 roto_source.clone(),
                 status_reporter.clone(),
+                rib_merge_update_stats.clone(),
             )
             .await;
 
@@ -713,7 +734,7 @@ impl RibUnitRunner {
         if new_values.is_empty() {
             None
         } else {
-            Some(RibValue::new(new_values))
+            Some(RibValue::new(new_values, rib_merge_update_stats))
         }
     }
 
@@ -722,6 +743,7 @@ impl RibUnitRunner {
         record_set: &RecordSet<RibValue>,
         roto_source: &Arc<arc_swap::ArcSwapAny<Arc<(Instant, String)>>>,
         status_reporter: Arc<RibUnitStatusReporter>,
+        rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
     ) -> Option<RecordSet<RibValue>> {
         let mut new_record_set = RecordSet::<RibValue>::new();
 
@@ -732,6 +754,7 @@ impl RibUnitRunner {
                 rib_value,
                 roto_source.clone(),
                 status_reporter.clone(),
+                rib_merge_update_stats.clone(),
             )
             .await
             {
@@ -814,9 +837,11 @@ impl RibUnitRunner {
 
 #[cfg(test)]
 mod tests {
-    use std::{net::IpAddr, str::FromStr};
+    use std::{net::IpAddr, str::FromStr, sync::Arc};
 
-    use roto::types::builtin::{RawRouteWithDeltas, RotondaId, RouteStatus, UpdateMessage};
+    use roto::types::builtin::{
+        BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus, UpdateMessage,
+    };
     use routecore::{addr::Prefix, bgp::message::SessionConfig};
 
     use crate::bgp::encode::{mk_bgp_update, Announcements, Prefixes};
@@ -887,11 +912,12 @@ mod tests {
         let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
 
         // When it is processed by this unit
-        let bgp_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-        RawRouteWithDeltas::new_with_message(
+        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        RawRouteWithDeltas::new_with_message_ref(
             delta_id,
             prefix.into(),
-            bgp_update_msg,
+            &bgp_update_msg,
             RouteStatus::InConvergence,
         )
     }
@@ -902,11 +928,12 @@ mod tests {
             mk_bgp_update(&Prefixes::new(vec![prefix]), &Announcements::None, &[]);
 
         // When it is processed by this unit
-        let bgp_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-        RawRouteWithDeltas::new_with_message(
+        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        RawRouteWithDeltas::new_with_message_ref(
             delta_id,
             prefix.into(),
-            bgp_update_msg,
+            &bgp_update_msg,
             RouteStatus::Withdrawn,
         )
     }

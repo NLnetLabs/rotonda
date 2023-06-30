@@ -15,6 +15,8 @@ use crate::{
     payload::RouterId,
 };
 
+use super::rib::RibMergeUpdateStatistics;
+
 #[derive(Debug, Default)]
 pub struct RibUnitMetrics {
     gate: Arc<GateMetrics>,
@@ -28,6 +30,7 @@ pub struct RibUnitMetrics {
     pub last_insert_duration: AtomicI64,
     pub last_update_duration: AtomicI64,
     routers: Arc<FrimMap<Arc<RouterId>, Arc<RouterMetrics>>>,
+    pub rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
 }
 
 impl RibUnitMetrics {
@@ -117,9 +120,10 @@ impl RibUnitMetrics {
 }
 
 impl RibUnitMetrics {
-    pub fn new(gate: &Arc<Gate>) -> Self {
+    pub fn new(gate: &Arc<Gate>, rib_merge_update_stats: Arc<RibMergeUpdateStatistics>) -> Self {
         RibUnitMetrics {
             gate: gate.metrics(),
+            rib_merge_update_stats,
             ..Default::default()
         }
     }
@@ -190,5 +194,7 @@ impl metrics::Source for RibUnitMetrics {
                 metrics.last_e2e_delay.load(Ordering::Relaxed),
             );
         }
+
+        eprintln!("Rib stats: {}", self.rib_merge_update_stats);
     }
 }

@@ -192,10 +192,10 @@ impl PrefixesApi {
 mod test {
     use std::str::FromStr;
 
-    use roto::types::builtin::{RawRouteWithDeltas, RotondaId, RouteStatus};
+    use roto::types::builtin::{RawRouteWithDeltas, RotondaId, RouteStatus, BgpUpdateMessage};
     use routecore::bgp::message::SessionConfig;
 
-    use crate::bgp::encode::{mk_bgp_update, Announcements, Prefixes};
+    use crate::bgp::{encode::{mk_bgp_update, Announcements, Prefixes}};
 
     use super::*;
 
@@ -206,15 +206,14 @@ mod test {
                 .unwrap();
         let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
 
-        let roto_update_msg =
-            roto::types::builtin::UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-
         let delta_id = (RotondaId(0), 0); // TODO
         let prefix = routecore::addr::Prefix::from_str("192.168.0.1/32").unwrap();
-        let raw_route = RawRouteWithDeltas::new_with_message(
+        let roto_update_msg = roto::types::builtin::UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        let raw_route = RawRouteWithDeltas::new_with_message_ref(
             delta_id,
             prefix.into(),
-            roto_update_msg,
+            &bgp_update_msg,
             RouteStatus::InConvergence,
         );
 

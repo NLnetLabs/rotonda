@@ -3,12 +3,15 @@ use std::{str::FromStr, sync::Arc};
 use arc_swap::{ArcSwap, ArcSwapOption};
 use assert_json_diff::{assert_json_matches_no_panic, CompareMode, Config};
 use hyper::{body::Bytes, Body, Request, StatusCode};
-use roto::types::builtin::{RawRouteWithDeltas, RotondaId, RouteStatus};
-use routecore::bgp::{
-    communities::{
-        Community, ExtendedCommunity, LargeCommunity, ParseError, StandardCommunity, Wellknown,
+use roto::types::builtin::{BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus};
+use routecore::{
+    asn::Asn,
+    bgp::{
+        communities::{
+            Community, ExtendedCommunity, LargeCommunity, ParseError, StandardCommunity, Wellknown,
+        },
+        message::SessionConfig,
     },
-    message::SessionConfig,
 };
 use serde_json::{json, Value};
 
@@ -32,9 +35,9 @@ use super::PrefixesApi;
 
 #[tokio::test]
 async fn error_with_garbage_prefix() {
-    let store = mk_rib();
+    let rib = mk_rib();
     assert_query_eq(
-        store.clone(),
+        rib.clone(),
         "/prefixes/not_a_valid_prefix",
         StatusCode::BAD_REQUEST,
         None,
@@ -44,9 +47,9 @@ async fn error_with_garbage_prefix() {
 
 #[tokio::test]
 async fn error_with_prefix_host_bits_set_ipv4() {
-    let store = mk_rib();
+    let rib = mk_rib();
     assert_query_eq(
-        store.clone(),
+        rib.clone(),
         "/prefixes/1.2.3.4/24", // that should have been 1.2.3.4/32 or 1.2.3.0/24
         StatusCode::BAD_REQUEST,
         None,
@@ -55,11 +58,11 @@ async fn error_with_prefix_host_bits_set_ipv4() {
 }
 
 #[tokio::test]
-async fn no_match_when_store_is_empty() {
-    let store = mk_rib();
+async fn no_match_when_rib_is_empty() {
+    let rib = mk_rib();
 
     assert_query_eq(
-        store,
+        rib,
         "/prefixes/1.2.3.4/32",
         StatusCode::OK,
         Some(json!({
@@ -72,16 +75,16 @@ async fn no_match_when_store_is_empty() {
 
 #[tokio::test]
 async fn exact_match_ipv4() {
-    let store = mk_rib();
+    let rib = mk_rib();
 
-    insert_withdrawal(store.clone(), "1.2.3.4/32", 1);
+    insert_announcement(rib.clone(), "1.2.3.4/32", 1);
 
     assert_query_eq(
-        store,
+        rib,
         "/prefixes/1.2.3.4/32",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_withdrawn_prefix("1.2.3.4/32", 1)],
+            "data": [mk_response_announced_prefix("1.2.3.4/32", 1)],
             "included": {}
         })),
     )
@@ -90,58 +93,58 @@ async fn exact_match_ipv4() {
 
 #[tokio::test]
 async fn exact_match_with_more_and_less_specifics_ipv4() {
-    let store = mk_rib();
+    let rib = mk_rib();
 
-    insert_withdrawal(store.clone(), "1.2.0.0/16", 1);
-    insert_withdrawal(store.clone(), "1.2.3.0/24", 2);
-    insert_withdrawal(store.clone(), "1.2.3.4/32", 3);
+    insert_withdrawal(rib.clone(), "1.2.0.0/16", 1);
+    insert_withdrawal(rib.clone(), "1.2.3.0/24", 2);
+    insert_withdrawal(rib.clone(), "1.2.3.4/32", 3);
 
     assert_query_eq(
-        store.clone(),
+        rib.clone(),
         "/prefixes/1.2.3.0/24",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_withdrawn_prefix("1.2.3.0/24", 2)],
+            "data": [mk_response_announced_prefix("1.2.3.0/24", 2)],
             "included": {}
         })),
     )
     .await;
 
     assert_query_eq(
-        store.clone(),
+        rib.clone(),
         "/prefixes/1.2.3.0/24?include=lessSpecifics",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_withdrawn_prefix("1.2.3.0/24", 2)],
+            "data": [mk_response_announced_prefix("1.2.3.0/24", 2)],
             "included": {
-                "lessSpecifics": [mk_response_withdrawn_prefix("1.2.0.0/16", 1)]
+                "lessSpecifics": [mk_response_announced_prefix("1.2.0.0/16", 1)]
             }
         })),
     )
     .await;
 
     assert_query_eq(
-        store.clone(),
+        rib.clone(),
         "/prefixes/1.2.3.0/24?include=moreSpecifics",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_withdrawn_prefix("1.2.3.0/24", 2)],
+            "data": [mk_response_announced_prefix("1.2.3.0/24", 2)],
             "included": {
-                "moreSpecifics": [mk_response_withdrawn_prefix("1.2.3.4/32", 3)]
+                "moreSpecifics": [mk_response_announced_prefix("1.2.3.4/32", 3)]
             }
         })),
     )
     .await;
 
     assert_query_eq(
-        store,
+        rib,
         "/prefixes/1.2.3.0/24?include=lessSpecifics,moreSpecifics",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_withdrawn_prefix("1.2.3.0/24", 2)],
+            "data": [mk_response_announced_prefix("1.2.3.0/24", 2)],
             "included": {
-                "lessSpecifics": [mk_response_withdrawn_prefix("1.2.0.0/16", 1)],
-                "moreSpecifics": [mk_response_withdrawn_prefix("1.2.3.4/32", 3)]
+                "lessSpecifics": [mk_response_announced_prefix("1.2.0.0/16", 1)],
+                "moreSpecifics": [mk_response_announced_prefix("1.2.3.4/32", 3)]
             }
         })),
     )
@@ -150,34 +153,34 @@ async fn exact_match_with_more_and_less_specifics_ipv4() {
 
 #[tokio::test]
 async fn issue_79_exact_match() {
-    let store = mk_rib();
+    let rib = mk_rib();
 
-    insert_withdrawal(store.clone(), "8.8.8.0/24", 1);
-    insert_withdrawal(store.clone(), "8.0.0.0/12", 2);
-    insert_withdrawal(store.clone(), "8.0.0.0/9", 3);
+    insert_withdrawal(rib.clone(), "8.8.8.0/24", 1);
+    insert_withdrawal(rib.clone(), "8.0.0.0/12", 2);
+    insert_withdrawal(rib.clone(), "8.0.0.0/9", 3);
 
     assert_query_eq(
-        store.clone(),
+        rib.clone(),
         "/prefixes/8.8.8.0/24",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_withdrawn_prefix("8.8.8.0/24", 1)],
+            "data": [mk_response_announced_prefix("8.8.8.0/24", 1)],
             "included": {}
         })),
     )
     .await;
 
     assert_query_eq(
-        store.clone(),
+        rib.clone(),
         "/prefixes/8.8.8.8/32?include=lessSpecifics",
         StatusCode::OK,
         Some(json!({
             "data": [],
             "included": {
                 "lessSpecifics": [
-                    mk_response_withdrawn_prefix("8.8.8.0/24", 1),
-                    mk_response_withdrawn_prefix("8.0.0.0/12", 2),
-                    mk_response_withdrawn_prefix("8.0.0.0/9", 3)
+                    mk_response_announced_prefix("8.8.8.0/24", 1),
+                    mk_response_announced_prefix("8.0.0.0/12", 2),
+                    mk_response_announced_prefix("8.0.0.0/9", 3)
                 ]
             }
         })),
@@ -187,22 +190,22 @@ async fn issue_79_exact_match() {
 
 #[tokio::test]
 async fn prefix_normalization_ipv6() {
-    let store = mk_rib();
+    let rib = mk_rib();
 
-    insert_withdrawal(store.clone(), "2001:DB8:2222::/48", 1);
-    insert_withdrawal(store.clone(), "2001:DB8:2222:0000::/64", 2);
-    insert_withdrawal(store.clone(), "2001:DB8:2222:0001::/64", 3);
+    insert_announcement(rib.clone(), "2001:DB8:2222::/48", 1);
+    insert_announcement(rib.clone(), "2001:DB8:2222:0000::/64", 2);
+    insert_announcement(rib.clone(), "2001:DB8:2222:0001::/64", 3);
 
     assert_query_eq(
-        store,
+        rib,
         "/prefixes/2001:DB8:2222::/48?include=moreSpecifics",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_withdrawn_prefix("2001:db8:2222::/48", 1)], // note: DB8 was queried but db8 was reported
+            "data": [mk_response_announced_prefix("2001:db8:2222::/48", 1)], // note: DB8 was queried but db8 was reported
             "included": {
                 "moreSpecifics": [
-                    mk_response_withdrawn_prefix("2001:db8:2222::/64", 2),   // note: 2222:0000:: compressed to 2222::
-                    mk_response_withdrawn_prefix("2001:db8:2222:1::/64", 3)  // note: 2222:0001:: compressed to 2222:1::
+                    mk_response_announced_prefix("2001:db8:2222::/64", 2),   // note: 2222:0000:: compressed to 2222::
+                    mk_response_announced_prefix("2001:db8:2222:1::/64", 3)  // note: 2222:0001:: compressed to 2222:1::
                 ]
             }
         })),
@@ -212,10 +215,10 @@ async fn prefix_normalization_ipv6() {
 
 #[tokio::test]
 async fn error_with_too_short_more_specifics_ipv4() {
-    let store = mk_rib();
+    let rib = mk_rib();
 
-    insert_withdrawal(store.clone(), "128.168.0.0/16", 1);
-    insert_withdrawal(store.clone(), "128.168.20.16/28", 2);
+    insert_withdrawal(rib.clone(), "128.168.0.0/16", 1);
+    insert_withdrawal(rib.clone(), "128.168.20.16/28", 2);
 
     // Test with a prefix whose first bit is the only bit set. 0x128 is 10000000 in binary. If we were to test
     // with any pattern of bits with a bit set further to the right, as the /N mask value increases the boundary
@@ -224,7 +227,7 @@ async fn error_with_too_short_more_specifics_ipv4() {
     // query to fail with HTTP 400 Bad Request: The host portion of the address has non-zero bits set.
     for n in MoreSpecifics::default_shortest_prefix_ipv4()..=32 {
         assert_query_eq(
-            store.clone(),
+            rib.clone(),
             &format!("/prefixes/128.0.0.0/{}?include=moreSpecifics", n),
             StatusCode::OK,
             None,
@@ -234,7 +237,7 @@ async fn error_with_too_short_more_specifics_ipv4() {
 
     for n in 0..MoreSpecifics::default_shortest_prefix_ipv4() {
         assert_query_eq(
-            store.clone(),
+            rib.clone(),
             &format!("/prefixes/128.0.0.0/{}?include=moreSpecifics", n),
             StatusCode::BAD_REQUEST,
             None,
@@ -245,11 +248,11 @@ async fn error_with_too_short_more_specifics_ipv4() {
 
 #[tokio::test]
 async fn error_with_too_short_more_specifics_ipv6() {
-    let store = mk_rib();
+    let rib = mk_rib();
 
-    insert_withdrawal(store.clone(), "2001:DB8:2222::/48", 1);
-    insert_withdrawal(store.clone(), "2001:DB8:2222:0000::/64", 2);
-    insert_withdrawal(store.clone(), "2001:DB8:2222:0001::/64", 3);
+    insert_withdrawal(rib.clone(), "2001:DB8:2222::/48", 1);
+    insert_withdrawal(rib.clone(), "2001:DB8:2222:0000::/64", 2);
+    insert_withdrawal(rib.clone(), "2001:DB8:2222:0001::/64", 3);
 
     // Test with a prefix whose first bit is the only bit set. 0x8000 is 1000000000000000 in binary. If we were to
     // test with any pattern of bits with a bit set further to the right, as the /N mask value increases the
@@ -258,7 +261,7 @@ async fn error_with_too_short_more_specifics_ipv6() {
     // causes the query to fail with HTTP 400 Bad Request: The host portion of the address has non-zero bits set.
     for n in MoreSpecifics::default_shortest_prefix_ipv6()..=128 {
         assert_query_eq(
-            store.clone(),
+            rib.clone(),
             &format!("/prefixes/8000::/{}?include=moreSpecifics", n),
             StatusCode::OK,
             None,
@@ -268,7 +271,7 @@ async fn error_with_too_short_more_specifics_ipv6() {
 
     for n in 0..MoreSpecifics::default_shortest_prefix_ipv6() {
         assert_query_eq(
-            store.clone(),
+            rib.clone(),
             &format!("/prefixes/8000::/{}?include=moreSpecifics", n),
             StatusCode::BAD_REQUEST,
             None,
@@ -279,7 +282,7 @@ async fn error_with_too_short_more_specifics_ipv6() {
 
 #[tokio::test]
 async fn exact_match_ipv4_with_normal_communities() {
-    let store = mk_rib();
+    let rib = mk_rib();
 
     #[rustfmt::skip]
     let normal_communities: Vec<StandardCommunity> = vec![
@@ -290,8 +293,8 @@ async fn exact_match_ipv4_with_normal_communities() {
         [0xFF, 0xFF, 0xFF, 0x05].into()
     ];
 
-    insert_announcement(
-        store.clone(),
+    insert_announcement_full(
+        rib.clone(),
         "1.2.3.4/32",
         1,
         &[18],
@@ -338,11 +341,11 @@ async fn exact_match_ipv4_with_normal_communities() {
     ]);
 
     assert_query_eq(
-        store,
+        rib,
         "/prefixes/1.2.3.4/32?details=communities",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix("1.2.3.4/32", 1, &[18], Some(expected_communities), "Pre")],
+            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18], Some(expected_communities), "Pre")],
             "included": {}
         })),
     )
@@ -351,7 +354,7 @@ async fn exact_match_ipv4_with_normal_communities() {
 
 #[tokio::test]
 async fn exact_match_ipv4_with_extended_communities() {
-    let store = mk_rib();
+    let rib = mk_rib();
 
     #[rustfmt::skip]
     let extended_communities: Vec<ExtendedCommunity> = vec![
@@ -360,8 +363,8 @@ async fn exact_match_ipv4_with_extended_communities() {
         sample_unrecgonised_extended_community(),
     ];
 
-    insert_announcement(
-        store.clone(),
+    insert_announcement_full(
+        rib.clone(),
         "1.2.3.4/32",
         1,
         &[18],
@@ -404,11 +407,11 @@ async fn exact_match_ipv4_with_extended_communities() {
     ]);
 
     assert_query_eq(
-        store,
+        rib,
         "/prefixes/1.2.3.4/32?details=communities",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix("1.2.3.4/32", 1, &[18], Some(expected_communities), "Pre")],
+            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18], Some(expected_communities), "Pre")],
             "included": {}
         })),
     )
@@ -417,10 +420,10 @@ async fn exact_match_ipv4_with_extended_communities() {
 
 #[tokio::test]
 async fn exact_match_ipv4_with_large_communities() {
-    let store = mk_rib();
+    let rib = mk_rib();
 
-    insert_announcement(
-        store.clone(),
+    insert_announcement_full(
+        rib.clone(),
         "1.2.3.4/32",
         1,
         &[18],
@@ -442,11 +445,11 @@ async fn exact_match_ipv4_with_large_communities() {
     ]);
 
     assert_query_eq(
-        store,
+        rib,
         "/prefixes/1.2.3.4/32?details=communities",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix("1.2.3.4/32", 1, &[18], Some(expected_communities), "Pre")],
+            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18], Some(expected_communities), "Pre")],
             "included": {}
         })),
     )
@@ -456,14 +459,14 @@ async fn exact_match_ipv4_with_large_communities() {
 #[tokio::test]
 async fn select_and_discard() {
     fn insert_announcement_helper<C: Into<Community>>(
-        store: Arc<ArcSwapOption<PhysicalRib>>,
+        rib: Arc<ArcSwapOption<PhysicalRib>>,
         router_n: u8,
         as_path: &[u32],
         community: Option<C>,
         // rib_name: RoutingInformationBase,
     ) {
-        insert_announcement(
-            store,
+        insert_announcement_full(
+            rib,
             "1.2.3.4/32",
             router_n,
             as_path,
@@ -508,8 +511,8 @@ async fn select_and_discard() {
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix("1.2.3.4/32", 2, &[19, 20, 21], None, "Post"),
-                mk_response_announced_prefix("1.2.3.4/32", 3, &[19, 20, 21], None, "Pre")
+                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None, "Post"),
+                mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None, "Pre")
             ],
             "included": {}
         })),
@@ -522,8 +525,8 @@ async fn select_and_discard() {
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix("1.2.3.4/32", 1, &[18, 19, 20], None, "Pre"),
-                mk_response_announced_prefix("1.2.3.4/32", 3, &[19, 20, 21], None, "Pre")
+                mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18, 19, 20], None, "Pre"),
+                mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None, "Pre")
             ],
             "included": {}
         })),
@@ -536,8 +539,8 @@ async fn select_and_discard() {
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix("1.2.3.4/32", 2, &[19, 20, 21], None, "Post"),
-                mk_response_announced_prefix("1.2.3.4/32", 4, &[20, 21, 22], None, "Post")
+                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None, "Post"),
+                mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None, "Post")
             ],
             "included": {}
         })),
@@ -549,7 +552,7 @@ async fn select_and_discard() {
         "/prefixes/1.2.3.4/32?select[source_as]=10003&sort=router_id",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix("1.2.3.4/32", 3, &[19, 20, 21], None, "Pre")],
+            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None, "Pre")],
             "included": {}
         })),
     )
@@ -560,7 +563,7 @@ async fn select_and_discard() {
         "/prefixes/1.2.3.4/32?select[community]=BLACKHOLE&select[as_path]=19,20,21&filter_op=all",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix("1.2.3.4/32", 2, &[19, 20, 21], None, "Post")],
+            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None, "Post")],
             "included": {}
         })),
     )
@@ -572,8 +575,8 @@ async fn select_and_discard() {
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix("1.2.3.4/32", 1, &[18, 19, 20], None, "Pre"),
-                mk_response_announced_prefix("1.2.3.4/32", 4, &[20, 21, 22], None, "Post")
+                mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18, 19, 20], None, "Pre"),
+                mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None, "Post")
             ],
             "included": {}
         })),
@@ -585,7 +588,7 @@ async fn select_and_discard() {
         "/prefixes/1.2.3.4/32?discard[as_path]=18,19,20&discard[as_path]=19,20,21&filter_op=any&sort=router_id",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix("1.2.3.4/32", 4, &[20, 21, 22], None, "Post")],
+            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None, "Post")],
             "included": {}
         })),
     )
@@ -597,9 +600,9 @@ async fn select_and_discard() {
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix("1.2.3.4/32", 1, &[18, 19, 20], None, "Pre"),
-                mk_response_announced_prefix("1.2.3.4/32", 3, &[19, 20, 21], None, "Pre"),
-                mk_response_announced_prefix("1.2.3.4/32", 4, &[20, 21, 22], None, "Post")
+                mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18, 19, 20], None, "Pre"),
+                mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None, "Pre"),
+                mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None, "Post")
             ],
             "included": {}
         })),
@@ -612,8 +615,8 @@ async fn select_and_discard() {
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix("1.2.3.4/32", 2, &[19, 20, 21], None, "Post"),
-                mk_response_announced_prefix("1.2.3.4/32", 3, &[19, 20, 21], None, "Pre")
+                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None, "Post"),
+                mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None, "Pre")
             ],
             "included": {}
         })),
@@ -644,9 +647,9 @@ async fn select_and_discard() {
             StatusCode::OK,
             Some(json!({
                 "data": [
-                    mk_response_announced_prefix("1.2.3.4/32", 2, &[19, 20, 21], None, "Post"),
-                    mk_response_announced_prefix("1.2.3.4/32", 3, &[19, 20, 21], None, "Pre"),
-                    mk_response_announced_prefix("1.2.3.4/32", 4, &[20, 21, 22], None, "Post")
+                    mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None, "Post"),
+                    mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None, "Pre"),
+                    mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None, "Post")
                 ],
                 "included": {}
             })),
@@ -756,13 +759,18 @@ fn insert_routes(rib: Arc<ArcSwapOption<PhysicalRib>>, announcements: Announceme
                 bgp_update_bytes.clone(),
                 SessionConfig::modern(),
             );
-            let raw_route = RawRouteWithDeltas::new_with_message(
+            let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+            let raw_route = RawRouteWithDeltas::new_with_message_ref(
                 delta_id,
                 (*prefix).into(),
-                roto_update_msg,
+                &bgp_update_msg,
                 RouteStatus::InConvergence,
-            );
-            let rib_value = PreHashedTypeValue::new(raw_route.into(), 1).into();
+            )
+            .with_peer_ip("192.168.0.1".parse().unwrap())
+            .with_peer_asn(Asn::from_u32(1818));
+
+            let stats = Default::default();
+            let rib_value = (PreHashedTypeValue::new(raw_route.into(), 1), stats).into();
             rib.load()
                 .as_ref()
                 .unwrap()
@@ -780,15 +788,20 @@ fn insert_withdrawal(rib: Arc<ArcSwapOption<PhysicalRib>>, withdrawals: &str, n:
     for prefix in prefixes.iter() {
         let roto_update_msg = roto::types::builtin::UpdateMessage::new(
             bgp_update_bytes.clone(),
-            SessionConfig::modern_addpath(),
+            SessionConfig::modern(),
         );
-        let raw_route = RawRouteWithDeltas::new_with_message(
+        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        let raw_route = RawRouteWithDeltas::new_with_message_ref(
             delta_id,
             (*prefix).into(),
-            roto_update_msg,
+            &bgp_update_msg,
             RouteStatus::Withdrawn,
-        );
-        let rib_value = PreHashedTypeValue::new(raw_route.into(), 1).into();
+        )
+        .with_peer_ip("192.168.0.1".parse().unwrap())
+        .with_peer_asn(Asn::from_u32(1818));
+
+        let stats = Default::default();
+        let rib_value = (PreHashedTypeValue::new(raw_route.into(), 1), stats).into();
         rib.load()
             .as_ref()
             .unwrap()
@@ -797,7 +810,11 @@ fn insert_withdrawal(rib: Arc<ArcSwapOption<PhysicalRib>>, withdrawals: &str, n:
     }
 }
 
-fn insert_announcement<C: Into<Community> + Copy>(
+fn insert_announcement(rib: Arc<ArcSwapOption<PhysicalRib>>, prefix: &str, n: u8) {
+    insert_announcement_full(rib, prefix, n, &[123, 456], "1.2.3.5", &[] as &[Community]);
+}
+
+fn insert_announcement_full<C: Into<Community> + Copy>(
     rib: Arc<ArcSwapOption<PhysicalRib>>,
     prefix: &str,
     n: u8,
@@ -843,18 +860,22 @@ fn mk_response_withdrawn_prefix(prefix: &str, n: u8) -> Value {
     })
 }
 
-fn mk_response_announced_prefix(
+fn mk_response_announced_prefix(prefix: &str, router_n: u8) -> Value {
+    mk_response_announced_prefix_full(prefix, router_n, &[123, 456], None, "unused")
+}
+
+fn mk_response_announced_prefix_full(
     prefix: &str,
     router_n: u8,
     as_path: &[u32],
     communities: Option<Value>,
-    rib_name: &str,
+    _rib_name: &str,
 ) -> Value {
     let mut prefix_object = json!({
         "prefix": prefix,
         "router": format!("router{}", router_n),
         "sourceAs": format!("AS1000{}", router_n),
-        "routingInformationBaseName": format!("{}-Policy-RIB", rib_name),
+        "routingInformationBaseName": format!("{}-Policy-RIB", _rib_name),
         "asPath": as_path.iter().map(|asn| format!("AS{}", asn)).collect::<Vec<String>>(),
         "neighbor": format!("1.1.1.{}", router_n)
     });

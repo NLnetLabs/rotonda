@@ -1,11 +1,13 @@
 use std::{
+    cell::RefCell,
     collections::hash_set,
     hash::{BuildHasher, Hasher},
     net::IpAddr,
     ops::Deref,
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
 
+use chrono::Utc;
 use hash_hasher::{HashBuildHasher, HashedSet};
 use roto::types::{
     builtin::{BuiltinTypeValue, RotondaId, RouteStatus, RouteToken},
@@ -19,6 +21,8 @@ use serde::Serialize;
 use smallvec::SmallVec;
 
 // -------- PhysicalRib -----------------------------------------------------------------------------------------------
+
+const SAMPLE_MERGE_UPDATE_SPEED_EVERY_N_CALLS: u64 = 1000;
 
 pub struct PhysicalRib {
     rib: Rib<RibValue>,
@@ -108,15 +112,114 @@ impl PhysicalRib {
 /// and not hard-coded in Rust types. We therefore precompute a hash code value and store it with the actual metadata
 /// value and the Hash trait impl passes the precomputed hash code to the HashedSet hasher which uses it effectively
 /// as-is, to avoid pointlessly calculating yet another hash code as would happen with the default Hasher.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Default)]
+pub struct CumAvg {
+    ca: f64,
+    n: u64,
+}
+
+impl CumAvg {
+    pub fn add(&mut self, v: u64) {
+        let v = v as f64;
+        let n = self.n as f64;
+        self.ca = (v + (n * self.ca)) / (n + 1.0);
+        self.n += 1;
+    }
+
+    pub fn value(&self) -> f64 {
+        self.ca
+    }
+}
+
+impl std::fmt::Display for CumAvg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} µs", self.value() as u64)
+    }
+}
+
+// The cumulative average per bucket where the bucket value is average time taken and the bucket range denotes the
+// size of the HashSet that was being MergeUpdate'd into at the time.
+#[derive(Debug, Default)]
+pub struct TimingBuckets {
+    le1: CumAvg,
+    le10: CumAvg,
+    le50: CumAvg,
+    le100: CumAvg,
+    leInf: CumAvg,
+}
+
+impl std::fmt::Display for TimingBuckets {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "le1: {}, le10: {}, le50: {}, le100: {}, leInf: {}",
+            self.le1, self.le10, self.le50, self.le100, self.leInf
+        )
+    }
+}
+
+#[derive(Debug, Default)]
+pub struct RibMergeUpdateStatistics {
+    withdraw: RwLock<TimingBuckets>,
+    other: RwLock<TimingBuckets>,
+}
+
+impl RibMergeUpdateStatistics {
+    pub fn add(&self, microseconds: u64, hashset_size: usize, withdraw: bool) {
+        let bucket = match withdraw {
+            true => &self.withdraw,
+            false => &self.other,
+        };
+
+        let mut unlocked_bucket = bucket.write().unwrap();
+
+        let range = match hashset_size {
+            0..=1 => &mut unlocked_bucket.le1,
+            2..=10 => &mut unlocked_bucket.le10,
+            11..=50 => &mut unlocked_bucket.le50,
+            51..=100 => &mut unlocked_bucket.le100,
+            _ => &mut unlocked_bucket.leInf,
+        };
+
+        range.add(microseconds);
+    }
+}
+
+impl std::fmt::Display for RibMergeUpdateStatistics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "withdraw: [{}], other: [{}]",
+            self.withdraw.read().unwrap(),
+            self.other.read().unwrap()
+        )
+    }
+}
+
+#[derive(Debug, Clone, Default)]
 pub struct RibValue {
     per_prefix_items: Arc<HashedSet<Arc<PreHashedTypeValue>>>,
+    stats: Arc<RibMergeUpdateStatistics>,
+}
+
+impl PartialEq for RibValue {
+    fn eq(&self, other: &Self) -> bool {
+        self.per_prefix_items == other.per_prefix_items
+    }
 }
 
 impl RibValue {
-    pub fn new(items: HashedSet<Arc<PreHashedTypeValue>>) -> Self {
+    thread_local!(
+        static STATS_COUNTER: RefCell<u64> = RefCell::new(0);
+    );
+
+    pub fn new(
+        items: HashedSet<Arc<PreHashedTypeValue>>,
+        stats: Arc<RibMergeUpdateStatistics>,
+    ) -> Self {
         Self {
             per_prefix_items: Arc::new(items),
+            stats,
         }
     }
 
@@ -141,32 +244,54 @@ impl MergeUpdate for RibValue {
     where
         Self: std::marker::Sized,
     {
+        let pre_insert = Utc::now();
+
         // There should only ever be one so unwrap().
         let in_item: &TypeValue = update_meta.per_prefix_items.iter().next().unwrap();
 
         // Clone ourselves, withdrawing matching routes if the given item is a withdrawn route
-        let out_items: HashedSet<Arc<PreHashedTypeValue>> = match in_item {
+        let (out_items, withdraw): (HashedSet<Arc<PreHashedTypeValue>>, bool) = match in_item {
             TypeValue::Builtin(BuiltinTypeValue::Route(new_route))
                 if new_route.status() == RouteStatus::Withdrawn =>
             {
                 let peer_id = PeerId::new(new_route.peer_ip(), new_route.peer_asn());
 
-                self.per_prefix_items
+                let out_items = self
+                    .per_prefix_items
                     .iter()
                     .map(|route| route.clone_and_withdraw(peer_id))
-                    .collect::<_>()
+                    .collect::<_>();
+
+                (out_items, true)
             }
 
             _ => {
                 // For all other cases, just use the Eq/Hash impls to replace matching or insert new.
-                self.per_prefix_items
+                let out_items = self
+                    .per_prefix_items
                     .union(&update_meta.per_prefix_items)
                     .cloned()
-                    .collect::<_>()
+                    .collect::<_>();
+
+                (out_items, false)
             }
         };
 
-        Ok(out_items.into())
+        Self::STATS_COUNTER.with(|counter| {
+            *counter.borrow_mut() += 1;
+            let res = *counter.borrow();
+            if res % SAMPLE_MERGE_UPDATE_SPEED_EVERY_N_CALLS == 0 {
+                let post_insert = Utc::now();
+                let insert_delay: u64 = (post_insert - pre_insert)
+                    .num_microseconds()
+                    .unwrap_or(i64::MAX) as u64;
+                update_meta
+                    .stats
+                    .add(insert_delay, out_items.len(), withdraw);
+            }
+        });
+
+        Ok((out_items, update_meta.stats.clone()).into())
     }
 }
 
@@ -184,20 +309,32 @@ impl std::ops::Deref for RibValue {
     }
 }
 
-impl From<PreHashedTypeValue> for RibValue {
-    fn from(item: PreHashedTypeValue) -> Self {
+impl From<(PreHashedTypeValue, Arc<RibMergeUpdateStatistics>)> for RibValue {
+    fn from((item, stats): (PreHashedTypeValue, Arc<RibMergeUpdateStatistics>)) -> Self {
         let mut items = HashedSet::with_capacity_and_hasher(1, HashBuildHasher::default());
         items.insert(Arc::new(item));
         Self {
             per_prefix_items: Arc::new(items),
+            stats,
         }
     }
 }
 
-impl From<HashedSet<Arc<PreHashedTypeValue>>> for RibValue {
-    fn from(value: HashedSet<Arc<PreHashedTypeValue>>) -> Self {
+impl
+    From<(
+        HashedSet<Arc<PreHashedTypeValue>>,
+        Arc<RibMergeUpdateStatistics>,
+    )> for RibValue
+{
+    fn from(
+        (value, stats): (
+            HashedSet<Arc<PreHashedTypeValue>>,
+            Arc<RibMergeUpdateStatistics>,
+        ),
+    ) -> Self {
         Self {
             per_prefix_items: Arc::new(value),
+            stats,
         }
     }
 }
@@ -317,13 +454,19 @@ mod tests {
     use std::{net::IpAddr, ops::Deref, str::FromStr, sync::Arc};
 
     use roto::types::{
-        builtin::{BuiltinTypeValue, RawRouteWithDeltas, RotondaId, RouteStatus, UpdateMessage},
+        builtin::{
+            BgpUpdateMessage, BuiltinTypeValue, RawRouteWithDeltas, RotondaId, RouteStatus,
+            UpdateMessage,
+        },
         typevalue::TypeValue,
     };
     use rotonda_store::prelude::MergeUpdate;
     use routecore::{addr::Prefix, asn::Asn, bgp::message::SessionConfig};
 
-    use crate::bgp::encode::{mk_bgp_update, Announcements, Prefixes};
+    use crate::{
+        bgp::encode::{mk_bgp_update, Announcements, Prefixes},
+        units::rib_unit::rib::RibMergeUpdateStatistics,
+    };
 
     use super::{PeerId, PreHashedTypeValue, RibValue};
 
@@ -335,7 +478,8 @@ mod tests {
 
     #[test]
     fn into_new() {
-        let rib_value: RibValue = PreHashedTypeValue::new(123u8.into(), 18).into();
+        let stats = Default::default();
+        let rib_value: RibValue = (PreHashedTypeValue::new(123u8.into(), 18), stats).into();
         assert_eq!(rib_value.len(), 1);
         assert_eq!(
             rib_value.iter().next(),
@@ -345,27 +489,37 @@ mod tests {
 
     #[test]
     fn merging_in_separate_values_yields_two_entries() {
+        let stats = Arc::new(RibMergeUpdateStatistics::default());
         let rib_value = RibValue::default();
         let value_one = PreHashedTypeValue::new(1u8.into(), 1);
         let value_two = PreHashedTypeValue::new(2u8.into(), 2);
 
-        let rib_value = rib_value.clone_merge_update(&value_one.into()).unwrap();
+        let rib_value = rib_value
+            .clone_merge_update(&(value_one, stats.clone()).into())
+            .unwrap();
         assert_eq!(rib_value.len(), 1);
 
-        let rib_value = rib_value.clone_merge_update(&value_two.into()).unwrap();
+        let rib_value = rib_value
+            .clone_merge_update(&(value_two, stats).into())
+            .unwrap();
         assert_eq!(rib_value.len(), 2);
     }
 
     #[test]
     fn merging_in_the_same_precomputed_hashcode_yields_one_entry() {
+        let stats = Arc::new(RibMergeUpdateStatistics::default());
         let rib_value = RibValue::default();
         let value_one = PreHashedTypeValue::new(1u8.into(), 1);
         let value_two = PreHashedTypeValue::new(2u8.into(), 1);
 
-        let rib_value = rib_value.clone_merge_update(&value_one.into()).unwrap();
+        let rib_value = rib_value
+            .clone_merge_update(&(value_one, stats.clone()).into())
+            .unwrap();
         assert_eq!(rib_value.len(), 1);
 
-        let rib_value = rib_value.clone_merge_update(&value_two.into()).unwrap();
+        let rib_value = rib_value
+            .clone_merge_update(&(value_two, stats).into())
+            .unwrap();
         assert_eq!(rib_value.len(), 1);
     }
 
@@ -373,7 +527,7 @@ mod tests {
     fn merging_in_a_withdrawal_updates_matching_entries() {
         // Given route announcements and withdrawals from a couple of peers to a single prefix
         let prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32).unwrap();
-        
+
         let peer_one = PeerId::new(
             Some(IpAddr::from_str("192.168.0.1").unwrap()),
             Some(Asn::from_u32(123)),
@@ -382,38 +536,44 @@ mod tests {
             Some(IpAddr::from_str("192.168.0.2").unwrap()),
             Some(Asn::from_u32(456)),
         );
-        
+
         let peer_one_announcement_one = mk_route_announcement(prefix, "123,456,789", peer_one);
         let peer_one_announcement_two = mk_route_announcement(prefix, "123,789", peer_one);
         let peer_two_announcement_one = mk_route_announcement(prefix, "456,789", peer_two);
         let peer_one_withdrawal = mk_route_withdrawal(prefix, peer_one);
-        
-        let peer_one_announcement_one = PreHashedTypeValue::new(peer_one_announcement_one.into(), 1);
-        let peer_one_announcement_two = PreHashedTypeValue::new(peer_one_announcement_two.into(), 2);
-        let peer_two_announcement_one = PreHashedTypeValue::new(peer_two_announcement_one.into(), 3);
+
+        let peer_one_announcement_one =
+            PreHashedTypeValue::new(peer_one_announcement_one.into(), 1);
+        let peer_one_announcement_two =
+            PreHashedTypeValue::new(peer_one_announcement_two.into(), 2);
+        let peer_two_announcement_one =
+            PreHashedTypeValue::new(peer_two_announcement_one.into(), 3);
         let peer_one_withdrawal = PreHashedTypeValue::new(peer_one_withdrawal.into(), 4);
 
-        // When merged into a RibValue        
+        // When merged into a RibValue
+        let stats = Arc::new(RibMergeUpdateStatistics::default());
         let rib_value = RibValue::default();
 
         // Unique announcements accumulate in the RibValue
         let rib_value = rib_value
-            .clone_merge_update(&peer_one_announcement_one.into())
+            .clone_merge_update(&(peer_one_announcement_one, stats.clone()).into())
             .unwrap();
         assert_eq!(rib_value.len(), 1);
 
         let rib_value = rib_value
-            .clone_merge_update(&peer_one_announcement_two.into())
+            .clone_merge_update(&(peer_one_announcement_two, stats.clone()).into())
             .unwrap();
         assert_eq!(rib_value.len(), 2);
 
         let rib_value = rib_value
-            .clone_merge_update(&peer_two_announcement_one.into())
+            .clone_merge_update(&(peer_two_announcement_one, stats.clone()).into())
             .unwrap();
         assert_eq!(rib_value.len(), 3);
 
         // And a withdrawal of one of those announced routes leaves the RibValue size unchanged
-        let rib_value = rib_value.clone_merge_update(&peer_one_withdrawal.into()).unwrap();
+        let rib_value = rib_value
+            .clone_merge_update(&(peer_one_withdrawal, stats).into())
+            .unwrap();
         assert_eq!(rib_value.len(), 3);
 
         // And routes from the first peer which were withdrawn are marked as such
@@ -469,11 +629,12 @@ mod tests {
         let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
 
         // When it is processed by this unit
-        let bgp_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-        let mut route = RawRouteWithDeltas::new_with_message(
+        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        let mut route = RawRouteWithDeltas::new_with_message_ref(
             delta_id,
             prefix.into(),
-            bgp_update_msg,
+            &bgp_update_msg,
             RouteStatus::InConvergence,
         );
 
@@ -494,11 +655,12 @@ mod tests {
             mk_bgp_update(&Prefixes::new(vec![prefix]), &Announcements::None, &[]);
 
         // When it is processed by this unit
-        let bgp_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-        let mut route = RawRouteWithDeltas::new_with_message(
+        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        let mut route = RawRouteWithDeltas::new_with_message_ref(
             delta_id,
             prefix.into(),
-            bgp_update_msg,
+            &bgp_update_msg,
             RouteStatus::Withdrawn,
         );
 

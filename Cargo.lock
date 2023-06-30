@@ -1998,7 +1998,7 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0"
-source = "git+https://github.com/NLnetLabs/roto.git#89d322319942f0039842741f5487f7e47584d57b"
+source = "git+https://github.com/NLnetLabs/roto.git?branch=fix-hashing-when-using-new-with-message-ref#f687ab788969e2389cd1bea1d95ebea85ab2d277"
 dependencies = [
  "arc-swap",
  "bytes",

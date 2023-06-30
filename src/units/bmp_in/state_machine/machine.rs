@@ -1123,7 +1123,7 @@ where
     fn finalize_bgp_msg_len(buf: &mut BytesMut) -> Result<(), &'static str> {
         if buf.len() < 19 {
             Err("Cannot finalize BGP message: message would be too short")
-        } else if buf.len() > 4096 {
+        } else if buf.len() > 65535 {
             // TOOD: If we can support RFC 8654 we can increase this to 65,535
             Err("Cannot finalize BGP message: message would be too long")
         } else {

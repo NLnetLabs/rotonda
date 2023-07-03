@@ -38,7 +38,7 @@ use routecore::{
     },
     bmp::message::{
         InformationTlvType, InitiationMessage, PeerDownNotification, PeerUpNotification,
-        PerPeerHeader, RibType, RouteMonitoring,
+        PerPeerHeader, RibType, RouteMonitoring, TerminationMessage,
     },
 };
 use smallvec::SmallVec;

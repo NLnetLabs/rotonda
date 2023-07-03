@@ -236,7 +236,7 @@ impl BmpState {
         }
     }
 
-    #{rustfmt::skip}
+    #[rustfmt::skip]
     pub async fn terminate(self) -> ProcessingResult {
         match self {
             BmpState::Initiating(v) => v.terminate(Option::<TerminationMessage<Bytes>>::None),

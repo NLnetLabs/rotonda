@@ -239,7 +239,8 @@ impl RouterInfoApi {
                                 writeln!(peer_report, "<tr><td colspan=6><pre>").unwrap();
                                 writeln!(peer_report, "    Announced prefixes: [<a href=\"{}\">close</a>]", base_http_path).unwrap();
                                 for prefix in prefixes {
-                                    writeln!(peer_report, "        {}", prefix).unwrap();
+                                    // TODO: Don't hard-code the RIB unit HTTP endpoint here as it is configurable!
+                                    writeln!(peer_report, "        <a href=\"/prefixes/{}\">{}</a>", prefix, prefix).unwrap();
                                 }
                                 writeln!(peer_report, "</pre></td></tr>").unwrap();
                             }

@@ -769,8 +769,7 @@ fn insert_routes(rib: Arc<ArcSwapOption<PhysicalRib>>, announcements: Announceme
             .with_peer_ip("192.168.0.1".parse().unwrap())
             .with_peer_asn(Asn::from_u32(1818));
 
-            let stats = Default::default();
-            let rib_value = (PreHashedTypeValue::new(raw_route.into(), 1), stats).into();
+            let rib_value = PreHashedTypeValue::new(raw_route.into(), 1).into();
             rib.load()
                 .as_ref()
                 .unwrap()
@@ -800,8 +799,7 @@ fn insert_withdrawal(rib: Arc<ArcSwapOption<PhysicalRib>>, withdrawals: &str, n:
         .with_peer_ip("192.168.0.1".parse().unwrap())
         .with_peer_asn(Asn::from_u32(1818));
 
-        let stats = Default::default();
-        let rib_value = (PreHashedTypeValue::new(raw_route.into(), 1), stats).into();
+        let rib_value = PreHashedTypeValue::new(raw_route.into(), 1).into();
         rib.load()
             .as_ref()
             .unwrap()

@@ -1,4 +1,4 @@
-use std::ops::ControlFlow;
+use std::{ops::ControlFlow, collections::hash_map::Keys};
 
 use bytes::Bytes;
 use roto::types::builtin::{BgpUpdateMessage, RouteStatus};
@@ -12,7 +12,7 @@ use routecore::{
 };
 use smallvec::SmallVec;
 
-use crate::{units::bmp_in::state_machine::machine::PeerStates, payload::{Payload, Update}};
+use crate::{units::bmp_in::state_machine::machine::{PeerStates, PeerState}, payload::{Payload, Update}};
 
 use super::super::{
     machine::{BmpState, BmpStateDetails, Initiable, PeerAware},
@@ -121,7 +121,7 @@ impl BmpStateDetails<Updating> {
         //     .map(|tlv| tlv.to_string())
         //     .collect::<Vec<_>>()
         //     .join("|");
-        let peers = self.details.get_peers().iter().map(|&v| v.clone()).collect::<Vec<_>>();
+        let peers = self.details.get_peers().cloned().collect::<Vec<_>>();
         let routes: SmallVec<[Payload; 8]> = peers.iter().flat_map(|pph| self.do_peer_down(pph)).collect();
         let next_state = BmpState::Terminated(self.into());
         if routes.is_empty() {
@@ -178,7 +178,7 @@ impl PeerAware for Updating {
             .add_peer_config(pph, session_config, eor_capable)
     }
 
-    fn get_peers(&self) -> Vec<&PerPeerHeader<Bytes>> {
+    fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState> {
         self.peer_states.get_peers()
     }
 

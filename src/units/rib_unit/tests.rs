@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use crate::units::rib_unit::rib::MergeUpdateUserData;
     use crate::units::rib_unit::statistics::RibMergeUpdateStatistics;
     use crate::{
         bgp::encode::{mk_bgp_update, Announcements, Prefixes},
@@ -376,7 +377,7 @@ mod tests {
             prefix: &Prefix,
             rib_value: RibValue,
             store: &PhysicalRib,
-        ) -> Result<(Upsert, u32), PrefixStoreError> {
+        ) -> Result<(Upsert<MergeUpdateUserData>, u32), PrefixStoreError> {
             eprintln!("Inserting {prefix} into the store");
             let res = store.insert(prefix, rib_value);
             eprintln!("Insert complete");

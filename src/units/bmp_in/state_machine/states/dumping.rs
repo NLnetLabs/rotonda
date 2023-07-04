@@ -1,4 +1,4 @@
-use std::{fmt::Debug, ops::ControlFlow};
+use std::{fmt::Debug, ops::ControlFlow, collections::hash_map::Keys};
 
 use bytes::Bytes;
 use roto::types::builtin::{BgpUpdateMessage, RouteStatus};
@@ -12,7 +12,7 @@ use routecore::{
 };
 use smallvec::SmallVec;
 
-use crate::{units::bmp_in::state_machine::machine::PeerStates, payload::{Payload, Update}};
+use crate::{units::bmp_in::state_machine::machine::{PeerStates, PeerState}, payload::{Payload, Update}};
 
 use super::initiating::Initiating;
 
@@ -265,7 +265,7 @@ impl BmpStateDetails<Dumping> {
         //     .map(|tlv| tlv.to_string())
         //     .collect::<Vec<_>>()
         //     .join("|");
-        let peers = self.details.get_peers().iter().map(|&v| v.clone()).collect::<Vec<_>>();
+        let peers = self.details.get_peers().cloned().collect::<Vec<_>>();
         let routes: SmallVec<[Payload; 8]> = peers.iter().flat_map(|pph| self.do_peer_down(pph)).collect();
         let next_state = BmpState::Terminated(self.into());
         if routes.is_empty() {
@@ -327,7 +327,7 @@ impl PeerAware for Dumping {
             .add_peer_config(pph, session_config, eor_capable)
     }
 
-    fn get_peers(&self) -> Vec<&PerPeerHeader<Bytes>> {
+    fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState> {
         self.peer_states.get_peers()
     }
 
@@ -565,7 +565,7 @@ mod tests {
         if let BmpState::Dumping(next_state) = res.next_state {
             let Dumping { peer_states, .. } = next_state.details;
             assert_eq!(peer_states.num_peer_configs(), 1);
-            let pph = peer_states.get_peers()[0];
+            let pph = peer_states.get_peers().nth(0).unwrap();
             assert_eq!(peer_states.is_peer_eor_capable(pph), Some(true));
             assert_eq!(peer_states.num_pending_eors(), 0); // zero because we have to see a route announcement to know which (S)AFI an EoR is expected for
         }

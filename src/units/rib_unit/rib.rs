@@ -1,5 +1,4 @@
 use std::{
-    cell::RefCell,
     collections::hash_set,
     hash::{BuildHasher, Hasher},
     net::IpAddr,
@@ -7,7 +6,7 @@ use std::{
     sync::Arc,
 };
 
-use chrono::Utc;
+use chrono::{Duration, Utc};
 use hash_hasher::{HashBuildHasher, HashedSet};
 use roto::types::{
     builtin::{BuiltinTypeValue, RotondaId, RouteStatus, RouteToken},
@@ -20,11 +19,7 @@ use routecore::asn::Asn;
 use serde::Serialize;
 use smallvec::SmallVec;
 
-use super::statistics::RibMergeUpdateStatistics;
-
 // -------- PhysicalRib -----------------------------------------------------------------------------------------------
-
-const SAMPLE_MERGE_UPDATE_SPEED_EVERY_N_CALLS: u64 = 1000;
 
 pub struct PhysicalRib {
     rib: Rib<RibValue>,
@@ -118,7 +113,6 @@ impl PhysicalRib {
 #[derive(Debug, Clone, Default)]
 pub struct RibValue {
     per_prefix_items: Arc<HashedSet<Arc<PreHashedTypeValue>>>,
-    stats: Arc<RibMergeUpdateStatistics>,
 }
 
 impl PartialEq for RibValue {
@@ -128,17 +122,9 @@ impl PartialEq for RibValue {
 }
 
 impl RibValue {
-    thread_local!(
-        static STATS_COUNTER: RefCell<u64> = RefCell::new(0);
-    );
-
-    pub fn new(
-        items: HashedSet<Arc<PreHashedTypeValue>>,
-        stats: Arc<RibMergeUpdateStatistics>,
-    ) -> Self {
+    pub fn new(items: HashedSet<Arc<PreHashedTypeValue>>) -> Self {
         Self {
             per_prefix_items: Arc::new(items),
-            stats,
         }
     }
 
@@ -154,63 +140,79 @@ impl RibValue {
     }
 }
 
+pub struct MergeUpdateUserData {
+    /// The number of items added or removed (withdrawn) by the MergeUpdate operation.
+    pub item_count_delta: isize,
+
+    /// The number of items resulting after the MergeUpdate operation.
+    pub item_count_total: usize,
+
+    /// The time taken to perform the MergeUpdate operation.
+    pub op_duration: Duration,
+}
+
 impl MergeUpdate for RibValue {
-    fn merge_update(&mut self, _update_record: RibValue) -> Result<(), Box<dyn std::error::Error>> {
+    type UserData = MergeUpdateUserData;
+
+    fn merge_update(
+        &mut self,
+        _update_record: RibValue,
+    ) -> Result<MergeUpdateUserData, Box<dyn std::error::Error>> {
         unreachable!()
     }
 
-    fn clone_merge_update(&self, update_meta: &Self) -> Result<Self, Box<dyn std::error::Error>>
+    fn clone_merge_update(
+        &self,
+        update_meta: &Self,
+    ) -> Result<(Self, Self::UserData), Box<dyn std::error::Error>>
     where
         Self: std::marker::Sized,
     {
         let pre_insert = Utc::now();
+        let mut item_count_delta: isize = 0;
 
         // There should only ever be one so unwrap().
         let in_item: &TypeValue = update_meta.per_prefix_items.iter().next().unwrap();
 
         // Clone ourselves, withdrawing matching routes if the given item is a withdrawn route
-        let (out_items, withdraw): (HashedSet<Arc<PreHashedTypeValue>>, bool) = match in_item {
+        let out_items: HashedSet<Arc<PreHashedTypeValue>> = match in_item {
             TypeValue::Builtin(BuiltinTypeValue::Route(new_route))
                 if new_route.status() == RouteStatus::Withdrawn =>
             {
                 let peer_id = PeerId::new(new_route.peer_ip(), new_route.peer_asn());
 
-                let out_items = self
-                    .per_prefix_items
+                self.per_prefix_items
                     .iter()
-                    .map(|route| route.clone_and_withdraw(peer_id))
-                    .collect::<_>();
-
-                (out_items, true)
+                    .map(|route| {
+                        let (out_route, withdrawn) = route.clone_and_withdraw(peer_id);
+                        if withdrawn {
+                            item_count_delta -= 1;
+                        }
+                        out_route
+                    })
+                    .collect::<_>()
             }
 
             _ => {
+                item_count_delta = 1;
+
                 // For all other cases, just use the Eq/Hash impls to replace matching or insert new.
-                let out_items = self
-                    .per_prefix_items
+                self.per_prefix_items
                     .union(&update_meta.per_prefix_items)
                     .cloned()
-                    .collect::<_>();
-
-                (out_items, false)
+                    .collect::<_>()
             }
         };
 
-        Self::STATS_COUNTER.with(|counter| {
-            *counter.borrow_mut() += 1;
-            let res = *counter.borrow();
-            if res % SAMPLE_MERGE_UPDATE_SPEED_EVERY_N_CALLS == 0 {
-                let post_insert = Utc::now();
-                let insert_delay: u64 = (post_insert - pre_insert)
-                    .num_microseconds()
-                    .unwrap_or(i64::MAX) as u64;
-                update_meta
-                    .stats
-                    .add(insert_delay, out_items.len(), withdraw);
-            }
-        });
+        let post_insert = Utc::now();
+        let op_duration = post_insert - pre_insert;
+        let user_data = MergeUpdateUserData {
+            item_count_delta,
+            item_count_total: out_items.len(),
+            op_duration,
+        };
 
-        Ok((out_items, update_meta.stats.clone()).into())
+        Ok((out_items.into(), user_data))
     }
 }
 
@@ -228,32 +230,20 @@ impl std::ops::Deref for RibValue {
     }
 }
 
-impl From<(PreHashedTypeValue, Arc<RibMergeUpdateStatistics>)> for RibValue {
-    fn from((item, stats): (PreHashedTypeValue, Arc<RibMergeUpdateStatistics>)) -> Self {
+impl From<PreHashedTypeValue> for RibValue {
+    fn from(item: PreHashedTypeValue) -> Self {
         let mut items = HashedSet::with_capacity_and_hasher(1, HashBuildHasher::default());
         items.insert(Arc::new(item));
         Self {
             per_prefix_items: Arc::new(items),
-            stats,
         }
     }
 }
 
-impl
-    From<(
-        HashedSet<Arc<PreHashedTypeValue>>,
-        Arc<RibMergeUpdateStatistics>,
-    )> for RibValue
-{
-    fn from(
-        (value, stats): (
-            HashedSet<Arc<PreHashedTypeValue>>,
-            Arc<RibMergeUpdateStatistics>,
-        ),
-    ) -> Self {
+impl From<HashedSet<Arc<PreHashedTypeValue>>> for RibValue {
+    fn from(value: HashedSet<Arc<PreHashedTypeValue>>) -> Self {
         Self {
             per_prefix_items: Arc::new(value),
-            stats,
         }
     }
 }
@@ -283,16 +273,20 @@ impl PreHashedTypeValue {
         self.peer_id() == Some(peer_id)
     }
 
+    pub fn is_withdrawn(&self) -> bool {
+        matches!(&self.value, TypeValue::Builtin(BuiltinTypeValue::Route(route)) if route.status() == RouteStatus::Withdrawn)
+    }
+
     pub fn clone_and_withdraw(
         self: &Arc<PreHashedTypeValue>,
         peer_id: PeerId,
-    ) -> Arc<PreHashedTypeValue> {
-        if self.peer_id() == Some(peer_id) {
+    ) -> (Arc<PreHashedTypeValue>, bool) {
+        if !self.is_withdrawn() && self.peer_id() == Some(peer_id) {
             let mut cloned = Arc::deref(self).clone();
             cloned.withdraw();
-            Arc::new(cloned)
+            (Arc::new(cloned), true)
         } else {
-            Arc::clone(self)
+            (Arc::clone(self), false)
         }
     }
 }
@@ -382,10 +376,7 @@ mod tests {
     use rotonda_store::prelude::MergeUpdate;
     use routecore::{addr::Prefix, asn::Asn, bgp::message::SessionConfig};
 
-    use crate::{
-        bgp::encode::{mk_bgp_update, Announcements, Prefixes},
-        units::rib_unit::rib::RibMergeUpdateStatistics,
-    };
+    use crate::bgp::encode::{mk_bgp_update, Announcements, Prefixes};
 
     use super::{PeerId, PreHashedTypeValue, RibValue};
 
@@ -397,8 +388,7 @@ mod tests {
 
     #[test]
     fn into_new() {
-        let stats = Default::default();
-        let rib_value: RibValue = (PreHashedTypeValue::new(123u8.into(), 18), stats).into();
+        let rib_value: RibValue = PreHashedTypeValue::new(123u8.into(), 18).into();
         assert_eq!(rib_value.len(), 1);
         assert_eq!(
             rib_value.iter().next(),
@@ -408,37 +398,27 @@ mod tests {
 
     #[test]
     fn merging_in_separate_values_yields_two_entries() {
-        let stats = Arc::new(RibMergeUpdateStatistics::default());
         let rib_value = RibValue::default();
         let value_one = PreHashedTypeValue::new(1u8.into(), 1);
         let value_two = PreHashedTypeValue::new(2u8.into(), 2);
 
-        let rib_value = rib_value
-            .clone_merge_update(&(value_one, stats.clone()).into())
-            .unwrap();
+        let (rib_value, _user_data) = rib_value.clone_merge_update(&value_one.into()).unwrap();
         assert_eq!(rib_value.len(), 1);
 
-        let rib_value = rib_value
-            .clone_merge_update(&(value_two, stats).into())
-            .unwrap();
+        let (rib_value, _user_data) = rib_value.clone_merge_update(&value_two.into()).unwrap();
         assert_eq!(rib_value.len(), 2);
     }
 
     #[test]
     fn merging_in_the_same_precomputed_hashcode_yields_one_entry() {
-        let stats = Arc::new(RibMergeUpdateStatistics::default());
         let rib_value = RibValue::default();
         let value_one = PreHashedTypeValue::new(1u8.into(), 1);
         let value_two = PreHashedTypeValue::new(2u8.into(), 1);
 
-        let rib_value = rib_value
-            .clone_merge_update(&(value_one, stats.clone()).into())
-            .unwrap();
+        let (rib_value, _user_data) = rib_value.clone_merge_update(&value_one.into()).unwrap();
         assert_eq!(rib_value.len(), 1);
 
-        let rib_value = rib_value
-            .clone_merge_update(&(value_two, stats).into())
-            .unwrap();
+        let (rib_value, _user_data) = rib_value.clone_merge_update(&value_two.into()).unwrap();
         assert_eq!(rib_value.len(), 1);
     }
 
@@ -470,28 +450,27 @@ mod tests {
         let peer_one_withdrawal = PreHashedTypeValue::new(peer_one_withdrawal.into(), 4);
 
         // When merged into a RibValue
-        let stats = Arc::new(RibMergeUpdateStatistics::default());
         let rib_value = RibValue::default();
 
         // Unique announcements accumulate in the RibValue
-        let rib_value = rib_value
-            .clone_merge_update(&(peer_one_announcement_one, stats.clone()).into())
+        let (rib_value, _user_data) = rib_value
+            .clone_merge_update(&peer_one_announcement_one.into())
             .unwrap();
         assert_eq!(rib_value.len(), 1);
 
-        let rib_value = rib_value
-            .clone_merge_update(&(peer_one_announcement_two, stats.clone()).into())
+        let (rib_value, _user_data) = rib_value
+            .clone_merge_update(&peer_one_announcement_two.into())
             .unwrap();
         assert_eq!(rib_value.len(), 2);
 
-        let rib_value = rib_value
-            .clone_merge_update(&(peer_two_announcement_one, stats.clone()).into())
+        let (rib_value, _user_data) = rib_value
+            .clone_merge_update(&peer_two_announcement_one.into())
             .unwrap();
         assert_eq!(rib_value.len(), 3);
 
         // And a withdrawal of one of those announced routes leaves the RibValue size unchanged
-        let rib_value = rib_value
-            .clone_merge_update(&(peer_one_withdrawal, stats).into())
+        let (rib_value, _user_data) = rib_value
+            .clone_merge_update(&peer_one_withdrawal.into())
             .unwrap();
         assert_eq!(rib_value.len(), 3);
 

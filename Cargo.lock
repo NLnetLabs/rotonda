@@ -2000,7 +2000,6 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0"
-source = "git+https://github.com/NLnetLabs/roto.git?branch=more-serialization#1668f74de77650ee1b0656ac90b2b144b5d07cb6"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -2070,8 +2069,7 @@ dependencies = [
 [[package]]
 name = "rotonda-macros"
 version = "0.2.0-pre.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a9f658b1d596f7543bfa57e0d25c25e41d888bdf9c297c8392fcb9bddc8510e"
+source = "git+https://github.com/NLnetLabs/rotonda-macros.git?branch=mergeupdate-userdata#2964eb2856ff79742f90a6673c9c7ee9be416e61"
 dependencies = [
  "quote",
  "syn 2.0.18",

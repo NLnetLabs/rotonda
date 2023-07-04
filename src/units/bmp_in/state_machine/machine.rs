@@ -44,7 +44,7 @@ use routecore::{
 use smallvec::SmallVec;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map::Keys},
     net::{IpAddr, SocketAddr},
     ops::ControlFlow,
     panic::UnwindSafe,
@@ -360,7 +360,7 @@ pub trait PeerAware {
         eor_capable: bool,
     ) -> bool;
 
-    fn get_peers(&self) -> Vec<&PerPeerHeader<Bytes>>;
+    fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState>;
 
     fn update_peer_config(&mut self, pph: &PerPeerHeader<Bytes>, config: SessionConfig) -> bool;
 
@@ -1021,8 +1021,8 @@ impl PeerAware for PeerStates {
         added
     }
 
-    fn get_peers(&self) -> Vec<&PerPeerHeader<Bytes>> {
-        self.0.keys().collect()
+    fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState> {
+        self.0.keys()
     }
 
     fn update_peer_config(

@@ -24,7 +24,10 @@ use roto::{
     types::{builtin::BuiltinTypeValue, collections::ElementTypeValue, typevalue::TypeValue},
 };
 use rotonda_store::{
-    custom_alloc::Upsert, epoch, prelude::multi::PrefixStoreError, QueryResult, RecordSet,
+    custom_alloc::Upsert,
+    epoch,
+    prelude::{multi::PrefixStoreError, MergeUpdate},
+    QueryResult, RecordSet,
 };
 
 use routecore::addr::Prefix;
@@ -41,15 +44,21 @@ use std::{
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-use super::statistics::RibMergeUpdateStatistics;
 use super::{
     http::PrefixesApi,
     metrics::RibUnitMetrics,
     rib::{PhysicalRib, PreHashedTypeValue, RibValue},
     status_reporter::RibUnitStatusReporter,
 };
+use super::{rib::MergeUpdateUserData, statistics::RibMergeUpdateStatistics};
 
 use std::time::Instant;
+
+const RECORD_MERGE_UPDATE_SPEED_EVERY_N_CALLS: u64 = 1000;
+
+thread_local!(
+    static STATS_COUNTER: RefCell<u64> = RefCell::new(0);
+);
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct MoreSpecifics {
@@ -419,17 +428,18 @@ impl RibUnitRunner {
         process_metrics: Arc<TokioTaskMetrics>,
         rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
     ) where
-        F: Fn(&Prefix, RibValue, &PhysicalRib) -> Result<(Upsert, u32), PrefixStoreError>
+        F: Fn(
+                &Prefix,
+                RibValue,
+                &PhysicalRib,
+            )
+                -> Result<(Upsert<<RibValue as MergeUpdate>::UserData>, u32), PrefixStoreError>
             + Send
             + Copy,
         F: 'static,
     {
         match update {
             Update::Bulk(updates) => {
-                // let mut new_announcements = 0;
-                // let mut modified_announcements = 0;
-                // let mut new_withdrawals = 0;
-
                 for payload in updates {
                     if let Some(update) = process_metrics
                         .instrument(Self::process_update_single(
@@ -445,12 +455,6 @@ impl RibUnitRunner {
                         gate.update_data(update).await;
                     }
                 }
-
-                // status_reporter.update_processed(
-                //     new_announcements,
-                //     modified_announcements,
-                //     new_withdrawals,
-                // );
 
                 if let Some(rib) = rib.load().as_ref() {
                     status_reporter.unique_prefix_count_updated(rib.prefixes_count());
@@ -513,7 +517,13 @@ impl RibUnitRunner {
         rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
     ) -> Option<Update>
     where
-        F: Fn(&Prefix, RibValue, &PhysicalRib) -> Result<(Upsert, u32), PrefixStoreError> + Send,
+        F: Fn(
+                &Prefix,
+                RibValue,
+                &PhysicalRib,
+            )
+                -> Result<(Upsert<<RibValue as MergeUpdate>::UserData>, u32), PrefixStoreError>
+            + Send,
         F: 'static,
     {
         match payload {
@@ -546,8 +556,8 @@ impl RibUnitRunner {
                             if let Some(prefix) = prefix {
                                 let hash = rib.precompute_hash_code(&output);
                                 let hashed_value = PreHashedTypeValue::new(output.clone(), hash);
-                                let rib_value =
-                                    RibValue::from((hashed_value, rib_merge_update_stats));
+                                let is_withdraw = hashed_value.is_withdrawn();
+                                let rib_value = hashed_value.into();
 
                                 let pre_insert = Utc::now();
                                 match insert(&prefix, rib_value, rib) {
@@ -561,12 +571,9 @@ impl RibUnitRunner {
                                         // let propagation_delay = (post_insert - rib_el.received).num_milliseconds();
                                         let propagation_delay = 0;
 
-                                        // TODO: Add a way to check RouteStatus on route or rib_value
-                                        // let is_announcement = rib_el.advert.is_some();
-                                        let is_announcement = true;
-
-                                        let router_id =
-                                            Arc::new(RouterId::from_str("dummy").unwrap());
+                                        let router_id = Arc::new(
+                                            RouterId::from_str("not implemented yet").unwrap(),
+                                        );
 
                                         match upsert {
                                             Upsert::Insert => {
@@ -575,14 +582,29 @@ impl RibUnitRunner {
                                                     insert_delay,
                                                     propagation_delay,
                                                     num_retries,
-                                                    is_announcement,
+                                                    is_withdraw,
                                                 );
-
-                                                // if is_announcement {
-                                                //     new_announcements += 1;
-                                                // }
                                             }
-                                            Upsert::Update => {
+                                            Upsert::Update(MergeUpdateUserData {
+                                                item_count_total,
+                                                op_duration,
+                                                ..
+                                            }) => {
+                                                STATS_COUNTER.with(|counter| {
+                                                    *counter.borrow_mut() += 1;
+                                                    let res = *counter.borrow();
+                                                    if res % RECORD_MERGE_UPDATE_SPEED_EVERY_N_CALLS == 0 {                                        
+                                                        rib_merge_update_stats.add(
+                                                            op_duration
+                                                                .num_microseconds()
+                                                                .unwrap_or(i64::MAX)
+                                                                as u64,
+                                                            item_count_total,
+                                                            is_withdraw,
+                                                        );
+                                                    }
+                                                });
+
                                                 status_reporter.update_ok(
                                                     router_id,
                                                     insert_delay,
@@ -590,15 +612,13 @@ impl RibUnitRunner {
                                                     num_retries,
                                                 );
 
-                                                // if is_announcement {
-                                                //     modified_announcements += 1;
-                                                // }
+                                                // status_reporter.update_processed(
+                                                //     new_announcements,
+                                                //     modified_announcements,
+                                                //     new_withdrawals,
+                                                // );
                                             }
                                         }
-
-                                        // if !is_announcement {
-                                        //     new_withdrawals += 1;
-                                        // }
                                     }
 
                                     Err(err) => status_reporter.insert_failed(prefix, err),
@@ -735,7 +755,7 @@ impl RibUnitRunner {
         if new_values.is_empty() {
             None
         } else {
-            Some(RibValue::new(new_values, rib_merge_update_stats))
+            Some(new_values.into())
         }
     }
 

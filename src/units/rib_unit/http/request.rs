@@ -4,7 +4,6 @@ use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
 use hyper::{Body, Method, Request, Response};
 use log::trace;
-use roto::types::datasources::Rib;
 use rotonda_store::{epoch, prelude::Prefix, MatchOptions};
 use routecore::{asn::Asn, bgp::communities::Community};
 use tokio::sync::oneshot;
@@ -20,8 +19,7 @@ use crate::{
     units::{
         rib_unit::{
             http::types::{FilterKind, FilterOp},
-            rib_value::RibValue,
-            unit::{PendingVirtualRibQueryResults, QueryLimits},
+            unit::{PendingVirtualRibQueryResults, QueryLimits}, rib::PhysicalRib,
         },
         RibType,
     },
@@ -30,7 +28,7 @@ use crate::{
 use super::types::{Details, Filter, FilterMode, Filters, Includes, SortKey};
 
 pub struct PrefixesApi {
-    rib: Arc<ArcSwapOption<Rib<RibValue>>>,
+    rib: Arc<ArcSwapOption<PhysicalRib>>,
     http_api_path: Arc<String>,
     query_limits: Arc<ArcSwap<QueryLimits>>,
     rib_type: RibType,
@@ -40,7 +38,7 @@ pub struct PrefixesApi {
 
 impl PrefixesApi {
     pub fn new(
-        rib: Arc<ArcSwapOption<Rib<RibValue>>>,
+        rib: Arc<ArcSwapOption<PhysicalRib>>,
         http_api_path: Arc<String>,
         query_limits: Arc<ArcSwap<QueryLimits>>,
         rib_type: RibType,
@@ -142,7 +140,7 @@ impl PrefixesApi {
             RibType::Physical => {
                 let guard = &epoch::pin();
                 if let Some(rib) = self.rib.load().as_ref() {
-                    rib.store.match_prefix(&prefix, &options, guard)
+                    rib.match_prefix(&prefix, &options, guard)
                 } else {
                     let res = Response::builder()
                         .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)

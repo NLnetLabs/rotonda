@@ -19,6 +19,7 @@ use super::{
 use crate::common::status_reporter::UnitStatusReporter;
 use crate::common::{status_reporter::Chainable, unit::UnitActivity};
 use crate::manager::{Component, WaitPoint};
+use crate::tokio::TokioTaskMetrics;
 use crate::{
     comms::{Gate, GateStatus, Terminated},
     units::Unit,
@@ -130,6 +131,9 @@ impl BmpTcpInRunner {
         let metrics = Arc::new(BmpTcpInMetrics::new(&gate));
         component.register_metrics(metrics.clone());
 
+        let accept_metrics = Arc::new(TokioTaskMetrics::new());
+        component.register_metrics(accept_metrics.clone());
+
         // Setup status reporting
         let status_reporter = Arc::new(BmpTcpInStatusReporter::new(&unit_name, metrics.clone()));
 
@@ -151,7 +155,7 @@ impl BmpTcpInRunner {
                 .await
                 .unwrap();
 
-            let mut accept_fut = Box::pin(listener.accept());
+            let mut accept_fut = Box::pin(accept_metrics.instrument(listener.accept()));
             loop {
                 let res = {
                     // wait for a status change or an incoming connection from
@@ -207,13 +211,12 @@ impl BmpTcpInRunner {
                         UnitActivity::InputReceived((tcp_stream, router_addr)) => {
                             // Incoming router connection.
                             status_reporter.listener_connection_accepted(router_addr);
-                            accept_fut = Box::pin(listener.accept());
+                            accept_fut = Box::pin(accept_metrics.instrument(listener.accept()));
                             Some((tcp_stream, router_addr))
                         }
 
                         UnitActivity::Terminated => {
                             status_reporter.terminated();
-
 
                             return Err(Terminated);
                         }

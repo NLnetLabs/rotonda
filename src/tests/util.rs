@@ -126,13 +126,13 @@ pub mod bgp {
         use std::convert::{TryFrom, TryInto};
         use std::{net::IpAddr, ops::Deref, str::FromStr};
 
-        use bytes::{Bytes, BytesMut};
+        use bytes::{Bytes, BytesMut, BufMut};
         use chrono::Utc;
         use rotonda_store::addr::Prefix;
         use routecore::asn::Asn;
         use routecore::bgp::aspath::HopPath;
         use routecore::bgp::communities::Community;
-        use routecore::bgp::types::{NextHop, OriginType, PathAttributeType};
+        use routecore::bgp::types::{NextHop, OriginType, PathAttributeType, AFI, SAFI};
         use routecore::bmp::message::{
             InformationTlvType, MessageType, PeerType, TerminationInformation,
         };
@@ -640,17 +640,28 @@ pub mod bgp {
             //
             // From: https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
             let mut withdrawn_routes = BytesMut::new();
+            let mut mp_unreach_nlri = BytesMut::new();
+
             for prefix in withdrawals.iter() {
                 let (addr, len) = prefix.addr_and_len();
-                withdrawn_routes.extend_from_slice(&[len]);
-                if len > 0 {
-                    let min_bytes = div_ceil(len, 8) as usize;
-                    match addr {
-                        IpAddr::V4(v) => {
-                            withdrawn_routes.extend_from_slice(&v.octets()[..min_bytes])
+                match addr {
+                    IpAddr::V4(addr) => {
+                        withdrawn_routes.extend_from_slice(&[len]);
+                        if len > 0 {
+                            let min_bytes = div_ceil(len, 8) as usize;
+                            withdrawn_routes.extend_from_slice(&addr.octets()[..min_bytes]);
                         }
-                        IpAddr::V6(v) => {
-                            withdrawn_routes.extend_from_slice(&v.octets()[..min_bytes])
+                    }
+                    IpAddr::V6(addr) => {
+                        // https://datatracker.ietf.org/doc/html/rfc4760#section-4
+                        if mp_unreach_nlri.is_empty() {
+                            mp_unreach_nlri.put_u16(AFI::Ipv6.into());
+                            mp_unreach_nlri.put_u8(u8::from(SAFI::Unicast)|u8::from(SAFI::Multicast));
+                        }
+                        mp_unreach_nlri.extend_from_slice(&[len]);
+                        if len > 0 {
+                            let min_bytes = div_ceil(len, 8) as usize;
+                            mp_unreach_nlri.extend_from_slice(&addr.octets()[..min_bytes]);
                         }
                     }
                 }
@@ -797,13 +808,11 @@ pub mod bgp {
                     //  field of the UPDATE message."
                     //
                     // From: https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
-                    path_attributes.push(required_well_known_mandatory_attribute_flags); // attr. flags
-                    path_attributes.push(u8::from(PathAttributeType::NextHop)); // attr. type
-                    path_attributes.push(4u8); // attr. octet length
                     if let NextHop::Ipv4(addr) = next_hop.0 {
+                        path_attributes.push(required_well_known_mandatory_attribute_flags); // attr. flags
+                        path_attributes.push(u8::from(PathAttributeType::NextHop)); // attr. type
+                        path_attributes.push(4u8); // attr. octet length
                         path_attributes.extend_from_slice(&addr.octets()); // attr. value
-                    } else {
-                        todo!();
                     }
 
                     // -------------------------------------------------------------------
@@ -842,29 +851,60 @@ pub mod bgp {
                         }
                     }
 
+                    // Now add the list of NLRI IP addresses
+                    let mut announced_routes = Vec::<u8>::new();
+                    let mut mp_reach_nlri = BytesMut::new();
+
+                    for prefix in prefixes.iter() {
+                        let (addr, len) = prefix.addr_and_len();
+                        match addr {
+                            IpAddr::V4(addr) => {
+                                announced_routes.extend_from_slice(&[len]);
+                                if len > 0 {
+                                    let min_bytes = div_ceil(len, 8) as usize;
+                                    announced_routes.extend_from_slice(&addr.octets()[..min_bytes]);
+                                }
+                            }
+                            IpAddr::V6(addr) => {
+                                // https://datatracker.ietf.org/doc/html/rfc4760#section-3
+                                if mp_reach_nlri.is_empty() {
+                                    mp_reach_nlri.put_u16(AFI::Ipv6.into());
+                                    mp_reach_nlri.put_u8(u8::from(SAFI::Unicast));
+                                    if let NextHop::Ipv6(addr) = next_hop.0 {
+                                        mp_reach_nlri.put_u8(addr.octets().len() as u8);
+                                        mp_reach_nlri.extend_from_slice(&addr.octets());
+                                    } else {
+                                        unreachable!();
+                                    }
+                                    mp_reach_nlri.put_u8(0u8); // reserved
+                                }
+                                mp_reach_nlri.extend_from_slice(&[len]);
+                                if len > 0 {
+                                    let min_bytes = div_ceil(len, 8) as usize;
+                                    mp_reach_nlri.extend_from_slice(&addr.octets()[..min_bytes]);
+                                }
+                            }
+                        }
+                    }
+
+                    if !mp_reach_nlri.is_empty() {
+                        if mp_reach_nlri.len() > u8::MAX.into() {
+                            path_attributes.put_u8(0b1001_0000); // optional (1), non-transitive (0), complete (0), extended (1)
+                            path_attributes.put_u8(u8::from(PathAttributeType::MpReachNlri)); // attr. type
+                            path_attributes.put_u16(mp_reach_nlri.len().try_into().unwrap()); // attr. octet length
+                        } else {
+                            path_attributes.put_u8(0b1000_0000); // optional (1), non-transitive (0), complete (0), non-extended (0)
+                            path_attributes.put_u8(u8::from(PathAttributeType::MpReachNlri)); // attr. type
+                            path_attributes.put_u8(mp_reach_nlri.len().try_into().unwrap()); // attr. octet length
+                        }
+                        path_attributes.extend(&mp_reach_nlri);
+                    }
+
                     let num_path_attribute_bytes =
                         u16::try_from(path_attributes.len() + extra_path_attributes.len()).unwrap();
                     buf.extend_from_slice(&num_path_attribute_bytes.to_be_bytes()); // N path attribute bytes
                     buf.extend_from_slice(&path_attributes);
                     buf.extend_from_slice(extra_path_attributes);
-
-                    // Now add the list of NLRI IP addresses
-                    let mut announced_routes = Vec::<u8>::new();
-                    for prefix in prefixes.iter() {
-                        let (addr, len) = prefix.addr_and_len();
-                        announced_routes.push(len);
-                        if len > 0 {
-                            let min_bytes = div_ceil(len, 8) as usize;
-                            match addr {
-                                IpAddr::V4(v) => {
-                                    announced_routes.extend_from_slice(&v.octets()[..min_bytes])
-                                }
-                                IpAddr::V6(v) => {
-                                    announced_routes.extend_from_slice(&v.octets()[..min_bytes])
-                                }
-                            }
-                        }
-                    }
 
                     if !announced_routes.is_empty() {
                         buf.extend_from_slice(&announced_routes); // the announced routes
@@ -1327,7 +1367,7 @@ pub mod bgp {
                 let ip_addr: IpAddr = s.parse()?;
                 match ip_addr {
                     IpAddr::V4(addr) => Ok(MyNextHop(NextHop::Ipv4(addr))),
-                    IpAddr::V6(_addr) => todo!(),
+                    IpAddr::V6(addr) => Ok(MyNextHop(NextHop::Ipv6(addr))),
                 }
             }
         }

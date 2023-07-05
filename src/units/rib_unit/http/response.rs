@@ -1,22 +1,18 @@
-use std::{ops::Deref, sync::Arc};
+use std::sync::Arc;
 
-use arc_swap::Guard;
 use hyper::{Body, Response};
-use roto::types::{
-    builtin::{MaterializedRoute, RawRouteWithDeltas},
-};
+
 use rotonda_store::prelude::Prefix;
-use routecore::{asn::Asn, bgp::communities::Community};
+
 use serde_json::{json, Value};
 
 use crate::{
-    common::json::{EasilyExtendedJSONObject},
-    payload::RoutingInformationBase,
-    units::rib_unit::rib_value::{RibValue, RouteWithUserDefinedHash},
+    common::json::EasilyExtendedJSONObject,
+    units::rib_unit::rib::{PreHashedTypeValue, RibValue},
 };
 
 use super::{
-    types::{Details, Filter, FilterKind, FilterOp, Filters, Includes, SortKey},
+    types::{Details, Filters, Includes, SortKey},
     PrefixesApi,
 };
 
@@ -126,7 +122,7 @@ impl PrefixesApi {
 
     fn mk_result(
         query_prefix: &Prefix,
-        route: &Arc<RouteWithUserDefinedHash>,
+        route: &Arc<PreHashedTypeValue>,
         details_cfg: &Details,
     ) -> Value {
         serde_json::to_value(route).unwrap()
@@ -196,28 +192,33 @@ impl PrefixesApi {
 mod test {
     use std::str::FromStr;
 
-    use roto::types::builtin::{RotondaId, RouteStatus};
+    use roto::types::builtin::{RawRouteWithDeltas, RotondaId, RouteStatus, BgpUpdateMessage};
     use routecore::bgp::message::SessionConfig;
 
-    use crate::bgp::encode::{Announcements, mk_bgp_update, Prefixes};
+    use crate::bgp::{encode::{mk_bgp_update, Announcements, Prefixes}};
 
     use super::*;
 
     #[test]
     fn test_mk_result() {
         let announcements =
-        Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32")
-            .unwrap();
+            Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32")
+                .unwrap();
         let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
-
-        let roto_update_msg = roto::types::builtin::UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
 
         let delta_id = (RotondaId(0), 0); // TODO
         let prefix = routecore::addr::Prefix::from_str("192.168.0.1/32").unwrap();
-        let raw_route = RawRouteWithDeltas::new_with_message(delta_id, prefix.into(), roto_update_msg, RouteStatus::InConvergence);
+        let roto_update_msg = roto::types::builtin::UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        let raw_route = RawRouteWithDeltas::new_with_message_ref(
+            delta_id,
+            prefix.into(),
+            &bgp_update_msg,
+            RouteStatus::InConvergence,
+        );
 
         let details = Details::default();
-        let route = RouteWithUserDefinedHash::new(raw_route, 1);
+        let route = PreHashedTypeValue::new(raw_route.into(), 1);
         let json_out = PrefixesApi::mk_result(&prefix, &Arc::new(route), &details);
         println!("{}", json_out);
     }

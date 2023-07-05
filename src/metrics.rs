@@ -203,13 +203,13 @@ impl Target {
 
         if matches!(self.format, OutputFormat::Prometheus) {
             self.target.push_str("# HELP ");
-            self.append_metric_name(metric, unit_name);
+            self.append_metric_name(metric, unit_name, None);
             self.target.push(' ');
             self.target.push_str(metric.help);
             self.target.push('\n');
 
             self.target.push_str("# TYPE ");
-            self.append_metric_name(metric, unit_name);
+            self.append_metric_name(metric, unit_name, None);
             writeln!(&mut self.target, " {}", metric.metric_type).unwrap();
         }
         values(&mut Records {
@@ -235,16 +235,31 @@ impl Target {
     }
 
     /// Constructs and appends the name of the given metric.
-    fn append_metric_name(&mut self, metric: &Metric, unit_name: Option<&str>) {
+    fn append_metric_name(
+        &mut self,
+        metric: &Metric,
+        unit_name: Option<&str>,
+        suffix: Option<&str>,
+    ) {
         match self.format {
-            OutputFormat::Prometheus => {
-                write!(
-                    &mut self.target,
-                    "{}_{}_{}",
-                    PROMETHEUS_PREFIX, metric.name, metric.unit
-                )
-                .unwrap();
-            }
+            OutputFormat::Prometheus => match suffix {
+                Some(suffix) => {
+                    write!(
+                        &mut self.target,
+                        "{}_{}_{}_{}",
+                        PROMETHEUS_PREFIX, metric.name, metric.unit, suffix,
+                    )
+                    .unwrap();
+                }
+                None => {
+                    write!(
+                        &mut self.target,
+                        "{}_{}_{}",
+                        PROMETHEUS_PREFIX, metric.name, metric.unit
+                    )
+                    .unwrap();
+                }
+            },
             OutputFormat::Plain => match unit_name {
                 Some(unit) => {
                     write!(&mut self.target, "{} {}", unit, metric.name).unwrap();
@@ -277,21 +292,27 @@ pub struct Records<'a> {
     unit_name: Option<&'a str>,
 }
 
-impl<'a> Records<'a> {
+impl<'b, 'a: 'b> Records<'a> {
     /// Appends a simple value to the metrics target.
     ///
     /// The value is simply output via the `Display` trait.
     pub fn value(&mut self, value: impl fmt::Display) {
+        self.suffixed_value(value, None)
+    }
+
+    pub fn suffixed_value(&mut self, value: impl fmt::Display, suffix: Option<&str>) {
         match self.target.format {
             OutputFormat::Prometheus => {
-                self.target.append_metric_name(self.metric, self.unit_name);
+                self.target
+                    .append_metric_name(self.metric, self.unit_name, suffix);
                 if let Some(unit_name) = self.unit_name {
                     write!(&mut self.target.target, "{{component=\"{}\"}}", unit_name).unwrap();
                 }
                 writeln!(&mut self.target.target, " {}", value).unwrap()
             }
             OutputFormat::Plain => {
-                self.target.append_metric_name(self.metric, self.unit_name);
+                self.target
+                    .append_metric_name(self.metric, self.unit_name, suffix);
                 writeln!(&mut self.target.target, ": {}", value).unwrap()
             }
         }
@@ -303,9 +324,19 @@ impl<'a> Records<'a> {
     /// name of the label and the second the label value. The metrics value
     /// is simply printed via the `Display` trait.
     pub fn label_value(&mut self, labels: &[(&str, &str)], value: impl fmt::Display) {
+        self.suffixed_label_value(labels, value, None)
+    }
+
+    pub fn suffixed_label_value(
+        &mut self,
+        labels: &[(&str, &str)],
+        value: impl fmt::Display,
+        suffix: Option<&str>,
+    ) {
         match self.target.format {
             OutputFormat::Prometheus => {
-                self.target.append_metric_name(self.metric, self.unit_name);
+                self.target
+                    .append_metric_name(self.metric, self.unit_name, suffix);
                 self.target.target.push('{');
                 let mut comma = false;
                 if let Some(unit_name) = self.unit_name {
@@ -323,7 +354,8 @@ impl<'a> Records<'a> {
                 writeln!(&mut self.target.target, "}} {}", value).unwrap()
             }
             OutputFormat::Plain => {
-                self.target.append_metric_name(self.metric, self.unit_name);
+                self.target
+                    .append_metric_name(self.metric, self.unit_name, suffix);
                 for (name, value) in labels {
                     write!(&mut self.target.target, " {}={}", name, value).unwrap();
                 }

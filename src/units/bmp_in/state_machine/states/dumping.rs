@@ -10,8 +10,9 @@ use routecore::{
     },
     bmp::message::{Message as BmpMsg, PerPeerHeader, TerminationMessage},
 };
+use smallvec::SmallVec;
 
-use crate::units::bmp_in::state_machine::machine::PeerStates;
+use crate::{units::bmp_in::state_machine::machine::PeerStates, payload::{Payload, Update}};
 
 use super::initiating::Initiating;
 
@@ -182,7 +183,7 @@ impl BmpStateDetails<Dumping> {
         filter: F,
     ) -> ProcessingResult
     where
-        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>
+        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>,
     {
         match BmpMsg::from_octets(msg_buf).unwrap() {
             // already verified upstream
@@ -212,7 +213,7 @@ impl BmpStateDetails<Dumping> {
                 .await
             }
 
-            BmpMsg::TerminationMessage(msg) => self.terminate(msg).await,
+            BmpMsg::TerminationMessage(msg) => self.terminate(Some(msg)).await,
 
             _ => {
                 // We ignore these. TODO: Should we count them?
@@ -256,11 +257,22 @@ impl BmpStateDetails<Dumping> {
     }
 
     pub async fn terminate<Octets: AsRef<[u8]>>(
-        self,
-        _msg: TerminationMessage<Octets>,
+        mut self,
+        _msg: Option<TerminationMessage<Octets>>,
     ) -> ProcessingResult {
+        // let reason = msg
+        //     .information()
+        //     .map(|tlv| tlv.to_string())
+        //     .collect::<Vec<_>>()
+        //     .join("|");
+        let peers = self.details.get_peers().iter().map(|&v| v.clone()).collect::<Vec<_>>();
+        let routes: SmallVec<[Payload; 8]> = peers.iter().flat_map(|pph| self.do_peer_down(pph)).collect();
         let next_state = BmpState::Terminated(self.into());
-        Self::mk_state_transition_result(next_state)
+        if routes.is_empty() {
+            Self::mk_state_transition_result(next_state)
+        } else {
+            Self::mk_final_routing_update_result(next_state, Update::Bulk(routes.into()))
+        }
     }
 }
 
@@ -369,7 +381,13 @@ impl PeerAware for Dumping {
 
 #[cfg(test)]
 mod tests {
-    use std::{str::FromStr, sync::{Arc, atomic::{AtomicU8, Ordering}}};
+    use std::{
+        str::FromStr,
+        sync::{
+            atomic::{AtomicU8, Ordering},
+            Arc,
+        },
+    };
 
     use roto::types::{
         builtin::{BuiltinTypeValue, MaterializedRoute},
@@ -442,6 +460,14 @@ mod tests {
         let announcements =
             Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32")
                 .unwrap();
+        crate::bgp::encode::mk_route_monitoring_msg(pph, &Prefixes::default(), &announcements, &[])
+    }
+
+    fn mk_ipv6_route_monitoring_msg(pph: &crate::bgp::encode::PerPeerHeader) -> Bytes {
+        let announcements = Announcements::from_str(
+            "e [123,456,789] 2001:2000:3080:e9c::1 BLACKHOLE,123:44 2001:2000:3080:e9c::2/128",
+        )
+        .unwrap();
         crate::bgp::encode::mk_route_monitoring_msg(pph, &Prefixes::default(), &announcements, &[])
     }
 
@@ -583,6 +609,7 @@ mod tests {
         let (pph_2, peer_up_msg_2_buf) =
             mk_peer_up_notification_msg_without_rfc4724_support("127.0.0.2", 12345);
         let route_mon_msg_buf = mk_route_monitoring_msg(&pph_2);
+        let ipv6_route_mon_msg_buf = mk_ipv6_route_monitoring_msg(&pph_2);
         let peer_down_msg_1_buf = mk_peer_down_notification_msg(&pph_1);
         let peer_down_msg_2_buf = mk_peer_down_notification_msg(&pph_2);
         assert!(processor.details.peer_states.is_empty());
@@ -611,6 +638,10 @@ mod tests {
 
         // But when the state machine processes a route announcement and then a peer down notification
         let processor = processor.process_msg(route_mon_msg_buf).await.next_state;
+        let processor = processor
+            .process_msg(ipv6_route_mon_msg_buf)
+            .await
+            .next_state;
         let res = processor.process_msg(peer_down_msg_2_buf).await;
 
         // Then the state should remain unchanged
@@ -625,20 +656,29 @@ mod tests {
             update: Update::Bulk(mut bulk),
         } = res.processing_result
         {
-            assert_eq!(bulk.len(), 1);
-            if let Some(Payload::TypeValue(type_value)) = bulk.drain(..).next() {
-                if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = type_value {
-                    let materialized_route = MaterializedRoute::from(route);
-                    let expected_prefix = Prefix::from_str("127.0.0.1/32").unwrap();
-                    let expected_roto_prefix = roto::types::builtin::Prefix::new(expected_prefix);
-                    assert_eq!(materialized_route.route.prefix.as_ref(), Some(&TypeValue::from(expected_roto_prefix)));
-                    assert_eq!(materialized_route.status, RouteStatus::Withdrawn);
+            assert_eq!(bulk.len(), 2);
+            let mut expected_roto_prefixes: Vec<TypeValue> = vec![
+                Prefix::from_str("127.0.0.1/32").unwrap().into(),
+                Prefix::from_str("2001:2000:3080:e9c::2/128").unwrap().into(),
+            ];
+            let mut found_count = 0;
+            for item in bulk.drain(..) {
+                if let Payload::TypeValue(type_value) = item {
+                    if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = type_value {
+                        let materialized_route = MaterializedRoute::from(route);
+                        let found_pfx = materialized_route.route.prefix.as_ref().unwrap();
+                        let position = expected_roto_prefixes.iter().position(|pfx| pfx == found_pfx).unwrap();
+                        expected_roto_prefixes.remove(position);
+                        assert_eq!(materialized_route.status, RouteStatus::Withdrawn);
+                        found_count += 1;
+                    } else {
+                        panic!("Expected TypeValue::Builtin(BuiltinTypeValue::Route(_)");
+                    }
                 } else {
-                    panic!("Expected TypeValue::Builtin(BuiltinTypeValue::Route(_)");
+                    panic!("Expected Payload::TypeValue");
                 }
-            } else {
-                panic!("Expected Payload::TypeValue");
             }
+            assert_eq!(found_count, 2);
         } else {
             unreachable!();
         }
@@ -854,32 +894,50 @@ mod tests {
         // BMP Initiation messages do not carry a BGP UPDATE message and so the filter should NOT be invoked (ctr += 0)
         let accept_cb = |msg, _| Ok(ControlFlow::Continue(msg));
         let cb_ctr = Some(ctr.clone());
-        let processor = processor.process_msg_with_filter(initiation_msg_buf, cb_ctr, accept_cb).await.next_state;
+        let processor = processor
+            .process_msg_with_filter(initiation_msg_buf, cb_ctr, accept_cb)
+            .await
+            .next_state;
         assert_eq!(0, ctr.load(Ordering::SeqCst));
 
         // BMP Peer Up messages do not carry a BGP UPDATE message and so the filter will should NOT be invoked (ctr += 0)
         let cb_ctr = Some(ctr.clone());
-        let processor = processor.process_msg_with_filter(peer_up_msg_buf, cb_ctr, accept_cb).await.next_state;
+        let processor = processor
+            .process_msg_with_filter(peer_up_msg_buf, cb_ctr, accept_cb)
+            .await
+            .next_state;
         assert_eq!(0, ctr.load(Ordering::SeqCst));
 
         // BMP Route Monitoring non-EoR messages DO carry a BGP UPDATE message and so the filter SHOULD be invoked (ctr += 1)
         let cb_ctr = Some(ctr.clone());
-        let processor = processor.process_msg_with_filter(route_mon_msg_buf.clone(), cb_ctr, count_cb).await.next_state;
+        let processor = processor
+            .process_msg_with_filter(route_mon_msg_buf.clone(), cb_ctr, count_cb)
+            .await
+            .next_state;
         assert_eq!(1, ctr.load(Ordering::SeqCst));
 
         // BMP Route Monitoring EoR messages are handled specially and so the filter should NOT be invoked (ctr += 0)
         let cb_ctr = Some(ctr.clone());
-        let processor = processor.process_msg_with_filter(eor_msg_buf, cb_ctr, count_cb).await.next_state;
+        let processor = processor
+            .process_msg_with_filter(eor_msg_buf, cb_ctr, count_cb)
+            .await
+            .next_state;
         assert_eq!(1, ctr.load(Ordering::SeqCst));
 
         // BMP Route Monitoring non-EoR messages DO carry a BGP UPDATE message and so the filter SHOULD be invoked (ctr += 1)
         let cb_ctr = Some(ctr.clone());
-        let processor = processor.process_msg_with_filter(route_mon_msg_buf, cb_ctr, count_cb).await.next_state;
+        let processor = processor
+            .process_msg_with_filter(route_mon_msg_buf, cb_ctr, count_cb)
+            .await
+            .next_state;
         assert_eq!(2, ctr.load(Ordering::SeqCst));
 
         // BMP Termination messages do not carry a BGP UPDATE message and so the filter will should NOT be invoked (ctr += 0)
         let cb_ctr = Some(ctr.clone());
-        processor.process_msg_with_filter(termination_msg_buf, cb_ctr, accept_cb).await.next_state;
+        processor
+            .process_msg_with_filter(termination_msg_buf, cb_ctr, accept_cb)
+            .await
+            .next_state;
         assert_eq!(2, ctr.load(Ordering::SeqCst));
     }
 
@@ -986,7 +1044,7 @@ mod tests {
         let addr = "127.0.0.1:1818".parse().unwrap();
         BmpStateDetails::<Dumping> {
             addr,
-            router_id: Default::default(),
+            router_id: Arc::new("test-router".to_string()),
             status_reporter: Arc::default(),
             details: Dumping::default(),
         }

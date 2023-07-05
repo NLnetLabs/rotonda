@@ -1998,7 +1998,7 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0"
-source = "git+https://github.com/NLnetLabs/roto.git#803075b9e250df4dec1d05fc3b49cfb9b8a70f45"
+source = "git+https://github.com/NLnetLabs/roto.git?branch=more-serialization#1668f74de77650ee1b0656ac90b2b144b5d07cb6"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -2059,6 +2059,7 @@ dependencies = [
  "smallvec",
  "syslog",
  "tokio",
+ "tokio-metrics",
  "toml",
  "url",
  "uuid",
@@ -2091,7 +2092,7 @@ dependencies = [
 [[package]]
 name = "routecore"
 version = "0.4.0-dev"
-source = "git+https://github.com/NLnetLabs/routecore.git#74791370dd5a2a1ca3a89afba1c40fc8c82ff14e"
+source = "git+https://github.com/NLnetLabs/routecore.git#3b70710cf695a1c5559b5c07e0b30afd9317f6ae"
 dependencies = [
  "bytes",
  "chrono",
@@ -2585,6 +2586,29 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.18",
+]
+
+[[package]]
+name = "tokio-metrics"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b60ac6224d622f71d0b80546558eedf8ff6c2d3817517a9d3ed87ce24fccf6a6"
+dependencies = [
+ "futures-util",
+ "pin-project-lite",
+ "tokio",
+ "tokio-stream",
+]
+
+[[package]]
+name = "tokio-stream"
+version = "0.1.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "397c988d37662c7dda6d2208364a706264bf3d6138b11d436cbac0ad38832842"
+dependencies = [
+ "futures-core",
+ "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]

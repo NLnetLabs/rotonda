@@ -15,6 +15,8 @@ use crate::{
     payload::RouterId,
 };
 
+use super::statistics::RibMergeUpdateStatistics;
+
 #[derive(Debug, Default)]
 pub struct RibUnitMetrics {
     gate: Arc<GateMetrics>,
@@ -28,6 +30,7 @@ pub struct RibUnitMetrics {
     pub last_insert_duration: AtomicI64,
     pub last_update_duration: AtomicI64,
     routers: Arc<FrimMap<Arc<RouterId>, Arc<RouterMetrics>>>,
+    pub rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
 }
 
 impl RibUnitMetrics {
@@ -117,9 +120,10 @@ impl RibUnitMetrics {
 }
 
 impl RibUnitMetrics {
-    pub fn new(gate: &Arc<Gate>) -> Self {
+    pub fn new(gate: &Arc<Gate>, rib_merge_update_stats: Arc<RibMergeUpdateStatistics>) -> Self {
         RibUnitMetrics {
             gate: gate.metrics(),
+            rib_merge_update_stats,
             ..Default::default()
         }
     }
@@ -153,7 +157,8 @@ impl metrics::Source for RibUnitMetrics {
         target.append_simple(
             &Self::NUM_MODIFIED_ROUTE_ANNOUNCEMENTS_METRIC,
             Some(unit_name),
-            self.num_modified_route_announcements.load(atomic::Ordering::Relaxed),
+            self.num_modified_route_announcements
+                .load(atomic::Ordering::Relaxed),
         );
         target.append_simple(
             &Self::NUM_WITHDRAWN_ROUTES_METRIC,
@@ -163,7 +168,8 @@ impl metrics::Source for RibUnitMetrics {
         target.append_simple(
             &Self::NUM_WITHDRAWN_ROUTES_WITHOUT_ANNOUNCEMENTS_METRIC,
             Some(unit_name),
-            self.num_route_withdrawals_without_announcement.load(atomic::Ordering::Relaxed),
+            self.num_route_withdrawals_without_announcement
+                .load(atomic::Ordering::Relaxed),
         );
         target.append_simple(
             &Self::LAST_INSERT_DURATION_METRIC,
@@ -190,5 +196,7 @@ impl metrics::Source for RibUnitMetrics {
                 metrics.last_e2e_delay.load(Ordering::Relaxed),
             );
         }
+
+        self.rib_merge_update_stats.append(unit_name, target);
     }
 }

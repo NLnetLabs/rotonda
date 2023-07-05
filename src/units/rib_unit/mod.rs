@@ -2,8 +2,9 @@ mod http;
 mod metrics;
 mod status_reporter;
 
-mod rib_value;
+mod rib;
 mod tests;
 
 pub mod unit;
-pub use rib_value::RibValue;
+pub mod statistics;
+pub use rib::RibValue;

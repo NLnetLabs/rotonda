@@ -21,11 +21,12 @@ use super::statistics::RibMergeUpdateStatistics;
 pub struct RibUnitMetrics {
     gate: Arc<GateMetrics>,
     pub num_unique_prefixes: AtomicUsize,
+    pub num_items: AtomicUsize,
     pub num_insert_retries: AtomicUsize,
     pub num_insert_hard_failures: AtomicUsize,
-    pub num_route_announcements: AtomicUsize,
+    pub num_routes_announced: AtomicUsize,
     pub num_modified_route_announcements: AtomicUsize,
-    pub num_route_withdrawals: AtomicUsize,
+    pub num_routes_withdrawn: AtomicUsize,
     pub num_route_withdrawals_without_announcement: AtomicUsize,
     pub last_insert_duration: AtomicI64,
     pub last_update_duration: AtomicI64,
@@ -63,6 +64,12 @@ impl RibUnitMetrics {
         MetricType::Counter,
         MetricUnit::Total,
     );
+    const NUM_ITEMS_METRIC: Metric = Metric::new(
+        "rib_unit_num_items",
+        "the total number of items (e.g. routes) stored (and not withdrawn) in the rib",
+        MetricType::Gauge,
+        MetricUnit::Total,
+    );
     const NUM_INSERT_RETRIES_METRIC: Metric = Metric::new(
         "rib_unit_num_insert_retries",
         "the number of times prefix insertions had to be retried due to contention",
@@ -75,9 +82,9 @@ impl RibUnitMetrics {
         MetricType::Counter,
         MetricUnit::Total,
     );
-    const NUM_ROUTE_ANNOUNCEMENTS_METRIC: Metric = Metric::new(
-        "rib_unit_num_route_announcements",
-        "the number of route announcements processed",
+    const NUM_ROUTES_ANNOUNCED_METRIC: Metric = Metric::new(
+        "rib_unit_num_routes_announced",
+        "the number of routes announced",
         MetricType::Counter,
         MetricUnit::Total,
     );
@@ -87,9 +94,9 @@ impl RibUnitMetrics {
         MetricType::Counter,
         MetricUnit::Total,
     );
-    const NUM_WITHDRAWN_ROUTES_METRIC: Metric = Metric::new(
-        "rib_unit_num_route_withdrawals",
-        "the number of route withdrawals processed",
+    const NUM_ROUTES_WITHDRAWN_METRIC: Metric = Metric::new(
+        "rib_unit_num_routes_withdrawan",
+        "the number of routes withdrawan",
         MetricType::Counter,
         MetricUnit::Total,
     );
@@ -139,6 +146,11 @@ impl metrics::Source for RibUnitMetrics {
             self.num_unique_prefixes.load(atomic::Ordering::Relaxed),
         );
         target.append_simple(
+            &Self::NUM_ITEMS_METRIC,
+            Some(unit_name),
+            self.num_items.load(atomic::Ordering::Relaxed),
+        );
+        target.append_simple(
             &Self::NUM_INSERT_RETRIES_METRIC,
             Some(unit_name),
             self.num_insert_retries.load(atomic::Ordering::Relaxed),
@@ -150,9 +162,9 @@ impl metrics::Source for RibUnitMetrics {
                 .load(atomic::Ordering::Relaxed),
         );
         target.append_simple(
-            &Self::NUM_ROUTE_ANNOUNCEMENTS_METRIC,
+            &Self::NUM_ROUTES_ANNOUNCED_METRIC,
             Some(unit_name),
-            self.num_route_announcements.load(atomic::Ordering::Relaxed),
+            self.num_routes_announced.load(atomic::Ordering::Relaxed),
         );
         target.append_simple(
             &Self::NUM_MODIFIED_ROUTE_ANNOUNCEMENTS_METRIC,
@@ -161,9 +173,9 @@ impl metrics::Source for RibUnitMetrics {
                 .load(atomic::Ordering::Relaxed),
         );
         target.append_simple(
-            &Self::NUM_WITHDRAWN_ROUTES_METRIC,
+            &Self::NUM_ROUTES_WITHDRAWN_METRIC,
             Some(unit_name),
-            self.num_route_withdrawals.load(atomic::Ordering::Relaxed),
+            self.num_routes_withdrawn.load(atomic::Ordering::Relaxed),
         );
         target.append_simple(
             &Self::NUM_WITHDRAWN_ROUTES_WITHOUT_ANNOUNCEMENTS_METRIC,

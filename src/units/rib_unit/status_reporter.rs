@@ -40,12 +40,13 @@ impl RibUnitStatusReporter {
         propagation_delay: i64,
         num_retries: u32,
         is_announcement: bool,
+        item_count_delta: isize,
     ) {
         self.metrics
             .last_insert_duration
             .store(insert_delay, Ordering::Relaxed);
 
-        self.insert_or_update(router_id, propagation_delay, num_retries);
+        self.insert_or_update(router_id, propagation_delay, num_retries, item_count_delta);
 
         if !is_announcement {
             self.metrics.num_route_withdrawals_without_announcement.fetch_add(1, Ordering::Relaxed);
@@ -58,15 +59,22 @@ impl RibUnitStatusReporter {
         insert_delay: i64,
         propagation_delay: i64,
         num_retries: u32,
+        item_count_delta: isize,
     ) {
         self.metrics
             .last_update_duration
             .store(insert_delay, Ordering::Relaxed);
 
-        self.insert_or_update(router_id, propagation_delay, num_retries);
+        self.insert_or_update(router_id, propagation_delay, num_retries, item_count_delta);
     }
 
-    fn insert_or_update(&self, router_id: Arc<String>, propagation_delay: i64, num_retries: u32) {
+    fn insert_or_update(
+        &self,
+        router_id: Arc<String>,
+        propagation_delay: i64,
+        num_retries: u32,
+        item_count_delta: isize,
+    ) {
         let metrics = self.metrics.router_metrics(router_id);
         metrics
             .last_e2e_delay
@@ -76,7 +84,21 @@ impl RibUnitStatusReporter {
         if num_retries > 0 {
             self.metrics
                 .num_insert_retries
-                .fetch_add(num_retries as usize, Ordering::Relaxed);
+
+        if item_count_delta > 0 {
+            self.metrics
+                .num_items
+                .fetch_add(item_count_delta as usize, Ordering::Relaxed);
+            self.metrics
+                .num_routes_announced
+                .fetch_add(item_count_delta as usize, Ordering::Relaxed);
+        } else {
+            self.metrics
+                .num_items
+                .fetch_sub(-item_count_delta as usize, Ordering::Relaxed);
+            self.metrics
+                .num_routes_withdrawn
+                .fetch_add(-item_count_delta as usize, Ordering::Relaxed);
         }
     }
 

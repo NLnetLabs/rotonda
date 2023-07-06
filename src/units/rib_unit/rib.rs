@@ -65,7 +65,10 @@ impl PhysicalRib {
     }
 
     pub fn with_custom_type(name: &str, ty: TypeDef, ty_keys: Vec<SmallVec<[usize; 8]>>) -> Self {
-        let store = MultiThreadedStore::<RibValue>::new().unwrap(); // TODO: handle this Err;
+        let eviction_policy = StoreEvictionPolicy::UpdateStatusOnWithdraw;
+        let store = MultiThreadedStore::<RibValue>::new()
+            .unwrap()
+            .with_user_data(eviction_policy); // TODO: handle this Err;
         let rib = Rib::new(name, ty.clone(), store);
         let rib_type_def: RibTypeDef = (Box::new(ty), Some(ty_keys));
         let type_def_rib = TypeDef::Rib(rib_type_def);
@@ -140,7 +143,15 @@ impl RibValue {
     }
 }
 
-pub struct MergeUpdateUserData {
+#[derive(Copy, Clone, Debug, Default)]
+pub enum StoreEvictionPolicy {
+    #[default]
+    UpdateStatusOnWithdraw,
+
+    RemoveOnWithdraw,
+}
+
+pub struct StoreInsertionReport {
     /// The number of items added or removed (withdrawn) by the MergeUpdate operation.
     pub item_count_delta: isize,
 
@@ -152,19 +163,22 @@ pub struct MergeUpdateUserData {
 }
 
 impl MergeUpdate for RibValue {
-    type UserData = MergeUpdateUserData;
+    type UserDataIn = StoreEvictionPolicy;
+    type UserDataOut = StoreInsertionReport;
 
     fn merge_update(
         &mut self,
         _update_record: RibValue,
-    ) -> Result<MergeUpdateUserData, Box<dyn std::error::Error>> {
+        _user_data: Option<&Self::UserDataIn>,
+    ) -> Result<StoreInsertionReport, Box<dyn std::error::Error>> {
         unreachable!()
     }
 
     fn clone_merge_update(
         &self,
         update_meta: &Self,
-    ) -> Result<(Self, Self::UserData), Box<dyn std::error::Error>>
+        eviction_policy: Option<&StoreEvictionPolicy>,
+    ) -> Result<(Self, Self::UserDataOut), Box<dyn std::error::Error>>
     where
         Self: std::marker::Sized,
     {
@@ -181,16 +195,31 @@ impl MergeUpdate for RibValue {
             {
                 let peer_id = PeerId::new(new_route.peer_ip(), new_route.peer_asn());
 
-                self.per_prefix_items
-                    .iter()
-                    .map(|route| {
-                        let (out_route, withdrawn) = route.clone_and_withdraw(peer_id);
-                        if withdrawn {
-                            item_count_delta -= 1;
-                        }
-                        out_route
-                    })
-                    .collect::<_>()
+                match eviction_policy {
+                    None | Some(StoreEvictionPolicy::UpdateStatusOnWithdraw) => self
+                        .per_prefix_items
+                        .iter()
+                        .map(|route| {
+                            let (out_route, withdrawn) = route.clone_and_withdraw(peer_id);
+                            if withdrawn {
+                                item_count_delta -= 1;
+                            }
+                            out_route
+                        })
+                        .collect::<_>(),
+                    
+                    Some(StoreEvictionPolicy::RemoveOnWithdraw) => {
+                        let mut out_items: HashedSet<Arc<PreHashedTypeValue>> = self
+                            .per_prefix_items
+                            .iter()
+                            .filter(|route| !route.is_withdrawn() || route.peer_id() != Some(peer_id))
+                            .cloned()
+                            .collect::<_>();
+
+                        out_items.shrink_to_fit();
+                        out_items
+                    }
+                }
             }
 
             _ => {
@@ -206,7 +235,7 @@ impl MergeUpdate for RibValue {
 
         let post_insert = Utc::now();
         let op_duration = post_insert - pre_insert;
-        let user_data = MergeUpdateUserData {
+        let user_data = StoreInsertionReport {
             item_count_delta,
             item_count_total: out_items.len(),
             op_duration,
@@ -364,8 +393,9 @@ impl RouteExtra for TypeValue {
 
 #[cfg(test)]
 mod tests {
-    use std::{net::IpAddr, ops::Deref, str::FromStr, sync::Arc};
+    use std::{alloc::System, net::IpAddr, ops::Deref, str::FromStr, sync::Arc};
 
+    use hashbrown::hash_map::DefaultHashBuilder;
     use roto::types::{
         builtin::{
             BgpUpdateMessage, BuiltinTypeValue, RawRouteWithDeltas, RotondaId, RouteStatus,
@@ -376,7 +406,11 @@ mod tests {
     use rotonda_store::prelude::MergeUpdate;
     use routecore::{addr::Prefix, asn::Asn, bgp::message::SessionConfig};
 
-    use crate::bgp::encode::{mk_bgp_update, Announcements, Prefixes};
+    use crate::{
+        bgp::encode::{mk_bgp_update, Announcements, Prefixes},
+        common::memory::TrackingAllocator,
+        units::rib_unit::rib::StoreEvictionPolicy,
+    };
 
     use super::{PeerId, PreHashedTypeValue, RibValue};
 
@@ -398,27 +432,37 @@ mod tests {
 
     #[test]
     fn merging_in_separate_values_yields_two_entries() {
+        let eviction_policy = StoreEvictionPolicy::UpdateStatusOnWithdraw;
         let rib_value = RibValue::default();
         let value_one = PreHashedTypeValue::new(1u8.into(), 1);
         let value_two = PreHashedTypeValue::new(2u8.into(), 2);
 
-        let (rib_value, _user_data) = rib_value.clone_merge_update(&value_one.into()).unwrap();
+        let (rib_value, _user_data) = rib_value
+            .clone_merge_update(&value_one.into(), Some(&eviction_policy))
+            .unwrap();
         assert_eq!(rib_value.len(), 1);
 
-        let (rib_value, _user_data) = rib_value.clone_merge_update(&value_two.into()).unwrap();
+        let (rib_value, _user_data) = rib_value
+            .clone_merge_update(&value_two.into(), Some(&eviction_policy))
+            .unwrap();
         assert_eq!(rib_value.len(), 2);
     }
 
     #[test]
     fn merging_in_the_same_precomputed_hashcode_yields_one_entry() {
+        let eviction_policy = StoreEvictionPolicy::UpdateStatusOnWithdraw;
         let rib_value = RibValue::default();
         let value_one = PreHashedTypeValue::new(1u8.into(), 1);
         let value_two = PreHashedTypeValue::new(2u8.into(), 1);
 
-        let (rib_value, _user_data) = rib_value.clone_merge_update(&value_one.into()).unwrap();
+        let (rib_value, _user_data) = rib_value
+            .clone_merge_update(&value_one.into(), Some(&eviction_policy))
+            .unwrap();
         assert_eq!(rib_value.len(), 1);
 
-        let (rib_value, _user_data) = rib_value.clone_merge_update(&value_two.into()).unwrap();
+        let (rib_value, _user_data) = rib_value
+            .clone_merge_update(&value_two.into(), Some(&eviction_policy))
+            .unwrap();
         assert_eq!(rib_value.len(), 1);
     }
 
@@ -450,27 +494,28 @@ mod tests {
         let peer_one_withdrawal = PreHashedTypeValue::new(peer_one_withdrawal.into(), 4);
 
         // When merged into a RibValue
+        let update_policy = StoreEvictionPolicy::UpdateStatusOnWithdraw;
         let rib_value = RibValue::default();
 
         // Unique announcements accumulate in the RibValue
         let (rib_value, _user_data) = rib_value
-            .clone_merge_update(&peer_one_announcement_one.into())
+            .clone_merge_update(&peer_one_announcement_one.into(), Some(&update_policy))
             .unwrap();
         assert_eq!(rib_value.len(), 1);
 
         let (rib_value, _user_data) = rib_value
-            .clone_merge_update(&peer_one_announcement_two.into())
+            .clone_merge_update(&peer_one_announcement_two.into(), Some(&update_policy))
             .unwrap();
         assert_eq!(rib_value.len(), 2);
 
         let (rib_value, _user_data) = rib_value
-            .clone_merge_update(&peer_two_announcement_one.into())
+            .clone_merge_update(&peer_two_announcement_one.into(), Some(&update_policy))
             .unwrap();
         assert_eq!(rib_value.len(), 3);
 
-        // And a withdrawal of one of those announced routes leaves the RibValue size unchanged
+        // And a withdrawal by one peer of the prefix which the RibValue represents leaves the RibValue size unchanged
         let (rib_value, _user_data) = rib_value
-            .clone_merge_update(&peer_one_withdrawal.into())
+            .clone_merge_update(&peer_one_withdrawal.clone().into(), Some(&update_policy))
             .unwrap();
         assert_eq!(rib_value.len(), 3);
 
@@ -515,6 +560,15 @@ mod tests {
             assert_eq!(route.peer_asn(), Some(peer_two.asn.unwrap()));
             assert_eq!(route.status(), RouteStatus::InConvergence);
         }
+
+        // And a withdrawal by one peer of the prefix which the RibValue represents, when using the removal eviction
+        // policy, causes the two routes from that peer to be removed leaving only one in the RibValue.
+        let remove_policy = StoreEvictionPolicy::RemoveOnWithdraw;
+        let (rib_value, _user_data) = rib_value
+            .clone_merge_update(&peer_one_withdrawal.into(), Some(&remove_policy))
+            .unwrap();
+        assert_eq!(rib_value.len(), 1);
+
     }
 
     fn mk_route_announcement(prefix: Prefix, as_path: &str, peer_id: PeerId) -> RawRouteWithDeltas {
@@ -571,5 +625,86 @@ mod tests {
         }
 
         route
+    }
+
+    #[test]
+    fn test_merge_update_user_data_in_out() {
+        const NUM_TEST_ITEMS: usize = 18;
+
+        type TestMap<T> = hashbrown::HashSet<T, DefaultHashBuilder, TrackingAllocator<System>>;
+
+        #[derive(Debug)]
+        struct MergeUpdateSettings {
+            pub allocator: TrackingAllocator<System>,
+            pub num_items_to_insert: usize,
+        }
+
+        impl MergeUpdateSettings {
+            fn new(allocator: TrackingAllocator<System>, num_items_to_insert: usize) -> Self {
+                Self {
+                    allocator,
+                    num_items_to_insert,
+                }
+            }
+        }
+
+        #[derive(Default)]
+        struct TestMetaData(TestMap<usize>);
+
+        impl MergeUpdate for TestMetaData {
+            type UserDataIn = MergeUpdateSettings;
+
+            type UserDataOut = ();
+
+            fn merge_update(
+                &mut self,
+                _update_meta: Self,
+                _user_data: Option<&Self::UserDataIn>,
+            ) -> Result<Self::UserDataOut, Box<dyn std::error::Error>> {
+                todo!()
+            }
+
+            fn clone_merge_update(
+                &self,
+                _update_meta: &Self,
+                settings: Option<&MergeUpdateSettings>,
+            ) -> Result<(Self, Self::UserDataOut), Box<dyn std::error::Error>>
+            where
+                Self: std::marker::Sized,
+            {
+                // Verify that the allocator can actually be used
+                let settings = settings.unwrap();
+                let mut v = TestMap::with_capacity_in(2, settings.allocator.clone());
+                for n in 0..settings.num_items_to_insert {
+                    v.insert(n);
+                }
+
+                let updated_meta = Self(v);
+
+                Ok((updated_meta, ()))
+            }
+        }
+
+        // Create some settings
+        let allocator = TrackingAllocator::default();
+        let settings = MergeUpdateSettings::new(allocator, NUM_TEST_ITEMS);
+
+        // Verify that it hasn't allocated anything yet
+        assert_eq!(0, settings.allocator.stats().bytes_allocated);
+
+        // Cause the allocator to be used by the merge update
+        let meta = TestMetaData::default();
+        let update_meta = TestMetaData::default();
+        let (updated_meta, _user_data_out) = meta
+            .clone_merge_update(&update_meta, Some(&settings))
+            .unwrap();
+
+        // Verify that the allocator was used
+        assert!(settings.allocator.stats().bytes_allocated > 0);
+        assert_eq!(NUM_TEST_ITEMS, updated_meta.0.len());
+
+        // Drop the updated meta and check that no bytes are currently allocated
+        drop(updated_meta);
+        assert_eq!(0, settings.allocator.stats().bytes_allocated);
     }
 }

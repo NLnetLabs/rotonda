@@ -50,7 +50,7 @@ use super::{
     rib::{PhysicalRib, PreHashedTypeValue, RibValue},
     status_reporter::RibUnitStatusReporter,
 };
-use super::{rib::MergeUpdateUserData, statistics::RibMergeUpdateStatistics};
+use super::{rib::StoreInsertionReport, statistics::RibMergeUpdateStatistics};
 
 use std::time::Instant;
 
@@ -433,7 +433,7 @@ impl RibUnitRunner {
                 RibValue,
                 &PhysicalRib,
             )
-                -> Result<(Upsert<<RibValue as MergeUpdate>::UserData>, u32), PrefixStoreError>
+                -> Result<(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32), PrefixStoreError>
             + Send
             + Copy,
         F: 'static,
@@ -522,7 +522,7 @@ impl RibUnitRunner {
                 RibValue,
                 &PhysicalRib,
             )
-                -> Result<(Upsert<<RibValue as MergeUpdate>::UserData>, u32), PrefixStoreError>
+                -> Result<(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32), PrefixStoreError>
             + Send,
         F: 'static,
     {
@@ -583,12 +583,13 @@ impl RibUnitRunner {
                                                     propagation_delay,
                                                     num_retries,
                                                     is_withdraw,
+                                                    1,
                                                 );
                                             }
-                                            Upsert::Update(MergeUpdateUserData {
+                                            Upsert::Update(StoreInsertionReport {
+                                                item_count_delta,
                                                 item_count_total,
                                                 op_duration,
-                                                ..
                                             }) => {
                                                 STATS_COUNTER.with(|counter| {
                                                     *counter.borrow_mut() += 1;
@@ -610,6 +611,7 @@ impl RibUnitRunner {
                                                     insert_delay,
                                                     propagation_delay,
                                                     num_retries,
+                                                    item_count_delta,
                                                 );
 
                                                 // status_reporter.update_processed(

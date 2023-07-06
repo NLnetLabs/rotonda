@@ -42,6 +42,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "allocator-api2"
+version = "0.2.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "56fc6cf8dc8c4158eed8649f9b8b0ea1518eb62b544fe9490d66fa0b349eafe9"
+
+[[package]]
 name = "android-tzdata"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -900,6 +906,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "hashbrown"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2c6201b9ff9fd90a5a3bac2e56a830d0caa509576f0e503818ee82c181b3437a"
+dependencies = [
+ "ahash 0.8.3",
+ "allocator-api2",
+]
+
+[[package]]
 name = "heck"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1074,7 +1090,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bd070e393353796e801d209ad339e89596eb4c8d430d18ede6a1cced8fafbd99"
 dependencies = [
  "autocfg",
- "hashbrown",
+ "hashbrown 0.12.3",
 ]
 
 [[package]]
@@ -1361,7 +1377,7 @@ checksum = "f7d24dc2dbae22bff6f1f9326ffce828c9f07ef9cc1e8002e5279f845432a30a"
 dependencies = [
  "crossbeam-epoch",
  "crossbeam-utils",
- "hashbrown",
+ "hashbrown 0.12.3",
  "metrics",
  "num_cpus",
  "parking_lot 0.12.1",
@@ -1585,7 +1601,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ccd746e37177e1711c20dd619a1620f34f5c8b569c53590a72dedd5344d8924a"
 dependencies = [
  "dlv-list",
- "hashbrown",
+ "hashbrown 0.12.3",
 ]
 
 [[package]]
@@ -1998,6 +2014,7 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0"
+source = "git+https://github.com/NLnetLabs/roto.git?branch=mergeupdate-userdata#ade3a000ea23468f0d2e7cc81c7da8fe78865af4"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -2013,6 +2030,7 @@ dependencies = [
 name = "rotonda"
 version = "0.0.1"
 dependencies = [
+ "allocator-api2",
  "anyhow",
  "arc-swap",
  "assert-json-diff",
@@ -2028,6 +2046,7 @@ dependencies = [
  "flate2",
  "futures",
  "hash_hasher",
+ "hashbrown 0.14.0",
  "hex",
  "hex-slice",
  "html-escape",
@@ -2067,7 +2086,7 @@ dependencies = [
 [[package]]
 name = "rotonda-macros"
 version = "0.2.0-pre.6"
-source = "git+https://github.com/NLnetLabs/rotonda-macros.git?branch=mergeupdate-userdata#2964eb2856ff79742f90a6673c9c7ee9be416e61"
+source = "git+https://github.com/NLnetLabs/rotonda-macros.git?branch=mergeupdate-userdata#8e0be3b5dc5218bed2683aa42c0113ea9cbb7ed5"
 dependencies = [
  "quote",
  "syn 2.0.18",
@@ -2076,6 +2095,7 @@ dependencies = [
 [[package]]
 name = "rotonda-store"
 version = "0.3.0-pre.2"
+source = "git+https://github.com/NLnetLabs/rotonda-store.git?branch=mergeupdate-userdata#9b7dc969e5a32fb327d03c927f136f3bcc398e40"
 dependencies = [
  "arc-swap",
  "crossbeam-epoch",

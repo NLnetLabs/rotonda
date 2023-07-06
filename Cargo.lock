@@ -2079,8 +2079,8 @@ dependencies = [
 
 [[package]]
 name = "rotonda-store"
-version = "0.3.0-pre.2"
-source = "git+https://github.com/NLnetLabs/rotonda-store.git#26fd3e071b4676b9521c54e6d943ba8dd4f038ca"
+version = "0.3.0-pre.3"
+source = "git+https://github.com/NLnetLabs/rotonda-store.git#3a53bebd4260456bc44393933e71bb85266e98ff"
 dependencies = [
  "arc-swap",
  "crossbeam-epoch",

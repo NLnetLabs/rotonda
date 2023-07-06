@@ -1,0 +1,21 @@
+module my-module {
+    define {
+        rx_tx msg: BmpMsg;
+    }
+
+    term peer-asn-matches {
+        match {
+            msg.asn == AS1818;
+        }
+    }
+
+    apply {
+        filter match peer-asn-matches matching { return reject; };
+        return accept;
+    }
+}
+
+type BmpMsg {
+    type: IntegerLiteral,
+    asn: Asn
+}

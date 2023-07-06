@@ -1,16 +1,21 @@
 //! Null target.
 
+use non_empty_vec::NonEmpty;
 use serde::Deserialize;
+use serde_with::{serde_as, formats::PreferOne, OneOrMany};
 use tokio::sync::mpsc;
 
 use crate::comms::Terminated;
 use crate::manager::{Component, WaitPoint};
 use crate::{comms::Link, manager::TargetCommand};
 
+#[serde_as]
 #[derive(Debug, Deserialize)]
 pub struct Target {
     #[allow(dead_code)]
-    source: Link,
+    #[serde(alias = "source")]
+    #[serde_as(deserialize_as = "OneOrMany<_, PreferOne>")]
+    sources: Vec<Link>,
 }
 
 impl Target {
@@ -25,7 +30,9 @@ impl Target {
         // use by suspending our link to upstream units. Don't just exit the
         // function because that will cause the upstream units to terminate if
         // we are their only downstream.
-        self.source.suspend().await;
+        for source in &mut self.sources {
+            source.suspend().await;
+        }
 
         // Wait for other components to be, and signal to other components that we are, ready to start. All units and
         // targets start together, otherwise data passed from one component to another may be lost if the receiving
@@ -36,18 +43,22 @@ impl Target {
             match cmd {
                 TargetCommand::Reconfigure { new_config } => {
                     if let crate::targets::Target::Null(Target {
-                        source: new_source,
+                        sources: new_sources,
                         ..
                         // config
                     }) = new_config
                     {
-                        self.source = new_source;
-                        self.source.suspend().await;
+                        self.sources = new_sources;
+                        for source in &mut self.sources {
+                            source.suspend().await;
+                        }
                     }
                 }
 
                 TargetCommand::ReportLinks { report } => {
-                    report.set_source(&self.source);
+                    if let Ok(non_empty) = NonEmpty::try_from(self.sources.clone()) {
+                        report.set_sources(&non_empty);
+                    }
                 }
 
                 TargetCommand::Terminate => {

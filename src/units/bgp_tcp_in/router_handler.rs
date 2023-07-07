@@ -6,8 +6,8 @@ use log::{debug, error, warn};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use roto::types::typevalue::TypeValue;
-use roto::types::builtin::{BuiltinTypeValue, Prefix, RawRouteWithDeltas};
-use roto::types::builtin::{RouteStatus, RotondaId, UpdateMessage};
+use roto::types::builtin::{Asn as RotoAsn, BuiltinTypeValue, Prefix, RawRouteWithDeltas};
+use roto::types::builtin::{IpAddress, RouteStatus, RotondaId, UpdateMessage};
 use routecore::asn::Asn;
 use routecore::bgp::message::UpdateMessage as UpdatePdu;
 
@@ -157,7 +157,11 @@ impl Processor {
                     match res {
                         None => { break; } 
                         Some(Message::UpdateMessage(pdu)) => {
-                            self.process_update(pdu).await;
+                            self.process_update(
+                                pdu,
+                                session.config.remote_addr,
+                                session.config.remote_asn,
+                            ).await;
                         }
                         Some(Message::NotificationMessage(pdu)) => {
                             debug!(
@@ -198,7 +202,14 @@ impl Processor {
     // TODO properly batch these per Action (one batch for announcements one
     // batch for withdrawals). Should we switch to
     // RawRouteWithDeltas::new_with_message_ref for that?
-    async fn process_update(&self, pdu: UpdatePdu<Bytes>) {
+    // TODO store all announced prefixes so we can easily withdraw them when
+    // the BGP session goes down.
+    async fn process_update(
+        &self,
+        pdu: UpdatePdu<Bytes>,
+        peer_ip: IpAddr,
+        peer_asn: Asn
+    ) {
         for n in pdu.nlris().iter() {
             let prefix = if let Some(prefix) = n.prefix() {
                 prefix
@@ -212,6 +223,8 @@ impl Processor {
             let rrwd = RawRouteWithDeltas::new_with_message(
                 (rot_id, ltime),
                 Prefix::new(prefix),
+                Some(IpAddress::new(peer_ip)),
+                Some(RotoAsn::new(peer_asn)),
                 UpdateMessage(pdu.clone()),
                 RouteStatus::InConvergence
                 );
@@ -232,6 +245,8 @@ impl Processor {
             let rrwd = RawRouteWithDeltas::new_with_message(
                 (rot_id, ltime),
                 Prefix::new(prefix),
+                Some(IpAddress::new(peer_ip)),
+                Some(RotoAsn::new(peer_asn)),
                 UpdateMessage(pdu.clone()),
                 RouteStatus::Withdrawn
                 );

@@ -126,12 +126,12 @@ impl RouterListApi {
                         ));
                         let metrics = self.bmp_metrics.router_metrics(router_id.clone());
 
-                        let state = metrics.bmp_state_machine_state.load(Ordering::Relaxed);
-                        let num_peers_up = metrics.num_peers_up.load(Ordering::Relaxed);
+                        let state = metrics.bmp_state_machine_state.load(Ordering::SeqCst);
+                        let num_peers_up = metrics.num_peers_up.load(Ordering::SeqCst);
                         let num_peers_up_eor_capable =
-                            metrics.num_peers_up_eor_capable.load(Ordering::Relaxed);
+                            metrics.num_peers_up_eor_capable.load(Ordering::SeqCst);
                         let num_peers_up_dumping =
-                            metrics.num_peers_up_dumping.load(Ordering::Relaxed);
+                            metrics.num_peers_up_dumping.load(Ordering::SeqCst);
                         let num_peers_up_eor_capable_pc =
                             calc_u8_pc(num_peers_up, num_peers_up_eor_capable);
                         let num_peers_up_dumping_pc =
@@ -141,18 +141,18 @@ impl RouterListApi {
                         {
                             router_metrics
                                 .num_invalid_bmp_messages
-                                .load(Ordering::Relaxed)
+                                .load(Ordering::SeqCst)
                         } else {
                             0
                         };
                         let num_soft_parsing_failures = metrics
                             .num_bgp_updates_with_recoverable_parsing_failures_for_known_peers
-                            .load(Ordering::Relaxed)
+                            .load(Ordering::SeqCst)
                             + metrics
                                 .num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers
-                                .load(Ordering::Relaxed);
-                        let num_hard_parsing_failures = metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers.load(Ordering::Relaxed) +
-                            metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers.load(Ordering::Relaxed);
+                                .load(Ordering::SeqCst);
+                        let num_hard_parsing_failures = metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers.load(Ordering::SeqCst) +
+                            metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers.load(Ordering::SeqCst);
 
                         formatdoc! {
                             r#"

@@ -75,10 +75,10 @@ impl MqttStatusReporter {
 
         let metrics = self.metrics.topic_metrics(Arc::new(topic));
 
-        metrics.publish_counts.fetch_add(1, Ordering::Relaxed);
+        metrics.publish_counts.fetch_add(1, Ordering::SeqCst);
         metrics
             .last_e2e_delay
-            .store(delay.num_milliseconds(), Ordering::Relaxed);
+            .store(delay.num_milliseconds(), Ordering::SeqCst);
 
         self.metrics
             .in_flight_count

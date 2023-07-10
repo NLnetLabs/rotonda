@@ -122,36 +122,36 @@ impl RouterInfoApi {
 
         let state = router_bmp_metrics
             .bmp_state_machine_state
-            .load(Ordering::Relaxed);
+            .load(Ordering::SeqCst);
 
-        let num_connects: usize = router_conn_metrics.connection_count.load(Ordering::Relaxed);
+        let num_connects: usize = router_conn_metrics.connection_count.load(Ordering::SeqCst);
         let num_msg_issues: usize = router_conn_metrics
             .num_invalid_bmp_messages
-            .load(Ordering::Relaxed);
+            .load(Ordering::SeqCst);
         let num_retried_bgp_updates_known_peer: usize = router_bmp_metrics
             .num_bgp_updates_with_recoverable_parsing_failures_for_known_peers
-            .load(Ordering::Relaxed);
+            .load(Ordering::SeqCst);
         let num_unusable_bgp_updates_known_peer: usize = router_bmp_metrics
             .num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers
-            .load(Ordering::Relaxed);
+            .load(Ordering::SeqCst);
         let num_retried_bgp_updates_unknown_peer: usize = router_bmp_metrics
             .num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers
-            .load(Ordering::Relaxed);
+            .load(Ordering::SeqCst);
         let num_unusable_bgp_updates_unknown_peer: usize = router_bmp_metrics
             .num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers
-            .load(Ordering::Relaxed);
+            .load(Ordering::SeqCst);
         let num_prefixes: usize = router_bmp_metrics
             .num_stored_prefixes
-            .load(Ordering::Relaxed);
-        let num_announce: usize = router_bmp_metrics.num_announcements.load(Ordering::Relaxed);
-        let num_withdraw: usize = router_bmp_metrics.num_withdrawals.load(Ordering::Relaxed);
-        let num_peers_up: usize = router_bmp_metrics.num_peers_up.load(Ordering::Relaxed);
+            .load(Ordering::SeqCst);
+        let num_announce: usize = router_bmp_metrics.num_announcements.load(Ordering::SeqCst);
+        let num_withdraw: usize = router_bmp_metrics.num_withdrawals.load(Ordering::SeqCst);
+        let num_peers_up: usize = router_bmp_metrics.num_peers_up.load(Ordering::SeqCst);
         let num_peers_up_eor_capable: usize = router_bmp_metrics
             .num_peers_up_eor_capable
-            .load(Ordering::Relaxed);
+            .load(Ordering::SeqCst);
         let num_peers_up_dumping: usize = router_bmp_metrics
             .num_peers_up_dumping
-            .load(Ordering::Relaxed);
+            .load(Ordering::SeqCst);
 
         use std::fmt::Write;
 

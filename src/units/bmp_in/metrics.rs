@@ -50,7 +50,7 @@ impl BmpInMetrics {
             .routers
             .entry(router_id)
             .or_insert_with(Default::default);
-        metrics.connection_count.fetch_add(1, Ordering::Relaxed);
+        metrics.connection_count.fetch_add(1, Ordering::SeqCst);
         metrics
     }
 
@@ -74,14 +74,14 @@ impl metrics::Source for BmpInMetrics {
                 target,
                 router_id,
                 Self::CONNECTION_COUNT_METRIC,
-                metrics.connection_count.load(Ordering::Relaxed),
+                metrics.connection_count.load(Ordering::SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 router_id,
                 Self::NUM_INVALID_BMP_MESSAGES_METRIC,
-                metrics.num_invalid_bmp_messages.load(Ordering::Relaxed),
+                metrics.num_invalid_bmp_messages.load(Ordering::SeqCst),
             );
         }
     }

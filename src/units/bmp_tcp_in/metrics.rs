@@ -23,15 +23,15 @@ pub struct BmpTcpInMetrics {
 
 impl GraphStatus for BmpTcpInMetrics {
     fn status_text(&self) -> String {
-        let num_clients = self.connection_accepted_count.load(Ordering::Relaxed) - self.connection_lost_count.load(Ordering::Relaxed);
-        let num_msgs_out = self.gate.as_ref().map(|gate| gate.num_updates.load(Ordering::Relaxed)).unwrap_or_default();
+        let num_clients = self.connection_accepted_count.load(Ordering::SeqCst) - self.connection_lost_count.load(Ordering::SeqCst);
+        let num_msgs_out = self.gate.as_ref().map(|gate| gate.num_updates.load(Ordering::SeqCst)).unwrap_or_default();
         format!("clients: {}\nout: {}", num_clients, num_msgs_out)
     }
 
     fn okay(&self) -> Option<bool> {
-        let connection_accepted_count = self.connection_accepted_count.load(Ordering::Relaxed);
+        let connection_accepted_count = self.connection_accepted_count.load(Ordering::SeqCst);
         if connection_accepted_count > 0 {
-            let connection_lost_count = self.connection_lost_count.load(Ordering::Relaxed);
+            let connection_lost_count = self.connection_lost_count.load(Ordering::SeqCst);
             let num_clients = connection_accepted_count - connection_lost_count;
             Some(num_clients > 0)
         } else {
@@ -112,20 +112,20 @@ impl metrics::Source for BmpTcpInMetrics {
         target.append_simple(
             &Self::LISTENER_BOUND_COUNT_METRIC,
             Some(unit_name),
-            self.listener_bound_count.load(atomic::Ordering::Relaxed),
+            self.listener_bound_count.load(atomic::Ordering::SeqCst),
         );
 
         target.append_simple(
             &Self::CONNECTION_ACCEPTED_COUNT_METRIC,
             Some(unit_name),
             self.connection_accepted_count
-                .load(atomic::Ordering::Relaxed),
+                .load(atomic::Ordering::SeqCst),
         );
 
         target.append_simple(
             &Self::CONNECTION_LOST_COUNT_METRIC,
             Some(unit_name),
-            self.connection_lost_count.load(atomic::Ordering::Relaxed),
+            self.connection_lost_count.load(atomic::Ordering::SeqCst),
         );
 
         for (router_addr, metrics) in self.routers.guard().iter() {
@@ -136,21 +136,21 @@ impl metrics::Source for BmpTcpInMetrics {
                 target,
                 router_addr,
                 Self::CONNECTION_COUNT_METRIC,
-                metrics.connection_count.load(Ordering::Relaxed),
+                metrics.connection_count.load(Ordering::SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 router_addr,
                 Self::NUM_BMP_MESSAGES_RECEIVED_METRIC,
-                metrics.num_bmp_messages_received.load(Ordering::Relaxed),
+                metrics.num_bmp_messages_received.load(Ordering::SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 router_addr,
                 Self::NUM_RECEIVE_IO_ERRORS_METRIC,
-                metrics.num_receive_io_errors.load(Ordering::Relaxed),
+                metrics.num_receive_io_errors.load(Ordering::SeqCst),
             );
         }
     }

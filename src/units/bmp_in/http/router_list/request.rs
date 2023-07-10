@@ -162,41 +162,41 @@ impl RouterListApi {
                             let metrics = self.bmp_metrics.router_metrics(router_id.clone());
 
                             match sort_by {
-                                Some("state") => metrics.bmp_state_machine_state.load(Ordering::Relaxed) as usize,
+                                Some("state") => metrics.bmp_state_machine_state.load(Ordering::SeqCst) as usize,
 
-                                Some("peers_up") => metrics.num_peers_up.load(Ordering::Relaxed),
+                                Some("peers_up") => metrics.num_peers_up.load(Ordering::SeqCst),
 
-                                Some("peers_up_eor_capable") => metrics.num_peers_up_eor_capable.load(Ordering::Relaxed),
+                                Some("peers_up_eor_capable") => metrics.num_peers_up_eor_capable.load(Ordering::SeqCst),
 
-                                Some("peers_up_dumping") => metrics.num_peers_up_dumping.load(Ordering::Relaxed),
+                                Some("peers_up_dumping") => metrics.num_peers_up_dumping.load(Ordering::SeqCst),
 
                                 Some("peers_up_eor_capable_pc") => {
-                                    let total = metrics.num_peers_up.load(Ordering::Relaxed);
-                                    let v = metrics.num_peers_up_eor_capable.load(Ordering::Relaxed);
+                                    let total = metrics.num_peers_up.load(Ordering::SeqCst);
+                                    let v = metrics.num_peers_up_eor_capable.load(Ordering::SeqCst);
                                     calc_u8_pc(total, v).into()
                                 }
                                 Some("peers_up_dumping_pc") => {
-                                    let total = metrics.num_peers_up_eor_capable.load(Ordering::Relaxed);
-                                    let v = metrics.num_peers_up_dumping.load(Ordering::Relaxed);
+                                    let total = metrics.num_peers_up_eor_capable.load(Ordering::SeqCst);
+                                    let v = metrics.num_peers_up_dumping.load(Ordering::SeqCst);
                                     calc_u8_pc(total, v).into()
                                 }
 
                                 Some("invalid_messages") => {
                                     if let Some(router_metrics) = self.router_metrics.router_metrics(router_id) {
-                                        router_metrics.num_invalid_bmp_messages.load(Ordering::Relaxed)
+                                        router_metrics.num_invalid_bmp_messages.load(Ordering::SeqCst)
                                     } else {
                                         0
                                     }
                                 }
 
                                 Some("soft_parse_errors") => {
-                                    metrics.num_bgp_updates_with_recoverable_parsing_failures_for_known_peers.load(Ordering::Relaxed) +
-                                    metrics.num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers.load(Ordering::Relaxed)
+                                    metrics.num_bgp_updates_with_recoverable_parsing_failures_for_known_peers.load(Ordering::SeqCst) +
+                                    metrics.num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers.load(Ordering::SeqCst)
                                 }
 
                                 Some("hard_parse_errors") => {
-                                    metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers.load(Ordering::Relaxed) +
-                                    metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers.load(Ordering::Relaxed)
+                                    metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers.load(Ordering::SeqCst) +
+                                    metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers.load(Ordering::SeqCst)
                                 }
 
                                 _ => unreachable!()

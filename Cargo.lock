@@ -2014,7 +2014,7 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0"
-source = "git+https://github.com/NLnetLabs/roto.git?branch=mergeupdate-userdata#ade3a000ea23468f0d2e7cc81c7da8fe78865af4"
+source = "git+https://github.com/NLnetLabs/roto.git#9b42116a3587b5f3409dbfcc6c30651f8c4ee712"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -2085,8 +2085,8 @@ dependencies = [
 
 [[package]]
 name = "rotonda-macros"
-version = "0.2.0-pre.6"
-source = "git+https://github.com/NLnetLabs/rotonda-macros.git?branch=mergeupdate-userdata#8e0be3b5dc5218bed2683aa42c0113ea9cbb7ed5"
+version = "0.3.0-pre.3"
+source = "git+https://github.com/NLnetLabs/rotonda-macros.git#6352b71155c044329452139ab72186985600d249"
 dependencies = [
  "quote",
  "syn 2.0.18",
@@ -2094,8 +2094,8 @@ dependencies = [
 
 [[package]]
 name = "rotonda-store"
-version = "0.3.0-pre.2"
-source = "git+https://github.com/NLnetLabs/rotonda-store.git?branch=mergeupdate-userdata#9b7dc969e5a32fb327d03c927f136f3bcc398e40"
+version = "0.3.0-pre.3"
+source = "git+https://github.com/NLnetLabs/rotonda-store.git#ee7159e1f459ac46b10f3680931bba72f2202547"
 dependencies = [
  "arc-swap",
  "crossbeam-epoch",

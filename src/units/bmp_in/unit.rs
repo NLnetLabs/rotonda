@@ -1,6 +1,6 @@
-use std::{cell::RefCell, net::SocketAddr, sync::Arc, path::PathBuf, time::Instant, fs::read_to_string, ops::ControlFlow};
+use std::{cell::RefCell, net::SocketAddr, sync::{Arc, Weak}, path::PathBuf, time::Instant, fs::read_to_string, ops::ControlFlow};
 
-use super::state_machine::{machine::BmpStateDetails, states::dumping::Dumping, processing::ProcessingResult};
+use super::state_machine::processing::ProcessingResult;
 use crate::{units::{bmp_in::{
     metrics::BmpInMetrics,
     state_machine::{machine::BmpState, processing::MessageType},
@@ -28,6 +28,7 @@ use log::info;
 use non_empty_vec::NonEmpty;
 use roto::{types::{builtin::{BuiltinTypeValue}, typevalue::TypeValue}, traits::RotoType};
 use serde::Deserialize;
+use tokio::{runtime::Handle, sync::Mutex};
 
 #[cfg(feature = "router-list")]
 use {
@@ -140,27 +141,28 @@ impl BmpInRunner {
         let state_machine_metrics = Arc::new(TokioTaskMetrics::new());
         component.register_metrics(state_machine_metrics.clone());
 
+        // Setup storage for tracking multiple connected router BMP states at
+        // once.
+        let router_states = Arc::new(FrimMap::default());
+
         // Setup REST API endpoint
         #[cfg(feature = "router-list")]
         let (_api_processor, router_info) = {
             let router_info = Arc::new(FrimMap::default());
 
-            let processor = RouterListApi::mk_http_processor(
+            let processor = Arc::new(RouterListApi::new(
                 http_api_path.clone(),
                 router_info.clone(),
                 router_metrics,
                 bmp_metrics.clone(),
                 router_id_template.clone(),
-            );
+                router_states.clone(),
+            ));
 
             component.register_http_resource(processor.clone());
 
             (processor, router_info)
         };
-
-        // Setup storage for tracking multiple connected router BMP states at
-        // once.
-        let router_states = Arc::new(FrimMap::default());
 
         #[cfg(feature = "router-list")]
         let component = Arc::new(RwLock::new(component));
@@ -297,6 +299,7 @@ impl BmpInRunner {
 
     fn router_disconnected(&self, router_addr: &SocketAddr) {
         self.router_states.remove(router_addr);
+        // TODO: also remove from self.router_info ?
     }
 
     async fn process_msg(
@@ -361,8 +364,10 @@ impl BmpInRunner {
                         router_addr,
                     ));
 
-                    self.setup_router_specific_api_endpoint(next_state, router_addr)
-                        .await;
+                    // Ensure that on first use the metrics for this
+                    // new router ID are correctly initialised.
+                    self.status_reporter
+                        .router_id_changed(next_state.router_id.clone());
                 }
             }
 
@@ -387,14 +392,9 @@ impl BmpInRunner {
     // connection to the monitored router is lost?
     async fn setup_router_specific_api_endpoint(
         &self,
-        next_state: &BmpStateDetails<Dumping>,
+        state_machine: Weak<Mutex<Option<BmpState>>>,
         #[allow(unused_variables)] router_addr: &SocketAddr,
     ) {
-        // Ensure that on first use the metrics for this
-        // (possibly) new router ID are correctly initialised.
-        self.status_reporter
-            .router_id_changed(next_state.router_id.clone());
-
         #[cfg(feature = "router-list")]
         match self.router_info.get(router_addr) {
             None => {
@@ -405,45 +405,34 @@ impl BmpInRunner {
                 ));
             }
 
-            Some(this_router_info) => {
-                // Save the sysName and sysDesc strings to be
-                // displayed by the /routers/ endpoint.
-                let sys_name = Some(next_state.details.sys_name.clone());
-                let sys_desc = Some(next_state.details.sys_desc.clone());
-
+            Some(mut this_router_info) => {
                 // Setup a REST API endpoint for querying information
                 // about this particular monitored router.
-                let api_processor = RouterInfoApi::mk_http_processor(
+                let processor = RouterInfoApi::new(
                     self.http_api_path.clone(),
                     *router_addr,
-                    next_state.router_id.clone(),
-                    next_state.details.sys_name.clone(),
-                    next_state.details.sys_desc.clone(),
-                    next_state.details.sys_extra.clone(),
                     self.status_reporter.metrics(),
                     self.router_metrics.clone(),
                     this_router_info.connected_at,
                     this_router_info.last_msg_at.clone(),
+                    state_machine,
+                    
                 );
+
+                let processor = Arc::new(processor);
 
                 self.component
                     .write()
                     .await
-                    .register_http_resource(api_processor.clone());
+                    .register_http_resource(processor.clone());
+
+                let mut updatable_router_info = Arc::make_mut(&mut this_router_info);
+                updatable_router_info.api_processor = Some(processor);
+
+                self.router_info.insert(*router_addr, this_router_info);
 
                 // TODO: unregister the processor if the router disconnects? (maybe after a delay so that we can
                 // still inspect the last known state for the monitored router)
-
-                let new_router_info = RouterInfo {
-                    sys_name,
-                    sys_desc,
-                    connected_at: this_router_info.connected_at,
-                    last_msg_at: this_router_info.last_msg_at.clone(),
-                    api_processor: Some(api_processor),
-                };
-
-                self.router_info
-                    .insert(*router_addr, Arc::new(new_router_info));
             }
         }
     }
@@ -495,50 +484,45 @@ impl BmpInRunner {
                 // Initialize the state machine if not already done for this
                 // router.
                 let entry = entry.or_insert_with(|| {
-                    Arc::new(tokio::sync::Mutex::new(Some(
+                    let new_entry = Arc::new(tokio::sync::Mutex::new(Some(
                         self.router_connected(&router_addr),
-                    )))
+                    )));
+
+                    let weak_ref = Arc::downgrade(&new_entry);
+                    tokio::task::block_in_place(|| {
+                        Handle::current().block_on(self.setup_router_specific_api_endpoint(weak_ref, &router_addr));
+                    });
+
+                    new_entry
                 });
 
-                let lock_res = entry.try_lock();
-                if lock_res.is_err() {
-                    // This should never happen.
-                    self.status_reporter.internal_error(format!(
-                        "BMP state machine for router connection {} is unexpectedly locked: {}",
-                        router_addr,
-                        lock_res.unwrap_err()
-                    ));
-                } else {
-                    let mut bmp_state = lock_res.unwrap();
+                let mut locked = entry.lock().await;
+                let this_state = locked.take().unwrap();
 
-                    // Obtain the current state machine state.
-                    let this_state = bmp_state.take().unwrap();
+                let next_state = match msg {
+                    RawBmpPayload::Eof => {
+                        // The connection to the router has been lost so drop the
+                        // connection state machine we have for it, if any.
+                        let res = this_state.terminate().await;
+                        let next_state = self.process_result(res, &router_addr).await;
+                        self.router_disconnected(&router_addr);
+                        next_state
+                    }
 
-                    let next_state = match msg {
-                        RawBmpPayload::Eof => {
-                            // The connection to the router has been lost so drop the
-                            // connection state machine we have for it, if any.
-                            let res = this_state.terminate().await;
-                            let next_state = self.process_result(res, &router_addr).await;
-                            self.router_disconnected(&router_addr);
-                            next_state
-                        }
+                    RawBmpPayload::Msg(msg_bytes) => {
+                        // Run the state machine resulting in a new state.
+                        self.state_machine_metrics.instrument(self.process_msg(&router_addr, this_state, msg_bytes)).await
+                    }
+                };
 
-                        RawBmpPayload::Msg(msg_bytes) => {
-                            // Run the state machine resulting in a new state.
-                            self.state_machine_metrics.instrument(self.process_msg(&router_addr, this_state, msg_bytes)).await
-                        }
-                    };
+                // TODO: if the next_state is Aborted, we have no way of feeding that back to the TCP connection
+                // handler... we can only sit here and uselessly pump any future messages into the dead state
+                // machine ... The TCP handling architecture created for the domain crate may serve us better here
+                // as it has a means for feeding back down from the application specific network handling layer to
+                // the TCP handling layer.
 
-                    // TODO: if the next_state is Aborted, we have no way of feeding that back to the TCP connection
-                    // handler... we can only sit here and uselessly pump any future messages into the dead state
-                    // machine ... The TCP handling architecture created for the domain crate may serve us better here
-                    // as it has a means for feeding back down from the application specific network handling layer to
-                    // the TCP handling layer.
-
-                    // Store the new state machine state.
-                    bmp_state.replace(next_state);
-                }
+                // Store the new state machine state.
+                locked.replace(next_state);
             }
 
             Update::Single(_) => {

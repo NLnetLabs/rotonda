@@ -48,7 +48,7 @@ impl BmpTcpInStatusReporter {
         self.metrics
             .router_metrics(router_addr)
             .num_receive_io_errors
-            .fetch_add(1, Ordering::Relaxed);
+            .fetch_add(1, Ordering::SeqCst);
     }
 
     /// Ensure only when necessary that metric counters for a new (or changed)
@@ -61,14 +61,14 @@ impl BmpTcpInStatusReporter {
         self.metrics
             .router_metrics(router_addr)
             .connection_count
-            .fetch_add(1, Ordering::Relaxed);
+            .fetch_add(1, Ordering::SeqCst);
     }
 
     pub fn bmp_message_received(&self, router_addr: SocketAddr) {
         self.metrics
             .router_metrics(router_addr)
             .num_bmp_messages_received
-            .fetch_add(1, Ordering::Relaxed);
+            .fetch_add(1, Ordering::SeqCst);
     }
 
     pub fn router_connection_lost(&self, router_addr: SocketAddr) {

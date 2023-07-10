@@ -649,7 +649,7 @@ pub struct GateMetrics {
 
 impl GraphStatus for GateMetrics {
     fn status_text(&self) -> String {
-        format!("out: {}", self.num_updates.load(Ordering::Relaxed))
+        format!("out: {}", self.num_updates.load(Ordering::SeqCst))
     }
 }
 
@@ -661,12 +661,12 @@ impl GateMetrics {
         _senders: Arc<FrimMap<Uuid, UpdateSender>>,
         sent_at_least_once: bool,
     ) {
-        self.num_updates.fetch_add(1, Ordering::Relaxed);
+        self.num_updates.fetch_add(1, Ordering::SeqCst);
         if !sent_at_least_once {
-            self.num_dropped_updates.fetch_add(1, Ordering::Relaxed);
+            self.num_dropped_updates.fetch_add(1, Ordering::SeqCst);
         }
         if let Update::Bulk(update) = update {
-            self.update_set_size.store(update.len(), Ordering::Relaxed);
+            self.update_set_size.store(update.len(), Ordering::SeqCst);
         }
         self.update.store(Some(Utc::now()));
 
@@ -684,13 +684,13 @@ impl GateMetrics {
         // }
 
         // if num_queue_senders > 0 {
-        //     self.capacity.store(capacity, Ordering::Relaxed);
+        //     self.capacity.store(capacity, Ordering::SeqCst);
         // }
 
         // self.num_queue_senders
-        //     .store(num_queue_senders, Ordering::Relaxed);
+        //     .store(num_queue_senders, Ordering::SeqCst);
         // self.num_direct_senders
-        //     .store(num_direct_senders, Ordering::Relaxed);
+        //     .store(num_direct_senders, Ordering::SeqCst);
     }
 
     /// Updates the metrics to match the given unit status.
@@ -767,13 +767,13 @@ impl metrics::Source for GateMetrics {
         target.append_simple(
             &Self::NUM_UPDATES_METRIC,
             Some(unit_name),
-            self.num_updates.load(Ordering::Relaxed),
+            self.num_updates.load(Ordering::SeqCst),
         );
 
         target.append_simple(
             &Self::NUM_DROPPED_UPDATES_METRIC,
             Some(unit_name),
-            self.num_dropped_updates.load(Ordering::Relaxed),
+            self.num_dropped_updates.load(Ordering::SeqCst),
         );
 
         match self.update.load() {
@@ -786,7 +786,7 @@ impl metrics::Source for GateMetrics {
                 target.append_simple(
                     &Self::UPDATE_SET_SIZE_METRIC,
                     Some(unit_name),
-                    self.update_set_size.load(Ordering::Relaxed),
+                    self.update_set_size.load(Ordering::SeqCst),
                 );
             }
             None => {
@@ -798,17 +798,17 @@ impl metrics::Source for GateMetrics {
         target.append_simple(
             &Self::LINK_CAPACITY_METRIC,
             Some(unit_name),
-            self.capacity.load(Ordering::Relaxed),
+            self.capacity.load(Ordering::SeqCst),
         );
         target.append_simple(
             &Self::NUM_QUEUE_SENDERS_METRIC,
             Some(unit_name),
-            self.num_queue_senders.load(Ordering::Relaxed),
+            self.num_queue_senders.load(Ordering::SeqCst),
         );
         target.append_simple(
             &Self::NUM_DIRECT_SENDERS_METRIC,
             Some(unit_name),
-            self.num_direct_senders.load(Ordering::Relaxed),
+            self.num_direct_senders.load(Ordering::SeqCst),
         );
     }
 }

@@ -21,7 +21,7 @@ use log::{error, log_enabled, trace};
 use non_empty_vec::NonEmpty;
 use roto::{
     traits::RotoType,
-    types::{builtin::BuiltinTypeValue, collections::ElementTypeValue, typevalue::TypeValue},
+    types::{builtin::{BuiltinTypeValue, RouteToken}, collections::ElementTypeValue, typevalue::TypeValue},
 };
 use rotonda_store::{
     custom_alloc::Upsert,
@@ -154,6 +154,10 @@ pub struct RibUnit {
     #[serde(default)]
     pub rib_type: RibType,
 
+    /// Which fields are the key for RIB metadata items?
+    #[serde(default = "RibUnit::default_rib_keys")]
+    pub rib_keys: Vec<RouteToken>,
+
     /// Virtual RIB upstream physical RIB. Only used when rib_type is Virtual.
     #[serde(default)]
     pub vrib_upstream: Option<Link>,
@@ -166,7 +170,7 @@ impl RibUnit {
         gate: Gate,
         waitpoint: WaitPoint,
     ) -> Result<(), Terminated> {
-        RibUnitRunner::new(gate, component, self.roto_path, self.rib_type)
+        RibUnitRunner::new(gate, component, self.roto_path, self.rib_type, &self.rib_keys)
             .run(
                 self.sources,
                 self.http_api_path,
@@ -184,6 +188,10 @@ impl RibUnit {
 
     fn default_query_limits() -> QueryLimits {
         QueryLimits::default()
+    }
+
+    fn default_rib_keys() -> Vec<RouteToken> {
+        vec![RouteToken::PeerIp, RouteToken::PeerAsn, RouteToken::AsPath]
     }
 }
 
@@ -247,6 +255,7 @@ impl RibUnitRunner {
         mut component: Component,
         roto_path: Option<PathBuf>,
         rib_type: RibType,
+        rib_keys: &[RouteToken],
     ) -> Self {
         let roto_source_code = roto_path
             .map(|v| read_to_string(v).unwrap())
@@ -268,10 +277,7 @@ impl RibUnitRunner {
                 // --- End: Create the Rib based on the Roto script Rib 'contains' type
                 //
 
-                let physical_rib = PhysicalRib::new(
-                    "my-rib", // TODO: Where should this name come from? Is it for lookup and access by other Roto
-                );
-
+                let physical_rib = PhysicalRib::new(rib_keys);
                 Arc::new(ArcSwapOption::from_pointee(physical_rib))
             }
 
@@ -873,7 +879,7 @@ mod tests {
 
     #[test]
     fn test_route_comparison_using_default_hash_key_values() {
-        let rib = PhysicalRib::new("test-rib");
+        let rib = PhysicalRib::default();
         let prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32).unwrap();
         let peer_one = IpAddr::from_str("192.168.0.1").unwrap();
         let peer_two = IpAddr::from_str("192.168.0.2").unwrap();

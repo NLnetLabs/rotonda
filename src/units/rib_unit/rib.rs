@@ -36,8 +36,8 @@ impl std::ops::Deref for PhysicalRib {
     }
 }
 
-impl PhysicalRib {
-    pub fn new(name: &str) -> Self {
+impl Default for PhysicalRib {
+    fn default() -> Self {
         // What is the key that uniquely identifies routes to be withdrawn when a BGP peering session is lost?
         //
         // A route is an AS path to follow from a given peer to reach a given prefix.
@@ -56,20 +56,26 @@ impl PhysicalRib {
         //
         // TODO: Are there other values from the BGP OPEN message that we may need to consider as disinguishing one
         // peer from another?
-        let peer_ip_key = vec![RouteToken::PeerIp as usize].into();
-        let peer_asn_key = vec![RouteToken::PeerAsn as usize].into();
-        let as_path_key = vec![RouteToken::AsPath as usize].into();
-        let route_keys = vec![peer_ip_key, peer_asn_key, as_path_key];
+        //
+        // TODO: Add support for 'router group', for BMP the "id" of the monitored router from which peers are
+        // learned of (either the "tcp ip address:tcp port" or the BMP Initiation message sysName TLV), or for BGP
+        // a string representation of the connected peers "tcp ip address:tcp port".
+        Self::new(&[RouteToken::PeerIp, RouteToken::PeerAsn, RouteToken::AsPath])
+    }
+}
 
-        Self::with_custom_type(name, TypeDef::Route, route_keys)
+impl PhysicalRib {
+    pub fn new(key_fields: &[RouteToken]) -> Self {
+        let key_fields = key_fields.iter().map(|&v| vec![v as usize].into()).collect::<Vec<_>>();
+        Self::with_custom_type(TypeDef::Route, key_fields)
     }
 
-    pub fn with_custom_type(name: &str, ty: TypeDef, ty_keys: Vec<SmallVec<[usize; 8]>>) -> Self {
+    pub fn with_custom_type(ty: TypeDef, ty_keys: Vec<SmallVec<[usize; 8]>>) -> Self {
         let eviction_policy = StoreEvictionPolicy::UpdateStatusOnWithdraw;
         let store = MultiThreadedStore::<RibValue>::new()
             .unwrap()
             .with_user_data(eviction_policy); // TODO: handle this Err;
-        let rib = Rib::new(name, ty.clone(), store);
+        let rib = Rib::new("rib-names-are-not-used-yet", ty.clone(), store);
         let rib_type_def: RibTypeDef = (Box::new(ty), Some(ty_keys));
         let type_def_rib = TypeDef::Rib(rib_type_def);
 

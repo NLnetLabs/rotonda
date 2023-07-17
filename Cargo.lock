@@ -2118,7 +2118,7 @@ dependencies = [
 [[package]]
 name = "routecore"
 version = "0.4.0-dev"
-source = "git+https://github.com/NLnetLabs/routecore.git#cfc4c3a8032de346a114dda93505806ebc492a04"
+source = "git+https://github.com/NLnetLabs/routecore.git#795106953a656a9181813868c35b91c77104e0dc"
 dependencies = [
  "bytes",
  "chrono",

@@ -2022,7 +2022,7 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0"
-source = "git+https://github.com/NLnetLabs/roto.git?branch=rich-community-serialization#4bb41542cefd8a07d12cfc0e18431aa2164047e5"
+source = "git+https://github.com/NLnetLabs/roto.git?branch=rich-community-serialization#e1742d52c4dbd416718ebec7625d0977dcdcf0a0"
 dependencies = [
  "arc-swap",
  "bytes",

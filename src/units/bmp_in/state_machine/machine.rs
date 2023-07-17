@@ -694,6 +694,8 @@ where
                         )
                         .into(),
                     );
+
+                    self.details.remove_announced_prefix(&pph, &prefix);
                 } else {
                     num_withdrawals -= 1;
                 }

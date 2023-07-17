@@ -1665,6 +1665,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "paste"
+version = "1.0.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "de3145af08024dea9fa9914f381a17b8fc6034dfb00f3a84013f7ff43f29ed4c"
+
+[[package]]
 name = "pathdiff"
 version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2014,12 +2020,13 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0"
-source = "git+https://github.com/NLnetLabs/roto.git#337c5854a5fcf44b10699faef1a53dc648c6f68d"
+source = "git+https://github.com/NLnetLabs/roto.git#1d9368d42de7690b4ae2adbcf09367147f0545b3"
 dependencies = [
  "arc-swap",
  "bytes",
  "log",
  "nom",
+ "paste",
  "rotonda-store",
  "routecore",
  "serde",
@@ -2109,7 +2116,7 @@ dependencies = [
 [[package]]
 name = "routecore"
 version = "0.4.0-dev"
-source = "git+https://github.com/NLnetLabs/routecore.git#3b70710cf695a1c5559b5c07e0b30afd9317f6ae"
+source = "git+https://github.com/NLnetLabs/routecore.git#cfc4c3a8032de346a114dda93505806ebc492a04"
 dependencies = [
  "bytes",
  "chrono",

@@ -156,7 +156,7 @@ pub struct RibUnit {
 
     /// Which fields are the key for RIB metadata items?
     #[serde(default = "RibUnit::default_rib_keys")]
-    pub rib_keys: Vec<RouteToken>,
+    pub rib_keys: NonEmpty<RouteToken>,
 
     /// Virtual RIB upstream physical RIB. Only used when rib_type is Virtual.
     #[serde(default)]
@@ -190,8 +190,8 @@ impl RibUnit {
         QueryLimits::default()
     }
 
-    fn default_rib_keys() -> Vec<RouteToken> {
-        vec![RouteToken::PeerIp, RouteToken::PeerAsn, RouteToken::AsPath]
+    fn default_rib_keys() -> NonEmpty<RouteToken> {
+        NonEmpty::try_from(vec![RouteToken::PeerIp, RouteToken::PeerAsn, RouteToken::AsPath]).unwrap()
     }
 }
 
@@ -866,107 +866,54 @@ impl RibUnitRunner {
 
 #[cfg(test)]
 mod tests {
-    use std::{net::IpAddr, str::FromStr, sync::Arc};
-
-    use roto::types::builtin::{
-        BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus, UpdateMessage,
-    };
-    use routecore::{addr::Prefix, bgp::message::SessionConfig};
-
-    use crate::bgp::encode::{mk_bgp_update, Announcements, Prefixes};
-
-    use super::PhysicalRib;
+    use super::*;
 
     #[test]
-    fn test_route_comparison_using_default_hash_key_values() {
-        let rib = PhysicalRib::default();
-        let prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32).unwrap();
-        let peer_one = IpAddr::from_str("192.168.0.1").unwrap();
-        let peer_two = IpAddr::from_str("192.168.0.2").unwrap();
-        let announcement_one_from_peer_one =
-            mk_route_announcement(prefix, "123,456").with_peer_ip(peer_one);
-        let announcement_two_from_peer_one =
-            mk_route_announcement(prefix, "789,456").with_peer_ip(peer_one);
-        let announcement_one_from_peer_two =
-            mk_route_announcement(prefix, "123,456").with_peer_ip(peer_two);
-        let announcement_two_from_peer_two =
-            mk_route_announcement(prefix, "789,456").with_peer_ip(peer_two);
+    fn default_rib_keys_are_as_expected() {
+        let toml = r#"
+        sources = ["some source"]
+        "#;
 
-        let hash_code_route_one_peer_one =
-            rib.precompute_hash_code(&announcement_one_from_peer_one.clone().into());
-        let hash_code_route_one_peer_one_again =
-            rib.precompute_hash_code(&announcement_one_from_peer_one.into());
-        let hash_code_route_one_peer_two =
-            rib.precompute_hash_code(&announcement_one_from_peer_two.into());
-        let hash_code_route_two_peer_one =
-            rib.precompute_hash_code(&announcement_two_from_peer_one.into());
-        let hash_code_route_two_peer_two =
-            rib.precompute_hash_code(&announcement_two_from_peer_two.into());
+        let config = mk_config_from_toml(toml).unwrap();
 
-        // Hashing sanity checks
-        assert_ne!(hash_code_route_one_peer_one, 0);
-        assert_eq!(
-            hash_code_route_one_peer_one,
-            hash_code_route_one_peer_one_again
-        );
-
-        assert_ne!(
-            hash_code_route_one_peer_one, hash_code_route_one_peer_two,
-            "Routes that differ only by peer IP should be considered different"
-        );
-        assert_ne!(
-            hash_code_route_two_peer_one, hash_code_route_two_peer_two,
-            "Routes that differ only by peer IP should be considered different"
-        );
-        assert_ne!(
-            hash_code_route_one_peer_one, hash_code_route_two_peer_one,
-            "Routes that differ only by AS path should be considered different"
-        );
-        assert_ne!(
-            hash_code_route_one_peer_two, hash_code_route_two_peer_two,
-            "Routes that differ only by AS path should be considered different"
-        );
-
-        // Sanity checks
-        assert_eq!(hash_code_route_one_peer_one, hash_code_route_one_peer_one);
-        assert_eq!(hash_code_route_one_peer_two, hash_code_route_one_peer_two);
-        assert_eq!(hash_code_route_two_peer_one, hash_code_route_two_peer_one);
-        assert_eq!(hash_code_route_two_peer_two, hash_code_route_two_peer_two);
+        assert_eq!(config.rib_keys.as_slice(), &[RouteToken::PeerIp, RouteToken::PeerAsn, RouteToken::AsPath]);
     }
 
-    fn mk_route_announcement(prefix: Prefix, as_path: &str) -> RawRouteWithDeltas {
-        let delta_id = (RotondaId(0), 0);
-        let announcements = Announcements::from_str(&format!(
-            "e [{as_path}] 10.0.0.1 BLACKHOLE,123:44 {}",
-            prefix
-        ))
-        .unwrap();
-        let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
+    #[test]
+    fn specified_rib_keys_are_received() {
+        let toml = r#"
+        sources = ["some source"]
+        rib_keys = ["PeerIp", "NextHop"]
+        "#;
 
-        // When it is processed by this unit
-        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
-        RawRouteWithDeltas::new_with_message_ref(
-            delta_id,
-            prefix.into(),
-            &bgp_update_msg,
-            RouteStatus::InConvergence,
-        )
+        let config = mk_config_from_toml(toml).unwrap();
+
+        assert_eq!(config.rib_keys.as_slice(), &[RouteToken::PeerIp, RouteToken::NextHop]);
     }
 
-    fn mk_route_withdrawal(prefix: Prefix) -> RawRouteWithDeltas {
-        let delta_id = (RotondaId(0), 0);
-        let bgp_update_bytes =
-            mk_bgp_update(&Prefixes::new(vec![prefix]), &Announcements::None, &[]);
+    #[test]
+    #[should_panic(expected = "empty vector")]
+    fn if_specified_rib_keys_must_be_non_empty() {
+        let toml = r#"
+        sources = ["some source"]
+        rib_keys = []
+        "#;
 
-        // When it is processed by this unit
-        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
-        RawRouteWithDeltas::new_with_message_ref(
-            delta_id,
-            prefix.into(),
-            &bgp_update_msg,
-            RouteStatus::Withdrawn,
-        )
+        mk_config_from_toml(toml).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown variant")]
+    fn only_known_route_tokens_may_be_used_as_rib_keys() {
+        let toml = r#"
+        sources = ["some source"]
+        rib_keys = ["blah"]
+        "#;
+
+        mk_config_from_toml(toml).unwrap();
+    }
+
+    fn mk_config_from_toml(toml: &str) -> Result<RibUnit, toml::de::Error> {
+        toml::de::from_slice::<RibUnit>(toml.as_bytes())
     }
 }

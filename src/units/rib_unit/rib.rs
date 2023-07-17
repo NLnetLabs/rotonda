@@ -371,6 +371,12 @@ impl PeerId {
     }
 }
 
+impl From<IpAddr> for PeerId {
+    fn from(ip_addr: IpAddr) -> Self {
+        PeerId::new(Some(ip_addr), None)
+    }
+}
+
 trait RouteExtra {
     fn withdraw(&mut self);
 
@@ -418,7 +424,7 @@ mod tests {
         units::rib_unit::rib::StoreEvictionPolicy,
     };
 
-    use super::{PeerId, PreHashedTypeValue, RibValue};
+    use super::*;
 
     #[test]
     fn empty_by_default() {
@@ -574,63 +580,59 @@ mod tests {
             .clone_merge_update(&peer_one_withdrawal.into(), Some(&remove_policy))
             .unwrap();
         assert_eq!(rib_value.len(), 1);
-
     }
 
-    fn mk_route_announcement(prefix: Prefix, as_path: &str, peer_id: PeerId) -> RawRouteWithDeltas {
-        let delta_id = (RotondaId(0), 0);
-        let announcements = Announcements::from_str(&format!(
-            "e [{as_path}] 10.0.0.1 BLACKHOLE,123:44 {}",
-            prefix
-        ))
-        .unwrap();
-        let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
+    #[test]
+    fn test_route_comparison_using_default_hash_key_values() {
+        let rib = PhysicalRib::default();
+        let prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32).unwrap();
+        let peer_one = IpAddr::from_str("192.168.0.1").unwrap();
+        let peer_two = IpAddr::from_str("192.168.0.2").unwrap();
+        let announcement_one_from_peer_one = mk_route_announcement(prefix, "123,456", peer_one);
+        let announcement_two_from_peer_one = mk_route_announcement(prefix, "789,456", peer_one);
+        let announcement_one_from_peer_two = mk_route_announcement(prefix, "123,456", peer_two);
+        let announcement_two_from_peer_two = mk_route_announcement(prefix, "789,456", peer_two);
 
-        // When it is processed by this unit
-        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
-        let mut route = RawRouteWithDeltas::new_with_message_ref(
-            delta_id,
-            prefix.into(),
-            &bgp_update_msg,
-            RouteStatus::InConvergence,
+        let hash_code_route_one_peer_one =
+            rib.precompute_hash_code(&announcement_one_from_peer_one.clone().into());
+        let hash_code_route_one_peer_one_again =
+            rib.precompute_hash_code(&announcement_one_from_peer_one.into());
+        let hash_code_route_one_peer_two =
+            rib.precompute_hash_code(&announcement_one_from_peer_two.into());
+        let hash_code_route_two_peer_one =
+            rib.precompute_hash_code(&announcement_two_from_peer_one.into());
+        let hash_code_route_two_peer_two =
+            rib.precompute_hash_code(&announcement_two_from_peer_two.into());
+
+        // Hashing sanity checks
+        assert_ne!(hash_code_route_one_peer_one, 0);
+        assert_eq!(
+            hash_code_route_one_peer_one,
+            hash_code_route_one_peer_one_again
         );
 
-        if let Some(ip) = peer_id.ip {
-            route = route.with_peer_ip(ip);
-        }
-
-        if let Some(asn) = peer_id.asn {
-            route = route.with_peer_asn(asn);
-        }
-
-        route
-    }
-
-    fn mk_route_withdrawal(prefix: Prefix, peer_id: PeerId) -> RawRouteWithDeltas {
-        let delta_id = (RotondaId(0), 0);
-        let bgp_update_bytes =
-            mk_bgp_update(&Prefixes::new(vec![prefix]), &Announcements::None, &[]);
-
-        // When it is processed by this unit
-        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
-        let mut route = RawRouteWithDeltas::new_with_message_ref(
-            delta_id,
-            prefix.into(),
-            &bgp_update_msg,
-            RouteStatus::Withdrawn,
+        assert_ne!(
+            hash_code_route_one_peer_one, hash_code_route_one_peer_two,
+            "Routes that differ only by peer IP should be considered different"
+        );
+        assert_ne!(
+            hash_code_route_two_peer_one, hash_code_route_two_peer_two,
+            "Routes that differ only by peer IP should be considered different"
+        );
+        assert_ne!(
+            hash_code_route_one_peer_one, hash_code_route_two_peer_one,
+            "Routes that differ only by AS path should be considered different"
+        );
+        assert_ne!(
+            hash_code_route_one_peer_two, hash_code_route_two_peer_two,
+            "Routes that differ only by AS path should be considered different"
         );
 
-        if let Some(ip) = peer_id.ip {
-            route = route.with_peer_ip(ip);
-        }
-
-        if let Some(asn) = peer_id.asn {
-            route = route.with_peer_asn(asn);
-        }
-
-        route
+        // Sanity checks
+        assert_eq!(hash_code_route_one_peer_one, hash_code_route_one_peer_one);
+        assert_eq!(hash_code_route_one_peer_two, hash_code_route_one_peer_two);
+        assert_eq!(hash_code_route_two_peer_one, hash_code_route_two_peer_one);
+        assert_eq!(hash_code_route_two_peer_two, hash_code_route_two_peer_two);
     }
 
     #[test]
@@ -712,5 +714,63 @@ mod tests {
         // Drop the updated meta and check that no bytes are currently allocated
         drop(updated_meta);
         assert_eq!(0, settings.allocator.stats().bytes_allocated);
+    }
+
+    fn mk_route_announcement<T: Into<PeerId>>(prefix: Prefix, as_path: &str, peer_id: T) -> RawRouteWithDeltas {
+        let delta_id = (RotondaId(0), 0);
+        let announcements = Announcements::from_str(&format!(
+            "e [{as_path}] 10.0.0.1 BLACKHOLE,123:44 {}",
+            prefix
+        ))
+        .unwrap();
+        let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
+
+        // When it is processed by this unit
+        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        let mut route = RawRouteWithDeltas::new_with_message_ref(
+            delta_id,
+            prefix.into(),
+            &bgp_update_msg,
+            RouteStatus::InConvergence,
+        );
+
+        let peer_id = peer_id.into();
+
+        if let Some(ip) = peer_id.ip {
+            route = route.with_peer_ip(ip);
+        }
+
+        if let Some(asn) = peer_id.asn {
+            route = route.with_peer_asn(asn);
+        }
+
+        route
+    }
+
+    fn mk_route_withdrawal(prefix: Prefix, peer_id: PeerId) -> RawRouteWithDeltas {
+        let delta_id = (RotondaId(0), 0);
+        let bgp_update_bytes =
+            mk_bgp_update(&Prefixes::new(vec![prefix]), &Announcements::None, &[]);
+
+        // When it is processed by this unit
+        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        let mut route = RawRouteWithDeltas::new_with_message_ref(
+            delta_id,
+            prefix.into(),
+            &bgp_update_msg,
+            RouteStatus::Withdrawn,
+        );
+
+        if let Some(ip) = peer_id.ip {
+            route = route.with_peer_ip(ip);
+        }
+
+        if let Some(asn) = peer_id.asn {
+            route = route.with_peer_asn(asn);
+        }
+
+        route
     }
 }

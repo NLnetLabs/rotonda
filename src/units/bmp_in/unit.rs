@@ -542,20 +542,20 @@ impl BmpInRunner {
     }
 
     fn is_filtered<R: RotoType>(
-        rx_tx: R,
+        rx: R,
         roto_source: Option<Arc<ArcSwap<(Instant, String)>>>,
     ) -> Result<ControlFlow<(), TypeValue>, String> {
         match roto_source {
             None => {
                 // No Roto filter defined, accept the BGP UPDATE messsage
-                Ok(ControlFlow::Continue(rx_tx.into()))
+                Ok(ControlFlow::Continue(rx.into()))
             }
             Some(roto_source) => {
                 // TODO: Run the Roto VM on a dedicated thread pool, to prevent blocking the Tokio async runtime, as we
                 // don't know how long we will have to wait for the VM execution to complete (as it depends on the
                 // behaviour of the user provided script). Timeouts might be a good idea!
                 Self::VM.with(move |vm| -> Result<ControlFlow<(), TypeValue>, String> {
-                    is_filtered_in_vm(vm, roto_source, rx_tx)
+                    is_filtered_in_vm(vm, roto_source, rx)
                 })
             }
         }

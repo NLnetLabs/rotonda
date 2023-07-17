@@ -1101,8 +1101,8 @@ pub mod bgp {
             let epoch_seconds = u32::try_from(now.timestamp()).unwrap();
             let epoch_micros = now.timestamp_subsec_micros();
 
-            buf.extend_from_slice(&peer_type_to_be_bytes(&pph.peer_type));
-            buf.extend_from_slice(&(pph.peer_flags).to_be_bytes());
+            buf.put_u8(u8::from(*pph.peer_type));
+            buf.put_u8(pph.peer_flags.into());
             buf.extend_from_slice(&pph.peer_distinguisher);
 
             // "Peer Address: The remote IP address associated with the TCP session
@@ -1189,15 +1189,6 @@ pub mod bgp {
             }
         }
 
-        fn peer_type_to_be_bytes(typ: &PeerType) -> [u8; 1] {
-            match typ {
-                PeerType::GlobalInstance => [0u8],
-                PeerType::RdInstance => [1u8],
-                PeerType::LocalInstance => [2u8],
-                PeerType::Undefined => unreachable!(),
-            }
-        }
-
         #[derive(Debug, PartialEq, Eq)]
         pub struct MyPeerType(PeerType);
 
@@ -1222,8 +1213,9 @@ pub mod bgp {
                 let peer_type = match s {
                     "global" => PeerType::GlobalInstance,
                     "local" => PeerType::LocalInstance,
+                    "localrib" => PeerType::LocalRibInstance,
                     "rd" => PeerType::RdInstance,
-                    _ => PeerType::Undefined,
+                    _ => todo!(),
                 };
 
                 Ok(MyPeerType(peer_type))

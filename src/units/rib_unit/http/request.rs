@@ -104,7 +104,6 @@ impl PrefixesApi {
         let filters = Self::parse_filter_params(&params)?;
         let sort = Self::parse_sort_params(&params)?;
         let format = get_param(&params, "format");
-        // let router = get_param(&params, "router");
 
         //
         // Check for unused params
@@ -202,18 +201,18 @@ impl PrefixesApi {
         // Format the response
         //
         let res = match format {
-            Some(format) if format.value() == "dump" => Self::mk_dump_response(&res),
+            None => {
+                // default format
+                Self::mk_json_response(res, includes, details, filters, sort)
+            }
 
-            // Some(format) if format.value() == "lg" => match router {
-            //     Some(router) => Self::mk_looking_glass_like_response(router.value(), &res),
-            //     None => Response::builder()
-            //         .status(hyper::StatusCode::BAD_REQUEST)
-            //         .header("Content-Type", "text/plain")
-            //         .body("Missing query parameter 'router' for format 'lg'".into())
-            //         .unwrap(),
-            // },
+            Some(format) if format.value() == "dump" => {
+                // internal diagnostic dump format
+                Self::mk_dump_response(&res)
+            }
+
             Some(other) => {
-                // unknown format type
+                // unknown format
                 Response::builder()
                     .status(hyper::StatusCode::BAD_REQUEST)
                     .header("Content-Type", "text/plain")
@@ -223,8 +222,6 @@ impl PrefixesApi {
                     )
                     .unwrap()
             }
-
-            None => Self::mk_json_response(res, includes, details, filters, sort),
         };
 
         Ok(res)

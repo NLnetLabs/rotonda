@@ -95,9 +95,9 @@ async fn exact_match_ipv4() {
 async fn exact_match_with_more_and_less_specifics_ipv4() {
     let rib = mk_rib();
 
-    insert_withdrawal(rib.clone(), "1.2.0.0/16", 1);
-    insert_withdrawal(rib.clone(), "1.2.3.0/24", 2);
-    insert_withdrawal(rib.clone(), "1.2.3.4/32", 3);
+    insert_announcement(rib.clone(), "1.2.0.0/16", 1);
+    insert_announcement(rib.clone(), "1.2.3.0/24", 2);
+    insert_announcement(rib.clone(), "1.2.3.4/32", 3);
 
     assert_query_eq(
         rib.clone(),
@@ -155,9 +155,9 @@ async fn exact_match_with_more_and_less_specifics_ipv4() {
 async fn issue_79_exact_match() {
     let rib = mk_rib();
 
-    insert_withdrawal(rib.clone(), "8.8.8.0/24", 1);
-    insert_withdrawal(rib.clone(), "8.0.0.0/12", 2);
-    insert_withdrawal(rib.clone(), "8.0.0.0/9", 3);
+    insert_announcement(rib.clone(), "8.8.8.0/24", 1);
+    insert_announcement(rib.clone(), "8.0.0.0/12", 2);
+    insert_announcement(rib.clone(), "8.0.0.0/9", 3);
 
     assert_query_eq(
         rib.clone(),
@@ -345,7 +345,7 @@ async fn exact_match_ipv4_with_normal_communities() {
         "/prefixes/1.2.3.4/32?details=communities",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18], Some(expected_communities), "Pre")],
+            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18], Some(expected_communities))],//, "Pre")],
             "included": {}
         })),
     )
@@ -411,7 +411,7 @@ async fn exact_match_ipv4_with_extended_communities() {
         "/prefixes/1.2.3.4/32?details=communities",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18], Some(expected_communities), "Pre")],
+            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18], Some(expected_communities))],//, "Pre")],
             "included": {}
         })),
     )
@@ -449,7 +449,7 @@ async fn exact_match_ipv4_with_large_communities() {
         "/prefixes/1.2.3.4/32?details=communities",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18], Some(expected_communities), "Pre")],
+            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18], Some(expected_communities))],//, "Pre")],
             "included": {}
         })),
     )
@@ -482,28 +482,28 @@ async fn select_and_discard() {
         1,
         &[18, 19, 20],
         Option::<StandardCommunity>::None,
-    ); //, PrePolicy);
+    );
     insert_announcement_helper(
         rib.clone(),
         2,
         &[19, 20, 21],
         Some(Wellknown::Blackhole),
-        // PostPolicy,
     );
+    // insert_announcement_helper(
+    //     rib.clone(),
+    //     3,
+    //     &[19, 20, 21],
+    //     Some(Wellknown::NoExport),
+    //     // PrePolicy,
+    // );
     insert_announcement_helper(
         rib.clone(),
         3,
-        &[19, 20, 21],
-        Some(Wellknown::NoExport),
-        // PrePolicy,
-    );
-    insert_announcement_helper(
-        rib.clone(),
-        4,
         &[20, 21, 22],
         Some(Wellknown::NoAdvertise),
-        // PostPolicy,
     );
+
+    assert_eq!(rib.load().as_ref().and_then(|rib| Some(rib.prefixes_count())), Some(1));
 
     assert_query_eq(
         rib.clone(),
@@ -511,8 +511,7 @@ async fn select_and_discard() {
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None, "Post"),
-                mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None, "Pre")
+                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None),
             ],
             "included": {}
         })),
@@ -525,8 +524,8 @@ async fn select_and_discard() {
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18, 19, 20], None, "Pre"),
-                mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None, "Pre")
+                mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18, 19, 20], None),//, "Pre"),
+                mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None)//, "Pre")
             ],
             "included": {}
         })),
@@ -539,9 +538,9 @@ async fn select_and_discard() {
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None, "Post"),
-                mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None, "Post")
-            ],
+                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None),//, "Post"),
+                mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None)//, "Post")
+        ],
             "included": {}
         })),
     )
@@ -552,7 +551,7 @@ async fn select_and_discard() {
         "/prefixes/1.2.3.4/32?select[source_as]=10003&sort=router_id",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None, "Pre")],
+            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None)],// "Pre")],
             "included": {}
         })),
     )
@@ -563,7 +562,7 @@ async fn select_and_discard() {
         "/prefixes/1.2.3.4/32?select[community]=BLACKHOLE&select[as_path]=19,20,21&filter_op=all",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None, "Post")],
+            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None)],//, "Post")],
             "included": {}
         })),
     )
@@ -575,8 +574,8 @@ async fn select_and_discard() {
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18, 19, 20], None, "Pre"),
-                mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None, "Post")
+                mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18, 19, 20], None),//, "Pre"),
+                mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None)//, "Post")
             ],
             "included": {}
         })),
@@ -588,7 +587,7 @@ async fn select_and_discard() {
         "/prefixes/1.2.3.4/32?discard[as_path]=18,19,20&discard[as_path]=19,20,21&filter_op=any&sort=router_id",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None, "Post")],
+            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None)],//, "Post")],
             "included": {}
         })),
     )
@@ -600,9 +599,9 @@ async fn select_and_discard() {
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18, 19, 20], None, "Pre"),
-                mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None, "Pre"),
-                mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None, "Post")
+                mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18, 19, 20], None),//, "Pre"),
+                mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None),//, "Pre"),
+                mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None)//, "Post")
             ],
             "included": {}
         })),
@@ -615,8 +614,8 @@ async fn select_and_discard() {
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None, "Post"),
-                mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None, "Pre")
+                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None),//, "Post"),
+                mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None)//, "Pre")
             ],
             "included": {}
         })),
@@ -647,9 +646,9 @@ async fn select_and_discard() {
             StatusCode::OK,
             Some(json!({
                 "data": [
-                    mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None, "Post"),
-                    mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None, "Pre"),
-                    mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None, "Post")
+                    mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None),//, "Post"),
+                    mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None),//, "Pre"),
+                    mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None)//, "Post")
                 ],
                 "included": {}
             })),
@@ -743,7 +742,7 @@ fn mk_rib() -> Arc<ArcSwapOption<PhysicalRib>> {
     Arc::new(ArcSwapOption::from_pointee(physical_rib))
 }
 
-fn insert_routes(rib: Arc<ArcSwapOption<PhysicalRib>>, announcements: Announcements) {
+fn insert_routes(rib: Arc<ArcSwapOption<PhysicalRib>>, n: u8, announcements: Announcements) {
     let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
     let delta_id = (RotondaId(0), 0); // TODO
     if let Announcements::Some {
@@ -768,7 +767,7 @@ fn insert_routes(rib: Arc<ArcSwapOption<PhysicalRib>>, announcements: Announceme
             )
             .with_peer_ip("192.168.0.1".parse().unwrap())
             .with_peer_asn(Asn::from_u32(1000))
-            .with_router_id(Arc::new("router1".into()));
+            .with_router_id(Arc::new(format!("router{n}")));
 
             let rib_value = PreHashedTypeValue::new(raw_route.into(), 1).into();
             rib.load()
@@ -811,7 +810,7 @@ fn insert_withdrawal(rib: Arc<ArcSwapOption<PhysicalRib>>, withdrawals: &str, n:
 }
 
 fn insert_announcement(rib: Arc<ArcSwapOption<PhysicalRib>>, prefix: &str, n: u8) {
-    insert_announcement_full(rib, prefix, n, &[123, 456], "1.2.3.5", &[] as &[Community]);
+    insert_announcement_full(rib, prefix, n, &[123, 456], "127.0.0.1", &[] as &[Community]);
 }
 
 fn insert_announcement_full<C: Into<Community> + Copy>(
@@ -844,6 +843,7 @@ fn insert_announcement_full<C: Into<Community> + Copy>(
     );
     insert_routes(
         rib,
+        n,
         Announcements::from_str(&format!("e {} {next_hop} {communities} {prefix}", as_path))
             .unwrap(),
     );
@@ -861,7 +861,7 @@ fn insert_announcement_full<C: Into<Community> + Copy>(
 // }
 
 fn mk_response_announced_prefix(prefix: &str, router_n: u8) -> Value {
-    mk_response_announced_prefix_full(prefix, router_n, &[123, 456], None, "unused")
+    mk_response_announced_prefix_full(prefix, router_n, &[123, 456], None)
 }
 
 fn mk_response_announced_prefix_full(
@@ -869,7 +869,6 @@ fn mk_response_announced_prefix_full(
     router_n: u8,
     as_path: &[u32],
     communities: Option<Value>,
-    _rib_name: &str,
 ) -> Value {
     let mut route_object = json!({
         "prefix": prefix,

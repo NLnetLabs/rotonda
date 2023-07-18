@@ -98,11 +98,10 @@ impl PrefixesApi {
         sort_cfg: &SortKey,
         result_prefixes: &mut Vec<Value>,
     ) {
-        // TODO: Add filtering back in.
-
         let mut sortable_results = rib_value
             .iter()
-            .map(|route| Self::mk_result(query_prefix, route, details_cfg))
+            .filter(|&item| Self::include_item_in_results(filter_cfg, item))
+            .map(|item| Self::mk_result(query_prefix, item, details_cfg))
             .collect::<Vec<Value>>();
 
         Self::sort_results(sort_cfg, &mut sortable_results);
@@ -128,64 +127,62 @@ impl PrefixesApi {
         serde_json::to_value(route).unwrap()
     }
 
-    // fn include_route_in_results(
-    //     filter_cfg: &Filters,
-    //     loaded_route: &Guard<Arc<RibElement>>,
-    // ) -> bool {
-    //     let no_selects = filter_cfg.selects().is_empty();
-    //     let no_discards = filter_cfg.discards().is_empty();
+    fn include_item_in_results(
+        filter_cfg: &Filters,
+        item: &Arc<PreHashedTypeValue>,
+    ) -> bool {
+        let no_selects = filter_cfg.selects().is_empty();
+        let no_discards = filter_cfg.discards().is_empty();
 
-    //     if no_selects && no_discards {
-    //         return true;
-    //     }
+        if no_selects && no_discards {
+            return true;
+        }
 
-    //     let matches = |filter: &Filter| match filter.kind() {
-    //         FilterKind::AsPath(filter_as_path) => Self::match_as_path(loaded_route, filter_as_path),
+        let matches = |filter: &Filter| match filter.kind() {
+            FilterKind::AsPath(filter_as_path) => Self::match_as_path(item, filter_as_path),
 
-    //         FilterKind::Community(community) => Self::match_community(loaded_route, community),
+            FilterKind::Community(community) => Self::match_community(item, community),
 
-    //         FilterKind::SourceAs(source_as) => Self::match_source_as(loaded_route, source_as),
+            FilterKind::SourceAs(source_as) => Self::match_source_as(item, source_as),
 
-    //         FilterKind::RoutingInformationBaseName(rib_name) => {
-    //             Self::match_rib_name(loaded_route, rib_name)
-    //         }
-    //     };
+            FilterKind::RoutingInformationBaseName(rib_name) => Self::match_rib_name(item, rib_name),
+        };
 
-    //     let mut discards = filter_cfg.discards().iter();
-    //     let mut selects = filter_cfg.selects().iter();
+        let mut discards = filter_cfg.discards().iter();
+        let mut selects = filter_cfg.selects().iter();
 
-    //     match filter_cfg.op() {
-    //         FilterOp::Any => {
-    //             (no_selects || selects.any(matches)) && (no_discards || !discards.any(matches))
-    //         }
-    //         FilterOp::All => {
-    //             (no_selects || selects.all(matches)) && (no_discards || !discards.all(matches))
-    //         }
-    //     }
-    // }
+        match filter_cfg.op() {
+            FilterOp::Any => {
+                (no_selects || selects.any(matches)) && (no_discards || !discards.any(matches))
+            }
+            FilterOp::All => {
+                (no_selects || selects.all(matches)) && (no_discards || !discards.all(matches))
+            }
+        }
+    }
 
-    // fn match_as_path(loaded_route: &Guard<Arc<RibElement>>, filter_as_path: &[Asn]) -> bool {
-    //     if let Some(advert) = &loaded_route.advert {
-    //         advert.as_path == filter_as_path
-    //     } else {
-    //         false
-    //     }
-    // }
+    fn match_as_path(item: &Arc<PreHashedTypeValue>, filter_as_path: &[Asn]) -> bool {
+        if let Some(advert) = &item.advert {
+            advert.as_path == filter_as_path
+        } else {
+            false
+        }
+    }
 
-    // fn match_community(loaded_route: &Guard<Arc<RibElement>>, community: &Community) -> bool {
-    //     matches!(&loaded_route.advert, Some(advert) if advert.has_community(community))
-    // }
+    fn match_community(item: &Arc<PreHashedTypeValue>, community: &Community) -> bool {
+        matches!(&item.advert, Some(advert) if advert.has_community(community))
+    }
 
-    // fn match_source_as(loaded_route: &Guard<Arc<RibElement>>, source_as: &Asn) -> bool {
-    //     loaded_route.neighbor.0 == *source_as
-    // }
+    fn match_source_as(item: &Arc<PreHashedTypeValue>, source_as: &Asn) -> bool {
+        item.neighbor.0 == *source_as
+    }
 
-    // fn match_rib_name(
-    //     loaded_route: &Guard<Arc<RibElement>>,
-    //     rib_name: &RoutingInformationBase,
-    // ) -> bool {
-    //     loaded_route.routing_information_base == *rib_name
-    // }
+    fn match_rib_name(
+        item: &Arc<PreHashedTypeValue>,
+        rib_name: &RoutingInformationBase,
+    ) -> bool {
+        item.routing_information_base == *rib_name
+    }
 }
 
 #[cfg(test)]

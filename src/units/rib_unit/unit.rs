@@ -47,7 +47,7 @@ use uuid::Uuid;
 use super::{
     http::PrefixesApi,
     metrics::RibUnitMetrics,
-    rib::{PhysicalRib, PreHashedTypeValue, RibValue},
+    rib::{PhysicalRib, PreHashedTypeValue, RibValue, RouteExtra},
     status_reporter::RibUnitStatusReporter,
 };
 use super::{rib::StoreInsertionReport, statistics::RibMergeUpdateStatistics};
@@ -430,7 +430,7 @@ impl RibUnitRunner {
     ) where
         F: Fn(
                 &Prefix,
-                RibValue,
+                TypeValue,
                 &PhysicalRib,
             )
                 -> Result<(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32), PrefixStoreError>
@@ -519,7 +519,7 @@ impl RibUnitRunner {
     where
         F: Fn(
                 &Prefix,
-                RibValue,
+                TypeValue,
                 &PhysicalRib,
             )
                 -> Result<(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32), PrefixStoreError>
@@ -554,13 +554,10 @@ impl RibUnitRunner {
                             };
 
                             if let Some(prefix) = prefix {
-                                let hash = rib.precompute_hash_code(&output);
-                                let hashed_value = PreHashedTypeValue::new(output.clone(), hash);
-                                let is_withdraw = hashed_value.is_withdrawn();
-                                let rib_value = hashed_value.into();
+                                let is_withdraw = output.is_withdrawn();
 
                                 let pre_insert = Utc::now();
-                                match insert(&prefix, rib_value, rib) {
+                                match insert(&prefix, output.clone(), rib) {
                                     Ok((upsert, num_retries)) => {
                                         let post_insert = Utc::now();
                                         let insert_delay = (post_insert - pre_insert)
@@ -594,7 +591,9 @@ impl RibUnitRunner {
                                                 STATS_COUNTER.with(|counter| {
                                                     *counter.borrow_mut() += 1;
                                                     let res = *counter.borrow();
-                                                    if res % RECORD_MERGE_UPDATE_SPEED_EVERY_N_CALLS == 0 {                                        
+                                                    if res % RECORD_MERGE_UPDATE_SPEED_EVERY_N_CALLS
+                                                        == 0
+                                                    {
                                                         rib_merge_update_stats.add(
                                                             op_duration
                                                                 .num_microseconds()
@@ -945,22 +944,6 @@ mod tests {
             prefix.into(),
             &bgp_update_msg,
             RouteStatus::InConvergence,
-        )
-    }
-
-    fn mk_route_withdrawal(prefix: Prefix) -> RawRouteWithDeltas {
-        let delta_id = (RotondaId(0), 0);
-        let bgp_update_bytes =
-            mk_bgp_update(&Prefixes::new(vec![prefix]), &Announcements::None, &[]);
-
-        // When it is processed by this unit
-        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
-        RawRouteWithDeltas::new_with_message_ref(
-            delta_id,
-            prefix.into(),
-            &bgp_update_msg,
-            RouteStatus::Withdrawn,
         )
     }
 }

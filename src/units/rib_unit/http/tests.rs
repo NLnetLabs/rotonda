@@ -217,8 +217,8 @@ async fn prefix_normalization_ipv6() {
 async fn error_with_too_short_more_specifics_ipv4() {
     let rib = mk_rib();
 
-    insert_withdrawal(rib.clone(), "128.168.0.0/16", 1);
-    insert_withdrawal(rib.clone(), "128.168.20.16/28", 2);
+    insert_announcement(rib.clone(), "128.168.0.0/16", 1);
+    insert_announcement(rib.clone(), "128.168.20.16/28", 2);
 
     // Test with a prefix whose first bit is the only bit set. 0x128 is 10000000 in binary. If we were to test
     // with any pattern of bits with a bit set further to the right, as the /N mask value increases the boundary
@@ -250,9 +250,9 @@ async fn error_with_too_short_more_specifics_ipv4() {
 async fn error_with_too_short_more_specifics_ipv6() {
     let rib = mk_rib();
 
-    insert_withdrawal(rib.clone(), "2001:DB8:2222::/48", 1);
-    insert_withdrawal(rib.clone(), "2001:DB8:2222:0000::/64", 2);
-    insert_withdrawal(rib.clone(), "2001:DB8:2222:0001::/64", 3);
+    insert_announcement(rib.clone(), "2001:DB8:2222::/48", 1);
+    insert_announcement(rib.clone(), "2001:DB8:2222:0000::/64", 2);
+    insert_announcement(rib.clone(), "2001:DB8:2222:0001::/64", 3);
 
     // Test with a prefix whose first bit is the only bit set. 0x8000 is 1000000000000000 in binary. If we were to
     // test with any pattern of bits with a bit set further to the right, as the /N mask value increases the
@@ -463,7 +463,6 @@ async fn select_and_discard() {
         router_n: u8,
         as_path: &[u32],
         community: Option<C>,
-        // rib_name: RoutingInformationBase,
     ) {
         insert_announcement_full(
             rib,
@@ -475,42 +474,55 @@ async fn select_and_discard() {
         );
     }
 
+    // Populate the RIB
     let rib = mk_rib();
 
+    insert_announcement_helper(rib.clone(), 1, &[19, 20, 21], Some(Wellknown::Blackhole));
     insert_announcement_helper(
         rib.clone(),
-        1,
-        &[18, 19, 20],
+        2,
+        &[19, 20, 21],
         Option::<StandardCommunity>::None,
     );
     insert_announcement_helper(
         rib.clone(),
         2,
-        &[19, 20, 21],
-        Some(Wellknown::Blackhole),
-    );
-    // insert_announcement_helper(
-    //     rib.clone(),
-    //     3,
-    //     &[19, 20, 21],
-    //     Some(Wellknown::NoExport),
-    //     // PrePolicy,
-    // );
-    insert_announcement_helper(
-        rib.clone(),
-        3,
         &[20, 21, 22],
-        Some(Wellknown::NoAdvertise),
+        Option::<StandardCommunity>::None,
     );
+    insert_announcement_helper(rib.clone(), 2, &[1, 2, 3], Some(Wellknown::NoExport));
+    insert_announcement_helper(rib.clone(), 3, &[21, 22, 23], Some(Wellknown::Blackhole));
 
-    assert_eq!(rib.load().as_ref().and_then(|rib| Some(rib.prefixes_count())), Some(1));
+    let blackhole_json = json!([
+        {
+            "rawFields": ["0xFFFF029A"],
+            "type": "standard",
+            "parsed": {
+                "value": { "type": "well-known", "attribute": "BLACKHOLE" }
+            }
+        }
+    ]);
 
+    let no_export_json = json!([
+        {
+            "rawFields": ["0xFFFFFF01"],
+            "type": "standard",
+            "parsed": {
+                "value": { "type": "well-known", "attribute": "NO_EXPORT" }
+            }
+        }
+    ]);
+
+    // Query the RIB
+
+    // -- Select by AS PATH
     assert_query_eq(
         rib.clone(),
-        "/prefixes/1.2.3.4/32?select[as_path]=19,20,21&sort=router_id",
+        "/prefixes/1.2.3.4/32?select[as_path]=19,20,21&sort=/route/router_id",
         StatusCode::OK,
         Some(json!({
             "data": [
+                mk_response_announced_prefix_full("1.2.3.4/32", 1, &[19, 20, 21], Some(blackhole_json.clone())),
                 mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None),
             ],
             "included": {}
@@ -518,116 +530,109 @@ async fn select_and_discard() {
     )
     .await;
 
+    // -- Select by peer AS, using a secondary sort to make the order stable for our test
     assert_query_eq(
         rib.clone(),
-        "/prefixes/1.2.3.4/32?select[routing_information_base_name]=Pre-Policy-RIB&sort=router_id",
+        "/prefixes/1.2.3.4/32?select[peer_as]=1002&sort=/route/router_id,/route/as_path",
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18, 19, 20], None),//, "Pre"),
-                mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None)//, "Pre")
+                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[1, 2, 3], Some(no_export_json.clone())),
+                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None),
+                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[20, 21, 22], None),
             ],
             "included": {}
         })),
     )
     .await;
 
+    // -- Select by community
     assert_query_eq(
         rib.clone(),
-        "/prefixes/1.2.3.4/32?select[routing_information_base_name]=Post-Policy-RIB&sort=router_id",
+        "/prefixes/1.2.3.4/32?select[community]=BLACKHOLE&sort=/route/router_id",
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None),//, "Post"),
-                mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None)//, "Post")
-        ],
-            "included": {}
-        })),
-    )
-    .await;
-
-    assert_query_eq(
-        rib.clone(),
-        "/prefixes/1.2.3.4/32?select[source_as]=10003&sort=router_id",
-        StatusCode::OK,
-        Some(json!({
-            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None)],// "Pre")],
-            "included": {}
-        })),
-    )
-    .await;
-
-    assert_query_eq(
-        rib.clone(),
-        "/prefixes/1.2.3.4/32?select[community]=BLACKHOLE&select[as_path]=19,20,21&filter_op=all",
-        StatusCode::OK,
-        Some(json!({
-            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None)],//, "Post")],
-            "included": {}
-        })),
-    )
-    .await;
-
-    assert_query_eq(
-        rib.clone(),
-        "/prefixes/1.2.3.4/32?discard[as_path]=19,20,21&sort=router_id",
-        StatusCode::OK,
-        Some(json!({
-            "data": [
-                mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18, 19, 20], None),//, "Pre"),
-                mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None)//, "Post")
+                mk_response_announced_prefix_full("1.2.3.4/32", 1, &[19, 20, 21], Some(blackhole_json.clone())),
+                mk_response_announced_prefix_full("1.2.3.4/32", 3, &[21, 22, 23], Some(blackhole_json.clone())),
             ],
             "included": {}
         })),
     )
     .await;
 
+    // -- Discard by AS path
     assert_query_eq(
         rib.clone(),
-        "/prefixes/1.2.3.4/32?discard[as_path]=18,19,20&discard[as_path]=19,20,21&filter_op=any&sort=router_id",
-        StatusCode::OK,
-        Some(json!({
-            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None)],//, "Post")],
-            "included": {}
-        })),
-    )
-    .await;
-
-    assert_query_eq(
-        rib.clone(),
-        "/prefixes/1.2.3.4/32?discard[community]=BLACKHOLE&discard[as_path]=19,20,21&filter_op=all&sort=router_id",
+        "/prefixes/1.2.3.4/32?discard[as_path]=19,20,21&sort=/route/as_path",
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix_full("1.2.3.4/32", 1, &[18, 19, 20], None),//, "Pre"),
-                mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None),//, "Pre"),
-                mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None)//, "Post")
+                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[1, 2, 3], Some(no_export_json.clone())),
+                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[20, 21, 22], None),
+                mk_response_announced_prefix_full("1.2.3.4/32", 3, &[21, 22, 23], Some(blackhole_json.clone())),
             ],
             "included": {}
         })),
     )
     .await;
 
+    // -- Discard by either of two AS paths.
     assert_query_eq(
         rib.clone(),
-        "/prefixes/1.2.3.4/32?select[as_path]=19,20,21&discard[community]=BLACKHOLE&discard[community]=NO_EXPORT&filter_op=all&sort=router_id",
+        "/prefixes/1.2.3.4/32?discard[as_path]=19,20,21&discard[as_path]=1,2,3&filter_op=any&sort=/route/router_id",
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None),//, "Post"),
-                mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None)//, "Pre")
+                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[20, 21, 22], None),
+                mk_response_announced_prefix_full("1.2.3.4/32", 3, &[21, 22, 23], Some(blackhole_json.clone())),
             ],
             "included": {}
         })),
     )
     .await;
 
+    // -- Discard by both community and AS path
     assert_query_eq(
         rib.clone(),
-        "/prefixes/1.2.3.4/32?select[as_path]=19,20,21&discard[community]=BLACKHOLE&discard[community]=NO_EXPORT&sort=router_id",
+        "/prefixes/1.2.3.4/32?discard[community]=BLACKHOLE&discard[as_path]=19,20,21&filter_op=all&sort=/route/as_path",
         StatusCode::OK,
         Some(json!({
-            "data": [],
+            "data": [
+                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[1, 2, 3], Some(no_export_json.clone())),
+                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None),
+                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[20, 21, 22], None),
+                mk_response_announced_prefix_full("1.2.3.4/32", 3, &[21, 22, 23], Some(blackhole_json.clone())),
+            ],
+            "included": {}
+        })),
+    )
+    .await;
+
+    // -- Select by peer AS AND discard if BOTH given communities match
+    assert_query_eq(
+        rib.clone(),
+        "/prefixes/1.2.3.4/32?select[peer_as]=1002&discard[community]=BLACKHOLE&discard[community]=NO_EXPORT&filter_op=all&sort=/route/as_path",
+        StatusCode::OK,
+        Some(json!({
+            "data": [
+                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[1, 2, 3], Some(no_export_json.clone())),
+                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None),
+                mk_response_announced_prefix_full("1.2.3.4/32", 2, &[20, 21, 22], None),
+            ],
+            "included": {}
+        })),
+    )
+    .await;
+
+    // -- Select by AS path, or discard if either given community matches
+    // -- Discard overrides select
+    assert_query_eq(
+        rib.clone(),
+        "/prefixes/1.2.3.4/32?select[as_path]=19,20,21&discard[community]=BLACKHOLE&discard[community]=NO_EXPORT&sort=/route/router_id",
+        StatusCode::OK,
+        Some(json!({
+            "data": [mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None)],
             "included": {}
         })),
     )
@@ -636,7 +641,7 @@ async fn select_and_discard() {
     // The default filter operation should be "any"
     for query_extra in &["&filter_op=any", ""] {
         let query = format!(
-            "/prefixes/1.2.3.4/32?select[community]=NO_ADVERTISE&select[as_path]=19,20,21{}&sort=router_id",
+            "/prefixes/1.2.3.4/32?select[community]=NO_EXPORT&select[peer_as]=1001{}&sort=/route/router_id",
             query_extra
         );
 
@@ -646,9 +651,8 @@ async fn select_and_discard() {
             StatusCode::OK,
             Some(json!({
                 "data": [
-                    mk_response_announced_prefix_full("1.2.3.4/32", 2, &[19, 20, 21], None),//, "Post"),
-                    mk_response_announced_prefix_full("1.2.3.4/32", 3, &[19, 20, 21], None),//, "Pre"),
-                    mk_response_announced_prefix_full("1.2.3.4/32", 4, &[20, 21, 22], None)//, "Post")
+                    mk_response_announced_prefix_full("1.2.3.4/32", 1, &[19, 20, 21], Some(blackhole_json.clone())),
+                    mk_response_announced_prefix_full("1.2.3.4/32", 2, &[1, 2, 3], Some(no_export_json.clone())),
                 ],
                 "included": {}
             })),
@@ -705,7 +709,13 @@ async fn do_query(
         let config = Config::new(CompareMode::Strict);
         match assert_json_matches_no_panic(&v, &expected_body, config) {
             Ok(_) => Ok(bytes),
-            Err(err) => Err((err, bytes, actual_status_code)),
+            Err(err) => {
+                let err = format!(
+                    "JSON difference detected (lhs=actual, rhs=expected): {}",
+                    err
+                );
+                Err((err, bytes, actual_status_code))
+            }
         }
     } else {
         Ok(bytes)
@@ -753,6 +763,9 @@ fn insert_routes(rib: Arc<ArcSwapOption<PhysicalRib>>, n: u8, announcements: Ann
         prefixes,
     } = announcements
     {
+        let loaded_rib = rib.load();
+        let rib = loaded_rib.as_ref().unwrap();
+
         for prefix in prefixes.iter() {
             let roto_update_msg = roto::types::builtin::UpdateMessage::new(
                 bgp_update_bytes.clone(),
@@ -765,52 +778,24 @@ fn insert_routes(rib: Arc<ArcSwapOption<PhysicalRib>>, n: u8, announcements: Ann
                 &bgp_update_msg,
                 RouteStatus::InConvergence,
             )
-            .with_peer_ip("192.168.0.1".parse().unwrap())
-            .with_peer_asn(Asn::from_u32(1000))
+            .with_peer_ip(format!("192.168.0.{n}").parse().unwrap())
+            .with_peer_asn(Asn::from_u32(1000 + (n as u32)))
             .with_router_id(Arc::new(format!("router{n}")));
 
-            let rib_value = PreHashedTypeValue::new(raw_route.into(), 1).into();
-            rib.load()
-                .as_ref()
-                .unwrap()
-                .insert(&prefix, rib_value)
-                .unwrap();
+            rib.insert(&prefix, raw_route).unwrap();
         }
     }
 }
 
-fn insert_withdrawal(rib: Arc<ArcSwapOption<PhysicalRib>>, withdrawals: &str, n: u8) {
-    let prefixes = Prefixes::from_str(withdrawals).unwrap();
-    let bgp_update_bytes = mk_bgp_update(&prefixes, &Announcements::None, &[]);
-    let delta_id = (RotondaId(0), 0); // TODO
-
-    for prefix in prefixes.iter() {
-        let roto_update_msg = roto::types::builtin::UpdateMessage::new(
-            bgp_update_bytes.clone(),
-            SessionConfig::modern(),
-        );
-        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
-        let raw_route = RawRouteWithDeltas::new_with_message_ref(
-            delta_id,
-            (*prefix).into(),
-            &bgp_update_msg,
-            RouteStatus::Withdrawn,
-        )
-        .with_peer_ip("192.168.0.1".parse().unwrap())
-        .with_peer_asn(Asn::from_u32(1818))
-        .with_router_id(Arc::new("blah".into()));
-
-        let rib_value = PreHashedTypeValue::new(raw_route.into(), 1).into();
-        rib.load()
-            .as_ref()
-            .unwrap()
-            .insert(&prefix, rib_value)
-            .unwrap();
-    }
-}
-
 fn insert_announcement(rib: Arc<ArcSwapOption<PhysicalRib>>, prefix: &str, n: u8) {
-    insert_announcement_full(rib, prefix, n, &[123, 456], "127.0.0.1", &[] as &[Community]);
+    insert_announcement_full(
+        rib,
+        prefix,
+        n,
+        &[123, 456],
+        "127.0.0.1",
+        &[] as &[Community],
+    );
 }
 
 fn insert_announcement_full<C: Into<Community> + Copy>(
@@ -849,17 +834,6 @@ fn insert_announcement_full<C: Into<Community> + Copy>(
     );
 }
 
-// fn _mk_response_withdrawn_prefix(prefix: &str, n: u8) -> Value {
-//     json!({
-//         "prefix": prefix,
-//         "router": format!("router{}", n),
-//         "sourceAs": format!("AS1000{}", n),
-//         "routingInformationBaseName": "Pre-Policy-RIB",
-//         "asPath": [],
-//         "neighbor": format!("1.1.1.{}", n)
-//     })
-// }
-
 fn mk_response_announced_prefix(prefix: &str, router_n: u8) -> Value {
     mk_response_announced_prefix_full(prefix, router_n, &[123, 456], None)
 }
@@ -878,9 +852,9 @@ fn mk_response_announced_prefix_full(
         },
         "atomic_aggregate": false,
         "origin_type": "Egp",
-        "peer_ip": "192.168.0.1",
-        "peer_asn": 1000,
-        "router_id": format!("router{}", router_n), // TODO: was neighbour
+        "peer_ip": format!("192.168.0.{router_n}"),
+        "peer_asn": 1000 + (router_n as u32),
+        "router_id": format!("router{}", router_n),
     });
 
     if let Some(communities) = communities {

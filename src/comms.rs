@@ -1456,7 +1456,9 @@ struct SubscribeResponse {
 /// into these topics.
 #[cfg(test)]
 mod tests {
-    use crate::tests::util::internal::mk_test_payload;
+    use roto::types::builtin::U8;
+
+    use crate::payload::Payload;
 
     use super::*;
 
@@ -1526,6 +1528,11 @@ mod tests {
         //     │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌▶│╌╌ recv() ╌┐
         //     │                    Err(UnitStatus::Gone) │      None │
         //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│◀╌╌╌╌╌╌╌╌╌╌┘
+
+        fn mk_test_payload() -> Payload {
+            Payload::TypeValue(U8::new(18).into())
+        }
+
         eprintln!("STARTING");
         // Create a gate. Updates sent via the gate will be received by links.
         let (gate, mut agent) = Gate::new(1); // the minimum allowed queue capacity is 1
@@ -1539,13 +1546,9 @@ mod tests {
         #[async_trait]
         impl DirectUpdate for TestDirectUpdateTarget {
             async fn direct_update(&self, update: Update) {
-                // Define a test payload to pass from unit to link.
-                let expected_payload =
-                    mk_test_payload("Pre-Policy-RIB@some_router[1.1.1.1@1818] withdraw 2.2.2.2/32");
-
                 assert!(matches!(update, Update::Single(_)));
                 if let Update::Single(payload) = &update {
-                    assert_eq!(*payload, expected_payload);
+                    assert_eq!(*payload, mk_test_payload());
                     self.0.fetch_add(1, Ordering::SeqCst);
                 }
             }
@@ -1572,11 +1575,8 @@ mod tests {
         eprintln!("CONNECTING LINK TO GATE");
         link.connect(false).await.unwrap();
 
-        let payload_to_send =
-            mk_test_payload("Pre-Policy-RIB@some_router[1.1.1.1@1818] withdraw 2.2.2.2/32");
-
         // Build an update to send
-        let update = Update::Single(payload_to_send);
+        let update = Update::Single(mk_test_payload());
 
         // Send the update through the gate
         eprintln!("SENDING PAYLOAD");

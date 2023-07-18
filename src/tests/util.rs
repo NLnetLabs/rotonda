@@ -16,54 +16,6 @@ pub(crate) mod internal {
             .is_test(true)
             .try_init();
     }
-
-    /// `event_summary` should be a string in the form:
-    ///     `<policy>@<router id>>[<peer ip>@<peer asn>] <withdraw> <prefix ip>/<prefix len>`
-    /// where policy is one of:
-    ///     Pre-Policy-RIB or Post-Policy-RIB
-    /// e.g.
-    ///     Pre-Policy-RIB@some_router[4.5.6.7@1818] withdraw 1.2.3.4/32
-    pub(crate) fn mk_test_payload(event_summary: &str) -> Payload {
-        // let parts: Vec<&str> = event_summary.splitn(7, &['[', '@', ']', ' ']).collect();
-        // let routing_information_base = parts[0].parse().unwrap();
-        // let router_id = Arc::new(parts[1].into());
-        // let neighbor_ip = parts[2].parse().unwrap();
-        // let neighbor_asn = parts[3].parse().unwrap();
-        // let _space = parts[4];
-        // let event_type = parts[5];
-        // let prefix = parts[6].parse().unwrap();
-
-        // let mut rib_el = RibElement {
-        //     received: Utc::now(),
-        //     routing_information_base,
-        //     neighbor: (neighbor_asn, neighbor_ip),
-        //     advert: None, // treated as a withdrawal
-        // };
-
-        // match event_type {
-        //     "withdraw" => {
-        //         // nothing to do
-        //     }
-        //     "announce" => {
-        //         // add a route advertisement
-        //         let mut as_path = Vec::new();
-        //         for asn in 0..10 {
-        //             as_path.push(Asn::from_u32(asn));
-        //         }
-        //         rib_el.advert = Some(AdvertisedRouteDetails {
-        //             as_path,
-        //             next_hop: NextHop::Ipv4("4.5.6.7".parse().unwrap()),
-        //             communities: (vec![], vec![], vec![]),
-        //         });
-        //     }
-        //     _ => panic!("Unsupported test routing event type '{}'", event_type),
-        // }
-
-        // let rib_el = SharedRibElement::new(rib_el);
-        // let meta = RouterSpecificRibElement { router_id, rib_el };
-        // Payload::RouterSpecificRibElement(prefix, meta)
-        todo!()
-    }
 }
 
 pub mod bgp {

@@ -291,7 +291,7 @@ mod tests {
     const TEST_PEER_ASN: u32 = 12345;
 
     const FILTER_OUT_ASN_ROTO: &str = r###"
-        module my-module {
+        filter-map my-module {
             define {
                 rx_tx msg: BmpMsg;
             }
@@ -315,7 +315,7 @@ mod tests {
     "###;
 
     const FILTER_IN_ASN_ROTO: &str = r###"
-        module my-module {
+        filter-map my-module {
             define {
                 rx_tx msg: BmpMsg;
             }
@@ -339,7 +339,7 @@ mod tests {
     "###;
 
     const MSG_TYPE_MATCHING_ROTO: &str = r###"
-        module my-module {
+        filter-map my-module {
             define {
                 rx_tx msg: BmpMsg;
             }

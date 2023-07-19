@@ -1,16 +1,16 @@
 Root ::= RootExpr+
 
-RootExpr ::= Module |
+RootExpr ::= FilterMap |
      "rib" Identifier 'contains' TypeIdentifier '{' RibBody '}' |
-     "module" Identifier 'contains' TypeIdentifier '{' Module '}' |
+     "filter-map" Identifier 'contains' TypeIdentifier '{' FilterMap '}' |
      "table" Identifier '{' TableBody '}' |
      RecordTypeAssignment |
      Comment
 
-Module ::= "module" ForStatement WithStatement '{' ModuleBody '}'
-ModuleBody ::= Define ModuleExpr+ Apply
+FilterMap ::= "filter-map" ForStatement WithStatement '{' FilterMapBody '}'
+FilterMapBody ::= Define FilterMapExpr+ Apply
 
-ModuleExpr ::= Define |
+FilterMapExpr ::= Define |
    Term+ | 
    Action+ |
    /* 'import' ForStatement '{' ImportBody '}' */

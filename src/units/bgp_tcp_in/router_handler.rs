@@ -68,6 +68,8 @@ impl Processor {
     ) -> (BgpSession<C>, mpsc::Receiver<Message>) {
         let peer_addr_cfg = session.config().remote_prefix_or_exact();
 
+        let mut rejected = false;
+
         // XXX is this all OK cancel-safety-wise? 
         loop {
             tokio::select! {
@@ -204,13 +206,23 @@ impl Processor {
                             break;
                         }
                         Some(Message::SessionNegotiated(negotiated)) => {
-                            live_sessions.lock().unwrap().insert(
+                            let key = (negotiated.remote_addr(), negotiated.remote_asn());
+                            if live_sessions.lock().unwrap().contains_key(&key) {
+                                error!("Already got a session for {:?}", key);
+                                let _ = self.tx.send(Command::Disconnect(
+                                        DisconnectReason::ConnectionRejected
+                                )).await;
+                                rejected = true;
+                                break;
+                            }
+                            let mut live_sessions = live_sessions.lock().unwrap();
+                            live_sessions.insert(
                                 (negotiated.remote_addr(), negotiated.remote_asn()),
                                 self.tx.clone()
                             );
                             debug!(
                                 "inserted into live_sessions (current count: {})",
-                                live_sessions.lock().unwrap().len()
+                                live_sessions.len()
                             );
                         }
                         Some(Message::Attributes(_)) => unimplemented!(),
@@ -220,15 +232,25 @@ impl Processor {
 
         }
         // Done, for whatever reason. Remove ourselves form the live sessions.
-        if let Some(negotiated) = session.negotiated() {
-            live_sessions.lock().unwrap().remove(
-                &(negotiated.remote_addr(), negotiated.remote_asn()),
-            );
-            debug!(
-                "removed {}@{} from live_sessions (current count: {})",
-                negotiated.remote_asn(), negotiated.remote_addr(),
-                live_sessions.lock().unwrap().len()
+        // But only if this was not an 'early reject' case, because we would
+        // wrongfully remove the firstly inserted (IpAddr, Asn) (i.e., an
+        // earlier session, not the currently rejected one) from the
+        // live_sessions set.
+        if !rejected {
+            if let Some(negotiated) = session.negotiated() {
+                live_sessions.lock().unwrap().remove(
+                    &(negotiated.remote_addr(), negotiated.remote_asn()),
                 );
+                debug!(
+                    "removed {}@{} from live_sessions (current count: {})",
+                    negotiated.remote_asn(), negotiated.remote_addr(),
+                    live_sessions.lock().unwrap().len()
+               );
+            }
+        } 
+
+        if rejected {
+            assert!(self.observed_prefixes.is_empty());
         }
 
         // TODO
@@ -296,8 +318,6 @@ impl Processor {
 
             self.observed_prefixes.remove(&prefix);
 
-            //let rot_id = RotondaId(0_usize);
-            //let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
             let rrwd = RawRouteWithDeltas::new_with_message_ref(
                 (rot_id, ltime),
                 RotoPrefix::new(prefix),

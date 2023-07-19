@@ -7,9 +7,7 @@ mod tests {
         comms::Gate,
         payload::{Payload, Update},
         units::rib_unit::{
-            metrics::RibUnitMetrics,
-            rib::{PhysicalRib, RibValue},
-            status_reporter::RibUnitStatusReporter,
+            metrics::RibUnitMetrics, rib::PhysicalRib, status_reporter::RibUnitStatusReporter,
             unit::RibUnitRunner,
         },
     };
@@ -375,11 +373,11 @@ mod tests {
 
         fn insert(
             prefix: &Prefix,
-            rib_value: RibValue,
+            value: TypeValue,
             rib: &PhysicalRib,
         ) -> Result<(Upsert<StoreInsertionReport>, u32), PrefixStoreError> {
             eprintln!("Inserting {prefix} into the store");
-            let res = rib.insert(prefix, rib_value);
+            let res = rib.insert(prefix, value);
             eprintln!("Insert complete");
             res
         }

@@ -386,7 +386,7 @@ impl From<IpAddr> for PeerId {
     }
 }
 
-trait RouteExtra {
+pub trait RouteExtra {
     fn withdraw(&mut self);
 
     fn peer_id(&self) -> Option<PeerId>;

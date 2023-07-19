@@ -1,23 +1,26 @@
-use std::net::{IpAddr, SocketAddr};
-use std::sync::Arc;
+use std::collections::BTreeSet;
+use std::net::IpAddr;
+use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
-use log::{debug, error, warn};
+use log::{debug, error};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use roto::types::typevalue::TypeValue;
-use roto::types::builtin::{Asn as RotoAsn, BuiltinTypeValue, Prefix, RawRouteWithDeltas};
+use roto::types::builtin::{Asn as RotoAsn, BuiltinTypeValue, Prefix as RotoPrefix, RawRouteWithDeltas};
 use roto::types::builtin::{IpAddress, RouteStatus, RotondaId, UpdateMessage};
 use routecore::asn::Asn;
 use routecore::bgp::message::UpdateMessage as UpdatePdu;
+use routecore::addr::Prefix;
 
 use rotonda_fsm::bgp::session::{
+    BgpConfig, // trait
     Command,
     DisconnectReason,
-    LocalConfig,
     Message,
     Session as BgpSession
 };
+
 
 use crate::comms::{Gate, GateStatus, Terminated};
 use crate::payload::{Payload, Update};
@@ -25,42 +28,45 @@ use crate::units::bgp_tcp_in::status_reporter::BgpTcpInStatusReporter;
 use crate::units::Unit;
 
 use super::unit::BgpTcpIn;
+use super::peer_config::{CombinedConfig, ConfigExt};
 
 
 struct Processor {
     gate: Gate,
     unit_cfg: BgpTcpIn,
     bgp_ltime: u64, // XXX or should this be on Unit level?
-    rx: mpsc::Receiver<Message>,
     tx: mpsc::Sender<Command>,
     status_reporter: Arc<BgpTcpInStatusReporter>,
+
+    observed_prefixes: BTreeSet<Prefix>
 }
 
 impl Processor {
     fn new(
         gate: Gate,
         unit_cfg: BgpTcpIn,
-        rx: mpsc::Receiver<Message>,
+        //rx: mpsc::Receiver<Message>,
         tx: mpsc::Sender<Command>,
         status_reporter: Arc<BgpTcpInStatusReporter>,
     ) -> Self {
-        Processor { gate, unit_cfg, bgp_ltime: 0, rx, tx, status_reporter }
+        Processor {
+            gate,
+            unit_cfg,
+            bgp_ltime: 0,
+            tx,
+            status_reporter,
+            observed_prefixes: BTreeSet::new()
+        }
     }
 
 
-    async fn process(&mut self, mut session: BgpSession) {
-        let (peer_addr, peer_asn) = session.details();
-        debug!("peer_addr peer_asn {:?} {}", peer_addr, peer_asn);
-        let peer_addr_cfg = session.config.remote_addr;
-        let current_config = session.config.clone();
-
-        // attempt to select! on session.tick() instead of passing the
-        // ownership into session.process()
-        /*
-        tokio::spawn(async {
-            session.process().await;
-        });
-        */
+    async fn process<C: BgpConfig + ConfigExt>(
+        &mut self,
+        mut session: BgpSession<C>,
+        mut rx_sess: mpsc::Receiver<Message>,
+        live_sessions: Arc<Mutex<super::unit::LiveSessions>>,
+    ) -> (BgpSession<C>, mpsc::Receiver<Message>) {
+        let peer_addr_cfg = session.config().remote_prefix_or_exact();
 
         // XXX is this all OK cancel-safety-wise? 
         loop {
@@ -77,7 +83,10 @@ impl Processor {
                 res = self.gate.process() => {
                     match res {
                         Err(Terminated) => {
-                            self.status_reporter.disconnect(peer_addr_cfg);
+                            debug!("Terminated: {:?}", session.negotiated());
+                            if let Some(remote_addr) = session.connected_addr() {
+                                self.status_reporter.disconnect(remote_addr.ip());
+                            }
                             let _ = self.tx.send(Command::Disconnect(
                                     DisconnectReason::Shutdown
                             )).await;
@@ -120,21 +129,26 @@ impl Processor {
                                     // A peer might have been removed from the
                                     // config, which results in a specific
                                     // NOTIFICATION.
-                                    if let Some(new_peer_config) = new_unit.peers.get(&peer_addr_cfg) {
-                                        if new_peer_config.remote_asn != current_config.remote_asn ||
-                                            new_peer_config.hold_time != current_config.hold_time {
-                                                let _ = self.tx.send(
-                                                    Command::Disconnect(
-                                                        DisconnectReason::Reconfiguration
-                                                        )
-                                                    ).await;
-                                            } else {
+                                    if let Some(new_peer_config) = new_unit.peer_configs.get_exact(&peer_addr_cfg) {
+                                        let current = self.unit_cfg.peer_configs.get_exact(&peer_addr_cfg).expect("must exist");
+                                        if *new_peer_config != *current {
+                                            let _ = self.tx.send(
+                                                Command::Disconnect(
+                                                    DisconnectReason::Reconfiguration
+                                                    )
+                                                ).await;
+                                        } else {
                                             debug!("GateStatus::Reconfiguring, noop");
                                         }
-
                                     } else {
                                         // disconnect, de-configured
-                                        self.status_reporter.disconnect(peer_addr_cfg);
+                                        if let Some(remote_addr) = session.connected_addr() {
+                                            self.status_reporter.disconnect(remote_addr.ip());
+                                        }
+                                        debug!(
+                                            "GateStatus::Reconfiguring, deconfigured {:?}",
+                                            peer_addr_cfg
+                                        );
                                         let _ = self.tx.send(
                                             Command::Disconnect(
                                                 DisconnectReason::Deconfigured
@@ -153,15 +167,22 @@ impl Processor {
                         }
                     }
                 }
-                res = self.rx.recv() => {
+                res = rx_sess.recv() => {
                     match res {
                         None => { break; } 
                         Some(Message::UpdateMessage(pdu)) => {
-                            self.process_update(
-                                pdu,
-                                session.config.remote_addr,
-                                session.config.remote_asn,
-                            ).await;
+                            // We can only receive UPDATE messages over an
+                            // established session, so not having a
+                            // NegotiatedConfig should never happen.
+                            if let Some(negotiated) = session.negotiated() {
+                                self.process_update(
+                                    pdu,
+                                    negotiated.remote_addr(),
+                                    negotiated.remote_asn()
+                                ).await;
+                            } else {
+                                error!("unexpected state: no NegotiatedConfig for session");
+                            }
                         }
                         Some(Message::NotificationMessage(pdu)) => {
                             debug!(
@@ -169,32 +190,68 @@ impl Processor {
                                 pdu.details()
                             );
                         }
-                        Some(Message::ConnectionLost) => {
+                        Some(Message::ConnectionLost(socket)) => {
                             //TODO clean up RIB etc?
-                            if let Some(peer_addr) = peer_addr {
-                                self.status_reporter
-                                    .peer_connection_lost(peer_addr);
-                                debug!(
-                                    "Connection lost: {}@{}",
-                                    peer_asn,
-                                    peer_addr
+                            self.status_reporter
+                                .peer_connection_lost(socket);
+                            debug!(
+                                "Connection lost: {}@{}",
+                                session.negotiated()
+                                    .map(|n| n.remote_asn())
+                                    .unwrap_or(Asn::MIN),
+                                socket
                                 );
-                            } else {
-                                debug!(
-                                    "Connection lost but \
-                                       not even established, \
-                                       configured remote {}",
-                                       peer_addr_cfg
-                                );
-                            }
                             break;
                         }
-                        _ => unimplemented!()
+                        Some(Message::SessionNegotiated(negotiated)) => {
+                            live_sessions.lock().unwrap().insert(
+                                (negotiated.remote_addr(), negotiated.remote_asn()),
+                                self.tx.clone()
+                            );
+                            debug!(
+                                "inserted into live_sessions (current count: {})",
+                                live_sessions.lock().unwrap().len()
+                            );
+                        }
+                        Some(Message::Attributes(_)) => unimplemented!(),
                     }
                 }
             }
 
         }
+        // Done, for whatever reason. Remove ourselves form the live sessions.
+        if let Some(negotiated) = session.negotiated() {
+            live_sessions.lock().unwrap().remove(
+                &(negotiated.remote_addr(), negotiated.remote_asn()),
+            );
+            debug!(
+                "removed {}@{} from live_sessions (current count: {})",
+                negotiated.remote_asn(), negotiated.remote_addr(),
+                live_sessions.lock().unwrap().len()
+                );
+        }
+
+        // TODO
+        // And, withdraw all prefixes we observed.
+        /*
+        for prefix in self.observed_prefixes {
+            let rot_id = RotondaId(0_usize);
+            let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
+            let rrwd = RawRouteWithDeltas::new_with_message(
+                (rot_id, ltime),
+                RotoPrefix::new(prefix),
+                Some(IpAddress::new(peer_ip)),
+                Some(RotoAsn::new(peer_asn)),
+                UpdateMessage(pdu.clone()),
+                RouteStatus::Withdrawn
+                );
+            let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
+            let payload = Payload::TypeValue(typval);
+            self.gate.update_data(Update::Single(payload)).await;
+        }
+        */
+
+        (session, rx_sess)
     }
 
     // For every NLRI and every withdrawal, send out a Single Payload to the
@@ -205,7 +262,7 @@ impl Processor {
     // TODO store all announced prefixes so we can easily withdraw them when
     // the BGP session goes down.
     async fn process_update(
-        &self,
+        &mut self,
         pdu: UpdatePdu<Bytes>,
         peer_ip: IpAddr,
         peer_asn: Asn
@@ -218,11 +275,13 @@ impl Processor {
                 continue
             };
 
+            self.observed_prefixes.insert(prefix);
+
             let rot_id = RotondaId(0_usize);
             let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
             let rrwd = RawRouteWithDeltas::new_with_message(
                 (rot_id, ltime),
-                Prefix::new(prefix),
+                RotoPrefix::new(prefix),
                 Some(IpAddress::new(peer_ip)),
                 Some(RotoAsn::new(peer_asn)),
                 UpdateMessage(pdu.clone()),
@@ -240,11 +299,13 @@ impl Processor {
                 continue
             };
 
+            self.observed_prefixes.remove(&prefix);
+
             let rot_id = RotondaId(0_usize);
             let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
             let rrwd = RawRouteWithDeltas::new_with_message(
                 (rot_id, ltime),
-                Prefix::new(prefix),
+                RotoPrefix::new(prefix),
                 Some(IpAddress::new(peer_ip)),
                 Some(RotoAsn::new(peer_asn)),
                 UpdateMessage(pdu.clone()),
@@ -258,48 +319,55 @@ impl Processor {
 
 }
 
-pub async fn handle_router(
+pub async fn handle_connection(
     gate: Gate,
+    unit_config: BgpTcpIn,
     tcp_stream: TcpStream,
-    peer_addr: SocketAddr,
-    unit_cfg: BgpTcpIn,
+    candidate_config: CombinedConfig,
+    cmds_tx: mpsc::Sender<Command>,
+    cmds_rx: mpsc::Receiver<Command>,
     status_reporter: Arc<BgpTcpInStatusReporter>,
-    ) {
+    live_sessions: Arc<Mutex<super::unit::LiveSessions>>,
+) {
+    // NB: when testing with an FRR instance configured with
+    //  "neighbor 1.2.3.4 timers delayopen 15"
+    // the socket is not readable until their delayopen has passed.
+    // Not sure whether this is correct/intentional.
+    // 
+    // To work around that, instead of checking for both writability and
+    // readability, we do not wait for the latter.
+    // So instead of:
+    //      let socket_status = tokio::join!(
+    //          tcp_stream.writable(),
+    //          tcp_stream.readable()
+    //      );
+    // we do:
+    let _ = tcp_stream.writable().await;
+    
+    let (sess_tx, sess_rx) = mpsc::channel::<Message>(100);
 
-    // peer_addr is sort of redundant here, we have tcp_stream
-    let peer = if let Some(peer) = unit_cfg.peers.get(&peer_addr.ip()) {
-        peer
-    } else {
-        warn!("No peer configuration for {}, dropping connection", peer_addr);
-        return;
-    };
-    // fsm session::LocalConfig:
-    // note there is significant overlap with BgpTcpIn here
-    let config = LocalConfig::new(
-        unit_cfg.my_asn,
-        unit_cfg.my_bgp_id,
-        peer_addr.ip(),
-        peer.remote_asn,
-        peer.hold_time,
+    /*
+    //  - depending on candidate_config, with or without DelayOpen
+    //  Ugly use of temp bool here, because candidate_config is moved.
+    //  We do not want to put this logic in BgpSession itself, because this
+    //  all looks a bit to rotonda-unit specific.
+    */
+    let delay_open = !candidate_config.is_exact();
+    debug!("delay_open for {}: {}", candidate_config.peer_config().name(), delay_open);
+
+    let mut session = BgpSession::new(
+        candidate_config,
+        tcp_stream,
+        sess_tx,
+        cmds_rx
     );
 
-    let (tx_sess, rx_sess) = mpsc::channel::<Message>(100);
-
-    let socket_status = tokio::join!(
-        tcp_stream.writable(),
-        tcp_stream.readable()
-    );
-
-    match BgpSession::try_for_connection(
-        config, tcp_stream, tx_sess
-    ).await {
-        Ok((mut session, tx_cmds)) => {
-            debug!("session with {}", peer_addr);
-            let mut p = Processor::new(gate, unit_cfg, rx_sess, tx_cmds, status_reporter);
-            p.process(session).await;
-        }
-        Err(e) => {
-            debug!("error {}", e);
-        }
+    if delay_open {
+        session.enable_delay_open();
     }
+    session.manual_start().await;
+    session.connection_established().await;
+
+    let mut p = Processor::new(gate, unit_config, cmds_tx, status_reporter);
+    p.process(session, sess_rx, live_sessions).await;
 }

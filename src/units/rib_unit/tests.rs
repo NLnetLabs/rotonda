@@ -349,7 +349,7 @@ mod tests {
     ) {
         let (gate, _gate_agent) = Gate::new(0);
         let gate = Arc::new(gate);
-        let physical_rib = PhysicalRib::new("test-rib");
+        let physical_rib = PhysicalRib::default();
         let stats = Arc::new(RibMergeUpdateStatistics::default());
 
         let rib = Arc::new(ArcSwapOption::from_pointee(physical_rib));

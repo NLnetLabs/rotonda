@@ -1194,7 +1194,11 @@ pub mod bgp {
                 PeerType::GlobalInstance => [0u8],
                 PeerType::RdInstance => [1u8],
                 PeerType::LocalInstance => [2u8],
-                PeerType::Undefined => unreachable!(),
+                PeerType::LocalRibInstance => [3u8],
+                PeerType::Reserved => [255u8],
+                PeerType::Unassigned(u) => [*u],
+                PeerType::Experimental(e) => [*e],
+                PeerType::Unimplemented(u) => [*u],
             }
         }
 
@@ -1223,7 +1227,7 @@ pub mod bgp {
                     "global" => PeerType::GlobalInstance,
                     "local" => PeerType::LocalInstance,
                     "rd" => PeerType::RdInstance,
-                    _ => PeerType::Undefined,
+                    _ => PeerType::Unimplemented(0) // XXX is this sufficient? 
                 };
 
                 Ok(MyPeerType(peer_type))

@@ -14,8 +14,12 @@ use roto::types::{
     typedef::{RibTypeDef, TypeDef},
     typevalue::TypeValue,
 };
-use rotonda_store::{prelude::MergeUpdate, MultiThreadedStore};
-use routecore::asn::Asn;
+use rotonda_store::{
+    custom_alloc::Upsert,
+    prelude::{multi::PrefixStoreError, MergeUpdate},
+    MultiThreadedStore,
+};
+use routecore::{addr::Prefix, asn::Asn};
 use serde::Serialize;
 use smallvec::SmallVec;
 
@@ -86,6 +90,17 @@ impl PhysicalRib {
         let mut state = HashBuildHasher::default().build_hasher();
         self.type_def_rib.hash_key_values(&mut state, val).unwrap();
         state.finish()
+    }
+
+    pub fn insert<T: Into<TypeValue>>(
+        &self,
+        prefix: &Prefix,
+        val: T,
+    ) -> Result<(Upsert<StoreInsertionReport>, u32), PrefixStoreError> {
+        let ty_val = val.into();
+        let hash_code = self.precompute_hash_code(&ty_val);
+        let rib_value = PreHashedTypeValue::new(ty_val, hash_code).into();
+        self.rib.store.insert(prefix, rib_value)
     }
 }
 
@@ -213,12 +228,14 @@ impl MergeUpdate for RibValue {
                             out_route
                         })
                         .collect::<_>(),
-                    
+
                     Some(StoreEvictionPolicy::RemoveOnWithdraw) => {
                         let mut out_items: HashedSet<Arc<PreHashedTypeValue>> = self
                             .per_prefix_items
                             .iter()
-                            .filter(|route| !route.is_withdrawn() || route.peer_id() != Some(peer_id))
+                            .filter(|route| {
+                                !route.is_withdrawn() || route.peer_id() != Some(peer_id)
+                            })
                             .cloned()
                             .collect::<_>();
 
@@ -304,14 +321,6 @@ impl PreHashedTypeValue {
         }
     }
 
-    pub fn is_route_from_peer(&self, peer_id: PeerId) -> bool {
-        self.peer_id() == Some(peer_id)
-    }
-
-    pub fn is_withdrawn(&self) -> bool {
-        matches!(&self.value, TypeValue::Builtin(BuiltinTypeValue::Route(route)) if route.status() == RouteStatus::Withdrawn)
-    }
-
     pub fn clone_and_withdraw(
         self: &Arc<PreHashedTypeValue>,
         peer_id: PeerId,
@@ -377,10 +386,14 @@ impl From<IpAddr> for PeerId {
     }
 }
 
-trait RouteExtra {
+pub trait RouteExtra {
     fn withdraw(&mut self);
 
     fn peer_id(&self) -> Option<PeerId>;
+
+    fn is_route_from_peer(&self, peer_id: PeerId) -> bool;
+
+    fn is_withdrawn(&self) -> bool;
 }
 
 impl RouteExtra for TypeValue {
@@ -398,6 +411,14 @@ impl RouteExtra for TypeValue {
             }
             _ => None,
         }
+    }
+
+    fn is_route_from_peer(&self, peer_id: PeerId) -> bool {
+        self.peer_id() == Some(peer_id)
+    }
+
+    fn is_withdrawn(&self) -> bool {
+        matches!(&self, TypeValue::Builtin(BuiltinTypeValue::Route(route)) if route.status() == RouteStatus::Withdrawn)
     }
 }
 

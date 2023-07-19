@@ -16,54 +16,6 @@ pub(crate) mod internal {
             .is_test(true)
             .try_init();
     }
-
-    /// `event_summary` should be a string in the form:
-    ///     `<policy>@<router id>>[<peer ip>@<peer asn>] <withdraw> <prefix ip>/<prefix len>`
-    /// where policy is one of:
-    ///     Pre-Policy-RIB or Post-Policy-RIB
-    /// e.g.
-    ///     Pre-Policy-RIB@some_router[4.5.6.7@1818] withdraw 1.2.3.4/32
-    pub(crate) fn mk_test_payload(event_summary: &str) -> Payload {
-        // let parts: Vec<&str> = event_summary.splitn(7, &['[', '@', ']', ' ']).collect();
-        // let routing_information_base = parts[0].parse().unwrap();
-        // let router_id = Arc::new(parts[1].into());
-        // let neighbor_ip = parts[2].parse().unwrap();
-        // let neighbor_asn = parts[3].parse().unwrap();
-        // let _space = parts[4];
-        // let event_type = parts[5];
-        // let prefix = parts[6].parse().unwrap();
-
-        // let mut rib_el = RibElement {
-        //     received: Utc::now(),
-        //     routing_information_base,
-        //     neighbor: (neighbor_asn, neighbor_ip),
-        //     advert: None, // treated as a withdrawal
-        // };
-
-        // match event_type {
-        //     "withdraw" => {
-        //         // nothing to do
-        //     }
-        //     "announce" => {
-        //         // add a route advertisement
-        //         let mut as_path = Vec::new();
-        //         for asn in 0..10 {
-        //             as_path.push(Asn::from_u32(asn));
-        //         }
-        //         rib_el.advert = Some(AdvertisedRouteDetails {
-        //             as_path,
-        //             next_hop: NextHop::Ipv4("4.5.6.7".parse().unwrap()),
-        //             communities: (vec![], vec![], vec![]),
-        //         });
-        //     }
-        //     _ => panic!("Unsupported test routing event type '{}'", event_type),
-        // }
-
-        // let rib_el = SharedRibElement::new(rib_el);
-        // let meta = RouterSpecificRibElement { router_id, rib_el };
-        // Payload::RouterSpecificRibElement(prefix, meta)
-        todo!()
-    }
 }
 
 pub mod bgp {
@@ -126,7 +78,7 @@ pub mod bgp {
         use std::convert::{TryFrom, TryInto};
         use std::{net::IpAddr, ops::Deref, str::FromStr};
 
-        use bytes::{Bytes, BytesMut, BufMut};
+        use bytes::{BufMut, Bytes, BytesMut};
         use chrono::Utc;
         use rotonda_store::addr::Prefix;
         use routecore::asn::Asn;
@@ -136,6 +88,8 @@ pub mod bgp {
         use routecore::bmp::message::{
             InformationTlvType, MessageType, PeerType, TerminationInformation,
         };
+
+        use super::raw::communities::large;
 
         pub fn mk_initiation_msg(sys_name: &str, sys_descr: &str) -> Bytes {
             let mut buf = BytesMut::new();
@@ -759,7 +713,48 @@ pub mod bgp {
                     communities,
                     prefixes,
                 } => {
-                    let required_well_known_mandatory_attribute_flags: u8 = 0x40; // transitive
+                    fn push_attributes(
+                        out_bytes: &mut Vec<u8>,
+                        r#type: PathAttributeType,
+                        pa_bytes: &[u8],
+                    ) {
+                        let len = pa_bytes.len();
+
+                        let (optional, transitive, complete) = match r#type {
+                            PathAttributeType::AsPath
+                            | PathAttributeType::NextHop
+                            | PathAttributeType::Origin => (false, true, true),
+                            PathAttributeType::Communities
+                            | PathAttributeType::ExtendedCommunities
+                            | PathAttributeType::LargeCommunities
+                            | PathAttributeType::MpReachNlri => (true, false, true),
+                            _ => todo!(),
+                        };
+
+                        let mut flags = 0u8;
+                        if optional {
+                            flags = flags | 0b1000_0000;
+                        }
+                        if transitive {
+                            flags = flags | 0b0100_0000;
+                        }
+                        if complete {
+                            flags = flags | 0b0010_0000;
+                        }
+                        if len > 255 {
+                            flags = flags | 0b0001_0000;
+                        }
+
+                        out_bytes.put_u8(flags); // attr. flags
+                        out_bytes.put_u8(u8::from(r#type)); // attr. type
+                        if len <= 255 {
+                            out_bytes.put_u8(u8::try_from(len).unwrap()); // attr. octet length
+                        } else {
+                            out_bytes.put_u16(u16::try_from(len).unwrap()); // attr. octet length
+                        };
+
+                        out_bytes.extend_from_slice(pa_bytes);
+                    }
 
                     let mut path_attributes = Vec::<u8>::new();
 
@@ -770,10 +765,11 @@ pub mod bgp {
                     //  of the path information."
                     //
                     // From: https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
-                    path_attributes.push(required_well_known_mandatory_attribute_flags); // attr. flags
-                    path_attributes.push(u8::from(PathAttributeType::Origin)); // attr. type
-                    path_attributes.push(1u8); // attr. octet length
-                    path_attributes.push(origin.into()); // attr. value
+                    push_attributes(
+                        &mut path_attributes,
+                        PathAttributeType::Origin,
+                        &[origin.into()],
+                    );
 
                     // -------------------------------------------------------------------
                     // "AS_PATH (Type Code 2):
@@ -794,10 +790,11 @@ pub mod bgp {
                     let as_path_attr_value_octet_len =
                         u8::try_from(as_path_attr_value_bytes.len()).unwrap();
 
-                    path_attributes.push(required_well_known_mandatory_attribute_flags); // attr. flags
-                    path_attributes.push(u8::from(PathAttributeType::AsPath)); // attr. type
-                    path_attributes.push(as_path_attr_value_octet_len); // attr. octet length
-                    path_attributes.append(&mut as_path_attr_value_bytes); // attr. value
+                    push_attributes(
+                        &mut path_attributes,
+                        PathAttributeType::AsPath,
+                        &as_path_attr_value_bytes,
+                    );
 
                     // -------------------------------------------------------------------
                     // "NEXT_HOP (Type Code 3):
@@ -809,10 +806,11 @@ pub mod bgp {
                     //
                     // From: https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
                     if let NextHop::Ipv4(addr) = next_hop.0 {
-                        path_attributes.push(required_well_known_mandatory_attribute_flags); // attr. flags
-                        path_attributes.push(u8::from(PathAttributeType::NextHop)); // attr. type
-                        path_attributes.push(4u8); // attr. octet length
-                        path_attributes.extend_from_slice(&addr.octets()); // attr. value
+                        push_attributes(
+                            &mut path_attributes,
+                            PathAttributeType::NextHop,
+                            &addr.octets(),
+                        );
                     }
 
                     // -------------------------------------------------------------------
@@ -842,12 +840,47 @@ pub mod bgp {
                     //
                     // From: https://www.rfc-editor.org/rfc/rfc1997.html
                     if !communities.is_empty() {
-                        path_attributes.push(required_well_known_mandatory_attribute_flags); // attr. flags
-                        path_attributes.push(u8::from(PathAttributeType::Communities)); // attr. type
-                        path_attributes.push(4u8 * u8::try_from(communities.len()).unwrap()); // attr. octet length
+                        let mut communities_attribute_bytes = Vec::<u8>::new();
+                        let mut extended_communities_attribute_bytes = Vec::<u8>::new();
+                        let mut large_communities_attribute_bytes = Vec::<u8>::new();
+
                         for community in communities.deref() {
-                            let v: [u8; 4] = community.as_ref().try_into().unwrap();
-                            path_attributes.extend_from_slice(&v);
+                            match community {
+                                Community::Standard(c) => {
+                                    communities_attribute_bytes.extend_from_slice(&c.to_raw())
+                                }
+                                Community::Extended(c) => {
+                                    extended_communities_attribute_bytes.extend_from_slice(&c.raw())
+                                }
+                                Community::Ipv6Extended(_) => todo!(),
+                                Community::Large(c) => {
+                                    large_communities_attribute_bytes.extend_from_slice(&c.raw())
+                                }
+                            }
+                        }
+
+                        if !communities_attribute_bytes.is_empty() {
+                            push_attributes(
+                                &mut path_attributes,
+                                PathAttributeType::Communities,
+                                &communities_attribute_bytes,
+                            );
+                        }
+
+                        if !extended_communities_attribute_bytes.is_empty() {
+                            push_attributes(
+                                &mut path_attributes,
+                                PathAttributeType::ExtendedCommunities,
+                                &extended_communities_attribute_bytes,
+                            );
+                        }
+
+                        if !large_communities_attribute_bytes.is_empty() {
+                            push_attributes(
+                                &mut path_attributes,
+                                PathAttributeType::LargeCommunities,
+                                &large_communities_attribute_bytes,
+                            );
                         }
                     }
 
@@ -888,16 +921,11 @@ pub mod bgp {
                     }
 
                     if !mp_reach_nlri.is_empty() {
-                        if mp_reach_nlri.len() > u8::MAX.into() {
-                            path_attributes.put_u8(0b1001_0000); // optional (1), non-transitive (0), complete (0), extended (1)
-                            path_attributes.put_u8(u8::from(PathAttributeType::MpReachNlri)); // attr. type
-                            path_attributes.put_u16(mp_reach_nlri.len().try_into().unwrap()); // attr. octet length
-                        } else {
-                            path_attributes.put_u8(0b1000_0000); // optional (1), non-transitive (0), complete (0), non-extended (0)
-                            path_attributes.put_u8(u8::from(PathAttributeType::MpReachNlri)); // attr. type
-                            path_attributes.put_u8(mp_reach_nlri.len().try_into().unwrap()); // attr. octet length
-                        }
-                        path_attributes.extend(&mp_reach_nlri);
+                        push_attributes(
+                            &mut path_attributes,
+                            PathAttributeType::MpReachNlri,
+                            &mp_reach_nlri,
+                        );
                     }
 
                     let num_path_attribute_bytes =
@@ -1101,8 +1129,8 @@ pub mod bgp {
             let epoch_seconds = u32::try_from(now.timestamp()).unwrap();
             let epoch_micros = now.timestamp_subsec_micros();
 
-            buf.extend_from_slice(&peer_type_to_be_bytes(&pph.peer_type));
-            buf.extend_from_slice(&(pph.peer_flags).to_be_bytes());
+            buf.put_u8(u8::from(*pph.peer_type));
+            buf.put_u8(pph.peer_flags.into());
             buf.extend_from_slice(&pph.peer_distinguisher);
 
             // "Peer Address: The remote IP address associated with the TCP session
@@ -1189,19 +1217,6 @@ pub mod bgp {
             }
         }
 
-        fn peer_type_to_be_bytes(typ: &PeerType) -> [u8; 1] {
-            match typ {
-                PeerType::GlobalInstance => [0u8],
-                PeerType::RdInstance => [1u8],
-                PeerType::LocalInstance => [2u8],
-                PeerType::LocalRibInstance => [3u8],
-                PeerType::Reserved => [255u8],
-                PeerType::Unassigned(u) => [*u],
-                PeerType::Experimental(e) => [*e],
-                PeerType::Unimplemented(u) => [*u],
-            }
-        }
-
         #[derive(Debug, PartialEq, Eq)]
         pub struct MyPeerType(PeerType);
 
@@ -1226,8 +1241,9 @@ pub mod bgp {
                 let peer_type = match s {
                     "global" => PeerType::GlobalInstance,
                     "local" => PeerType::LocalInstance,
+                    "localrib" => PeerType::LocalRibInstance,
                     "rd" => PeerType::RdInstance,
-                    _ => PeerType::Unimplemented(0) // XXX is this sufficient? 
+                    _ => todo!(),
                 };
 
                 Ok(MyPeerType(peer_type))

@@ -15,11 +15,11 @@ use crate::{
         extract_params, get_all_params, get_param, MatchedParam, PercentDecodedPath,
         ProcessRequest, QueryParams,
     },
-    payload::RoutingInformationBase,
     units::{
         rib_unit::{
             http::types::{FilterKind, FilterOp},
-            unit::{PendingVirtualRibQueryResults, QueryLimits}, rib::PhysicalRib,
+            rib::PhysicalRib,
+            unit::{PendingVirtualRibQueryResults, QueryLimits},
         },
         RibType,
     },
@@ -104,7 +104,6 @@ impl PrefixesApi {
         let filters = Self::parse_filter_params(&params)?;
         let sort = Self::parse_sort_params(&params)?;
         let format = get_param(&params, "format");
-        // let router = get_param(&params, "router");
 
         //
         // Check for unused params
@@ -202,18 +201,18 @@ impl PrefixesApi {
         // Format the response
         //
         let res = match format {
-            Some(format) if format.value() == "dump" => Self::mk_dump_response(&res),
+            None => {
+                // default format
+                Self::mk_json_response(res, includes, details, filters, sort)
+            }
 
-            // Some(format) if format.value() == "lg" => match router {
-            //     Some(router) => Self::mk_looking_glass_like_response(router.value(), &res),
-            //     None => Response::builder()
-            //         .status(hyper::StatusCode::BAD_REQUEST)
-            //         .header("Content-Type", "text/plain")
-            //         .body("Missing query parameter 'router' for format 'lg'".into())
-            //         .unwrap(),
-            // },
+            Some(format) if format.value() == "dump" => {
+                // internal diagnostic dump format
+                Self::mk_dump_response(&res)
+            }
+
             Some(other) => {
-                // unknown format type
+                // unknown format
                 Response::builder()
                     .status(hyper::StatusCode::BAD_REQUEST)
                     .header("Content-Type", "text/plain")
@@ -223,8 +222,6 @@ impl PrefixesApi {
                     )
                     .unwrap()
             }
-
-            None => Self::mk_json_response(res, includes, details, filters, sort),
         };
 
         Ok(res)
@@ -329,15 +326,9 @@ impl PrefixesApi {
         Ok(Filters::new(op, filters))
     }
 
-    #[cfg(not(test))]
-    fn parse_sort_params(_params: &QueryParams) -> Result<SortKey, String> {
-        Ok(SortKey::None)
-    }
-
-    #[cfg(test)]
     fn parse_sort_params(params: &QueryParams) -> Result<SortKey, String> {
         match get_param(params, "sort").as_ref().map(MatchedParam::value) {
-            // Some("router_id") => Ok(SortKey::RouterId),
+            Some(json_pointer) => Ok(SortKey::Some(json_pointer.into())),
             _ => Ok(SortKey::None),
         }
     }
@@ -359,10 +350,10 @@ fn extract_filter_kind(filter: MatchedParam) -> Result<FilterKind, String> {
             Ok(FilterKind::AsPath(asns))
         }
 
-        MatchedParam::Family("source_as", v) => match Asn::from_str(v) {
-            Ok(asn) => Ok(FilterKind::SourceAs(asn)),
+        MatchedParam::Family("peer_as", v) => match Asn::from_str(v) {
+            Ok(asn) => Ok(FilterKind::PeerAs(asn)),
             Err(err) => Err(format!(
-                "Invalid value '{}' for 'source_as' filter: {}",
+                "Invalid value '{}' for 'peer_as' filter: {}",
                 v, err
             )),
         },
@@ -374,16 +365,6 @@ fn extract_filter_kind(filter: MatchedParam) -> Result<FilterKind, String> {
                 v, err
             )),
         },
-
-        MatchedParam::Family("routing_information_base_name", v) => {
-            match RoutingInformationBase::from_str(v) {
-                Ok(rib_name) => Ok(FilterKind::RoutingInformationBaseName(rib_name)),
-                Err(err) => Err(format!(
-                    "Invalid value '{}' for 'routing_information_base_name' filter: {}",
-                    v, err
-                )),
-            }
-        }
 
         other => Err(format!("Unrecognized filter family '{}'", other)),
     }?;

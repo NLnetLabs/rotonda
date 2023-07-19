@@ -1,9 +1,4 @@
-use routecore::{
-    asn::Asn,
-    bgp::communities::Community,
-};
-
-use crate::payload::RoutingInformationBase;
+use routecore::{asn::Asn, bgp::communities::Community};
 
 #[derive(Debug, Default)]
 pub struct Includes {
@@ -27,9 +22,8 @@ pub enum FilterOp {
 #[derive(Debug)]
 pub enum FilterKind {
     AsPath(Vec<Asn>),
-    SourceAs(Asn),
+    PeerAs(Asn),
     Community(Community),
-    RoutingInformationBaseName(RoutingInformationBase),
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -91,16 +85,6 @@ impl Filters {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
-pub enum SortKey {
-    None,
-
-    // #[cfg(test)]
-    // RouterId,
-}
-
-impl Default for SortKey {
-    fn default() -> Self {
-        Self::None
-    }
-}
+// A SortKey is an RFC 6901 JSON Pointer.
+// See: https://docs.rs/serde_json/latest/serde_json/value/enum.Value.html#method.pointer
+pub type SortKey = Option<String>;

@@ -194,12 +194,16 @@ mod tests {
         type = "rib-unit"
         sources = ["routers"]
         roto_path = ["etc/filter.roto", "etc/filter.roto", "etc/filter.roto"]
+
+        [targets.dummy-null]
+        type = "null-out"
+        source = "bmp-tcp-in"
         "#;
 
         let null_target_toml = r#"
         [targets.null]
         type = "null-out"
-        source = "global-rib"
+        sources = ["global-rib", "filter"]
         "#;
 
         let mqtt_target_toml = r#"

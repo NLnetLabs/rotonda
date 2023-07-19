@@ -1,14 +1,13 @@
 #[cfg(test)]
 mod tests {
+    use crate::units::rib_unit::rib::StoreInsertionReport;
     use crate::units::rib_unit::statistics::RibMergeUpdateStatistics;
     use crate::{
         bgp::encode::{mk_bgp_update, Announcements, Prefixes},
         comms::Gate,
         payload::{Payload, Update},
         units::rib_unit::{
-            metrics::RibUnitMetrics,
-            rib::{PhysicalRib, RibValue},
-            status_reporter::RibUnitStatusReporter,
+            metrics::RibUnitMetrics, rib::PhysicalRib, status_reporter::RibUnitStatusReporter,
             unit::RibUnitRunner,
         },
     };
@@ -348,7 +347,7 @@ mod tests {
     ) {
         let (gate, _gate_agent) = Gate::new(0);
         let gate = Arc::new(gate);
-        let physical_rib = PhysicalRib::new("test-rib");
+        let physical_rib = PhysicalRib::default();
         let stats = Arc::new(RibMergeUpdateStatistics::default());
 
         let rib = Arc::new(ArcSwapOption::from_pointee(physical_rib));
@@ -374,11 +373,11 @@ mod tests {
 
         fn insert(
             prefix: &Prefix,
-            rib_value: RibValue,
-            store: &PhysicalRib,
-        ) -> Result<(Upsert, u32), PrefixStoreError> {
+            value: TypeValue,
+            rib: &PhysicalRib,
+        ) -> Result<(Upsert<StoreInsertionReport>, u32), PrefixStoreError> {
             eprintln!("Inserting {prefix} into the store");
-            let res = store.insert(prefix, rib_value);
+            let res = rib.insert(prefix, value);
             eprintln!("Insert complete");
             res
         }

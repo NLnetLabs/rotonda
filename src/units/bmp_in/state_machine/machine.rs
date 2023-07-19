@@ -44,7 +44,7 @@ use routecore::{
 use smallvec::SmallVec;
 
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, hash_map::Keys},
     net::{IpAddr, SocketAddr},
     ops::ControlFlow,
     panic::UnwindSafe,
@@ -360,7 +360,7 @@ pub trait PeerAware {
         eor_capable: bool,
     ) -> bool;
 
-    fn get_peers(&self) -> Vec<&PerPeerHeader<Bytes>>;
+    fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState>;
 
     fn update_peer_config(&mut self, pph: &PerPeerHeader<Bytes>, config: SessionConfig) -> bool;
 
@@ -497,6 +497,7 @@ where
                             Ok(update) => {
                                 for prefix in prefixes_to_withdraw {
                                     let route = Self::mk_route_for_prefix(
+                                        self.router_id.clone(),
                                         update.clone(),
                                         &pph,
                                         *prefix,
@@ -669,7 +670,14 @@ where
 
                 // clone is cheap due to use of Bytes
                 routes.push(
-                    Self::mk_route_for_prefix(update.clone(), &pph, prefix, route_status).into(),
+                    Self::mk_route_for_prefix(
+                        self.router_id.clone(),
+                        update.clone(),
+                        &pph,
+                        prefix,
+                        route_status,
+                    )
+                    .into(),
                 );
             }
         }
@@ -687,6 +695,7 @@ where
                     // clone is cheap due to use of Bytes
                     routes.push(
                         Self::mk_route_for_prefix(
+                            self.router_id.clone(),
                             update.clone(),
                             &pph,
                             prefix,
@@ -694,6 +703,8 @@ where
                         )
                         .into(),
                     );
+
+                    self.details.remove_announced_prefix(&pph, &prefix);
                 } else {
                     num_withdrawals -= 1;
                 }
@@ -704,6 +715,7 @@ where
     }
 
     fn mk_route_for_prefix(
+        router_id: Arc<String>,
         update: UpdateMessage<Bytes>,
         pph: &PerPeerHeader<Bytes>,
         prefix: Prefix,
@@ -715,6 +727,7 @@ where
         RawRouteWithDeltas::new_with_message_ref(delta_id, prefix.into(), &raw_msg, route_status)
             .with_peer_ip(pph.address())
             .with_peer_asn(pph.asn())
+            .with_router_id(router_id)
     }
 }
 
@@ -1021,8 +1034,8 @@ impl PeerAware for PeerStates {
         added
     }
 
-    fn get_peers(&self) -> Vec<&PerPeerHeader<Bytes>> {
-        self.0.keys().collect()
+    fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState> {
+        self.0.keys()
     }
 
     fn update_peer_config(

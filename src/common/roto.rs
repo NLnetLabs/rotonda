@@ -6,7 +6,7 @@ use roto::{
     compile::{Compiler, MirBlock},
     traits::RotoType,
     types::typevalue::TypeValue,
-    vm::{ExtDataSource, LinearMemory, VirtualMachine, VmBuilder},
+    vm::{ExtDataSource, LinearMemory, VirtualMachine, VmBuilder, VmResult},
 };
 
 pub type VM = VirtualMachine<Arc<[MirBlock]>, Arc<[ExtDataSource]>>;
@@ -36,12 +36,12 @@ pub fn build_vm(source_code: &str) -> Result<VM, String> {
 pub fn is_filtered_in_vm<R: RotoType>(
     vm: &ThreadLocalVM,
     roto_source: Arc<arc_swap::ArcSwapAny<Arc<(Instant, String)>>>,
-    rx_tx: R,
+    rx: R,
 ) -> Result<ControlFlow<(), TypeValue>, String> {
     let roto_source_ref = roto_source.load();
     if roto_source_ref.1.is_empty() {
         // Empty Roto script supplied, act as if the input is not filtered
-        return Ok(ControlFlow::Continue(rx_tx.into()));
+        return Ok(ControlFlow::Continue(rx.into()));
     }
     
     let prev_vm = &mut vm.borrow_mut();
@@ -72,20 +72,20 @@ pub fn is_filtered_in_vm<R: RotoType>(
         vm.reset();
     }
 
-    match vm.exec(rx_tx.into(), None::<TypeValue>, None, mem) {
-        Ok((AcceptReject::Reject, _, _)) => {
+    match vm.exec(rx.into(), None::<TypeValue>, None, mem) {
+        Ok(VmResult { accept_reject: AcceptReject::Reject, .. }) => {
             // The roto filter script said this BGP UPDATE message should be rejected.
             Ok(ControlFlow::Break(()))
         }
 
-        Ok((AcceptReject::Accept, rx_tx, _)) => {
+        Ok(VmResult { accept_reject: AcceptReject::Accept, rx, .. }) => {
             // The roto filter script has given us a, possibly modified, rx_tx output value to continue with. It may be
             // the same value that it was given to check, or it may be a modified version of that value, or a
             // completely new value maybe even a different TypeValue variant.
-            Ok(ControlFlow::Continue(rx_tx))
+            Ok(ControlFlow::Continue(rx))
         }
 
-        Ok((AcceptReject::NoReturn, _, _)) => Err(
+        Ok(VmResult { accept_reject: AcceptReject::NoReturn, .. }) => Err(
             "Roto filter NoReturn result is unexpected, BGP UPDATE message will be rejected"
                 .to_string(),
         ),

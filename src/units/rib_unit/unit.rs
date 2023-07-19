@@ -21,10 +21,13 @@ use log::{error, log_enabled, trace};
 use non_empty_vec::NonEmpty;
 use roto::{
     traits::RotoType,
-    types::{builtin::BuiltinTypeValue, collections::ElementTypeValue, typevalue::TypeValue},
+    types::{builtin::{BuiltinTypeValue, RouteToken}, collections::ElementTypeValue, typevalue::TypeValue},
 };
 use rotonda_store::{
-    custom_alloc::Upsert, epoch, prelude::multi::PrefixStoreError, QueryResult, RecordSet,
+    custom_alloc::Upsert,
+    epoch,
+    prelude::{multi::PrefixStoreError, MergeUpdate},
+    QueryResult, RecordSet,
 };
 
 use routecore::addr::Prefix;
@@ -41,15 +44,21 @@ use std::{
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-use super::statistics::RibMergeUpdateStatistics;
 use super::{
     http::PrefixesApi,
     metrics::RibUnitMetrics,
-    rib::{PhysicalRib, PreHashedTypeValue, RibValue},
+    rib::{PhysicalRib, PreHashedTypeValue, RibValue, RouteExtra},
     status_reporter::RibUnitStatusReporter,
 };
+use super::{rib::StoreInsertionReport, statistics::RibMergeUpdateStatistics};
 
 use std::time::Instant;
+
+const RECORD_MERGE_UPDATE_SPEED_EVERY_N_CALLS: u64 = 1000;
+
+thread_local!(
+    static STATS_COUNTER: RefCell<u64> = RefCell::new(0);
+);
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct MoreSpecifics {
@@ -145,6 +154,10 @@ pub struct RibUnit {
     #[serde(default)]
     pub rib_type: RibType,
 
+    /// Which fields are the key for RIB metadata items?
+    #[serde(default = "RibUnit::default_rib_keys")]
+    pub rib_keys: NonEmpty<RouteToken>,
+
     /// Virtual RIB upstream physical RIB. Only used when rib_type is Virtual.
     #[serde(default)]
     pub vrib_upstream: Option<Link>,
@@ -157,7 +170,7 @@ impl RibUnit {
         gate: Gate,
         waitpoint: WaitPoint,
     ) -> Result<(), Terminated> {
-        RibUnitRunner::new(gate, component, self.roto_path, self.rib_type)
+        RibUnitRunner::new(gate, component, self.roto_path, self.rib_type, &self.rib_keys)
             .run(
                 self.sources,
                 self.http_api_path,
@@ -175,6 +188,10 @@ impl RibUnit {
 
     fn default_query_limits() -> QueryLimits {
         QueryLimits::default()
+    }
+
+    fn default_rib_keys() -> NonEmpty<RouteToken> {
+        NonEmpty::try_from(vec![RouteToken::PeerIp, RouteToken::PeerAsn, RouteToken::AsPath]).unwrap()
     }
 }
 
@@ -238,6 +255,7 @@ impl RibUnitRunner {
         mut component: Component,
         roto_path: Option<PathBuf>,
         rib_type: RibType,
+        rib_keys: &[RouteToken],
     ) -> Self {
         let roto_source_code = roto_path
             .map(|v| read_to_string(v).unwrap())
@@ -259,10 +277,7 @@ impl RibUnitRunner {
                 // --- End: Create the Rib based on the Roto script Rib 'contains' type
                 //
 
-                let physical_rib = PhysicalRib::new(
-                    "my-rib", // TODO: Where should this name come from? Is it for lookup and access by other Roto
-                );
-
+                let physical_rib = PhysicalRib::new(rib_keys);
                 Arc::new(ArcSwapOption::from_pointee(physical_rib))
             }
 
@@ -419,17 +434,18 @@ impl RibUnitRunner {
         process_metrics: Arc<TokioTaskMetrics>,
         rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
     ) where
-        F: Fn(&Prefix, RibValue, &PhysicalRib) -> Result<(Upsert, u32), PrefixStoreError>
+        F: Fn(
+                &Prefix,
+                TypeValue,
+                &PhysicalRib,
+            )
+                -> Result<(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32), PrefixStoreError>
             + Send
             + Copy,
         F: 'static,
     {
         match update {
             Update::Bulk(updates) => {
-                // let mut new_announcements = 0;
-                // let mut modified_announcements = 0;
-                // let mut new_withdrawals = 0;
-
                 for payload in updates {
                     if let Some(update) = process_metrics
                         .instrument(Self::process_update_single(
@@ -445,12 +461,6 @@ impl RibUnitRunner {
                         gate.update_data(update).await;
                     }
                 }
-
-                // status_reporter.update_processed(
-                //     new_announcements,
-                //     modified_announcements,
-                //     new_withdrawals,
-                // );
 
                 if let Some(rib) = rib.load().as_ref() {
                     status_reporter.unique_prefix_count_updated(rib.prefixes_count());
@@ -513,7 +523,13 @@ impl RibUnitRunner {
         rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
     ) -> Option<Update>
     where
-        F: Fn(&Prefix, RibValue, &PhysicalRib) -> Result<(Upsert, u32), PrefixStoreError> + Send,
+        F: Fn(
+                &Prefix,
+                TypeValue,
+                &PhysicalRib,
+            )
+                -> Result<(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32), PrefixStoreError>
+            + Send,
         F: 'static,
     {
         match payload {
@@ -544,13 +560,10 @@ impl RibUnitRunner {
                             };
 
                             if let Some(prefix) = prefix {
-                                let hash = rib.precompute_hash_code(&output);
-                                let hashed_value = PreHashedTypeValue::new(output.clone(), hash);
-                                let rib_value =
-                                    RibValue::from((hashed_value, rib_merge_update_stats));
+                                let is_withdraw = output.is_withdrawn();
 
                                 let pre_insert = Utc::now();
-                                match insert(&prefix, rib_value, rib) {
+                                match insert(&prefix, output.clone(), rib) {
                                     Ok((upsert, num_retries)) => {
                                         let post_insert = Utc::now();
                                         let insert_delay = (post_insert - pre_insert)
@@ -561,12 +574,9 @@ impl RibUnitRunner {
                                         // let propagation_delay = (post_insert - rib_el.received).num_milliseconds();
                                         let propagation_delay = 0;
 
-                                        // TODO: Add a way to check RouteStatus on route or rib_value
-                                        // let is_announcement = rib_el.advert.is_some();
-                                        let is_announcement = true;
-
-                                        let router_id =
-                                            Arc::new(RouterId::from_str("dummy").unwrap());
+                                        let router_id = Arc::new(
+                                            RouterId::from_str("not implemented yet").unwrap(),
+                                        );
 
                                         match upsert {
                                             Upsert::Insert => {
@@ -575,30 +585,47 @@ impl RibUnitRunner {
                                                     insert_delay,
                                                     propagation_delay,
                                                     num_retries,
-                                                    is_announcement,
+                                                    is_withdraw,
+                                                    1,
                                                 );
-
-                                                // if is_announcement {
-                                                //     new_announcements += 1;
-                                                // }
                                             }
-                                            Upsert::Update => {
+                                            Upsert::Update(StoreInsertionReport {
+                                                item_count_delta,
+                                                item_count_total,
+                                                op_duration,
+                                            }) => {
+                                                STATS_COUNTER.with(|counter| {
+                                                    *counter.borrow_mut() += 1;
+                                                    let res = *counter.borrow();
+                                                    if res % RECORD_MERGE_UPDATE_SPEED_EVERY_N_CALLS
+                                                        == 0
+                                                    {
+                                                        rib_merge_update_stats.add(
+                                                            op_duration
+                                                                .num_microseconds()
+                                                                .unwrap_or(i64::MAX)
+                                                                as u64,
+                                                            item_count_total,
+                                                            is_withdraw,
+                                                        );
+                                                    }
+                                                });
+
                                                 status_reporter.update_ok(
                                                     router_id,
                                                     insert_delay,
                                                     propagation_delay,
                                                     num_retries,
+                                                    item_count_delta,
                                                 );
 
-                                                // if is_announcement {
-                                                //     modified_announcements += 1;
-                                                // }
+                                                // status_reporter.update_processed(
+                                                //     new_announcements,
+                                                //     modified_announcements,
+                                                //     new_withdrawals,
+                                                // );
                                             }
                                         }
-
-                                        // if !is_announcement {
-                                        //     new_withdrawals += 1;
-                                        // }
                                     }
 
                                     Err(err) => status_reporter.insert_failed(prefix, err),
@@ -735,7 +762,7 @@ impl RibUnitRunner {
         if new_values.is_empty() {
             None
         } else {
-            Some(RibValue::new(new_values, rib_merge_update_stats))
+            Some(new_values.into())
         }
     }
 
@@ -771,20 +798,20 @@ impl RibUnitRunner {
     }
 
     fn is_filtered<R: RotoType>(
-        rx_tx: R,
+        rx: R,
         roto_source: Option<Arc<ArcSwap<(Instant, String)>>>,
     ) -> Result<ControlFlow<(), TypeValue>, String> {
         match roto_source {
             None => {
                 // No Roto filter defined, accept the BGP UPDATE messsage
-                Ok(ControlFlow::Continue(rx_tx.into()))
+                Ok(ControlFlow::Continue(rx.into()))
             }
             Some(roto_source) => {
                 // TODO: Run the Roto VM on a dedicated thread pool, to prevent blocking the Tokio async runtime, as we
                 // don't know how long we will have to wait for the VM execution to complete (as it depends on the
                 // behaviour of the user provided script). Timeouts might be a good idea!
                 Self::VM.with(move |vm| -> Result<ControlFlow<(), TypeValue>, String> {
-                    is_filtered_in_vm(vm, roto_source, rx_tx)
+                    is_filtered_in_vm(vm, roto_source, rx)
                 })
             }
         }
@@ -838,107 +865,54 @@ impl RibUnitRunner {
 
 #[cfg(test)]
 mod tests {
-    use std::{net::IpAddr, str::FromStr, sync::Arc};
-
-    use roto::types::builtin::{
-        BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus, UpdateMessage,
-    };
-    use routecore::{addr::Prefix, bgp::message::SessionConfig};
-
-    use crate::bgp::encode::{mk_bgp_update, Announcements, Prefixes};
-
-    use super::PhysicalRib;
+    use super::*;
 
     #[test]
-    fn test_route_comparison_using_default_hash_key_values() {
-        let rib = PhysicalRib::new("test-rib");
-        let prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32).unwrap();
-        let peer_one = IpAddr::from_str("192.168.0.1").unwrap();
-        let peer_two = IpAddr::from_str("192.168.0.2").unwrap();
-        let announcement_one_from_peer_one =
-            mk_route_announcement(prefix, "123,456").with_peer_ip(peer_one);
-        let announcement_two_from_peer_one =
-            mk_route_announcement(prefix, "789,456").with_peer_ip(peer_one);
-        let announcement_one_from_peer_two =
-            mk_route_announcement(prefix, "123,456").with_peer_ip(peer_two);
-        let announcement_two_from_peer_two =
-            mk_route_announcement(prefix, "789,456").with_peer_ip(peer_two);
+    fn default_rib_keys_are_as_expected() {
+        let toml = r#"
+        sources = ["some source"]
+        "#;
 
-        let hash_code_route_one_peer_one =
-            rib.precompute_hash_code(&announcement_one_from_peer_one.clone().into());
-        let hash_code_route_one_peer_one_again =
-            rib.precompute_hash_code(&announcement_one_from_peer_one.into());
-        let hash_code_route_one_peer_two =
-            rib.precompute_hash_code(&announcement_one_from_peer_two.into());
-        let hash_code_route_two_peer_one =
-            rib.precompute_hash_code(&announcement_two_from_peer_one.into());
-        let hash_code_route_two_peer_two =
-            rib.precompute_hash_code(&announcement_two_from_peer_two.into());
+        let config = mk_config_from_toml(toml).unwrap();
 
-        // Hashing sanity checks
-        assert_ne!(hash_code_route_one_peer_one, 0);
-        assert_eq!(
-            hash_code_route_one_peer_one,
-            hash_code_route_one_peer_one_again
-        );
-
-        assert_ne!(
-            hash_code_route_one_peer_one, hash_code_route_one_peer_two,
-            "Routes that differ only by peer IP should be considered different"
-        );
-        assert_ne!(
-            hash_code_route_two_peer_one, hash_code_route_two_peer_two,
-            "Routes that differ only by peer IP should be considered different"
-        );
-        assert_ne!(
-            hash_code_route_one_peer_one, hash_code_route_two_peer_one,
-            "Routes that differ only by AS path should be considered different"
-        );
-        assert_ne!(
-            hash_code_route_one_peer_two, hash_code_route_two_peer_two,
-            "Routes that differ only by AS path should be considered different"
-        );
-
-        // Sanity checks
-        assert_eq!(hash_code_route_one_peer_one, hash_code_route_one_peer_one);
-        assert_eq!(hash_code_route_one_peer_two, hash_code_route_one_peer_two);
-        assert_eq!(hash_code_route_two_peer_one, hash_code_route_two_peer_one);
-        assert_eq!(hash_code_route_two_peer_two, hash_code_route_two_peer_two);
+        assert_eq!(config.rib_keys.as_slice(), &[RouteToken::PeerIp, RouteToken::PeerAsn, RouteToken::AsPath]);
     }
 
-    fn mk_route_announcement(prefix: Prefix, as_path: &str) -> RawRouteWithDeltas {
-        let delta_id = (RotondaId(0), 0);
-        let announcements = Announcements::from_str(&format!(
-            "e [{as_path}] 10.0.0.1 BLACKHOLE,123:44 {}",
-            prefix
-        ))
-        .unwrap();
-        let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
+    #[test]
+    fn specified_rib_keys_are_received() {
+        let toml = r#"
+        sources = ["some source"]
+        rib_keys = ["PeerIp", "NextHop"]
+        "#;
 
-        // When it is processed by this unit
-        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
-        RawRouteWithDeltas::new_with_message_ref(
-            delta_id,
-            prefix.into(),
-            &bgp_update_msg,
-            RouteStatus::InConvergence,
-        )
+        let config = mk_config_from_toml(toml).unwrap();
+
+        assert_eq!(config.rib_keys.as_slice(), &[RouteToken::PeerIp, RouteToken::NextHop]);
     }
 
-    fn mk_route_withdrawal(prefix: Prefix) -> RawRouteWithDeltas {
-        let delta_id = (RotondaId(0), 0);
-        let bgp_update_bytes =
-            mk_bgp_update(&Prefixes::new(vec![prefix]), &Announcements::None, &[]);
+    #[test]
+    #[should_panic(expected = "empty vector")]
+    fn if_specified_rib_keys_must_be_non_empty() {
+        let toml = r#"
+        sources = ["some source"]
+        rib_keys = []
+        "#;
 
-        // When it is processed by this unit
-        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
-        RawRouteWithDeltas::new_with_message_ref(
-            delta_id,
-            prefix.into(),
-            &bgp_update_msg,
-            RouteStatus::Withdrawn,
-        )
+        mk_config_from_toml(toml).unwrap();
+    }
+
+    #[test]
+    #[should_panic(expected = "unknown variant")]
+    fn only_known_route_tokens_may_be_used_as_rib_keys() {
+        let toml = r#"
+        sources = ["some source"]
+        rib_keys = ["blah"]
+        "#;
+
+        mk_config_from_toml(toml).unwrap();
+    }
+
+    fn mk_config_from_toml(toml: &str) -> Result<RibUnit, toml::de::Error> {
+        toml::de::from_slice::<RibUnit>(toml.as_bytes())
     }
 }

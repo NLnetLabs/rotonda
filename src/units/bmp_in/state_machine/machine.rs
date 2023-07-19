@@ -497,6 +497,7 @@ where
                             Ok(update) => {
                                 for prefix in prefixes_to_withdraw {
                                     let route = Self::mk_route_for_prefix(
+                                        self.router_id.clone(),
                                         update.clone(),
                                         &pph,
                                         *prefix,
@@ -669,7 +670,14 @@ where
 
                 // clone is cheap due to use of Bytes
                 routes.push(
-                    Self::mk_route_for_prefix(update.clone(), &pph, prefix, route_status).into(),
+                    Self::mk_route_for_prefix(
+                        self.router_id.clone(),
+                        update.clone(),
+                        &pph,
+                        prefix,
+                        route_status,
+                    )
+                    .into(),
                 );
             }
         }
@@ -687,6 +695,7 @@ where
                     // clone is cheap due to use of Bytes
                     routes.push(
                         Self::mk_route_for_prefix(
+                            self.router_id.clone(),
                             update.clone(),
                             &pph,
                             prefix,
@@ -706,6 +715,7 @@ where
     }
 
     fn mk_route_for_prefix(
+        router_id: Arc<String>,
         update: UpdateMessage<Bytes>,
         pph: &PerPeerHeader<Bytes>,
         prefix: Prefix,
@@ -717,6 +727,7 @@ where
         RawRouteWithDeltas::new_with_message_ref(delta_id, prefix.into(), &raw_msg, route_status)
             .with_peer_ip(pph.address())
             .with_peer_asn(pph.asn())
+            .with_router_id(router_id)
     }
 }
 

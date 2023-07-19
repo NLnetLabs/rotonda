@@ -386,7 +386,7 @@ mod tests {
         sync::{
             atomic::{AtomicU8, Ordering},
             Arc,
-        },
+        }, net::IpAddr,
     };
 
     use roto::types::{
@@ -1000,7 +1000,19 @@ mod tests {
             MessageType::RoutingUpdate { .. }
         ));
         if let MessageType::RoutingUpdate { update } = res.processing_result {
-            dbg!(update); // TODO: assert the content of the update
+            dbg!(&update); // TODO: assert the content of the update
+            if let Update::Bulk(updates) = &update {
+                assert_eq!(updates.len(), 1);
+                if let Payload::TypeValue(TypeValue::Builtin(BuiltinTypeValue::Route(route))) = &updates[0] {
+                    assert_eq!(route.peer_ip().unwrap(), IpAddr::from_str("127.0.0.1").unwrap());
+                    assert_eq!(route.peer_asn().unwrap(), Asn::from_u32(12345));
+                    assert_eq!(route.router_id().unwrap().as_str(), TEST_ROUTER_SYS_NAME);
+                } else {
+                    panic!("Expected a route");
+                }
+            } else {
+                panic!("Expected a bulk update");
+            }
         }
     }
 

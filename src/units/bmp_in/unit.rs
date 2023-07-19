@@ -629,7 +629,7 @@ mod tests {
     #[tokio::test]
     async fn route_monitoring_afi_accepted() {
         const ROTO_FILTER: &str = r###"
-        module filter-unicast-v4-v6-only {
+        filter-map filter-unicast-v4-v6-only {
             define {
                 rx_tx bgp_msg: BgpUpdateMessage;
             }
@@ -669,7 +669,7 @@ mod tests {
     #[tokio::test]
     async fn route_monitoring_afi_rejected_not_ipv6() {
         const ROTO_FILTER: &str = r###"
-        module filter-unicast-v4-v6-only {
+        filter-map filter-unicast-v4-v6-only {
             define {
                 rx_tx bgp_msg: BgpUpdateMessage;
             }

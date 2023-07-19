@@ -5,6 +5,7 @@ use assert_json_diff::{assert_json_matches_no_panic, CompareMode, Config};
 use hyper::{body::Bytes, Body, Request, StatusCode};
 use roto::types::builtin::{BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus};
 use routecore::{
+    addr::Prefix,
     asn::Asn,
     bgp::{
         communities::{
@@ -787,15 +788,23 @@ fn insert_routes(rib: Arc<ArcSwapOption<PhysicalRib>>, n: u8, announcements: Ann
     }
 }
 
-fn insert_announcement(rib: Arc<ArcSwapOption<PhysicalRib>>, prefix: &str, n: u8) {
+fn insert_announcement(rib: Arc<ArcSwapOption<PhysicalRib>>, prefix_str: &str, n: u8) {
+    let next_hop = get_localhost_next_hop_for_prefix(prefix_str).0;
     insert_announcement_full(
         rib,
-        prefix,
+        prefix_str,
         n,
         &[123, 456],
-        "127.0.0.1",
+        next_hop,
         &[] as &[Community],
     );
+}
+
+fn get_localhost_next_hop_for_prefix(prefix_str: &str) -> (&str, bool) {
+    match Prefix::from_str(prefix_str).unwrap().is_v4() {
+        true => ("127.0.0.1", true),
+        false => ("::1", false),
+    }
 }
 
 fn insert_announcement_full<C: Into<Community> + Copy>(
@@ -844,12 +853,15 @@ fn mk_response_announced_prefix_full(
     as_path: &[u32],
     communities: Option<Value>,
 ) -> Value {
+    let next_hop = match get_localhost_next_hop_for_prefix(prefix) {
+        (next_hop, true) => json!({ "Ipv4": next_hop}),
+        (next_hop, false) => json!({ "Ipv6": next_hop}),
+    };
+
     let mut route_object = json!({
         "prefix": prefix,
         "as_path": as_path.iter().map(|asn| format!("AS{}", asn)).collect::<Vec<String>>(),
-        "next_hop": {
-            "Ipv4": "127.0.0.1",
-        },
+        "next_hop": next_hop,
         "atomic_aggregate": false,
         "origin_type": "Egp",
         "peer_ip": format!("192.168.0.{router_n}"),

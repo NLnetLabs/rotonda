@@ -748,7 +748,7 @@ async fn assert_query_eq(
 }
 
 fn mk_rib() -> Arc<ArcSwapOption<PhysicalRib>> {
-    let physical_rib = PhysicalRib::new("test-rib");
+    let physical_rib = PhysicalRib::default();
     Arc::new(ArcSwapOption::from_pointee(physical_rib))
 }
 

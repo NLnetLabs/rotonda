@@ -8,7 +8,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use roto::types::typevalue::TypeValue;
 use roto::types::builtin::{Asn as RotoAsn, BuiltinTypeValue, Prefix as RotoPrefix, RawRouteWithDeltas};
-use roto::types::builtin::{IpAddress, RouteStatus, RotondaId, UpdateMessage};
+use roto::types::builtin::{IpAddress, RouteStatus, RotondaId, BgpUpdateMessage, UpdateMessage};
 use routecore::asn::Asn;
 use routecore::bgp::message::UpdateMessage as UpdatePdu;
 use routecore::addr::Prefix;
@@ -177,8 +177,8 @@ impl Processor {
                             if let Some(negotiated) = session.negotiated() {
                                 self.process_update(
                                     pdu,
-                                    negotiated.remote_addr(),
-                                    negotiated.remote_asn()
+                                    //negotiated.remote_addr(),
+                                    //negotiated.remote_asn()
                                 ).await;
                             } else {
                                 error!("unexpected state: no NegotiatedConfig for session");
@@ -256,17 +256,16 @@ impl Processor {
 
     // For every NLRI and every withdrawal, send out a Single Payload to the
     // next unit.
-    // TODO properly batch these per Action (one batch for announcements one
-    // batch for withdrawals). Should we switch to
-    // RawRouteWithDeltas::new_with_message_ref for that?
-    // TODO store all announced prefixes so we can easily withdraw them when
-    // the BGP session goes down.
+    // TODO: properly batch these in an Update::Bulk instead of Update::Single
     async fn process_update(
         &mut self,
         pdu: UpdatePdu<Bytes>,
-        peer_ip: IpAddr,
-        peer_asn: Asn
+        //peer_ip: IpAddr,
+        //peer_asn: Asn
     ) {
+        let rot_id = RotondaId(0_usize);
+        let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
+        let msg = Arc::new(BgpUpdateMessage::new((rot_id, ltime), UpdateMessage(pdu.clone())));
         for n in pdu.nlris().iter() {
             let prefix = if let Some(prefix) = n.prefix() {
                 prefix
@@ -277,14 +276,10 @@ impl Processor {
 
             self.observed_prefixes.insert(prefix);
 
-            let rot_id = RotondaId(0_usize);
-            let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
-            let rrwd = RawRouteWithDeltas::new_with_message(
+            let rrwd = RawRouteWithDeltas::new_with_message_ref(
                 (rot_id, ltime),
                 RotoPrefix::new(prefix),
-                Some(IpAddress::new(peer_ip)),
-                Some(RotoAsn::new(peer_asn)),
-                UpdateMessage(pdu.clone()),
+                &msg,
                 RouteStatus::InConvergence
                 );
             let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
@@ -301,14 +296,12 @@ impl Processor {
 
             self.observed_prefixes.remove(&prefix);
 
-            let rot_id = RotondaId(0_usize);
-            let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
-            let rrwd = RawRouteWithDeltas::new_with_message(
+            //let rot_id = RotondaId(0_usize);
+            //let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
+            let rrwd = RawRouteWithDeltas::new_with_message_ref(
                 (rot_id, ltime),
                 RotoPrefix::new(prefix),
-                Some(IpAddress::new(peer_ip)),
-                Some(RotoAsn::new(peer_asn)),
-                UpdateMessage(pdu.clone()),
+                &msg,
                 RouteStatus::Withdrawn
                 );
             let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));

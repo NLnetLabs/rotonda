@@ -2100,7 +2100,7 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0"
-source = "git+https://github.com/NLnetLabs/roto.git?branch=main#2d0e68d48a3c4e4d2697a5e492e99d3cba91bf66"
+source = "git+https://github.com/NLnetLabs/roto.git#1d9368d42de7690b4ae2adbcf09367147f0545b3"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -2211,6 +2211,7 @@ dependencies = [
 name = "routecore"
 version = "0.4.0-dev"
 source = "git+https://github.com/NLnetLabs/routecore.git?branch=compose-messages-ng#6824bacbbbd3902c583e748ec92bb2843e35737f"
+source = "git+https://github.com/NLnetLabs/routecore.git#3c55f4e0a21cf373df40b9a40a8cdde1a4f273d9"
 dependencies = [
  "bytes",
  "chrono",

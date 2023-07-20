@@ -3,14 +3,15 @@ Root ::= RootExpr+
 RootExpr ::= 
      "module" Identifier '{' ModuleBody '}' |
      "rib" Identifier 'contains' TypeIdentifier '{' RibBody '}' |
-     "filter-map" Identifier 'contains' TypeIdentifier '{' FilterMap '}' |
-     "filter" Identifier 'contains' TypeIdentifier '{' Filter '}' |
+     "filter-map" Identifier 'contains' TypeIdentifier '{' FilterMapBody '}' |
+     "filter" Identifier 'contains' TypeIdentifier '{' FilterBody '}' |
      "table" Identifier '{' TableBody '}' |
      RecordTypeAssignment |
      Comment
 
-FilterMap ::= "filter-map" ForStatement WithStatement '{' FilterMapBody '}'
-Filter ::= "filter" ForStatement WithStatement '{' Filterody '}'
+ModuleBody ::=  
+     "filter-map" Identifier 'contains' TypeIdentifier '{' FilterMapBody '}' |
+     "filter" Identifier 'contains' TypeIdentifier '{' FilterBody '}'
 FilterMapBody ::= Define FilterMapExpr+ Apply
 FilterBody ::= Define FilterExpr+ Apply
 

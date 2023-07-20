@@ -1,19 +1,28 @@
 Root ::= RootExpr+
 
-RootExpr ::= FilterMap |
+RootExpr ::= 
+     "module" Identifier '{' ModuleBody '}' |
      "rib" Identifier 'contains' TypeIdentifier '{' RibBody '}' |
-     "filter-map" Identifier 'contains' TypeIdentifier '{' FilterMap '}' |
+     "filter-map" Identifier 'contains' TypeIdentifier '{' FilterMapBody '}' |
+     "filter" Identifier 'contains' TypeIdentifier '{' FilterBody '}' |
      "table" Identifier '{' TableBody '}' |
      RecordTypeAssignment |
      Comment
 
-FilterMap ::= "filter-map" ForStatement WithStatement '{' FilterMapBody '}'
+ModuleBody ::=  
+     "filter-map" Identifier 'contains' TypeIdentifier '{' FilterMapBody '}' |
+     "filter" Identifier 'contains' TypeIdentifier '{' FilterBody '}'
 FilterMapBody ::= Define FilterMapExpr+ Apply
+FilterBody ::= Define FilterExpr+ Apply
 
 FilterMapExpr ::= Define |
    Term+ | 
    Action+ |
    /* 'import' ForStatement '{' ImportBody '}' */
+
+FilterExpr ::= Define |
+     Term+ | 
+     Action+ |
 
 Define ::= 'define' ForStatement  WithStatement '{' DefineBody '}'
 DefineBody ::= ( ( 'use' Identifier ';' )? ( Identifier '=' ComputeExpr ';' )+ )+

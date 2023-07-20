@@ -9,7 +9,7 @@ use crate::{
     },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
     manager::{Component, TargetCommand, WaitPoint},
-    payload::{Action, Payload, RouterId, Update, RawBmpPayload},
+    payload::{Action, Payload, RawBmpPayload, RouterId, Update},
 };
 
 use async_trait::async_trait;
@@ -19,8 +19,9 @@ use mqtt::{
     QoS,
 };
 use non_empty_vec::NonEmpty;
-use routecore::{bgp::communities::Community, addr::Prefix};
+use roto::types::typevalue::TypeValue;
 use routecore::bmp::message::Message as BmpMsg;
+use routecore::{addr::Prefix, bgp::communities::Community};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use serde_with::{serde_as, DisplayFromStr};
@@ -536,11 +537,11 @@ impl DirectUpdate for MqttRunner {
                 };
 
                 let event = json!({
-                        "router": router_addr,
-                        "msg_type": msg_type,
-                        "pph": pph_str,
-                        "msg_type_specific": msg_type_specific,
-                    });
+                    "router": router_addr,
+                    "msg_type": msg_type,
+                    "pph": pph_str,
+                    "msg_type_specific": msg_type_specific,
+                });
 
                 let publish_details = (event, "no-prefix".to_string());
                 let msg = (received, publish_details, Arc::new(router_addr.to_string()));
@@ -548,12 +549,31 @@ impl DirectUpdate for MqttRunner {
             }
 
             Update::Single(_) => {
-                self.status_reporter
-                    .input_mismatch("Update::Single(Payload::RawBmp)", "Update::Single(RawBmp)|Update::Bulk(_)");
+                self.status_reporter.input_mismatch(
+                    "Update::Single(Payload::RawBmp)",
+                    "Update::Single(RawBmp)|Update::Bulk(_)",
+                );
             }
 
-            Update::QueryResult( .. ) => {
-                self.status_reporter.input_mismatch("Update::Single(Payload::RawBmp)", "Update::QueryResult(_)");
+            Update::QueryResult(..) => {
+                self.status_reporter
+                    .input_mismatch("Update::Single(Payload::RawBmp)", "Update::QueryResult(_)");
+            }
+
+            Update::OutputStreamMessage(messages) => {
+                // Ahha, is this for us?
+                // TODO: match on the topic, does it match something we are interested in?
+                let received = Utc::now();
+                for msg in messages {
+                    let event = serde_json::to_value(&TypeValue::from(msg)).unwrap();
+                    let publish_details = (event, "no-prefix".to_string());
+                    let msg = (
+                        received,
+                        publish_details,
+                        Arc::new("dummy-router-id".into()),
+                    );
+                    self.sender.as_ref().unwrap().send(msg).unwrap();
+                }
             }
         }
     }

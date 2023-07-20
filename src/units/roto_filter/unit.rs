@@ -165,7 +165,13 @@ impl RotoFilterRunner {
             }
 
             Update::QueryResult(..) => {
+                // These should only be received by virtual RIBs, we shouldn't see these.
                 status_reporter.input_mismatch("Update::Single(_)", "Update::QueryResult(_)");
+            }
+
+            Update::OutputStreamMessage(_) => {
+                // pass it on, we don't (yet?) support filtering of these
+                gate.update_data(update).await;
             }
         }
     }

@@ -209,6 +209,10 @@ impl DirectUpdate for BmpTcpOutRunner {
             Update::QueryResult( .. ) => {
                 self.status_reporter.input_mismatch("Update::Single(Payload::RawBmp)", "Update::QueryResult(_)");
             }
+
+            Update::OutputStreamMessage(_) => {
+                todo!();
+            }
         }
     }
 }

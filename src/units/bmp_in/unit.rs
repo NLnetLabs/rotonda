@@ -26,7 +26,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use log::info;
 use non_empty_vec::NonEmpty;
-use roto::{types::{builtin::{BuiltinTypeValue}, typevalue::TypeValue}, traits::RotoType};
+use roto::{types::{builtin::BuiltinTypeValue, typevalue::TypeValue}, traits::RotoType, vm::OutputStreamQueue};
 use serde::Deserialize;
 use tokio::{runtime::Handle, sync::Mutex};
 
@@ -332,8 +332,8 @@ impl BmpInRunner {
                 match Self::is_filtered(raw_bgp_msg, roto_source) {
                     Ok(ControlFlow::Break(())) => Ok(ControlFlow::Break(())),
                     // TODO: Modify roto to not output an Arc if the given rx wasn't an Arc, so then we don't have to do the Arc::try_unwrap() dance.
-                    Ok(ControlFlow::Continue(TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(raw_bgp_msg)))) => Ok(ControlFlow::Continue(Arc::try_unwrap(raw_bgp_msg).unwrap())),
-                    Ok(ControlFlow::Continue(some_unsupported_type)) => Err(format!("Filter result type must be BgpUpdateMessage, found: {some_unsupported_type}")),
+                    Ok(ControlFlow::Continue((TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(raw_bgp_msg)), _tx, _omq))) => Ok(ControlFlow::Continue(Arc::try_unwrap(raw_bgp_msg).unwrap())),
+                    Ok(ControlFlow::Continue((some_unsupported_type, ..))) => Err(format!("Filter result type must be BgpUpdateMessage, found: {some_unsupported_type}")),
                     Err(err) => Err(format!("Filter execution failed: {err}")),
                 }
             })
@@ -538,23 +538,28 @@ impl BmpInRunner {
             Update::QueryResult(..) => {
                 self.status_reporter.input_mismatch("Update::Single(_)", "Update::QueryResult(_)");
             }
+
+            Update::OutputStreamMessage(_) => {
+                self.status_reporter
+                    .input_mismatch("Update::Single(Payload::RawBmp)", "Update::OutputStreaMessage(_)");
+            }
         }
     }
 
     fn is_filtered<R: RotoType>(
         rx: R,
         roto_source: Option<Arc<ArcSwap<(Instant, String)>>>,
-    ) -> Result<ControlFlow<(), TypeValue>, String> {
+    ) -> Result<ControlFlow<(), (TypeValue, Option<TypeValue>, OutputStreamQueue)>, String> {
         match roto_source {
             None => {
                 // No Roto filter defined, accept the BGP UPDATE messsage
-                Ok(ControlFlow::Continue(rx.into()))
+                Ok(ControlFlow::Continue((rx.into(), None, OutputStreamQueue::new())))
             }
             Some(roto_source) => {
                 // TODO: Run the Roto VM on a dedicated thread pool, to prevent blocking the Tokio async runtime, as we
                 // don't know how long we will have to wait for the VM execution to complete (as it depends on the
                 // behaviour of the user provided script). Timeouts might be a good idea!
-                Self::VM.with(move |vm| -> Result<ControlFlow<(), TypeValue>, String> {
+                Self::VM.with(move |vm| -> Result<ControlFlow<(), (TypeValue, Option<TypeValue>, OutputStreamQueue)>, String> {
                     is_filtered_in_vm(vm, roto_source, rx)
                 })
             }

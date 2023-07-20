@@ -1,21 +1,27 @@
-module my-module {
+filter-map my-module {
     define {
-        rx_tx msg: BmpMsg;
+        rx_tx bgp_msg: BgpUpdateMessage;
     }
 
-    term peer-asn-matches {
+    term afi-safi-unicast {
         match {
-            msg.asn == AS1818;
+            bgp_msg.nlris.afi != IPV4;
         }
     }
 
+    action send-message {
+        mqtt.send({ 
+            message: String.format("🤭 I encountered ", "1818")
+        });
+    }
+
     apply {
-        filter match peer-asn-matches matching { return reject; };
-        return accept;
+        filter match afi-safi-unicast matching {
+            send-message;
+        };
     }
 }
 
-type BmpMsg {
-    type: IntegerLiteral,
-    asn: Asn
+output-stream mqtt contains Message {
+    message: String
 }

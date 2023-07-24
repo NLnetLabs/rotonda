@@ -1,17 +1,28 @@
 use std::collections::BTreeSet;
-use std::net::IpAddr;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use log::{debug, error};
-use tokio::net::TcpStream;
-use tokio::sync::mpsc;
+use roto::types::builtin::{
+    /*Asn as RotoAsn,*/
+    BuiltinTypeValue,
+    Prefix as RotoPrefix,
+    RawRouteWithDeltas
+};
+use roto::types::builtin::{
+    BgpUpdateMessage,
+    /*IpAddress,*/
+    RotondaId,
+    RouteStatus,
+    UpdateMessage
+};
 use roto::types::typevalue::TypeValue;
-use roto::types::builtin::{Asn as RotoAsn, BuiltinTypeValue, Prefix as RotoPrefix, RawRouteWithDeltas};
-use roto::types::builtin::{IpAddress, RouteStatus, RotondaId, BgpUpdateMessage, UpdateMessage};
+use routecore::addr::Prefix;
 use routecore::asn::Asn;
 use routecore::bgp::message::UpdateMessage as UpdatePdu;
-use routecore::addr::Prefix;
+use smallvec::SmallVec;
+use tokio::net::TcpStream;
+use tokio::sync::mpsc;
 
 use rotonda_fsm::bgp::session::{
     BgpConfig, // trait
@@ -278,7 +289,6 @@ impl Processor {
 
     // For every NLRI and every withdrawal, send out a Single Payload to the
     // next unit.
-    // TODO: properly batch these in an Update::Bulk instead of Update::Single
     async fn process_update(
         &mut self,
         pdu: UpdatePdu<Bytes>,
@@ -288,45 +298,58 @@ impl Processor {
         let rot_id = RotondaId(0_usize);
         let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
         let msg = Arc::new(BgpUpdateMessage::new((rot_id, ltime), UpdateMessage(pdu.clone())));
-        for n in pdu.nlris().iter() {
-            let prefix = if let Some(prefix) = n.prefix() {
-                prefix
-            } else {
-                debug!("NLRI without actual prefix");
-                continue
-            };
+        for chunk in pdu.nlris().iter().collect::<Vec<_>>().chunks(8) {
+            let mut bulk = SmallVec::new();
+            for nlri in chunk {
+                let prefix = if let Some(prefix) = nlri.prefix() {
+                    prefix
+                } else {
+                    debug!("NLRI without actual prefix");
+                    continue
+                };
 
-            self.observed_prefixes.insert(prefix);
+                self.observed_prefixes.insert(prefix);
 
-            let rrwd = RawRouteWithDeltas::new_with_message_ref(
-                (rot_id, ltime),
-                RotoPrefix::new(prefix),
-                &msg,
-                RouteStatus::InConvergence
-                );
-            let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
-            let payload = Payload::TypeValue(typval);
-            self.gate.update_data(Update::Single(payload)).await;
+                let rrwd = RawRouteWithDeltas::new_with_message_ref(
+                    (rot_id, ltime),
+                    RotoPrefix::new(prefix),
+                    &msg,
+                    RouteStatus::InConvergence
+                    );
+                let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
+                let payload = Payload::TypeValue(typval);
+                //self.gate.update_data(Update::Single(payload)).await;
+                bulk.push(payload);
+            }
+            self.gate.update_data(Update::Bulk(bulk.into())).await;
         }
-        for w in pdu.withdrawals().iter() {
-            let prefix = if let Some(prefix) = w.prefix() {
-                prefix
-            } else {
-                debug!("Withdrawal without actual prefix");
-                continue
-            };
 
-            self.observed_prefixes.remove(&prefix);
 
-            let rrwd = RawRouteWithDeltas::new_with_message_ref(
-                (rot_id, ltime),
-                RotoPrefix::new(prefix),
-                &msg,
-                RouteStatus::Withdrawn
-                );
-            let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
-            let payload = Payload::TypeValue(typval);
-            self.gate.update_data(Update::Single(payload)).await;
+
+        for chunk in pdu.withdrawals().iter().collect::<Vec<_>>().chunks(8) {
+            let mut bulk = SmallVec::new();
+            for withdrawal in chunk {
+                let prefix = if let Some(prefix) = withdrawal.prefix() {
+                    prefix
+                } else {
+                    debug!("Withdrawal without actual prefix");
+                    continue
+                };
+
+                self.observed_prefixes.remove(&prefix);
+
+                let rrwd = RawRouteWithDeltas::new_with_message_ref(
+                    (rot_id, ltime),
+                    RotoPrefix::new(prefix),
+                    &msg,
+                    RouteStatus::Withdrawn
+                    );
+                let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
+                let payload = Payload::TypeValue(typval);
+                //self.gate.update_data(Update::Single(payload)).await;
+                bulk.push(payload);
+            }
+            self.gate.update_data(Update::Bulk(bulk.into())).await;
         }
     }
 

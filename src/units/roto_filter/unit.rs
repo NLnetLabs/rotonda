@@ -207,7 +207,7 @@ impl RotoFilterRunner {
 
                             // Build dynamic input data and submit it to the VM to execute with the Roto script it was
                             // compiled against.
-                            roto::types::collections::Record::create_instance(
+                            roto::types::collections::Record::create_instance_with_ordered_fields(
                                 vm_record_type_ref,
                                 vec![
                                     (

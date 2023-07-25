@@ -1325,7 +1325,7 @@ pub mod bgp {
                     0 => OriginType::Igp,
                     1 => OriginType::Egp,
                     2 => OriginType::Incomplete,
-                    _ => OriginType::Unknown(v),
+                    _ => OriginType::Unimplemented(v),
                 };
                 Self(origin_type)
             }
@@ -1337,7 +1337,7 @@ pub mod bgp {
                     MyOriginType(OriginType::Igp) => 0,
                     MyOriginType(OriginType::Egp) => 1,
                     MyOriginType(OriginType::Incomplete) => 2,
-                    MyOriginType(OriginType::Unknown(v)) => *v,
+                    MyOriginType(OriginType::Unimplemented(v)) => *v,
                 }
             }
         }

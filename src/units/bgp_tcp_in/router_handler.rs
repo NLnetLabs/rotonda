@@ -19,7 +19,12 @@ use roto::types::builtin::{
 use roto::types::typevalue::TypeValue;
 use routecore::addr::Prefix;
 use routecore::asn::Asn;
-use routecore::bgp::message::UpdateMessage as UpdatePdu;
+use routecore::bgp::message::{
+    nlri::Nlri,
+    SessionConfig,
+    update::{ComposeError, UpdateBuilder},
+    UpdateMessage as UpdatePdu
+};
 use smallvec::SmallVec;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -264,37 +269,145 @@ impl Processor {
             assert!(self.observed_prefixes.is_empty());
         }
 
-        // TODO
-        // And, withdraw all prefixes we observed.
-        /*
-        for prefix in self.observed_prefixes {
+        // attempt using new withdrawals_from_iter methods in routecore
+        // XXX see https://github.com/rust-lang/rust/issues/102211
+        // we can not do observed_prefixes.iter().map(|p| ...).peekable()
+        // because that results in an error 
+        //  "higher-ranked lifetime error"
+        //
+        // For now, we create a separate vec and push Nlri in there.
+
+        let mut nlris = vec![];
+        self.observed_prefixes.iter().for_each(|p| {
+            nlris.push(Nlri::Basic((*p).into()));
+        });
+        let mut withdrawals_iter = nlris.into_iter().peekable();
+        let mut observed_prefixes = self.observed_prefixes.iter();
+
+        while withdrawals_iter.peek().is_some() {
+            let mut builder = UpdateBuilder::new_bytes();
+            let old_len = withdrawals_iter.len();
+            match builder.withdrawals_from_iter(&mut withdrawals_iter) {
+                Ok(()) => {
+                    // Everything fit into this PDU, done after this one.
+
+                    debug!("Ok(()) from builder, last PDU");
+
+                }
+                Err(ComposeError::PduTooLarge(_)) => {
+                    // There is more in prefix_iter to process in a next PDU.
+
+                    debug!("PduTooLarge from builder, remaining: {}",
+                           withdrawals_iter.len()
+                           );
+                }
+                Err(e) => {
+                    error!("error while building withdrawal PDUs: {}", e);
+                    break;
+                }
+            }
+            let pdu = match builder.finish() {
+                Ok(pdu) => pdu,
+                Err(_) => {
+                    // Only possible error is an AppendError, which is
+                    // unlikely.
+                    error!("AppendError while constructing withdrawal PDU");
+                    break
+                }
+            };
+            let in_pdu = old_len - withdrawals_iter.len();
             let rot_id = RotondaId(0_usize);
             let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
-            let rrwd = RawRouteWithDeltas::new_with_message(
-                (rot_id, ltime),
-                RotoPrefix::new(prefix),
-                Some(IpAddress::new(peer_ip)),
-                Some(RotoAsn::new(peer_asn)),
-                UpdateMessage(pdu.clone()),
-                RouteStatus::Withdrawn
-                );
-            let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
-            let payload = Payload::TypeValue(typval);
-            self.gate.update_data(Update::Single(payload)).await;
+            let msg = Arc::new(BgpUpdateMessage::new(
+                    (rot_id, ltime),
+                    UpdateMessage::new(pdu, SessionConfig::modern())
+            ));
+            let mut sent_out = 0;
+            //for _ in 0..num_processed {
+
+            while sent_out < in_pdu {
+                let mut bulk = SmallVec::new();
+                while bulk.len() < 8 {
+                    debug!("bulk.len() / sent_out: {}/{}", bulk.len(), sent_out);
+                    let prefix = if let Some(p) = observed_prefixes.next() {
+                        p
+                    } else {
+                        break
+                    };
+
+                    let rot_id = RotondaId(0_usize);
+                    let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
+                    let rrwd = RawRouteWithDeltas::new_with_message_ref(
+                        (rot_id, ltime),
+                        RotoPrefix::new(*prefix),
+                        &msg,
+                        RouteStatus::InConvergence
+                    );
+                    let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
+                    let payload = Payload::TypeValue(typval);
+                    sent_out += 1;
+                    bulk.push(payload);
+                } 
+                debug!("sending bulk payload withdrawal");
+                self.gate.update_data(Update::Bulk(bulk.into())).await;
+            }
         }
-        */
+
+        assert!(observed_prefixes.len() == 0);
+
+
 
         (session, rx_sess)
     }
 
-    // For every NLRI and every withdrawal, send out a Single Payload to the
-    // next unit.
+    fn print_pcap<T: AsRef<[u8]>>(buf: T) {
+        print!("000000 ");
+        for b in buf.as_ref() {
+            print!("{:02x} ", b);
+        }
+        println!();
+    }
+
+    // For every NLRI and every withdrawal, send out Bulk Payload to the next
+    // unit.
     async fn process_update(
         &mut self,
         pdu: UpdatePdu<Bytes>,
         //peer_ip: IpAddr,
         //peer_asn: Asn
     ) {
+        Self::print_pcap(pdu.as_ref());
+
+        // When sending both v4 and v6 nlri using exabgp, exa sends a v4
+        // NextHop in a v6 MP_REACH_NLRI, which is invalid.
+        // However, routecore logs that the nexthop looks bogus but continues
+        // and happily gives us the announced prefixes from the nlri in the
+        // pdu.
+        // What should we do here? One option is to let NextHop::check return
+        // an Error in such case, and let Nlris::parse use NextHop::check
+        // instead of NextHop::skip.
+        // (For now, returning an Error from NextHop::check would perhaps be
+        // sufficient, but in the near future we want to make all the parsing
+        // even lazier.)
+        //
+        // ------
+        //
+        // Local copy of routecore now throws the Error, that seems to work.
+        // The session is reset:
+        //
+        // [2023-08-02 21:13:18] WARN  routecore::bgp::message::nlri: Unimplemented NextHop AFI/SAFI Ipv6/Unicast len 4
+        // [2023-08-02 21:13:18] ERROR rotonda_fsm::bgp::session: error: parse error
+        // [2023-08-02 21:13:18] DEBUG rotonda_fsm::bgp::fsm: FSM Established -> Connect
+        // [2023-08-02 21:13:18] ERROR rotonda::units::bgp_tcp_in::router_handler: error from fsm: error: error from read_frame
+        // [2023-08-02 21:13:18] DEBUG rotonda::units::bgp_tcp_in::router_handler: removed AS200@10.1.0.2 from live_sessions (current count: 0)
+        //
+        // And all previously announced correct prefixes are withdrawn from
+        // rib-unit. Perhaps this can serve when further developing the part
+        // where such an invalid PDU results in a specific NOTIFICATION that
+        // needs to go out. Also, check whether 7606 comes into play here.
+
+
+
         let rot_id = RotondaId(0_usize);
         let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
         let msg = Arc::new(BgpUpdateMessage::new((rot_id, ltime), UpdateMessage(pdu.clone())));

@@ -37,7 +37,7 @@ use std::{
 };
 use std::{future::pending, sync::atomic::AtomicUsize};
 use tokio::sync::{mpsc, oneshot, RwLock};
-use tokio::time::{timeout_at, Instant, timeout};
+use tokio::time::{timeout_at, Instant};
 use uuid::Uuid;
 
 #[async_trait]
@@ -152,9 +152,9 @@ impl Gate {
     }
 
     /// Take the key internals of a Gate to use elsewhere.
-    /// 
+    ///
     /// Can't be done manually via destructuring due to the existence of the Drop impl for Gate.
-    /// 
+    ///
     /// For internal use only, hence not public.
     fn take(self) -> (mpsc::Receiver<GateCommand>, FrimMap<Uuid, UpdateSender>) {
         let commands = self.commands.clone();
@@ -182,7 +182,12 @@ impl Gate {
 
     pub async fn detach(&self) {
         if let Some(sender) = &self.parent_command_sender {
-            if let Err(_err) = sender.send(GateCommand::DetachClone { clone_id: self.clone_id.unwrap() }).await {
+            if let Err(_err) = sender
+                .send(GateCommand::DetachClone {
+                    clone_id: self.clone_id.unwrap(),
+                })
+                .await
+            {
                 // TO DO
             }
         }
@@ -225,7 +230,7 @@ impl Gate {
                     // clone tree so that it can be acted upon at the root of
                     // the tree.
                     self.detach().await;
-                },
+                }
 
                 GateCommand::Suspension { slot, suspend } => self.suspension(slot, suspend),
 
@@ -270,13 +275,7 @@ impl Gate {
 
                 GateCommand::Reconfigure {
                     new_config,
-                    new_gate/*:
-                        Gate {
-                            id: new_id,
-                            commands: new_commands,
-                            updates: new_updates,
-                            ..
-                        },*/
+                    new_gate,
                 } => {
                     assert!(
                         !self.is_clone(),
@@ -582,11 +581,11 @@ impl Clone for Gate {
     /// Clone the gate.
     ///
     /// # Why clone?
-    /// 
+    ///
     /// Cloning a gate clones the underlying mpsc::Sender instances so that the
     /// gate can be passed across await/thread boundaries in order for multiple
     /// tasks to concurrently push updates through the gate.
-    /// 
+    ///
     /// A default Clone impl isn't possible because the command receiver cannot
     /// be cloned. Instead we give the clone its own command receiver and give
     /// the corresponding sender to the parent so that commands relevant to the
@@ -1457,7 +1456,7 @@ enum GateCommand {
 
     DetachClone {
         clone_id: Uuid,
-    }
+    },
 }
 
 impl Clone for GateCommand {

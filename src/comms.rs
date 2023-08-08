@@ -204,8 +204,6 @@ impl Gate {
     /// Panics if a cloned gate receives `GateCommand::Subscribe` or a
     /// non-cloned gate receives `GateCommand::FollowSubscribe`.
     pub async fn process(&self) -> Result<GateStatus, Terminated> {
-        self.cleanup_clone_senders();
-
         loop {
             match timeout(Duration::from_secs(1), self.process_internal()).await {
                 Ok(Ok(status)) => {
@@ -220,15 +218,6 @@ impl Gate {
                     // Wait completed, loop again
                 }
             }
-
-            self.cleanup_clone_senders();
-        }
-    }
-
-    fn cleanup_clone_senders(&self) {
-        if !self.is_clone() {
-            self.clone_senders
-                .retain(|_uuid, sender| !sender.is_closed());
         }
     }
 

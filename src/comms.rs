@@ -204,24 +204,6 @@ impl Gate {
     /// Panics if a cloned gate receives `GateCommand::Subscribe` or a
     /// non-cloned gate receives `GateCommand::FollowSubscribe`.
     pub async fn process(&self) -> Result<GateStatus, Terminated> {
-        loop {
-            match timeout(Duration::from_secs(1), self.process_internal()).await {
-                Ok(Ok(status)) => {
-                    // Wait interrupted by internal gate status change
-                    return Ok(status);
-                }
-                Ok(Err(Terminated)) => {
-                    // Wait interrupted by gate termination, abort
-                    return Err(Terminated);
-                }
-                Err(_) => {
-                    // Wait completed, loop again
-                }
-            }
-        }
-    }
-
-    pub async fn process_internal(&self) -> Result<GateStatus, Terminated> {
         let status = self.get_gate_status();
         loop {
             let command = {

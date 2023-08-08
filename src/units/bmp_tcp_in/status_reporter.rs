@@ -74,6 +74,7 @@ impl BmpTcpInStatusReporter {
     pub fn router_connection_lost(&self, router_addr: SocketAddr) {
         sr_log!(debug: self, "Router connection lost: {}", router_addr);
         self.metrics.connection_lost_count.fetch_add(1, Relaxed);
+        self.metrics.remove_router(router_addr);
     }
 }
 

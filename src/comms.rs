@@ -37,7 +37,7 @@ use std::{
 };
 use std::{future::pending, sync::atomic::AtomicUsize};
 use tokio::sync::{mpsc, oneshot, RwLock};
-use tokio::time::{timeout_at, Instant};
+use tokio::time::{timeout_at, Instant, timeout};
 use uuid::Uuid;
 
 #[async_trait]
@@ -101,7 +101,12 @@ pub struct Gate {
     /// Senders for propagating received commands to clones of this Gate.
     clone_senders: Arc<FrimMap<Uuid, mpsc::Sender<GateCommand>>>,
 
-    is_clone: bool,
+    /// The id of this clone, if we are a clone
+    clone_id: Option<Uuid>,
+
+    /// Used by clones to remove themselves from the parents clone_senders set.
+    /// If Some indicates that we are a clone.
+    parent_clone_senders: Option<Arc<FrimMap<Uuid, mpsc::Sender<GateCommand>>>>,
 }
 
 impl Gate {
@@ -121,7 +126,8 @@ impl Gate {
             unit_status: Default::default(),
             metrics: Default::default(),
             clone_senders: Default::default(),
-            is_clone: false,
+            clone_id: None,
+            parent_clone_senders: None,
         };
         let agent = GateAgent {
             id: gate.id.clone(),
@@ -135,7 +141,7 @@ impl Gate {
     }
 
     pub fn is_clone(&self) -> bool {
-        self.is_clone
+        self.parent_clone_senders.is_some()
     }
 
     /// Returns a shareable reference to the gate metrics.
@@ -161,6 +167,35 @@ impl Gate {
     /// Panics if a cloned gate receives `GateCommand::Subscribe` or a
     /// non-cloned gate receives `GateCommand::FollowSubscribe`.
     pub async fn process(&self) -> Result<GateStatus, Terminated> {
+        self.cleanup_clone_senders();
+
+        loop {
+            match timeout(Duration::from_secs(1), self.process_internal()).await {
+                Ok(Ok(status)) => {
+                    // Wait interrupted by internal gate status change
+                    return Ok(status);
+                }
+                Ok(Err(Terminated)) => {
+                    // Wait interrupted by gate termination, abort
+                    return Err(Terminated);
+                }
+                Err(_) => {
+                    // Wait completed, loop again
+                }
+            }
+
+            self.cleanup_clone_senders();
+        }
+    }
+
+    fn cleanup_clone_senders(&self) {
+        if !self.is_clone() {
+            self.clone_senders
+                .retain(|_uuid, sender| !sender.is_closed());
+        }
+    }
+
+    pub async fn process_internal(&self) -> Result<GateStatus, Terminated> {
         let status = self.get_gate_status();
         loop {
             let command = {
@@ -180,7 +215,7 @@ impl Gate {
                     direct_update,
                 } => {
                     assert!(
-                        !self.is_clone,
+                        !self.is_clone(),
                         "Cloned gates do not support the Subscribe command"
                     );
                     self.subscribe(suspended, response, direct_update).await
@@ -188,7 +223,7 @@ impl Gate {
 
                 GateCommand::Unsubscribe { slot } => {
                     assert!(
-                        !self.is_clone,
+                        !self.is_clone(),
                         "Cloned gates do not support the Unsubscribe command"
                     );
                     self.unsubscribe(slot).await
@@ -199,7 +234,7 @@ impl Gate {
                     update_sender,
                 } => {
                     assert!(
-                        self.is_clone,
+                        self.is_clone(),
                         "Only cloned gates support the FollowSubscribe command"
                     );
                     self.updates.insert(slot, update_sender);
@@ -207,7 +242,7 @@ impl Gate {
 
                 GateCommand::FollowUnsubscribe { slot } => {
                     assert!(
-                        self.is_clone,
+                        self.is_clone(),
                         "Only cloned gates support the FollowUnsubscribe command"
                     );
                     self.updates.remove(&slot);
@@ -224,7 +259,7 @@ impl Gate {
                         },
                 } => {
                     assert!(
-                        !self.is_clone,
+                        !self.is_clone(),
                         "Cloned gates do not support the Reconfigure command"
                     );
 
@@ -250,7 +285,7 @@ impl Gate {
 
                 GateCommand::FollowReconfigure { new_config } => {
                     assert!(
-                        self.is_clone,
+                        self.is_clone(),
                         "Only cloned gates support the FollowReconfigure command"
                     );
                     return Ok(GateStatus::Reconfiguring { new_config });
@@ -330,7 +365,7 @@ impl Gate {
     /// # Panics
     ///
     /// See [process()](Self::process).
-    pub async fn wait(&mut self, secs: u64) -> Result<(), Terminated> {
+    pub async fn wait(&self, secs: u64) -> Result<(), Terminated> {
         let end = Instant::now() + Duration::from_secs(secs);
 
         while end > Instant::now() {
@@ -528,6 +563,12 @@ impl Clone for Gate {
     /// tasks to concurrently push updates through the gate.
     fn clone(&self) -> Self {
         let (tx, rx) = mpsc::channel(COMMAND_QUEUE_LEN);
+        let clone_id = Uuid::new_v4();
+        let parent_clone_senders = if self.is_clone() {
+            self.parent_clone_senders.clone()
+        } else {
+            Some(self.clone_senders.clone())
+        };
         let gate = Gate {
             id: self.id.clone(),
             commands: Arc::new(RwLock::new(rx)),
@@ -537,10 +578,12 @@ impl Clone for Gate {
             unit_status: self.unit_status.clone(),
             metrics: self.metrics.clone(),
             clone_senders: Default::default(),
-            is_clone: true,
+            clone_id: Some(clone_id),
+            parent_clone_senders,
         };
 
-        self.clone_senders.insert(Uuid::new_v4(), tx);
+        self.clone_senders.insert(clone_id, tx);
+        eprintln!("Length after inserting = {}", self.clone_senders.len());
 
         gate
     }

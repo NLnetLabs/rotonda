@@ -1660,7 +1660,7 @@ mod tests {
         assert_eq!(1, counter.load(Ordering::SeqCst));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn gate_clones_terminate_when_parent_gate_is_dropped() {
         let (gate, agent) = Gate::new(10);
         let gate_clone = gate.clone();
@@ -1686,7 +1686,7 @@ mod tests {
         eprintln!("GATE AND GATE CLONE ARE TERMINATED");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn gate_clones_receive_termination_signal() {
         let (gate, agent) = Gate::new(10);
         let gate_clone = gate.clone();

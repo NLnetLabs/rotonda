@@ -298,7 +298,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_reconfigured_bind_address() {
         // Given an instance of the BMP TCP input unit that is configured to
         // listen for incoming connections on "localhost:8080":
@@ -350,7 +350,7 @@ mod tests {
         assert_eq!(binds[1], "otherhost:8081");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_unchanged_bind_address() {
         // Given an instance of the BMP TCP input unit that is configured to
         // listen for incoming connections on "localhost:8080":

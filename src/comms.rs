@@ -84,8 +84,9 @@ pub struct Gate {
     commands: Arc<RwLock<mpsc::Receiver<GateCommand>>>,
 
     /// Sender to our command receiver. Cloned when creating a clone of this
-    /// Gate so that the cloned Gate can notify us when it is dropped.
-    command_sender: mpsc::Sender<GateCommand>,
+    /// Gate so that the cloned Gate can notify us when it is dropped. Only
+    /// root Gates have this set, not their clones (if any).
+    command_sender: Option<mpsc::Sender<GateCommand>>,
 
     /// Senders to all links.
     updates: Arc<FrimMap<Uuid, UpdateSender>>,
@@ -117,9 +118,13 @@ pub struct Gate {
 // reference to them is never cleaned up.
 impl Drop for Gate {
     fn drop(&mut self) {
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.detach());
-        });
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            tokio::task::block_in_place(move || {
+                handle.block_on(self.detach());
+            });
+        } else {
+            self.blocking_detach();
+        }
     }
 }
 
@@ -134,7 +139,7 @@ impl Gate {
         let gate = Gate {
             id: Arc::new(Mutex::new(Uuid::new_v4())),
             commands: Arc::new(RwLock::new(rx)),
-            command_sender: tx.clone(),
+            command_sender: Some(tx.clone()),
             updates: Default::default(),
             queue_size,
             suspended: Default::default(),
@@ -182,12 +187,19 @@ impl Gate {
 
     pub async fn detach(&self) {
         if let Some(sender) = &self.parent_command_sender {
-            if let Err(_err) = sender
-                .send(GateCommand::DetachClone {
-                    clone_id: self.clone_id.unwrap(),
-                })
-                .await
-            {
+            if let Err(_err) = sender.send(GateCommand::DetachClone {
+                clone_id: self.clone_id.unwrap(),
+            }).await {
+                // TO DO
+            }
+        }
+    }
+
+    pub fn blocking_detach(&self) {
+        if let Some(sender) = &self.parent_command_sender {
+            if let Err(_err) = sender.blocking_send(GateCommand::DetachClone {
+                clone_id: self.clone_id.unwrap(),
+            }) {
                 // TO DO
             }
         }
@@ -596,7 +608,7 @@ impl Clone for Gate {
         let gate = Gate {
             id: self.id.clone(),
             commands: Arc::new(RwLock::new(rx)),
-            command_sender: tx.clone(),
+            command_sender: None,
             updates: self.updates.clone(),
             queue_size: self.queue_size,
             suspended: self.suspended.clone(),
@@ -604,7 +616,7 @@ impl Clone for Gate {
             metrics: self.metrics.clone(),
             clone_senders: Default::default(),
             clone_id: Some(clone_id),
-            parent_command_sender: Some(self.command_sender.clone()),
+            parent_command_sender: self.command_sender.clone(),
         };
 
         self.clone_senders.insert(clone_id, tx);
@@ -1701,5 +1713,24 @@ mod tests {
         assert_eq!(gate_clone.process().await, Err(Terminated));
 
         eprintln!("GATE AND GATE CLONE ARE TERMINATED");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn gate_parent_cleans_up_when_clone_terminates() {
+        let (gate, _agent) = Gate::new(10);
+        let gate_clone = gate.clone();
+
+        eprintln!("CHECKING GATE HAS CLONE SENDER");
+        assert_eq!(gate.clone_senders.is_empty(), false);
+
+        eprintln!("DROPPING CLONED GATE");
+        drop(gate_clone);
+
+        // Allow the DetachClone command to be received and acted upon
+        eprintln!("PROCESS COMMANDS IN PARENT GATE");
+        gate.wait(1).await.unwrap();
+
+        eprintln!("CHECKING GATE HAS NO CLONE SENDER");
+        assert_eq!(gate.clone_senders.is_empty(), true);
     }
 }

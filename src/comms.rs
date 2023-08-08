@@ -153,7 +153,7 @@ impl Gate {
 
     /// Take the key internals of a Gate to use elsewhere.
     /// 
-    /// Can't be done manually via destructuring due to the existing of the Drop impl for Gate.
+    /// Can't be done manually via destructuring due to the existence of the Drop impl for Gate.
     /// 
     /// For internal use only, hence not public.
     fn take(self) -> (mpsc::Receiver<GateCommand>, FrimMap<Uuid, UpdateSender>) {

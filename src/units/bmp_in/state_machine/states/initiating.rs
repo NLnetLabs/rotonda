@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, sync::Arc, ops::ControlFlow};
+use std::{net::SocketAddr, ops::ControlFlow, sync::Arc};
 
 use bytes::Bytes;
 use roto::types::builtin::BgpUpdateMessage;
@@ -58,7 +58,8 @@ impl BmpStateDetails<Initiating> {
     }
 
     pub async fn process_msg(self, msg_buf: Bytes) -> ProcessingResult {
-        self.process_msg_with_filter(msg_buf, None::<()>, |msg, _| Ok(ControlFlow::Continue(msg))).await
+        self.process_msg_with_filter(msg_buf, None::<()>, |msg, _| Ok(ControlFlow::Continue(msg)))
+            .await
     }
 
     pub async fn process_msg_with_filter<F, D>(
@@ -68,7 +69,7 @@ impl BmpStateDetails<Initiating> {
         _filter: F,
     ) -> ProcessingResult
     where
-        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>
+        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>,
     {
         match BmpMsg::from_octets(&msg_buf).unwrap() {
             // already verified upstream

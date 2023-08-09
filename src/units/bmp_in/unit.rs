@@ -1,11 +1,25 @@
-use std::{cell::RefCell, net::SocketAddr, sync::{Arc, Weak}, path::PathBuf, time::Instant, ops::ControlFlow};
+use std::{
+    cell::RefCell,
+    net::SocketAddr,
+    ops::ControlFlow,
+    path::PathBuf,
+    sync::{Arc, Weak},
+    time::Instant,
+};
 
 use super::state_machine::processing::ProcessingResult;
-use crate::{units::bmp_in::{
-    metrics::BmpInMetrics,
-    state_machine::{machine::BmpState, processing::MessageType},
-    status_reporter::BmpInStatusReporter,
-}, common::{roto::is_filtered_in_vm, file_io::{TheFileIo, FileIo}}, tokio::TokioTaskMetrics};
+use crate::{
+    common::{
+        file_io::{FileIo, TheFileIo},
+        roto::is_filtered_in_vm,
+    },
+    tokio::TokioTaskMetrics,
+    units::bmp_in::{
+        metrics::BmpInMetrics,
+        state_machine::{machine::BmpState, processing::MessageType},
+        status_reporter::BmpInStatusReporter,
+    },
+};
 use crate::{
     common::{
         frim::FrimMap,
@@ -26,7 +40,10 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use log::info;
 use non_empty_vec::NonEmpty;
-use roto::{types::{builtin::{BuiltinTypeValue}, typevalue::TypeValue}, traits::RotoType};
+use roto::{
+    traits::RotoType,
+    types::{builtin::BuiltinTypeValue, typevalue::TypeValue},
+};
 use serde::Deserialize;
 use tokio::{runtime::Handle, sync::Mutex};
 
@@ -131,10 +148,8 @@ impl BmpInRunner {
         component.register_metrics(router_metrics.clone());
 
         // Setup our status reporting
-        let status_reporter = Arc::new(BmpInStatusReporter::new(
-            &unit_name,
-            router_metrics.clone(),
-        ));
+        let status_reporter =
+            Arc::new(BmpInStatusReporter::new(&unit_name, router_metrics.clone()));
 
         // Setup metrics to be updated by the BMP state machines that we use
         // to make sense of the BMP data per router that supplies it.
@@ -170,7 +185,9 @@ impl BmpInRunner {
         #[cfg(feature = "router-list")]
         let component = Arc::new(RwLock::new(component));
 
-        let roto_source_code = roto_path.map(|v| file_io.read_to_string(v).unwrap()).unwrap_or_default();
+        let roto_source_code = roto_path
+            .map(|v| file_io.read_to_string(v).unwrap())
+            .unwrap_or_default();
         let roto_source = (Instant::now(), roto_source_code);
         let roto_source = Arc::new(ArcSwap::from_pointee(roto_source));
 
@@ -248,7 +265,6 @@ impl BmpInRunner {
                             for link in sources.iter_mut() {
                                 link.connect(arc_self.clone(), false).await.unwrap();
                             }
-    
                         }
 
                         GateStatus::ReportLinks { report } => {
@@ -293,12 +309,7 @@ impl BmpInRunner {
 
         let metrics = self.router_metrics.clone();
 
-        BmpState::new(
-            *router_addr,
-            router_id,
-            child_status_reporter,
-            metrics,
-        )
+        BmpState::new(*router_addr, router_id, child_status_reporter, metrics)
     }
 
     fn router_disconnected(&self, router_addr: &SocketAddr) {
@@ -346,12 +357,26 @@ impl BmpInRunner {
         self.process_result(res, router_addr).await
     }
 
-    pub async fn process_result(&self, mut res: ProcessingResult, router_addr: &SocketAddr) -> BmpState {
+    pub async fn process_result(
+        &self,
+        mut res: ProcessingResult,
+        router_addr: &SocketAddr,
+    ) -> BmpState {
         match res.processing_result {
-            MessageType::InvalidMessage { err, known_peer, msg_bytes } => {
-                self.status_reporter.invalid_bmp_message_received(res.next_state.router_id());
+            MessageType::InvalidMessage {
+                err,
+                known_peer,
+                msg_bytes,
+            } => {
+                self.status_reporter
+                    .invalid_bmp_message_received(res.next_state.router_id());
                 if let Some(reporter) = res.next_state.status_reporter() {
-                    reporter.bgp_update_parse_hard_fail(res.next_state.router_id(), known_peer, err, msg_bytes);
+                    reporter.bgp_update_parse_hard_fail(
+                        res.next_state.router_id(),
+                        known_peer,
+                        err,
+                        msg_bytes,
+                    );
                 }
             }
 
@@ -420,7 +445,6 @@ impl BmpInRunner {
                     this_router_info.connected_at,
                     this_router_info.last_msg_at.clone(),
                     state_machine,
-                    
                 );
 
                 let processor = Arc::new(processor);
@@ -478,9 +502,7 @@ impl BmpInRunner {
         // processing of BMP messages received from other router connections.
         match update {
             Update::Single(Payload::RawBmp {
-                router_addr,
-                msg,
-                ..
+                router_addr, msg, ..
             }) => {
                 let entry = self.router_states.entry(router_addr);
 
@@ -494,7 +516,9 @@ impl BmpInRunner {
 
                     let weak_ref = Arc::downgrade(&new_entry);
                     tokio::task::block_in_place(|| {
-                        Handle::current().block_on(self.setup_router_specific_api_endpoint(weak_ref, &router_addr));
+                        Handle::current().block_on(
+                            self.setup_router_specific_api_endpoint(weak_ref, &router_addr),
+                        );
                     });
 
                     new_entry
@@ -515,7 +539,9 @@ impl BmpInRunner {
 
                     RawBmpPayload::Msg(msg_bytes) => {
                         // Run the state machine resulting in a new state.
-                        self.state_machine_metrics.instrument(self.process_msg(&router_addr, this_state, msg_bytes)).await
+                        self.state_machine_metrics
+                            .instrument(self.process_msg(&router_addr, this_state, msg_bytes))
+                            .await
                     }
                 };
 
@@ -540,7 +566,8 @@ impl BmpInRunner {
             }
 
             Update::QueryResult(..) => {
-                self.status_reporter.input_mismatch("Update::Single(_)", "Update::QueryResult(_)");
+                self.status_reporter
+                    .input_mismatch("Update::Single(_)", "Update::QueryResult(_)");
             }
         }
     }
@@ -587,10 +614,10 @@ impl std::fmt::Debug for BmpInRunner {
 mod tests {
     use std::str::FromStr;
 
-    use roto::types::builtin::{RotondaId, BgpUpdateMessage};
+    use roto::types::builtin::{BgpUpdateMessage, RotondaId};
     use routecore::bgp::message::SessionConfig;
 
-    use crate::bgp::encode::{Announcements, mk_bgp_update, Prefixes};
+    use crate::bgp::encode::{mk_bgp_update, Announcements, Prefixes};
 
     use super::*;
 
@@ -660,14 +687,19 @@ mod tests {
         // And a BGP UPDATE message to pass as input to the Roto script
         let bgp_update_bytes = mk_bgp_update_msg();
         let bgp_update_msg = mk_filter_input(bgp_update_bytes.clone());
-        
+
         // When the Roto VM executes the filter script with our BGP UPDATE message as input
         let res = BmpInRunner::is_filtered(bgp_update_msg, Some(roto_source));
 
         // Then we should be told that it is okay to proceed and the output of the script should match the BGP UPDATE
         // message that we passed in (as the script doesn't modify the output).
         let expected_raw_bgp_message = Arc::new(mk_filter_input(bgp_update_bytes));
-        assert_eq!(res, Ok(ControlFlow::Continue(TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(expected_raw_bgp_message)))));
+        assert_eq!(
+            res,
+            Ok(ControlFlow::Continue(TypeValue::Builtin(
+                BuiltinTypeValue::BgpUpdateMessage(expected_raw_bgp_message)
+            )))
+        );
     }
 
     #[tokio::test]
@@ -699,7 +731,7 @@ mod tests {
         // And an IPv4 BGP UPDATE message to pass as input to the Roto script
         let bgp_update_bytes = mk_bgp_update_msg();
         let bgp_update_msg = mk_filter_input(bgp_update_bytes.clone());
-        
+
         // When the Roto VM executes the filter script with our BGP UPDATE message as input
         let res = BmpInRunner::is_filtered(bgp_update_msg, Some(roto_source));
 

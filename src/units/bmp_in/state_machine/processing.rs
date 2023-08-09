@@ -21,14 +21,17 @@ impl ProcessingResult {
 
 #[derive(Debug)]
 pub enum MessageType {
-    InvalidMessage { 
-        known_peer: Option<bool>,   // is the peer known or not?
-        msg_bytes: Option<Bytes>,   // do we have a copy of the message?
-        err: String },
+    InvalidMessage {
+        known_peer: Option<bool>, // is the peer known or not?
+        msg_bytes: Option<Bytes>, // do we have a copy of the message?
+        err: String,
+    },
 
     Other,
 
-    RoutingUpdate { update: Update },
+    RoutingUpdate {
+        update: Update,
+    },
 
     StateTransition,
 

@@ -501,7 +501,8 @@ mod tests {
     ) {
         let full_metric_name = format!("{}{}", METRIC_PREFIX, metric_name);
         loop {
-            if get_metrics(metrics).get(&full_metric_name, label, result.clone()) == Some(wanted_v) {
+            if get_metrics(metrics).get(&full_metric_name, label, result.clone()) == Some(wanted_v)
+            {
                 result.store(MetricLookupResult::Ok, Ordering::SeqCst);
                 break;
             }

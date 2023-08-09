@@ -10,7 +10,7 @@ use crate::{
     payload::RouterId,
 };
 
-use super::metrics::{RouterMetrics, BmpInMetrics};
+use super::metrics::{BmpInMetrics, RouterMetrics};
 
 #[derive(Debug, Default)]
 pub struct BmpInStatusReporter {
@@ -43,7 +43,9 @@ impl BmpInStatusReporter {
 
     pub fn invalid_bmp_message_received(&self, router_id: Arc<RouterId>) {
         if let Some(router_metrics) = self.metrics.router_metrics(router_id) {
-            router_metrics.num_invalid_bmp_messages.fetch_add(1, Ordering::SeqCst);
+            router_metrics
+                .num_invalid_bmp_messages
+                .fetch_add(1, Ordering::SeqCst);
         }
     }
 

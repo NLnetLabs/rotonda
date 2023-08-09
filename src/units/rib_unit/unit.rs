@@ -22,7 +22,11 @@ use log::{error, log_enabled, trace};
 use non_empty_vec::NonEmpty;
 use roto::{
     traits::RotoType,
-    types::{builtin::{BuiltinTypeValue, RouteToken}, collections::ElementTypeValue, typevalue::TypeValue},
+    types::{
+        builtin::{BuiltinTypeValue, RouteToken},
+        collections::ElementTypeValue,
+        typevalue::TypeValue,
+    },
 };
 use rotonda_store::{
     custom_alloc::Upsert,
@@ -178,15 +182,15 @@ impl RibUnit {
             &self.rib_keys,
             TheFileIo::default(),
         )
-            .run(
-                self.sources,
-                self.http_api_path,
-                self.query_limits,
-                self.rib_type,
-                self.vrib_upstream,
-                waitpoint,
-            )
-            .await
+        .run(
+            self.sources,
+            self.http_api_path,
+            self.query_limits,
+            self.rib_type,
+            self.vrib_upstream,
+            waitpoint,
+        )
+        .await
     }
 
     fn default_http_api_path() -> String {
@@ -198,7 +202,12 @@ impl RibUnit {
     }
 
     fn default_rib_keys() -> NonEmpty<RouteToken> {
-        NonEmpty::try_from(vec![RouteToken::PeerIp, RouteToken::PeerAsn, RouteToken::AsPath]).unwrap()
+        NonEmpty::try_from(vec![
+            RouteToken::PeerIp,
+            RouteToken::PeerAsn,
+            RouteToken::AsPath,
+        ])
+        .unwrap()
     }
 }
 
@@ -883,7 +892,10 @@ mod tests {
 
         let config = mk_config_from_toml(toml).unwrap();
 
-        assert_eq!(config.rib_keys.as_slice(), &[RouteToken::PeerIp, RouteToken::PeerAsn, RouteToken::AsPath]);
+        assert_eq!(
+            config.rib_keys.as_slice(),
+            &[RouteToken::PeerIp, RouteToken::PeerAsn, RouteToken::AsPath]
+        );
     }
 
     #[test]
@@ -895,7 +907,10 @@ mod tests {
 
         let config = mk_config_from_toml(toml).unwrap();
 
-        assert_eq!(config.rib_keys.as_slice(), &[RouteToken::PeerIp, RouteToken::NextHop]);
+        assert_eq!(
+            config.rib_keys.as_slice(),
+            &[RouteToken::PeerIp, RouteToken::NextHop]
+        );
     }
 
     #[test]

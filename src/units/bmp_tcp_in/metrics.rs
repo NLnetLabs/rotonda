@@ -46,6 +46,10 @@ impl BmpTcpInMetrics {
             .entry(Arc::new(socket_addr))
             .or_insert_with(Default::default)
     }
+
+    pub fn remove_router(&self, socket_addr: SocketAddr) {
+        self.routers.remove(&Arc::new(socket_addr));
+    }
 }
 
 #[derive(Debug, Default)]

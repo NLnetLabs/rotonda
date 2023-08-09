@@ -83,6 +83,11 @@ pub struct Gate {
     /// Receiver for commands sent in by the links.
     commands: Arc<RwLock<mpsc::Receiver<GateCommand>>>,
 
+    /// Sender to our command receiver. Cloned when creating a clone of this
+    /// Gate so that the cloned Gate can notify us when it is dropped. Only
+    /// root Gates have this set, not their clones (if any).
+    command_sender: Option<mpsc::Sender<GateCommand>>,
+
     /// Senders to all links.
     updates: Arc<FrimMap<Uuid, UpdateSender>>,
 
@@ -101,7 +106,26 @@ pub struct Gate {
     /// Senders for propagating received commands to clones of this Gate.
     clone_senders: Arc<FrimMap<Uuid, mpsc::Sender<GateCommand>>>,
 
-    is_clone: bool,
+    /// The id of this clone, if we are a clone
+    clone_id: Option<Uuid>,
+
+    /// A sender for sending commands to the parent of a clone.
+    parent_command_sender: Option<mpsc::Sender<GateCommand>>,
+}
+
+// On drop, notify the parent of a cloned gate that this clone is detaching itself so that the parent Gate remove the
+// corresponding entry from its clone senders collection, otherwise clones "leak" memory in the parent because a
+// reference to them is never cleaned up.
+impl Drop for Gate {
+    fn drop(&mut self) {
+        if let Ok(handle) = tokio::runtime::Handle::try_current() {
+            tokio::task::block_in_place(move || {
+                handle.block_on(self.detach());
+            });
+        } else {
+            self.blocking_detach();
+        }
+    }
 }
 
 impl Gate {
@@ -115,13 +139,15 @@ impl Gate {
         let gate = Gate {
             id: Arc::new(Mutex::new(Uuid::new_v4())),
             commands: Arc::new(RwLock::new(rx)),
+            command_sender: Some(tx.clone()),
             updates: Default::default(),
             queue_size,
             suspended: Default::default(),
             unit_status: Default::default(),
             metrics: Default::default(),
             clone_senders: Default::default(),
-            is_clone: false,
+            clone_id: None,
+            parent_command_sender: None,
         };
         let agent = GateAgent {
             id: gate.id.clone(),
@@ -130,12 +156,26 @@ impl Gate {
         (gate, agent)
     }
 
+    /// Take the key internals of a Gate to use elsewhere.
+    ///
+    /// Can't be done manually via destructuring due to the existence of the Drop impl for Gate.
+    ///
+    /// For internal use only, hence not public.
+    fn take(self) -> (mpsc::Receiver<GateCommand>, FrimMap<Uuid, UpdateSender>) {
+        let commands = self.commands.clone();
+        let updates = self.updates.clone();
+        drop(self);
+        let commands = Arc::try_unwrap(commands).unwrap().into_inner();
+        let updates = Arc::try_unwrap(updates).unwrap();
+        (commands, updates)
+    }
+
     pub fn id(&self) -> Uuid {
         *self.id.lock().unwrap()
     }
 
     pub fn is_clone(&self) -> bool {
-        self.is_clone
+        self.clone_id.is_some()
     }
 
     /// Returns a shareable reference to the gate metrics.
@@ -143,6 +183,26 @@ impl Gate {
     /// Metrics are shared between a gate and its clones.
     pub fn metrics(&self) -> Arc<GateMetrics> {
         self.metrics.clone()
+    }
+
+    pub async fn detach(&self) {
+        if let Some(sender) = &self.parent_command_sender {
+            if let Err(_err) = sender.send(GateCommand::DetachClone {
+                clone_id: self.clone_id.unwrap(),
+            }).await {
+                // TO DO
+            }
+        }
+    }
+
+    pub fn blocking_detach(&self) {
+        if let Some(sender) = &self.parent_command_sender {
+            if let Err(_err) = sender.blocking_send(GateCommand::DetachClone {
+                clone_id: self.clone_id.unwrap(),
+            }) {
+                // TO DO
+            }
+        }
     }
 
     /// Runs the gate’s internal machine.
@@ -172,6 +232,18 @@ impl Gate {
             };
 
             match command {
+                GateCommand::DetachClone { clone_id } => {
+                    // clone_senders should only be populated in the root Gate
+                    // of a clone tree, so if we are a clone this should be a
+                    // NO OP.
+                    self.clone_senders.remove(&clone_id);
+
+                    // But if we are a clone, propagate the detach up the
+                    // clone tree so that it can be acted upon at the root of
+                    // the tree.
+                    self.detach().await;
+                }
+
                 GateCommand::Suspension { slot, suspend } => self.suspension(slot, suspend),
 
                 GateCommand::Subscribe {
@@ -180,7 +252,7 @@ impl Gate {
                     direct_update,
                 } => {
                     assert!(
-                        !self.is_clone,
+                        !self.is_clone(),
                         "Cloned gates do not support the Subscribe command"
                     );
                     self.subscribe(suspended, response, direct_update).await
@@ -188,7 +260,7 @@ impl Gate {
 
                 GateCommand::Unsubscribe { slot } => {
                     assert!(
-                        !self.is_clone,
+                        !self.is_clone(),
                         "Cloned gates do not support the Unsubscribe command"
                     );
                     self.unsubscribe(slot).await
@@ -199,7 +271,7 @@ impl Gate {
                     update_sender,
                 } => {
                     assert!(
-                        self.is_clone,
+                        self.is_clone(),
                         "Only cloned gates support the FollowSubscribe command"
                     );
                     self.updates.insert(slot, update_sender);
@@ -207,7 +279,7 @@ impl Gate {
 
                 GateCommand::FollowUnsubscribe { slot } => {
                     assert!(
-                        self.is_clone,
+                        self.is_clone(),
                         "Only cloned gates support the FollowUnsubscribe command"
                     );
                     self.updates.remove(&slot);
@@ -215,22 +287,16 @@ impl Gate {
 
                 GateCommand::Reconfigure {
                     new_config,
-                    new_gate:
-                        Gate {
-                            id: new_id,
-                            commands: new_commands,
-                            updates: new_updates,
-                            ..
-                        },
+                    new_gate,
                 } => {
                     assert!(
-                        !self.is_clone,
+                        !self.is_clone(),
                         "Cloned gates do not support the Reconfigure command"
                     );
 
                     // Ensure we drop the lock before we hit the .awaits below as we cannot hold the lock across an .await.
                     {
-                        let new_id = *new_id.lock().unwrap();
+                        let new_id = *new_gate.id.lock().unwrap();
                         let mut id = self.id.lock().unwrap();
                         if log_enabled!(log::Level::Trace) {
                             trace!("Gate[{}]: Reconfiguring: new ID={}", id, new_id);
@@ -238,9 +304,12 @@ impl Gate {
                         *id = new_id;
                     }
 
-                    *self.commands.write().await =
-                        Arc::try_unwrap(new_commands).unwrap().into_inner();
-                    self.updates.replace(Arc::try_unwrap(new_updates).unwrap());
+                    // This is an ugly way to take over the internals of the given Gate object and use them ourselves.
+                    // We need to take() because just destructuring the Gate struct causes compilation failure because the
+                    // Gate innards can't be moved out when Gate has a Drop impl.
+                    let (new_commands, new_updates) = new_gate.take();
+                    *self.commands.write().await = new_commands;
+                    self.updates.replace(new_updates);
                     self.notify_clones(GateCommand::FollowReconfigure {
                         new_config: new_config.clone(),
                     })
@@ -250,7 +319,7 @@ impl Gate {
 
                 GateCommand::FollowReconfigure { new_config } => {
                     assert!(
-                        self.is_clone,
+                        self.is_clone(),
                         "Only cloned gates support the FollowReconfigure command"
                     );
                     return Ok(GateStatus::Reconfiguring { new_config });
@@ -330,7 +399,7 @@ impl Gate {
     /// # Panics
     ///
     /// See [process()](Self::process).
-    pub async fn wait(&mut self, secs: u64) -> Result<(), Terminated> {
+    pub async fn wait(&self, secs: u64) -> Result<(), Terminated> {
         let end = Instant::now() + Duration::from_secs(secs);
 
         while end > Instant::now() {
@@ -523,24 +592,34 @@ impl Gate {
 impl Clone for Gate {
     /// Clone the gate.
     ///
+    /// # Why clone?
+    ///
     /// Cloning a gate clones the underlying mpsc::Sender instances so that the
     /// gate can be passed across await/thread boundaries in order for multiple
     /// tasks to concurrently push updates through the gate.
+    ///
+    /// A default Clone impl isn't possible because the command receiver cannot
+    /// be cloned. Instead we give the clone its own command receiver and give
+    /// the corresponding sender to the parent so that commands relevant to the
+    /// clone can be sent by the parent to the clone.
     fn clone(&self) -> Self {
         let (tx, rx) = mpsc::channel(COMMAND_QUEUE_LEN);
+        let clone_id = Uuid::new_v4();
         let gate = Gate {
             id: self.id.clone(),
             commands: Arc::new(RwLock::new(rx)),
+            command_sender: None,
             updates: self.updates.clone(),
             queue_size: self.queue_size,
             suspended: self.suspended.clone(),
             unit_status: self.unit_status.clone(),
             metrics: self.metrics.clone(),
             clone_senders: Default::default(),
-            is_clone: true,
+            clone_id: Some(clone_id),
+            parent_command_sender: self.command_sender.clone(),
         };
 
-        self.clone_senders.insert(Uuid::new_v4(), tx);
+        self.clone_senders.insert(clone_id, tx);
 
         gate
     }
@@ -1386,6 +1465,10 @@ enum GateCommand {
     },
 
     Terminate,
+
+    DetachClone {
+        clone_id: Uuid,
+    },
 }
 
 impl Clone for GateCommand {
@@ -1589,7 +1672,7 @@ mod tests {
         assert_eq!(1, counter.load(Ordering::SeqCst));
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn gate_clones_terminate_when_parent_gate_is_dropped() {
         let (gate, agent) = Gate::new(10);
         let gate_clone = gate.clone();
@@ -1615,7 +1698,7 @@ mod tests {
         eprintln!("GATE AND GATE CLONE ARE TERMINATED");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn gate_clones_receive_termination_signal() {
         let (gate, agent) = Gate::new(10);
         let gate_clone = gate.clone();
@@ -1630,5 +1713,24 @@ mod tests {
         assert_eq!(gate_clone.process().await, Err(Terminated));
 
         eprintln!("GATE AND GATE CLONE ARE TERMINATED");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn gate_parent_cleans_up_when_clone_terminates() {
+        let (gate, _agent) = Gate::new(10);
+        let gate_clone = gate.clone();
+
+        eprintln!("CHECKING GATE HAS CLONE SENDER");
+        assert_eq!(gate.clone_senders.is_empty(), false);
+
+        eprintln!("DROPPING CLONED GATE");
+        drop(gate_clone);
+
+        // Allow the DetachClone command to be received and acted upon
+        eprintln!("PROCESS COMMANDS IN PARENT GATE");
+        gate.wait(1).await.unwrap();
+
+        eprintln!("CHECKING GATE HAS NO CLONE SENDER");
+        assert_eq!(gate.clone_senders.is_empty(), true);
     }
 }

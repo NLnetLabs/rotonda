@@ -1,4 +1,4 @@
-module my-module {
+filter-map my-module {
     define {
         rx_tx msg: BmpMsg;
     }

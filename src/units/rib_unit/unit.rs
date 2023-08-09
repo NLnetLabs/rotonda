@@ -1,5 +1,6 @@
 use crate::{
     common::{
+        file_io::{FileIo, TheFileIo},
         frim::FrimMap,
         roto::{is_filtered_in_vm, ThreadLocalVM},
         status_reporter::{AnyStatusReporter, UnitStatusReporter},
@@ -34,7 +35,6 @@ use routecore::addr::Prefix;
 use serde::Deserialize;
 use std::{
     cell::RefCell,
-    fs::read_to_string,
     ops::{ControlFlow, Deref},
     path::PathBuf,
     str::FromStr,
@@ -170,7 +170,14 @@ impl RibUnit {
         gate: Gate,
         waitpoint: WaitPoint,
     ) -> Result<(), Terminated> {
-        RibUnitRunner::new(gate, component, self.roto_path, self.rib_type, &self.rib_keys)
+        RibUnitRunner::new(
+            gate,
+            component,
+            self.roto_path,
+            self.rib_type,
+            &self.rib_keys,
+            TheFileIo::default(),
+        )
             .run(
                 self.sources,
                 self.http_api_path,
@@ -256,9 +263,10 @@ impl RibUnitRunner {
         roto_path: Option<PathBuf>,
         rib_type: RibType,
         rib_keys: &[RouteToken],
+        file_io: TheFileIo,
     ) -> Self {
         let roto_source_code = roto_path
-            .map(|v| read_to_string(v).unwrap())
+            .map(|v| file_io.read_to_string(v).unwrap())
             .unwrap_or_default();
         let roto_source = (Instant::now(), roto_source_code);
         let roto_source = Arc::new(ArcSwap::from_pointee(roto_source));

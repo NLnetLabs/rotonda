@@ -1,11 +1,11 @@
-use std::{cell::RefCell, net::SocketAddr, sync::{Arc, Weak}, path::PathBuf, time::Instant, fs::read_to_string, ops::ControlFlow};
+use std::{cell::RefCell, net::SocketAddr, sync::{Arc, Weak}, path::PathBuf, time::Instant, ops::ControlFlow};
 
 use super::state_machine::processing::ProcessingResult;
-use crate::{units::{bmp_in::{
+use crate::{units::bmp_in::{
     metrics::BmpInMetrics,
     state_machine::{machine::BmpState, processing::MessageType},
     status_reporter::BmpInStatusReporter,
-}}, common::roto::is_filtered_in_vm, tokio::TokioTaskMetrics};
+}, common::{roto::is_filtered_in_vm, file_io::{TheFileIo, FileIo}}, tokio::TokioTaskMetrics};
 use crate::{
     common::{
         frim::FrimMap,
@@ -75,6 +75,7 @@ impl BmpIn {
             #[cfg(feature = "router-list")]
             self.http_api_path,
             self.roto_path,
+            TheFileIo::default(),
         )
         .run(self.sources, waitpoint)
         .await
@@ -106,6 +107,7 @@ struct BmpInRunner {
     _api_processor: Arc<dyn ProcessRequest>,
     roto_source: Arc<ArcSwap<(std::time::Instant, String)>>,
     state_machine_metrics: Arc<TokioTaskMetrics>,
+    file_io: TheFileIo,
 }
 
 impl BmpInRunner {
@@ -120,6 +122,7 @@ impl BmpInRunner {
         router_id_template: Arc<String>,
         #[cfg(feature = "router-list")] http_api_path: Arc<String>,
         roto_path: Option<PathBuf>,
+        file_io: TheFileIo,
     ) -> Self {
         let unit_name = component.name().clone();
 
@@ -167,7 +170,7 @@ impl BmpInRunner {
         #[cfg(feature = "router-list")]
         let component = Arc::new(RwLock::new(component));
 
-        let roto_source_code = roto_path.map(|v| read_to_string(v).unwrap()).unwrap_or_default();
+        let roto_source_code = roto_path.map(|v| file_io.read_to_string(v).unwrap()).unwrap_or_default();
         let roto_source = (Instant::now(), roto_source_code);
         let roto_source = Arc::new(ArcSwap::from_pointee(roto_source));
 
@@ -187,6 +190,7 @@ impl BmpInRunner {
             _api_processor,
             roto_source,
             state_machine_metrics,
+            file_io,
         }
     }
 
@@ -225,7 +229,7 @@ impl BmpInRunner {
                             // Replace the roto script with the new one
                             let roto_source_code = if let Some(new_roto_path) = new_roto_path {
                                 info!("Using roto script at path '{}'", new_roto_path.to_string_lossy());
-                                read_to_string(new_roto_path).unwrap()
+                                arc_self.file_io.read_to_string(new_roto_path).unwrap()
                             } else {
                                 Default::default()
                             };

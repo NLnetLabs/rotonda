@@ -43,7 +43,7 @@ pub fn is_filtered_in_vm<R: RotoType>(
         // Empty Roto script supplied, act as if the input is not filtered
         return Ok(ControlFlow::Continue(rx.into()));
     }
-    
+
     let prev_vm = &mut vm.borrow_mut();
     if prev_vm.is_none() {
         let when = Instant::now();
@@ -73,19 +73,29 @@ pub fn is_filtered_in_vm<R: RotoType>(
     }
 
     match vm.exec(rx.into(), None::<TypeValue>, None, mem) {
-        Ok(VmResult { accept_reject: AcceptReject::Reject, .. }) => {
+        Ok(VmResult {
+            accept_reject: AcceptReject::Reject,
+            ..
+        }) => {
             // The roto filter script said this BGP UPDATE message should be rejected.
             Ok(ControlFlow::Break(()))
         }
 
-        Ok(VmResult { accept_reject: AcceptReject::Accept, rx, .. }) => {
+        Ok(VmResult {
+            accept_reject: AcceptReject::Accept,
+            rx,
+            ..
+        }) => {
             // The roto filter script has given us a, possibly modified, rx_tx output value to continue with. It may be
             // the same value that it was given to check, or it may be a modified version of that value, or a
             // completely new value maybe even a different TypeValue variant.
             Ok(ControlFlow::Continue(rx))
         }
 
-        Ok(VmResult { accept_reject: AcceptReject::NoReturn, .. }) => Err(
+        Ok(VmResult {
+            accept_reject: AcceptReject::NoReturn,
+            ..
+        }) => Err(
             "Roto filter NoReturn result is unexpected, BGP UPDATE message will be rejected"
                 .to_string(),
         ),

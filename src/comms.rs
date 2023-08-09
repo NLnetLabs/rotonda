@@ -39,7 +39,7 @@
 //! Active. A Link can be suspended via the Link `suspend()` fn. To receive
 //! updates that were sent via message queue the owning component must use the
 //! Link `query()` fn. Calling `query()` will unsuspend a suspended Link.
-//! 
+//!
 //! It is not possible to publish concurrently from multiple threads via the
 //! same Gate. To support components that receive data from multiple threads
 //! at once without requiring them to lock the Gate in order to publish to it
@@ -60,7 +60,7 @@
 //! instructed to shutdown via the Terminate command, and Gates owning
 //! components can be triggered via the Trigger command by a downstream link
 //! to cause the upstream component to do something, e.g. perform a lookup
-//! or calculation and pass the result back down through the Gate as a 
+//! or calculation and pass the result back down through the Gate as a
 //! QueryResult update. Additional commands are used internally to keep Gate
 //! clones configuration in sync with that of the original Gate.
 

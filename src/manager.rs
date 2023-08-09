@@ -1,6 +1,6 @@
 //! Controlling the entire operation.
 
-use crate::comms::{DirectLink, Gate, GateAgent, Link, UPDATE_QUEUE_LEN, GraphStatus};
+use crate::comms::{DirectLink, Gate, GateAgent, GraphStatus, Link, UPDATE_QUEUE_LEN};
 use crate::config::{Config, ConfigFile, Marked};
 use crate::log::Failed;
 use crate::targets::Target;
@@ -95,7 +95,8 @@ impl Component {
 
     /// Register an HTTP resources.
     pub fn register_http_resource(&mut self, process: Arc<dyn http::ProcessRequest>) {
-        self.http_resources.register(Arc::downgrade(&process), false)
+        self.http_resources
+            .register(Arc::downgrade(&process), false)
     }
 
     /// Register a sub HTTP resources.
@@ -197,7 +198,10 @@ impl LinkReport {
 
         // add nodes for each unit and target
         for (unit_or_target_name, report) in &self.links {
-            let (shape_kind, style_attr) = match report.graph_status().and_then(|weak_ref| weak_ref.upgrade()) {
+            let (shape_kind, style_attr) = match report
+                .graph_status()
+                .and_then(|weak_ref| weak_ref.upgrade())
+            {
                 Some(graph_status) => {
                     let shape_kind = ShapeKind::new_box(&format!(
                         "{}\n{}",
@@ -213,12 +217,12 @@ impl LinkReport {
 
                     let style_attr = StyleAttr::new(Color::fast(line_colour), 2, None, 0, 15);
 
-                    (shape_kind ,style_attr)
+                    (shape_kind, style_attr)
                 }
                 None => (
                     ShapeKind::new_box(unit_or_target_name),
                     StyleAttr::new(Color::fast("black"), 2, None, 0, 15),
-                )
+                ),
             };
             let node = Element::create(
                 shape_kind,
@@ -278,12 +282,13 @@ pub struct UpstreamLinkReport {
 impl std::fmt::Debug for UpstreamLinkReport {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.links.lock().unwrap().deref() {
-            Some(links) => { let graph_status = self.graph_status.lock().unwrap(); f
-                .debug_struct("UpstreamLinkReport")
-                .field("links", links)
-                .field("graph_status", &graph_status.is_some())
-                .finish()
-            },
+            Some(links) => {
+                let graph_status = self.graph_status.lock().unwrap();
+                f.debug_struct("UpstreamLinkReport")
+                    .field("links", links)
+                    .field("graph_status", &graph_status.is_some())
+                    .finish()
+            }
             _ => f.debug_struct("UpstreamLinkReport").finish(),
         }
     }

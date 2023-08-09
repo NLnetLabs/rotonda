@@ -44,7 +44,7 @@ use routecore::{
 use smallvec::SmallVec;
 
 use std::{
-    collections::{HashMap, HashSet, hash_map::Keys},
+    collections::{hash_map::Keys, HashMap, HashSet},
     net::{IpAddr, SocketAddr},
     ops::ControlFlow,
     panic::UnwindSafe,

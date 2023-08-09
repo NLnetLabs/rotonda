@@ -245,7 +245,7 @@ impl RouterInfoApi {
                                 writeln!(peer_report, "</pre></td></tr>").unwrap();
                             }
                         }
-                    },
+                    }
                 }
             }
 

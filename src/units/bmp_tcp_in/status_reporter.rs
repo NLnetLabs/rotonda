@@ -9,9 +9,9 @@ use std::{
 
 use log::{debug, trace, warn};
 
-use crate::{common::status_reporter::{
+use crate::common::status_reporter::{
     sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter,
-}};
+};
 
 use super::metrics::BmpTcpInMetrics;
 

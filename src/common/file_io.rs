@@ -1,5 +1,7 @@
 //! Support for dumping of BMP messages to files for diagnostic purposes.
 
+use std::path::Path;
+
 use async_trait::async_trait;
 use tokio::io::AsyncWrite;
 
@@ -26,6 +28,8 @@ pub(crate) trait FileIo: Default {
         T: AsRef<[u8]> + Send + Sync;
 
     async fn flush<W: AsyncWrite + Unpin + Send>(&mut self, writer: W) -> std::io::Result<()>;
+
+    fn read_to_string<P: AsRef<Path>>(&self, path: P) -> std::io::Result<String>;
 }
 
 // --- FileIo trait: real filesystem implementation -------------------------
@@ -33,6 +37,8 @@ pub(crate) trait FileIo: Default {
 #[cfg(not(test))]
 mod fileio {
     //! Filesystem I/O.
+    use std::path::Path;
+
     use async_trait::async_trait;
     use tokio::io::AsyncWrite;
 
@@ -77,6 +83,10 @@ mod fileio {
             use tokio::io::AsyncWriteExt;
             writer.flush().await
         }
+
+        fn read_to_string<P: AsRef<Path>>(&self, path: P) -> std::io::Result<String> {
+            std::fs::read_to_string(path)
+        }
     }
 }
 
@@ -86,17 +96,31 @@ mod fileio {
 mod fileio {
     ///! Mock I/O.
     use async_trait::async_trait;
-    use std::path::PathBuf;
+    use std::{
+        collections::HashMap,
+        path::{Path, PathBuf},
+    };
     use tokio::io::AsyncWrite;
 
     #[derive(Default)]
     pub(crate) struct MockFileIo {
+        pub readable_paths: HashMap<PathBuf, String>,
         pub rename_calls: Vec<(PathBuf, PathBuf)>,
         pub remove_file_calls: Vec<PathBuf>,
         pub write_all_calls: usize,
     }
 
     impl MockFileIo {
+        pub fn new<T>(readable_paths: T) -> Self
+        where
+            T: Into<HashMap<PathBuf, String>>,
+        {
+            Self {
+                readable_paths: readable_paths.into(),
+                ..Default::default()
+            }
+        }
+
         pub fn _is_unchanged(&self) -> bool {
             self.rename_calls.is_empty()
                 && self.remove_file_calls.is_empty()
@@ -138,6 +162,13 @@ mod fileio {
 
         async fn flush<W: AsyncWrite + Unpin + Send>(&mut self, _writer: W) -> std::io::Result<()> {
             Ok(())
+        }
+
+        fn read_to_string<P: AsRef<Path>>(&self, path: P) -> std::io::Result<String> {
+            self.readable_paths
+                .get(path.as_ref())
+                .map(|v| v.to_string())
+                .ok_or(std::io::ErrorKind::NotFound.into())
         }
     }
 }

@@ -50,15 +50,6 @@ async fn read_from_router<T: AsyncRead + Unpin>(
                 // There was a problem reading from the BMP stream.
                 status_reporter.receive_io_error(router_addr, &err);
 
-                if matches!(err.kind(), std::io::ErrorKind::UnexpectedEof) {
-                    status_reporter.router_connection_lost(router_addr);
-
-                    // Notify downstream units that the data stream for this
-                    // particular monitored router has ended.
-                    let payload = Payload::bmp_eof(router_addr);
-                    gate_worker.update_data(Update::Single(payload)).await;
-                }
-
                 // TODO: are there kinds of error worth ignoring, e.g. some
                 // sort of network timeout?
 
@@ -110,6 +101,13 @@ async fn read_from_router<T: AsyncRead + Unpin>(
             }
         }
     }
+
+    status_reporter.router_connection_lost(router_addr);
+
+    // Notify downstream units that the data stream for this
+    // particular monitored router has ended.
+    let payload = Payload::bmp_eof(router_addr);
+    gate_worker.update_data(Update::Single(payload)).await;
 }
 
 #[cfg(test)]

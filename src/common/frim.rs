@@ -161,6 +161,11 @@ where
         self.inner.load().len()
     }
 
+    /// Returns true if the FrimMap is empty.
+    pub fn is_empty(&self) -> bool {
+        self.inner.load().is_empty()
+    }
+
     /// Get an iteration guard.
     ///
     /// Once the guard has been obtained, call [Guard::iter()] to get an

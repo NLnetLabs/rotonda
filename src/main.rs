@@ -295,7 +295,7 @@ mod tests {
 
             // check to see if the internal "gate" counters are correct
             eprintln!("Checking counter metrics...");
-            assert_metric_eq(manager.metrics(), "num_updates_total", Some(("component", "bmp-in")), 3).await;
+            assert_metric_eq(manager.metrics(), "num_updates_total", Some(("component", "bmp-tcp-in")), 3).await;
             assert_metric_eq(manager.metrics(), "num_updates_total", Some(("component", "filter")), 3).await;
             assert_metric_eq(manager.metrics(), "num_updates_total", Some(("component", "routers")), 1).await;
             assert_metric_eq(manager.metrics(), "num_updates_total", Some(("component", "global-rib")), 1).await;
@@ -304,7 +304,7 @@ mod tests {
             eprintln!("Checking state metrics...");
             assert_metric_eq(manager.metrics(), "bmp_state_num_up_peers_total", Some(("router", &sys_name)), 1).await;
             assert_metric_eq(manager.metrics(), "bmp_tcp_in_num_bmp_messages_received_total", Some(("router", &local_addr)), 3).await;
-            assert_metric_eq(manager.metrics(), "rib_unit_num_route_announcements_total", Some(("component", "global-rib")), 1).await;
+            assert_metric_eq(manager.metrics(), "rib_unit_num_routes_announced_total", Some(("component", "global-rib")), 1).await;
 
             // query the route to make sure it was stored
             eprintln!("Querying prefix store...");
@@ -338,14 +338,14 @@ mod tests {
             bmp_route_announce(&mut bmp_conn, test_prefix2).await;
 
             eprintln!("Checking counter metrics...");
-            assert_metric_eq(manager.metrics(), "num_updates_total", Some(("component", "bmp-in")), 4).await;
+            assert_metric_eq(manager.metrics(), "num_updates_total", Some(("component", "bmp-tcp-in")), 4).await;
             assert_metric_eq(manager.metrics(), "num_updates_total", Some(("component", "filter")), 4).await;
             assert_metric_eq(manager.metrics(), "num_updates_total", Some(("component", "routers")), 2).await;
             assert_metric_eq(manager.metrics(), "num_updates_total", Some(("component", "global-rib")), 2).await;
 
             eprintln!("Checking state metrics...");
             assert_metric_eq(manager.metrics(), "bmp_tcp_in_num_bmp_messages_received_total", Some(("router", &local_addr)), 4).await;
-            assert_metric_eq(manager.metrics(), "rib_unit_num_route_announcements_total", Some(("component", "global-rib")), 2).await;
+            assert_metric_eq(manager.metrics(), "rib_unit_num_routes_announced_total", Some(("component", "global-rib")), 2).await;
             assert_metric_eq(manager.metrics(), "mqtt_target_publish_count_total", Some(("component", "local-broker")), 1).await;
 
             // query the route to make sure it was stored
@@ -442,12 +442,13 @@ mod tests {
         #[allow(clippy::expect_fun_call)]
         if tokio::time::timeout(
             duration,
-            wait_for_metric(metrics, metric_name, label, wanted_v, result.clone()),
+            wait_for_metric(&metrics, metric_name, label, wanted_v, result.clone()),
         )
         .await
         .is_err()
         {
             if result.load(Ordering::SeqCst) != MetricLookupResult::Ok {
+                eprintln!("Metric dump: {:#?}", get_metrics(&metrics));
                 panic!(
                     "Metric '{}' with label '{:?}' != {} after {} seconds (reason: {})",
                     metric_name,
@@ -472,12 +473,13 @@ mod tests {
         #[allow(clippy::expect_fun_call)]
         if tokio::time::timeout(
             duration,
-            wait_for_metric(metrics, metric_name, label, wanted_v, result.clone()),
+            wait_for_metric(&metrics, metric_name, label, wanted_v, result.clone()),
         )
         .await
         .is_ok()
         {
             if result.load(Ordering::SeqCst) != MetricLookupResult::Ok {
+                eprintln!("Metric dump: {:#?}", get_metrics(&metrics));
                 panic!(
                     "Metric '{}' with label '{:?}' != {} after {} seconds (reason: {})",
                     metric_name,
@@ -491,26 +493,29 @@ mod tests {
     }
 
     async fn wait_for_metric(
-        metrics: metrics::Collection,
+        metrics: &metrics::Collection,
         metric_name: &str,
         label: Option<(&str, &str)>,
         wanted_v: i64,
         result: Arc<AtomicMetricLookupResult>,
     ) {
+        let full_metric_name = format!("{}{}", METRIC_PREFIX, metric_name);
         loop {
-            let prom_txt = metrics.assemble(OutputFormat::Prometheus);
-            let lines: Vec<_> = prom_txt.lines().map(|s| Ok(s.to_owned())).collect();
-            let metrics = prometheus_parse::Scrape::parse(lines.into_iter())
-                .expect("Error while querying metrics");
-
-            let full_metric_name = format!("{}{}", METRIC_PREFIX, metric_name);
-            if metrics.get(&full_metric_name, label, result.clone()) == Some(wanted_v) {
+            if get_metrics(metrics).get(&full_metric_name, label, result.clone()) == Some(wanted_v) {
                 result.store(MetricLookupResult::Ok, Ordering::SeqCst);
                 break;
             }
 
             sleep(Duration::from_millis(100)).await;
         }
+    }
+
+    fn get_metrics(metrics: &metrics::Collection) -> prometheus_parse::Scrape {
+        let prom_txt = metrics.assemble(OutputFormat::Prometheus);
+        let lines: Vec<_> = prom_txt.lines().map(|s| Ok(s.to_owned())).collect();
+        let metrics = prometheus_parse::Scrape::parse(lines.into_iter())
+            .expect("Error while querying metrics");
+        metrics
     }
 
     async fn wait_for_bmp_connect() -> TcpStream {

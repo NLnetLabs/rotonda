@@ -2,7 +2,7 @@
 
 use non_empty_vec::NonEmpty;
 use serde::Deserialize;
-use serde_with::{serde_as, formats::PreferOne, OneOrMany};
+use serde_with::{formats::PreferOne, serde_as, OneOrMany};
 use tokio::sync::mpsc;
 
 use crate::comms::Terminated;

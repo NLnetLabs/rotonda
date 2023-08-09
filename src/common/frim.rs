@@ -1,5 +1,5 @@
 //! Types for frequent reads and infrequent writes.
-use std::{sync::Arc, ops::Deref};
+use std::{ops::Deref, sync::Arc};
 
 use arc_swap::ArcSwap;
 use smallvec::SmallVec;

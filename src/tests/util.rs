@@ -610,7 +610,8 @@ pub mod bgp {
                         // https://datatracker.ietf.org/doc/html/rfc4760#section-4
                         if mp_unreach_nlri.is_empty() {
                             mp_unreach_nlri.put_u16(AFI::Ipv6.into());
-                            mp_unreach_nlri.put_u8(u8::from(SAFI::Unicast)|u8::from(SAFI::Multicast));
+                            mp_unreach_nlri
+                                .put_u8(u8::from(SAFI::Unicast) | u8::from(SAFI::Multicast));
                         }
                         mp_unreach_nlri.extend_from_slice(&[len]);
                         if len > 0 {

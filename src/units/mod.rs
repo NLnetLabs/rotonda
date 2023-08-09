@@ -18,12 +18,15 @@
 //------------ Sub-modules ---------------------------------------------------
 //
 // These contain all the actual unit types grouped by shared functionality.
-mod rib_unit;
 mod bmp_filter;
-mod bmp_tcp_in;
-mod roto_filter;
 mod bmp_in;
-pub use rib_unit::{RibValue, unit::{RibType, RibUnit}};
+mod bmp_tcp_in;
+mod rib_unit;
+mod roto_filter;
+pub use rib_unit::{
+    unit::{RibType, RibUnit},
+    RibValue,
+};
 
 //------------ Unit ----------------------------------------------------------
 

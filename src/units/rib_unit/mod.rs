@@ -5,6 +5,6 @@ mod status_reporter;
 mod rib;
 mod tests;
 
-pub mod unit;
 pub mod statistics;
+pub mod unit;
 pub use rib::RibValue;

@@ -9,9 +9,9 @@ use std::{
 
 use log::{debug, trace, warn};
 
-use crate::{common::status_reporter::{
+use crate::common::status_reporter::{
     sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter,
-}};
+};
 
 use super::metrics::BmpTcpInMetrics;
 
@@ -74,6 +74,7 @@ impl BmpTcpInStatusReporter {
     pub fn router_connection_lost(&self, router_addr: SocketAddr) {
         sr_log!(debug: self, "Router connection lost: {}", router_addr);
         self.metrics.connection_lost_count.fetch_add(1, Relaxed);
+        self.metrics.remove_router(router_addr);
     }
 }
 

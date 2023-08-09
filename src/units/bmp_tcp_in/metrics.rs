@@ -23,8 +23,13 @@ pub struct BmpTcpInMetrics {
 
 impl GraphStatus for BmpTcpInMetrics {
     fn status_text(&self) -> String {
-        let num_clients = self.connection_accepted_count.load(Ordering::SeqCst) - self.connection_lost_count.load(Ordering::SeqCst);
-        let num_msgs_out = self.gate.as_ref().map(|gate| gate.num_updates.load(Ordering::SeqCst)).unwrap_or_default();
+        let num_clients = self.connection_accepted_count.load(Ordering::SeqCst)
+            - self.connection_lost_count.load(Ordering::SeqCst);
+        let num_msgs_out = self
+            .gate
+            .as_ref()
+            .map(|gate| gate.num_updates.load(Ordering::SeqCst))
+            .unwrap_or_default();
         format!("clients: {}\nout: {}", num_clients, num_msgs_out)
     }
 
@@ -45,6 +50,10 @@ impl BmpTcpInMetrics {
         self.routers
             .entry(Arc::new(socket_addr))
             .or_insert_with(Default::default)
+    }
+
+    pub fn remove_router(&self, socket_addr: SocketAddr) {
+        self.routers.remove(&Arc::new(socket_addr));
     }
 }
 

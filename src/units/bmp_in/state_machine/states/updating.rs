@@ -1,4 +1,4 @@
-use std::{ops::ControlFlow, collections::hash_map::Keys};
+use std::{collections::hash_map::Keys, ops::ControlFlow};
 
 use bytes::Bytes;
 use roto::types::builtin::{BgpUpdateMessage, RouteStatus};
@@ -12,7 +12,10 @@ use routecore::{
 };
 use smallvec::SmallVec;
 
-use crate::{units::bmp_in::state_machine::machine::{PeerStates, PeerState}, payload::{Payload, Update}};
+use crate::{
+    payload::{Payload, Update},
+    units::bmp_in::state_machine::machine::{PeerState, PeerStates},
+};
 
 use super::super::{
     machine::{BmpState, BmpStateDetails, Initiable, PeerAware},
@@ -56,7 +59,8 @@ pub struct Updating {
 
 impl BmpStateDetails<Updating> {
     pub async fn process_msg(self, msg_buf: Bytes) -> ProcessingResult {
-        self.process_msg_with_filter(msg_buf, None::<()>, |msg, _| Ok(ControlFlow::Continue(msg))).await
+        self.process_msg_with_filter(msg_buf, None::<()>, |msg, _| Ok(ControlFlow::Continue(msg)))
+            .await
     }
 
     /// `filter` should return true if the BGP message should be ignored, i.e. be filtered out.
@@ -67,7 +71,7 @@ impl BmpStateDetails<Updating> {
         filter: F,
     ) -> ProcessingResult
     where
-        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>
+        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>,
     {
         match BmpMsg::from_octets(msg_buf).unwrap() {
             // already verified upstream
@@ -122,7 +126,10 @@ impl BmpStateDetails<Updating> {
         //     .collect::<Vec<_>>()
         //     .join("|");
         let peers = self.details.get_peers().cloned().collect::<Vec<_>>();
-        let routes: SmallVec<[Payload; 8]> = peers.iter().flat_map(|pph| self.do_peer_down(pph)).collect();
+        let routes: SmallVec<[Payload; 8]> = peers
+            .iter()
+            .flat_map(|pph| self.do_peer_down(pph))
+            .collect();
         let next_state = BmpState::Terminated(self.into());
         if routes.is_empty() {
             Self::mk_state_transition_result(next_state)
@@ -230,7 +237,10 @@ impl PeerAware for Updating {
         self.peer_states.remove_announced_prefix(pph, prefix)
     }
 
-    fn get_announced_prefixes(&self, pph: &PerPeerHeader<Bytes>) -> Option<std::collections::hash_set::Iter<Prefix>> {
+    fn get_announced_prefixes(
+        &self,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> Option<std::collections::hash_set::Iter<Prefix>> {
         self.peer_states.get_announced_prefixes(pph)
     }
 }

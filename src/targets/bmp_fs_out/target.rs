@@ -9,7 +9,7 @@ use crate::{
     common::{
         file_io::{FileIo, TheFileIo},
         frim::FrimMap,
-        routecore_extra::{mk_hash, generate_alternate_config},
+        routecore_extra::{generate_alternate_config, mk_hash},
         status_reporter::{AnyStatusReporter, TargetStatusReporter},
     },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
@@ -490,8 +490,9 @@ impl<T: FileIo + Send + Sync + 'static> DirectUpdate for BmpFsOutRunner<T> {
                     .input_mismatch("Update::Single(Payload::RawBmp)", "Update::Bulk(_)");
             }
 
-            Update::QueryResult( .. ) => {
-                self.status_reporter.input_mismatch("Update::Single(Payload::RawBmp)", "Update::QueryResult(_)");
+            Update::QueryResult(..) => {
+                self.status_reporter
+                    .input_mismatch("Update::Single(Payload::RawBmp)", "Update::QueryResult(_)");
             }
 
             Update::OutputStreamMessage(_) => {

@@ -377,7 +377,9 @@ impl ConfigFile {
                 let rib_type = unit_table.get("rib_type");
                 #[allow(clippy::collapsible_if)]
                 if unit_type == Some(&Value::String("rib-unit".to_string())) {
-                    if Option::is_none(&rib_type) || rib_type == Some(&Value::String("Physical".to_string())) {
+                    if Option::is_none(&rib_type)
+                        || rib_type == Some(&Value::String("Physical".to_string()))
+                    {
                         if let Some(Value::Array(roto_paths)) = unit_table.get("roto_path") {
                             if roto_paths.len() > 1 {
                                 // This is a shorthand definition of a physical RIB with one or more virtual RIBs.
@@ -428,7 +430,10 @@ impl ConfigFile {
                                     new_unit_table
                                         .insert("roto_path".to_string(), roto_path.clone());
                                     let mut rib_type_table = toml::map::Map::new();
-                                    rib_type_table.insert("Virtual".to_string(), Value::Integer(n.try_into().unwrap()));
+                                    rib_type_table.insert(
+                                        "Virtual".to_string(),
+                                        Value::Integer(n.try_into().unwrap()),
+                                    );
                                     new_unit_table.insert(
                                         "rib_type".to_string(),
                                         Value::Table(rib_type_table),
@@ -496,7 +501,8 @@ impl ConfigFile {
                             for old_source in old_sources {
                                 match old_source {
                                     Value::String(old_source) => {
-                                        if let Some(new_source) = source_remappings.get(old_source) {
+                                        if let Some(new_source) = source_remappings.get(old_source)
+                                        {
                                             old_source.clone_from(new_source);
                                         }
                                     }

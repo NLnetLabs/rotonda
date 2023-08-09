@@ -154,7 +154,7 @@ impl BmpFilterRunner {
                 status_reporter.input_mismatch("Update::Single(_)", "Update::Bulk(_)");
             }
 
-            Update::QueryResult( .. ) => {
+            Update::QueryResult(..) => {
                 status_reporter.input_mismatch("Update::Single(_)", "Update::QueryResult(_)");
             }
 

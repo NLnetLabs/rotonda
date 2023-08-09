@@ -517,14 +517,21 @@ impl DirectUpdate for MqttRunner {
             //         }
             //     }
             // }
-
-            Update::Single(Payload::RawBmp { received, router_addr, msg: RawBmpPayload::Msg(bytes) }) => {
+            Update::Single(Payload::RawBmp {
+                received,
+                router_addr,
+                msg: RawBmpPayload::Msg(bytes),
+            }) => {
                 let msg = BmpMsg::from_octets(bytes).unwrap();
 
                 let (msg_type, pph, msg_type_specific) = match &msg {
                     BmpMsg::RouteMonitoring(msg) => (0, Some(msg.per_peer_header()), None),
                     BmpMsg::StatisticsReport(msg) => (1, Some(msg.per_peer_header()), None),
-                    BmpMsg::PeerDownNotification(msg) => (2, Some(msg.per_peer_header()), Some(format!("{:?}", msg.reason()))),
+                    BmpMsg::PeerDownNotification(msg) => (
+                        2,
+                        Some(msg.per_peer_header()),
+                        Some(format!("{:?}", msg.reason())),
+                    ),
                     BmpMsg::PeerUpNotification(msg) => (3, Some(msg.per_peer_header()), None),
                     BmpMsg::InitiationMessage(_msg) => (4, None, None),
                     BmpMsg::TerminationMessage(_msg) => (5, None, None),

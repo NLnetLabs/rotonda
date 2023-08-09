@@ -5,7 +5,8 @@ use std::sync::{
 
 use crate::{
     common::frim::FrimMap,
-    metrics::{self, util::append_per_router_metric, Metric, MetricType, MetricUnit}, comms::GraphStatus,
+    comms::GraphStatus,
+    metrics::{self, util::append_per_router_metric, Metric, MetricType, MetricUnit},
 };
 
 #[derive(Debug, Default)]
@@ -33,13 +34,17 @@ impl GraphStatus for MqttMetrics {
     fn status_text(&self) -> String {
         match self.connection_established.load(Ordering::SeqCst) {
             true => {
-                format!("in-flight: {}\npublished: {}\nerrors: {}",
+                format!(
+                    "in-flight: {}\npublished: {}\nerrors: {}",
                     self.in_flight_count.load(Ordering::SeqCst),
-                    self.topics.guard().iter().fold(0, |acc, v| acc + v.1.publish_counts.load(Ordering::SeqCst)),
+                    self.topics
+                        .guard()
+                        .iter()
+                        .fold(0, |acc, v| acc + v.1.publish_counts.load(Ordering::SeqCst)),
                     self.transmit_error_count.load(Ordering::SeqCst),
                 )
-            },
-            false => "N/A".to_string()
+            }
+            false => "N/A".to_string(),
         }
     }
 
@@ -98,8 +103,7 @@ impl metrics::Source for MqttMetrics {
         target.append_simple(
             &Self::UP_METRIC,
             Some(unit_name),
-            self.connection_established
-                .load(atomic::Ordering::SeqCst) as u8,
+            self.connection_established.load(atomic::Ordering::SeqCst) as u8,
         );
         target.append_simple(
             &Self::CONNECTION_LOST_COUNT_METRIC,

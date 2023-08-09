@@ -1,10 +1,8 @@
 use std::ops::ControlFlow;
 
-use crate::units::bmp_in::state_machine::{
-    machine::BmpStateDetails, processing::ProcessingResult,
-};
+use crate::units::bmp_in::state_machine::{machine::BmpStateDetails, processing::ProcessingResult};
 
-use super::{dumping::Dumping, updating::Updating, initiating::Initiating};
+use super::{dumping::Dumping, initiating::Initiating, updating::Updating};
 
 use bytes::Bytes;
 use roto::types::builtin::BgpUpdateMessage;
@@ -86,7 +84,7 @@ impl BmpStateDetails<Terminated> {
         _filter: F,
     ) -> ProcessingResult
     where
-        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>
+        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>,
     {
         let bmp_msg = BmpMsg::from_octets(&msg_buf).unwrap(); // already verified upstream
         self.mk_invalid_message_result(format!(

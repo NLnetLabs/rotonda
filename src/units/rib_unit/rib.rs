@@ -70,7 +70,10 @@ impl Default for PhysicalRib {
 
 impl PhysicalRib {
     pub fn new(key_fields: &[RouteToken]) -> Self {
-        let key_fields = key_fields.iter().map(|&v| vec![v as usize].into()).collect::<Vec<_>>();
+        let key_fields = key_fields
+            .iter()
+            .map(|&v| vec![v as usize].into())
+            .collect::<Vec<_>>();
         Self::with_custom_type(TypeDef::Route, key_fields)
     }
 
@@ -737,7 +740,11 @@ mod tests {
         assert_eq!(0, settings.allocator.stats().bytes_allocated);
     }
 
-    fn mk_route_announcement<T: Into<PeerId>>(prefix: Prefix, as_path: &str, peer_id: T) -> RawRouteWithDeltas {
+    fn mk_route_announcement<T: Into<PeerId>>(
+        prefix: Prefix,
+        as_path: &str,
+        peer_id: T,
+    ) -> RawRouteWithDeltas {
         let delta_id = (RotondaId(0), 0);
         let announcements = Announcements::from_str(&format!(
             "e [{as_path}] 10.0.0.1 BLACKHOLE,123:44 {}",

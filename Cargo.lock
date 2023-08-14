@@ -2022,7 +2022,7 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0"
-source = "git+https://github.com/NLnetLabs/roto.git#4f3aec77c477b75c22647b24cc0b57fa7698ccb4"
+source = "git+https://github.com/NLnetLabs/roto.git?branch=serialize_short_string_as_str#29e8d0721ef588d491e895082ea76ca18cb63bb8"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -2118,7 +2118,7 @@ dependencies = [
 [[package]]
 name = "routecore"
 version = "0.4.0-dev"
-source = "git+https://github.com/NLnetLabs/routecore.git#3c55f4e0a21cf373df40b9a40a8cdde1a4f273d9"
+source = "git+https://github.com/NLnetLabs/routecore.git#e6df2ba88158ab8f0f49b4c7a9d3cd9678d81043"
 dependencies = [
  "bytes",
  "chrono",

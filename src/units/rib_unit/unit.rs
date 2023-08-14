@@ -661,7 +661,9 @@ impl RibUnitRunner {
 
                         let mut updates = SmallVec::<[Update; 8]>::new();
                         updates.push(Update::Single(Payload::TypeValue(rx)));
-                        updates.push(Update::OutputStreamMessage(output_stream_queue));
+                        if !output_stream_queue.is_empty() {
+                            updates.push(Update::OutputStreamMessage(output_stream_queue));
+                        }
                         return updates;
                     }
 

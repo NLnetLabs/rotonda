@@ -10,7 +10,9 @@ filter-map my-module {
     }
 
     action send-message {
-        mqtt.send({ 
+        mqtt.send({
+            name: "Some name",
+            topic: "rotonda/testing", 
             message: String.format("🤭 I encountered {}", "1818")
         });
     }
@@ -23,5 +25,7 @@ filter-map my-module {
 }
 
 output-stream mqtt contains Message {
+    name: String,
+    topic: String,
     message: String
 }

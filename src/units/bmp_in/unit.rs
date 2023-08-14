@@ -40,7 +40,11 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use log::info;
 use non_empty_vec::NonEmpty;
-use roto::{types::{builtin::BuiltinTypeValue, typevalue::TypeValue}, traits::RotoType, vm::OutputStreamQueue};
+use roto::{
+    traits::RotoType,
+    types::{builtin::BuiltinTypeValue, typevalue::TypeValue},
+    vm::OutputStreamQueue,
+};
 use serde::Deserialize;
 use tokio::{runtime::Handle, sync::Mutex};
 
@@ -568,8 +572,10 @@ impl BmpInRunner {
             }
 
             Update::OutputStreamMessage(_) => {
-                self.status_reporter
-                    .input_mismatch("Update::Single(Payload::RawBmp)", "Update::OutputStreaMessage(_)");
+                self.status_reporter.input_mismatch(
+                    "Update::Single(Payload::RawBmp)",
+                    "Update::OutputStreaMessage(_)",
+                );
             }
         }
     }
@@ -696,12 +702,13 @@ mod tests {
         // Then we should be told that it is okay to proceed and the output of the script should match the BGP UPDATE
         // message that we passed in (as the script doesn't modify the output).
         let expected_raw_bgp_message = Arc::new(mk_filter_input(bgp_update_bytes));
-        assert_eq!(
+        assert!(matches!(
             res,
-            Ok(ControlFlow::Continue(TypeValue::Builtin(
-                BuiltinTypeValue::BgpUpdateMessage(expected_raw_bgp_message)
-            )))
-        );
+            Ok(ControlFlow::Continue((
+                TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(msg)),
+                ..
+            ))) if msg == expected_raw_bgp_message
+        ));
     }
 
     #[tokio::test]
@@ -738,7 +745,7 @@ mod tests {
         let res = BmpInRunner::is_filtered(bgp_update_msg, Some(roto_source));
 
         // Then we should be told to sotp as the filter has rejected the input
-        assert_eq!(res, Ok(ControlFlow::Break(())));
+        assert!(matches!(res, Ok(ControlFlow::Break(()))));
     }
 
     // --- Test helpers ------------------------------------------------------

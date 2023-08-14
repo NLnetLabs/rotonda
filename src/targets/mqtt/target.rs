@@ -3,13 +3,10 @@ use std::{fmt::Display, sync::Arc, time::Duration};
 use super::{metrics::MqttMetrics, status_reporter::MqttStatusReporter};
 
 use crate::{
-    common::{
-        json::mk_communities_json,
-        status_reporter::{AnyStatusReporter, TargetStatusReporter},
-    },
+    common::status_reporter::{AnyStatusReporter, TargetStatusReporter},
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
     manager::{Component, TargetCommand, WaitPoint},
-    payload::{Action, Payload, RawBmpPayload, RouterId, Update},
+    payload::{Payload, RawBmpPayload, Update},
 };
 
 use async_trait::async_trait;
@@ -19,12 +16,10 @@ use mqtt::{
     QoS,
 };
 use non_empty_vec::NonEmpty;
-use roto::types::typevalue::TypeValue;
 use routecore::bmp::message::Message as BmpMsg;
-use routecore::{addr::Prefix, bgp::communities::Community};
 use serde::Deserialize;
-use serde_json::{json, Value};
-use serde_with::{serde_as, DisplayFromStr};
+use serde_json::json;
+use serde_with::serde_as;
 use tokio::{
     sync::mpsc,
     time::{interval, timeout},
@@ -52,24 +47,6 @@ pub struct Mqtt {
 
     #[serde(flatten)]
     config: Config,
-}
-
-#[derive(Copy, Clone, Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum Mode {
-    /// In filtering mode only announcements which match the defined triggers will be published
-    /// to the MQTT broker.
-    Filtering,
-
-    /// In mirroring mode every update (both announcements and withdrawals) is published to the
-    /// MQTT broker.
-    Mirroring,
-}
-
-impl Default for Mode {
-    fn default() -> Self {
-        Self::Filtering
-    }
 }
 
 #[serde_as]
@@ -101,12 +78,6 @@ struct Config {
     /// How many messages to buffer if publishing encounters delays
     #[serde(default = "Config::default_queue_size")]
     queue_size: u16,
-
-    #[serde(default)]
-    mode: Mode,
-
-    #[serde_as(as = "Vec<DisplayFromStr>")]
-    communities: Vec<Community>,
 }
 
 impl Config {
@@ -139,7 +110,7 @@ impl Config {
     }
 }
 
-type SenderMsg = (DateTime<Utc>, (Value, String), Arc<RouterId>);
+type SenderMsg = (DateTime<Utc>, String, String); // when, what, topic
 
 impl Mqtt {
     pub async fn run(
@@ -317,15 +288,12 @@ impl MqttRunner {
         // component is not yet ready to accept it.
         waitpoint.running().await;
 
-        while let Some((received, (event, prefix_str), router_id)) = rx.recv().await {
-            let content = event.to_string();
-            let topic = config.topic_template.replace("{id}", &router_id);
+        while let Some((received, content, topic)) = rx.recv().await {
             Self::publish_msg(
                 status_reporter.clone(),
                 Some(client.clone()),
                 topic,
                 received,
-                prefix_str,
                 content,
                 config.qos,
                 config.publish_max_secs,
@@ -341,7 +309,6 @@ impl MqttRunner {
         client: Option<Arc<AsyncClient>>,
         topic: String,
         received: DateTime<Utc>,
-        prefix_str: String,
         content: String,
         qos: i32,
         duration: Duration,
@@ -353,7 +320,7 @@ impl MqttRunner {
 
         match Self::do_publish(client, &topic, content, qos, duration, test_publish).await {
             Ok(_) => {
-                status_reporter.publish_ok(prefix_str, topic, received);
+                status_reporter.publish_ok(topic, received);
             }
             Err(err) => {
                 status_reporter.publish_error(err);
@@ -393,193 +360,123 @@ impl MqttRunner {
             Ok(())
         }
     }
-
-    // fn prepare_for_publication(
-    //     &self,
-    //     action: Action,
-    //     router_id: Arc<RouterId>,
-    //     pfx: &Prefix,
-    //     rib_el: &RibElement,
-    // ) -> Option<(Value, String)> {
-    //     match (self.config.mode, action) {
-    //         (Mode::Filtering, Action::Announce) | (Mode::Mirroring, Action::Announce) => {
-    //             if let Some(advert) = &rib_el.advert {
-    //                 let triggered = advert.has_communities(&self.config.communities);
-
-    //                 let publish = match self.config.mode {
-    //                     Mode::Mirroring => true,
-    //                     Mode::Filtering => triggered,
-    //                 };
-
-    //                 if publish {
-    //                     let (addr, len) = pfx.addr_and_len();
-    //                     let prefix_str = format!("{}/{}", addr, len);
-    //                     let routing_information_base_name =
-    //                         rib_el.routing_information_base.to_string();
-
-    //                     let description = match self.config.mode {
-    //                         Mode::Filtering => {
-    //                             format!(
-    //                                 "{} RTBH received from router {} on {}",
-    //                                 prefix_str, router_id, routing_information_base_name
-    //                             )
-    //                         }
-    //                         Mode::Mirroring => {
-    //                             format!(
-    //                                 "{} announcement received from router {} on {}",
-    //                                 prefix_str, router_id, routing_information_base_name
-    //                             )
-    //                         }
-    //                     };
-
-    //                     let communities = mk_communities_json(
-    //                         advert.standard_communities(),
-    //                         advert.ext_communities(),
-    //                         advert.large_communities(),
-    //                     );
-
-    //                     let as_path: Vec<String> =
-    //                         advert.as_path.iter().map(|asn| asn.to_string()).collect();
-
-    //                     let event = json!({
-    //                         "prefix": &prefix_str,
-    //                         "router": router_id,
-    //                         "sourceAs": rib_el.neighbor.0.to_string(),
-    //                         "routingInformationBaseName": routing_information_base_name,
-    //                         "asPath": as_path,
-    //                         "neighbor": rib_el.neighbor.1,
-    //                         "communities": communities,
-    //                         "description": description,
-    //                     });
-
-    //                     return Some((event, prefix_str));
-    //                 }
-    //             }
-    //         }
-
-    //         (Mode::Filtering, Action::Withdraw) => {
-    //             // Nothing to do
-    //         }
-
-    //         (Mode::Mirroring, Action::Withdraw) => {
-    //             let (addr, len) = pfx.addr_and_len();
-    //             let prefix_str = format!("{}/{}", addr, len);
-    //             let routing_information_base_name = rib_el.routing_information_base.to_string();
-    //             let description = format!(
-    //                 "{} withdrawal received from router {} on {}",
-    //                 prefix_str, router_id, routing_information_base_name
-    //             );
-
-    //             let event = json!({
-    //                 "prefix": &prefix_str,
-    //                 "router": router_id,
-    //                 "sourceAs": rib_el.neighbor.0.to_string(),
-    //                 "routingInformationBaseName": routing_information_base_name,
-    //                 "asPath": [],
-    //                 "neighbor": rib_el.neighbor.1,
-    //                 "communities": [],
-    //                 "description": description,
-    //             });
-
-    //             return Some((event, prefix_str));
-    //         }
-    //     }
-
-    //     None
-    // }
 }
 
 #[async_trait]
 impl DirectUpdate for MqttRunner {
     async fn direct_update(&self, update: Update) {
+        fn payload_to_msg(
+            payload: Payload,
+            config: &Arc<Config>,
+            status_reporter: &Arc<MqttStatusReporter>,
+        ) -> Option<SenderMsg> {
+            match payload {
+                Payload::RawBmp {
+                    received,
+                    router_addr,
+                    msg: RawBmpPayload::Msg(bytes),
+                } => {
+                    let msg = BmpMsg::from_octets(bytes).unwrap();
+
+                    let (msg_type, pph, msg_type_specific) = match &msg {
+                        BmpMsg::RouteMonitoring(msg) => (0, Some(msg.per_peer_header()), None),
+                        BmpMsg::StatisticsReport(msg) => (1, Some(msg.per_peer_header()), None),
+                        BmpMsg::PeerDownNotification(msg) => (
+                            2,
+                            Some(msg.per_peer_header()),
+                            Some(format!("{:?}", msg.reason())),
+                        ),
+                        BmpMsg::PeerUpNotification(msg) => (3, Some(msg.per_peer_header()), None),
+                        BmpMsg::InitiationMessage(_msg) => (4, None, None),
+                        BmpMsg::TerminationMessage(_msg) => (5, None, None),
+                        BmpMsg::RouteMirroring(msg) => (6, Some(msg.per_peer_header()), None),
+                    };
+
+                    let pph_str: String = match pph {
+                        Some(pph) => format!("{}", pph),
+                        None => "No PPH".to_string(),
+                    };
+
+                    let content = json!({
+                        "router": router_addr,
+                        "msg_type": msg_type,
+                        "pph": pph_str,
+                        "msg_type_specific": msg_type_specific,
+                    })
+                    .to_string();
+
+                    let topic = config
+                        .topic_template
+                        .replace("{id}", &router_addr.to_string());
+                    let msg = (received, content, topic);
+                    Some(msg)
+                }
+
+                Payload::TypeValue(tv) => {
+                    let received = Utc::now();
+                    match serde_json::to_string(&tv) {
+                        Ok(content) => {
+                            let topic = config.topic_template.replace("{id}", "unknown");
+                            let msg = (received, content, topic);
+                            Some(msg)
+                        }
+                        Err(_err) => {
+                            // TODO
+                            None
+                        }
+                    }
+                }
+
+                _ => {
+                    status_reporter.input_mismatch(
+                        "Update::Single(Payload::RawBmp)|Update::Bulk(Payload::RawBmp)|Update::OutputStreamMessage",
+                        "Update::Single(_)|Update::Bulk(_)",
+                    );
+                    None
+                }
+            }
+        }
+
         match update {
+            Update::Single(payload) => {
+                if let Some(msg) = payload_to_msg(payload, &self.config, &self.status_reporter) {
+                    if let Err(_err) = self.sender.as_ref().unwrap().send(msg) {
+                        // TODO
+                    }
+                }
+            }
+
             Update::Bulk(updates) => {
-                todo!()
-            }
-
-            // Update::Bulk(updates) => {
-            //     log::trace!("MQTT: Received direct update");
-            //     for payload in updates {
-            //         log::trace!("MQTT: Processing direct update payload");
-            //         if let Payload::RouterSpecificRibElement(pfx, meta) = payload {
-            //             let rib_el = meta.rib_el.load();
-            //             let publish_details = self.prepare_for_publication(
-            //                 todo!(), //action,
-            //                 meta.router_id.clone(),
-            //                 &pfx,
-            //                 &rib_el,
-            //             );
-
-            //             if let Some(publish_details) = publish_details {
-            //                 let msg = (rib_el.received, publish_details, meta.router_id.clone());
-            //                 self.sender.as_ref().unwrap().send(msg).unwrap();
-            //             }
-            //         }
-            //     }
-            // }
-            Update::Single(Payload::RawBmp {
-                received,
-                router_addr,
-                msg: RawBmpPayload::Msg(bytes),
-            }) => {
-                let msg = BmpMsg::from_octets(bytes).unwrap();
-
-                let (msg_type, pph, msg_type_specific) = match &msg {
-                    BmpMsg::RouteMonitoring(msg) => (0, Some(msg.per_peer_header()), None),
-                    BmpMsg::StatisticsReport(msg) => (1, Some(msg.per_peer_header()), None),
-                    BmpMsg::PeerDownNotification(msg) => (
-                        2,
-                        Some(msg.per_peer_header()),
-                        Some(format!("{:?}", msg.reason())),
-                    ),
-                    BmpMsg::PeerUpNotification(msg) => (3, Some(msg.per_peer_header()), None),
-                    BmpMsg::InitiationMessage(_msg) => (4, None, None),
-                    BmpMsg::TerminationMessage(_msg) => (5, None, None),
-                    BmpMsg::RouteMirroring(msg) => (6, Some(msg.per_peer_header()), None),
-                };
-
-                let pph_str: String = match pph {
-                    Some(pph) => format!("{}", pph),
-                    None => "No PPH".to_string(),
-                };
-
-                let event = json!({
-                    "router": router_addr,
-                    "msg_type": msg_type,
-                    "pph": pph_str,
-                    "msg_type_specific": msg_type_specific,
-                });
-
-                let publish_details = (event, "no-prefix".to_string());
-                let msg = (received, publish_details, Arc::new(router_addr.to_string()));
-                self.sender.as_ref().unwrap().send(msg).unwrap();
-            }
-
-            Update::Single(_) => {
-                self.status_reporter.input_mismatch(
-                    "Update::Single(Payload::RawBmp)",
-                    "Update::Single(RawBmp)|Update::Bulk(_)",
-                );
+                for payload in updates {
+                    if let Some(msg) = payload_to_msg(payload, &self.config, &self.status_reporter)
+                    {
+                        if let Err(_err) = self.sender.as_ref().unwrap().send(msg) {
+                            // TODO
+                        }
+                    }
+                }
             }
 
             Update::QueryResult(..) => {
+                // QueryResults are only intended to be sent from physical RIB to virtual RIBs. If we receive one it has
+                // mistakenly escaped (been wrongly propagated onward by the last vRIB in a chain), but it wasn't
+                // intended for nor can we do anything with it.
                 self.status_reporter
-                    .input_mismatch("Update::Single(Payload::RawBmp)", "Update::QueryResult(_)");
+                    .input_mismatch("Update::Single(Payload::RawBmp)|Update::Bulk(Payload::RawBmp)|Update::OutputStreamMessage", "Update::QueryResult(..)");
             }
 
             Update::OutputStreamMessage(messages) => {
-                // Ahha, is this for us?
-                // TODO: match on the topic, does it match something we are interested in?
                 let received = Utc::now();
                 for msg in messages {
-                    let event = serde_json::to_value(&TypeValue::from(msg)).unwrap();
-                    let publish_details = (event, "no-prefix".to_string());
-                    let msg = (
-                        received,
-                        publish_details,
-                        Arc::new("dummy-router-id".into()),
-                    );
-                    self.sender.as_ref().unwrap().send(msg).unwrap();
+                    match serde_json::to_string(msg.get_record()) {
+                        Ok(content) => {
+                            let msg = (received, content, msg.get_topic().clone());
+                            if let Err(_err) = self.sender.as_ref().unwrap().send(msg) {
+                                // TODO
+                            }
+                        }
+                        Err(_err) => { /* TODO */ }
+                    }
                 }
             }
         }

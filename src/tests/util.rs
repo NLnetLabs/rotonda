@@ -1,12 +1,6 @@
 #[cfg(test)]
 pub(crate) mod internal {
-    use std::sync::Arc;
-
-    use chrono::Utc;
     use env_logger::Env;
-    use routecore::{asn::Asn, bgp::types::NextHop};
-
-    use crate::payload::Payload;
 
     /// Tries to enable logging. Intended for use in tests.
     ///
@@ -15,6 +9,23 @@ pub(crate) mod internal {
         let _ = env_logger::Builder::from_env(Env::default().default_filter_or(log_level))
             .is_test(true)
             .try_init();
+    }
+}
+
+pub fn assert_json_eq(actual_json: serde_json::Value, expected_json: serde_json::Value) {
+    use assert_json_diff::{assert_json_matches_no_panic, CompareMode};
+
+    let config = assert_json_diff::Config::new(CompareMode::Strict);
+    if let Err(err) = assert_json_matches_no_panic(&actual_json, &expected_json, config) {
+        eprintln!(
+            "Actual JSON: {}",
+            serde_json::to_string_pretty(&actual_json).unwrap()
+        );
+        eprintln!(
+            "Expected JSON: {}",
+            serde_json::to_string_pretty(&expected_json).unwrap()
+        );
+        panic!("JSON doesn't match expectations: {}", err);
     }
 }
 
@@ -75,7 +86,7 @@ pub mod bgp {
     }
 
     pub mod encode {
-        use std::convert::{TryFrom, TryInto};
+        use std::convert::TryFrom;
         use std::{net::IpAddr, ops::Deref, str::FromStr};
 
         use bytes::{BufMut, Bytes, BytesMut};
@@ -88,8 +99,6 @@ pub mod bgp {
         use routecore::bmp::message::{
             InformationTlvType, MessageType, PeerType, TerminationInformation,
         };
-
-        use super::raw::communities::large;
 
         pub fn mk_initiation_msg(sys_name: &str, sys_descr: &str) -> Bytes {
             let mut buf = BytesMut::new();
@@ -787,9 +796,6 @@ pub mod bgp {
                     for segment in as_path.to_as_path::<Vec<u8>>().unwrap().segments() {
                         segment.compose(&mut as_path_attr_value_bytes).unwrap();
                     }
-
-                    let as_path_attr_value_octet_len =
-                        u8::try_from(as_path_attr_value_bytes.len()).unwrap();
 
                     push_attributes(
                         &mut path_attributes,

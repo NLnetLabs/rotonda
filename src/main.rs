@@ -163,6 +163,8 @@ mod tests {
     #[cfg(feature = "mqtt")]
     #[test]
     fn integration_test() {
+        use rotonda::tests::util::assert_json_eq;
+
         Config::init().unwrap();
 
         let base_config_toml = r#"
@@ -370,7 +372,7 @@ mod tests {
 
             eprintln!("Checking MQTT message...");
             if let Some(Notification::Forward(forward)) = msg {
-                assert_eq!(forward.publish.topic, "rotonda/unknown");
+                assert_eq!(forward.publish.topic, "rotonda/my-sys-name");
                 let expected_json = serde_json::json!({
                     "route": {
                         "prefix": "127.0.0.2/32",
@@ -454,7 +456,7 @@ mod tests {
                     });
                     let actual_json: serde_json::Value =
                         serde_json::from_slice(&forward.publish.payload).unwrap();
-                    assert_json_eq(actual_json, expected_json);
+                    rotonda::tests::util::assert_json_eq(actual_json, expected_json);
                 } else {
                     unreachable!();
                 }
@@ -738,23 +740,6 @@ mod tests {
                 .iter()
                 .find(|sample| is_wanted(sample, metric_name, &label, result.clone()))
                 .map(sample_as_i64)
-        }
-    }
-
-    pub fn assert_json_eq(actual_json: serde_json::Value, expected_json: serde_json::Value) {
-        use assert_json_diff::{assert_json_matches_no_panic, CompareMode};
-
-        let config = assert_json_diff::Config::new(CompareMode::Strict);
-        if let Err(err) = assert_json_matches_no_panic(&actual_json, &expected_json, config) {
-            eprintln!(
-                "Actual JSON: {}",
-                serde_json::to_string_pretty(&actual_json).unwrap()
-            );
-            eprintln!(
-                "Expected JSON: {}",
-                serde_json::to_string_pretty(&expected_json).unwrap()
-            );
-            panic!("JSON doesn't match expectations: {}", err);
         }
     }
 }

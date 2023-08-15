@@ -462,7 +462,10 @@ impl MqttRunner {
         let received = Utc::now();
         match serde_json::to_string(output_stream_message.get_record()) {
             Ok(content) => {
-                let topic = output_stream_message.get_topic().clone();
+                let topic = self
+                    .config
+                    .topic_template
+                    .replace("{id}", output_stream_message.get_topic());
                 let msg = SenderMsg {
                     received,
                     content,
@@ -541,6 +544,8 @@ mod tests {
             BgpUpdateMessage, BuiltinTypeValue, RawRouteWithDeltas, RotondaId, RouteStatus,
             UpdateMessage,
         },
+        collections::Record,
+        typedef::TypeDef,
         typevalue::TypeValue,
     };
     use routecore::{
@@ -677,10 +682,10 @@ mod tests {
           "msg_type_specific": null
         });
 
-        dbg!(topic);
         let actual_json = serde_json::from_str(&content).unwrap();
         assert_json_eq(actual_json, expected_json);
     }
+
     #[test]
     fn generate_correct_json_for_publishing_from_bgp_update_roto_type_value() {
         // Given an MQTT target runner
@@ -772,6 +777,32 @@ mod tests {
         assert_json_eq(actual_json, expected_json);
     }
 
+    #[test]
+    fn generate_correct_json_for_publishing_from_output_stream_roto_type_value() {
+        // Given an MQTT target runner
+        let runner = mk_mqtt_runner();
+
+        // And a payload that should be published
+        let output_stream = mk_roto_output_stream_payload();
+
+        // Then the candidate should be selected for publication
+        let SenderMsg { content, topic, .. } =
+            runner.output_stream_message_to_msg(output_stream).unwrap();
+
+        // And the topic should be based on the rouuter id recorded with the route, if any
+        assert_eq!(topic, "rotonda/my-topic");
+
+        // And the produced message to be published should match the expected JSON format
+        let expected_json = json!({
+            "some-asn": 1818,
+            "some-str": "some-value",
+            "topic": "my-topic"
+        });
+
+        let actual_json = serde_json::from_str(&content).unwrap();
+        assert_json_eq(actual_json, expected_json);
+    }
+
     // --- Test helpers -----------------------------------------------------------------------------------------------
 
     fn mk_mqtt_runner() -> MqttRunner {
@@ -813,6 +844,23 @@ mod tests {
         .with_router_id("test-router".to_string().into());
         let tv = TypeValue::Builtin(BuiltinTypeValue::Route(route));
         Payload::TypeValue(tv)
+    }
+
+    fn mk_roto_output_stream_payload() -> OutputStreamMessage {
+        let typedef = TypeDef::new_record_type(vec![
+            ("topic", Box::new(TypeDef::StringLiteral)),
+            ("some-str", Box::new(TypeDef::StringLiteral)),
+            ("some-asn", Box::new(TypeDef::Asn)),
+        ])
+        .unwrap();
+
+        let fields = vec![
+            ("topic", "my-topic".into()),
+            ("some-str", "some-value".into()),
+            ("some-asn", routecore::asn::Asn::from_u32(1818).into()),
+        ];
+        let record = Record::create_instance_with_sort(&typedef, fields).unwrap();
+        OutputStreamMessage::from(record)
     }
 
     fn bmp_initiate() -> Bytes {

@@ -100,20 +100,20 @@ pub struct PeerState {
     pub pending_eors: HashSet<EoRProperties>,
 
     /// RFC 7854 section "4.9. Peer Down Notification" states:
-    ///     "A Peer Down message implicitly withdraws all routes that were
-    ///      associated with the peer in question.  A BMP implementation MAY
-    ///      omit sending explicit withdraws for such routes."
+    ///     > A Peer Down message implicitly withdraws all routes that were
+    ///     > associated with the peer in question.  A BMP implementation MAY
+    ///     > omit sending explicit withdraws for such routes."
     ///
     /// RFC 4271 section "4.3. UPDATE Message Format" states:
-    ///     "An UPDATE message can list multiple routes that are to be withdrawn
-    ///      from service.  Each such route is identified by its destination
-    ///      (expressed as an IP prefix), which unambiguously identifies the route
-    ///      in the context of the BGP speaker - BGP speaker connection to which
-    ///      it has been previously advertised.
-    ///      
-    ///      An UPDATE message might advertise only routes that are to be
-    ///      withdrawn from service, in which case the message will not include
-    ///      path attributes or Network Layer Reachability Information."
+    ///     > An UPDATE message can list multiple routes that are to be withdrawn
+    ///     > from service.  Each such route is identified by its destination
+    ///     > (expressed as an IP prefix), which unambiguously identifies the route
+    ///     > in the context of the BGP speaker - BGP speaker connection to which
+    ///     > it has been previously advertised.
+    ///     >      
+    ///     > An UPDATE message might advertise only routes that are to be
+    ///     > withdrawn from service, in which case the message will not include
+    ///     > path attributes or Network Layer Reachability Information."
     ///
     /// So, we need to generate synthetic withdrawals for the routes announced by a peer when that peer goes down, and
     /// the only information needed to announce a withdrawal is the peer identity (represented by the PerPeerHeader and

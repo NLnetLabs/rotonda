@@ -2,7 +2,7 @@ use std::fmt::Display;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{atomic::Ordering::Relaxed, Arc};
 
-use log::{debug, trace, warn};
+use log::{debug, info, trace, warn};
 
 use crate::common::status_reporter::{
     AnyStatusReporter, Chainable, Named, sr_log, UnitStatusReporter
@@ -29,7 +29,7 @@ impl BgpTcpInStatusReporter {
     }
 
     pub fn listener_connection_accepted(&self, router_addr: SocketAddr) {
-        sr_log!(debug: self, "Router connected from: {}", router_addr);
+        sr_log!(info: self, "Router connected from: {}", router_addr);
         self.metrics.connection_accepted_count.fetch_add(1, Relaxed);
     }
 

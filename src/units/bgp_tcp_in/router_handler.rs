@@ -376,7 +376,7 @@ impl Processor {
         //peer_ip: IpAddr,
         //peer_asn: Asn
     ) {
-        Self::print_pcap(pdu.as_ref());
+        //Self::print_pcap(pdu.as_ref());
 
         // When sending both v4 and v6 nlri using exabgp, exa sends a v4
         // NextHop in a v6 MP_REACH_NLRI, which is invalid.

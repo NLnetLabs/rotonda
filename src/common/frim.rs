@@ -1,5 +1,5 @@
 //! Types for frequent reads and infrequent writes.
-use std::{sync::Arc, ops::Deref};
+use std::{ops::Deref, sync::Arc};
 
 use arc_swap::ArcSwap;
 use smallvec::SmallVec;
@@ -159,6 +159,11 @@ where
     /// Returns the number of elements in the FrimMap.
     pub fn len(&self) -> usize {
         self.inner.load().len()
+    }
+
+    /// Returns true if the FrimMap is empty.
+    pub fn is_empty(&self) -> bool {
+        self.inner.load().is_empty()
     }
 
     /// Get an iteration guard.

@@ -1,4 +1,4 @@
-use std::{fmt::Debug, ops::ControlFlow, collections::hash_map::Keys};
+use std::{collections::hash_map::Keys, fmt::Debug, ops::ControlFlow};
 
 use bytes::Bytes;
 use roto::types::builtin::{BgpUpdateMessage, RouteStatus};
@@ -12,7 +12,10 @@ use routecore::{
 };
 use smallvec::SmallVec;
 
-use crate::{units::bmp_in::state_machine::machine::{PeerStates, PeerState}, payload::{Payload, Update}};
+use crate::{
+    payload::{Payload, Update},
+    units::bmp_in::state_machine::machine::{PeerState, PeerStates},
+};
 
 use super::initiating::Initiating;
 
@@ -266,7 +269,10 @@ impl BmpStateDetails<Dumping> {
         //     .collect::<Vec<_>>()
         //     .join("|");
         let peers = self.details.get_peers().cloned().collect::<Vec<_>>();
-        let routes: SmallVec<[Payload; 8]> = peers.iter().flat_map(|pph| self.do_peer_down(pph)).collect();
+        let routes: SmallVec<[Payload; 8]> = peers
+            .iter()
+            .flat_map(|pph| self.do_peer_down(pph))
+            .collect();
         let next_state = BmpState::Terminated(self.into());
         if routes.is_empty() {
             Self::mk_state_transition_result(next_state)
@@ -382,11 +388,12 @@ impl PeerAware for Dumping {
 #[cfg(test)]
 mod tests {
     use std::{
+        net::IpAddr,
         str::FromStr,
         sync::{
             atomic::{AtomicU8, Ordering},
             Arc,
-        }, net::IpAddr,
+        },
     };
 
     use roto::types::{
@@ -423,7 +430,11 @@ mod tests {
     fn mk_peer_up_notification_msg_without_rfc4724_support(
         peer_ip: &str,
         peer_as: u32,
-    ) -> (crate::bgp::encode::PerPeerHeader, Bytes, PerPeerHeader<Bytes>) {
+    ) -> (
+        crate::bgp::encode::PerPeerHeader,
+        Bytes,
+        PerPeerHeader<Bytes>,
+    ) {
         let pph = mk_per_peer_header(peer_ip, peer_as);
         let (bmp_msg, real_pph) = mk_peer_up_notification_msg(&pph, false);
         (pph, bmp_msg, real_pph)
@@ -680,7 +691,7 @@ mod tests {
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
         assert_eq!(get_announced_prefix_count(&res.next_state, &real_pph_2), 1);
         let processor = res.next_state;
-        
+
         // And when a peer down notification is received
         let res = processor.process_msg(peer_down_msg_2_buf).await;
 
@@ -697,15 +708,19 @@ mod tests {
         } = res.processing_result
         {
             assert_eq!(bulk.len(), 1);
-            let mut expected_roto_prefixes: Vec<TypeValue> = vec![
-                Prefix::from_str("2001:2000:3080:e9c::2/128").unwrap().into(),
-            ];
+            let mut expected_roto_prefixes: Vec<TypeValue> =
+                vec![Prefix::from_str("2001:2000:3080:e9c::2/128")
+                    .unwrap()
+                    .into()];
             for item in bulk.drain(..) {
                 if let Payload::TypeValue(type_value) = item {
                     if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = type_value {
                         let materialized_route = MaterializedRoute::from(route);
                         let found_pfx = materialized_route.route.prefix.as_ref().unwrap();
-                        let position = expected_roto_prefixes.iter().position(|pfx| pfx == found_pfx).unwrap();
+                        let position = expected_roto_prefixes
+                            .iter()
+                            .position(|pfx| pfx == found_pfx)
+                            .unwrap();
                         expected_roto_prefixes.remove(position);
                         assert_eq!(materialized_route.status, RouteStatus::Withdrawn);
                     } else {
@@ -760,7 +775,8 @@ mod tests {
 
         let (pph_up, peer_up_msg_buf, _) =
             mk_peer_up_notification_msg_without_rfc4724_support("127.0.0.1", 12345);
-        let (pph_down, _, _) = mk_peer_up_notification_msg_without_rfc4724_support("127.0.0.2", 54321);
+        let (pph_down, _, _) =
+            mk_peer_up_notification_msg_without_rfc4724_support("127.0.0.2", 54321);
         let peer_down_msg_buf = mk_peer_down_notification_msg(&pph_down);
 
         assert_ne!(&pph_up, &pph_down);
@@ -1003,8 +1019,13 @@ mod tests {
             dbg!(&update); // TODO: assert the content of the update
             if let Update::Bulk(updates) = &update {
                 assert_eq!(updates.len(), 1);
-                if let Payload::TypeValue(TypeValue::Builtin(BuiltinTypeValue::Route(route))) = &updates[0] {
-                    assert_eq!(route.peer_ip().unwrap(), IpAddr::from_str("127.0.0.1").unwrap());
+                if let Payload::TypeValue(TypeValue::Builtin(BuiltinTypeValue::Route(route))) =
+                    &updates[0]
+                {
+                    assert_eq!(
+                        route.peer_ip().unwrap(),
+                        IpAddr::from_str("127.0.0.1").unwrap()
+                    );
                     assert_eq!(route.peer_asn().unwrap(), Asn::from_u32(12345));
                     assert_eq!(route.router_id().unwrap().as_str(), TEST_ROUTER_SYS_NAME);
                 } else {
@@ -1104,7 +1125,10 @@ mod tests {
     }
 
     fn get_announced_prefix_count(processor: &BmpState, pph: &PerPeerHeader<Bytes>) -> usize {
-        get_peer_states(processor).get_announced_prefixes(pph).unwrap().len()
+        get_peer_states(processor)
+            .get_announced_prefixes(pph)
+            .unwrap()
+            .len()
     }
 
     fn get_peer_states(processor: &BmpState) -> &PeerStates {

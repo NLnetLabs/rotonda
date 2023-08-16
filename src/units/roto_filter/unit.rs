@@ -1,5 +1,9 @@
 use crate::{
-    common::{status_reporter::{AnyStatusReporter, UnitStatusReporter}, roto::{is_filtered_in_vm, ThreadLocalVM}},
+    common::{
+        file_io::{FileIo, TheFileIo},
+        roto::{is_filtered_in_vm, ThreadLocalVM},
+        status_reporter::{AnyStatusReporter, UnitStatusReporter},
+    },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus, Terminated},
     manager::{Component, WaitPoint},
     payload::{Payload, RawBmpPayload, Update},
@@ -7,12 +11,16 @@ use crate::{
 };
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
-use log::{info, error};
+use log::{error, info};
 use non_empty_vec::NonEmpty;
-use roto::{types::{typedef::TypeDef, typevalue::TypeValue, builtin::{BuiltinTypeValue, IntegerLiteral}}};
-use routecore::{bmp::message::Message as BmpMsg, asn::Asn};
+use roto::types::{
+    builtin::{BuiltinTypeValue, IntegerLiteral},
+    typedef::TypeDef,
+    typevalue::TypeValue,
+};
+use routecore::{asn::Asn, bmp::message::Message as BmpMsg};
 use serde::Deserialize;
-use std::{cell::RefCell, sync::Arc, time::Instant, path::PathBuf, fs::read_to_string, ops::ControlFlow};
+use std::{cell::RefCell, ops::ControlFlow, path::PathBuf, sync::Arc, time::Instant};
 
 use super::{metrics::RotoFilterMetrics, status_reporter::RotoFilterStatusReporter};
 
@@ -32,7 +40,7 @@ impl RotoFilter {
         gate: Gate,
         waitpoint: WaitPoint,
     ) -> Result<(), Terminated> {
-        RotoFilterRunner::new(gate, component, self.roto_path)
+        RotoFilterRunner::new(gate, component, self.roto_path, TheFileIo::default())
             .run(self.sources, waitpoint)
             .await
     }
@@ -42,6 +50,7 @@ struct RotoFilterRunner {
     gate: Arc<Gate>,
     status_reporter: Arc<RotoFilterStatusReporter>,
     roto_source: Arc<ArcSwap<(std::time::Instant, String)>>,
+    file_io: TheFileIo,
 }
 
 impl RotoFilterRunner {
@@ -51,7 +60,7 @@ impl RotoFilterRunner {
         static VM_RECORD_TYPE: RefCell<Option<TypeDef>> = RefCell::new(None);
     );
 
-    fn new(gate: Gate, mut component: Component, roto_path: PathBuf) -> Self {
+    fn new(gate: Gate, mut component: Component, roto_path: PathBuf, file_io: TheFileIo) -> Self {
         let unit_name = component.name().clone();
         let gate = Arc::new(gate);
 
@@ -62,7 +71,7 @@ impl RotoFilterRunner {
         // Setup status reporting
         let status_reporter = Arc::new(RotoFilterStatusReporter::new(&unit_name, metrics));
 
-        let roto_source_code = read_to_string(roto_path).unwrap();
+        let roto_source_code = file_io.read_to_string(roto_path).unwrap();
         let roto_source = (Instant::now(), roto_source_code);
         let roto_source = Arc::new(ArcSwap::from_pointee(roto_source));
 
@@ -70,6 +79,7 @@ impl RotoFilterRunner {
             gate,
             status_reporter,
             roto_source,
+            file_io,
         }
     }
 
@@ -107,8 +117,12 @@ impl RotoFilterRunner {
                                 }),
                         } => {
                             // Replace the roto script with the new one
-                            info!("Using roto script at path '{}'", new_roto_path.to_string_lossy());
-                            let roto_source_code = read_to_string(new_roto_path).unwrap();
+                            info!(
+                                "Using roto script at path '{}'",
+                                new_roto_path.to_string_lossy()
+                            );
+                            let roto_source_code =
+                                arc_self.file_io.read_to_string(new_roto_path).unwrap();
                             let roto_source = (Instant::now(), roto_source_code);
                             let roto_source = Arc::new(roto_source);
                             arc_self.roto_source.store(roto_source);
@@ -212,12 +226,15 @@ impl RotoFilterRunner {
                                 vec![
                                     (
                                         "type",
-                                        TypeValue::Builtin(BuiltinTypeValue::IntegerLiteral(IntegerLiteral::new(msg_type.into()))),
+                                        TypeValue::Builtin(BuiltinTypeValue::IntegerLiteral(
+                                            IntegerLiteral::new(msg_type.into()),
+                                        )),
                                     ),
                                     ("asn", asn.into()),
                                 ],
                             )
-                            .unwrap().into()
+                            .unwrap()
+                            .into()
                         })
                     }
 
@@ -258,13 +275,7 @@ impl DirectUpdate for RotoFilterRunner {
         let gate = self.gate.clone();
         let status_reporter = self.status_reporter.clone();
         let roto_source = self.roto_source.clone();
-        Self::process_update(
-            gate,
-            status_reporter,
-            update,
-            roto_source,
-        )
-        .await;
+        Self::process_update(gate, status_reporter, update, roto_source).await;
     }
 }
 
@@ -428,10 +439,22 @@ mod tests {
     #[tokio::test]
     async fn bmp_messages_without_a_per_peer_header_should_not_be_filtered() {
         let asn_to_ignore = TEST_PEER_ASN.into();
-        let roto_source = Arc::new(ArcSwap::from_pointee((Instant::now(), interpolate_source(FILTER_OUT_ASN_ROTO, asn_to_ignore))));
+        let roto_source = Arc::new(ArcSwap::from_pointee((
+            Instant::now(),
+            interpolate_source(FILTER_OUT_ASN_ROTO, asn_to_ignore),
+        )));
 
-        assert!(!RotoFilterRunner::is_filtered(&mk_filter_payload(mk_initiation_msg()), roto_source.clone()).await);
-        assert!(!RotoFilterRunner::is_filtered(&mk_filter_payload(mk_termination_msg()), roto_source).await);
+        assert!(
+            !RotoFilterRunner::is_filtered(
+                &mk_filter_payload(mk_initiation_msg()),
+                roto_source.clone()
+            )
+            .await
+        );
+        assert!(
+            !RotoFilterRunner::is_filtered(&mk_filter_payload(mk_termination_msg()), roto_source)
+                .await
+        );
     }
 
     #[rustfmt::skip]

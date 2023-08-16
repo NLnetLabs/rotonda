@@ -9,7 +9,7 @@ use crate::{
     },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
     manager::{Component, TargetCommand, WaitPoint},
-    payload::{Action, Payload, RouterId, Update, RawBmpPayload},
+    payload::{Action, Payload, RawBmpPayload, RouterId, Update},
 };
 
 use async_trait::async_trait;
@@ -19,8 +19,8 @@ use mqtt::{
     QoS,
 };
 use non_empty_vec::NonEmpty;
-use routecore::{bgp::communities::Community, addr::Prefix};
 use routecore::bmp::message::Message as BmpMsg;
+use routecore::{addr::Prefix, bgp::communities::Community};
 use serde::Deserialize;
 use serde_json::{json, Value};
 use serde_with::{serde_as, DisplayFromStr};
@@ -516,14 +516,21 @@ impl DirectUpdate for MqttRunner {
             //         }
             //     }
             // }
-
-            Update::Single(Payload::RawBmp { received, router_addr, msg: RawBmpPayload::Msg(bytes) }) => {
+            Update::Single(Payload::RawBmp {
+                received,
+                router_addr,
+                msg: RawBmpPayload::Msg(bytes),
+            }) => {
                 let msg = BmpMsg::from_octets(bytes).unwrap();
 
                 let (msg_type, pph, msg_type_specific) = match &msg {
                     BmpMsg::RouteMonitoring(msg) => (0, Some(msg.per_peer_header()), None),
                     BmpMsg::StatisticsReport(msg) => (1, Some(msg.per_peer_header()), None),
-                    BmpMsg::PeerDownNotification(msg) => (2, Some(msg.per_peer_header()), Some(format!("{:?}", msg.reason()))),
+                    BmpMsg::PeerDownNotification(msg) => (
+                        2,
+                        Some(msg.per_peer_header()),
+                        Some(format!("{:?}", msg.reason())),
+                    ),
                     BmpMsg::PeerUpNotification(msg) => (3, Some(msg.per_peer_header()), None),
                     BmpMsg::InitiationMessage(_msg) => (4, None, None),
                     BmpMsg::TerminationMessage(_msg) => (5, None, None),
@@ -536,11 +543,11 @@ impl DirectUpdate for MqttRunner {
                 };
 
                 let event = json!({
-                        "router": router_addr,
-                        "msg_type": msg_type,
-                        "pph": pph_str,
-                        "msg_type_specific": msg_type_specific,
-                    });
+                    "router": router_addr,
+                    "msg_type": msg_type,
+                    "pph": pph_str,
+                    "msg_type_specific": msg_type_specific,
+                });
 
                 let publish_details = (event, "no-prefix".to_string());
                 let msg = (received, publish_details, Arc::new(router_addr.to_string()));
@@ -548,12 +555,15 @@ impl DirectUpdate for MqttRunner {
             }
 
             Update::Single(_) => {
-                self.status_reporter
-                    .input_mismatch("Update::Single(Payload::RawBmp)", "Update::Single(RawBmp)|Update::Bulk(_)");
+                self.status_reporter.input_mismatch(
+                    "Update::Single(Payload::RawBmp)",
+                    "Update::Single(RawBmp)|Update::Bulk(_)",
+                );
             }
 
-            Update::QueryResult( .. ) => {
-                self.status_reporter.input_mismatch("Update::Single(Payload::RawBmp)", "Update::QueryResult(_)");
+            Update::QueryResult(..) => {
+                self.status_reporter
+                    .input_mismatch("Update::Single(Payload::RawBmp)", "Update::QueryResult(_)");
             }
         }
     }

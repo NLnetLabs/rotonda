@@ -1,6 +1,9 @@
 use allocator_api2::alloc::{Allocator, Layout, System};
 
-use std::sync::{atomic::{AtomicUsize, Ordering::SeqCst}, Arc};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering::SeqCst},
+    Arc,
+};
 
 use crate::metrics::{self, Metric, MetricType, MetricUnit};
 

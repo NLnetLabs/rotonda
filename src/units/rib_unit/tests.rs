@@ -263,7 +263,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn process_update_two_routes_to_different_prefixes() {
         let (_gate, rib, metrics) = test_init();
 

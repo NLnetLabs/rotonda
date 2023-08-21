@@ -159,7 +159,8 @@ impl BmpFilterRunner {
             }
 
             Update::OutputStreamMessage(_) => {
-                todo!();
+                // pass it on, we don't (yet?) support doing anything with these
+                gate.update_data(update).await;
             }
         }
     }

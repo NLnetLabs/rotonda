@@ -496,7 +496,8 @@ impl<T: FileIo + Send + Sync + 'static> DirectUpdate for BmpFsOutRunner<T> {
             }
 
             Update::OutputStreamMessage(_) => {
-                todo!();
+                self.status_reporter
+                    .input_mismatch("Update::Single(Payload::RawBmp)", "Update::OutputStreamMessage(_)");
             }
         }
     }

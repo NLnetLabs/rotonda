@@ -2,7 +2,10 @@ use atomic_enum::atomic_enum;
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::FutureExt;
 use log::error;
-use roto::types::builtin::{BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus};
+use roto::{
+    types::builtin::{BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus},
+    vm::OutputStreamQueue,
+};
 
 /// RFC 7854 BMP processing.
 ///
@@ -272,15 +275,15 @@ where
         ProcessingResult::new(MessageType::Other, self.into())
     }
 
-    pub fn mk_routing_update_result(self, update: Update) -> ProcessingResult {
-        ProcessingResult::new(MessageType::RoutingUpdate { update }, self.into())
+    pub fn mk_routing_update_result(self, updates: SmallVec<[Update; 1]>) -> ProcessingResult {
+        ProcessingResult::new(MessageType::RoutingUpdate { updates }, self.into())
     }
 
     pub fn mk_final_routing_update_result(
         next_state: BmpState,
-        update: Update,
+        updates: SmallVec<[Update; 1]>,
     ) -> ProcessingResult {
-        ProcessingResult::new(MessageType::RoutingUpdate { update }, next_state)
+        ProcessingResult::new(MessageType::RoutingUpdate { updates }, next_state)
     }
 
     pub fn mk_state_transition_result(next_state: BmpState) -> ProcessingResult {
@@ -461,7 +464,7 @@ where
         } else if routes.is_empty() {
             self.mk_other_result()
         } else {
-            self.mk_routing_update_result(Update::Bulk(routes))
+            self.mk_routing_update_result([Update::Bulk(routes)].into())
         }
     }
 
@@ -544,7 +547,10 @@ where
             &PerPeerHeader<Bytes>,
             &UpdateMessage<Bytes>,
         ) -> ControlFlow<ProcessingResult, Self>,
-        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>,
+        F: Fn(
+            BgpUpdateMessage,
+            Option<D>,
+        ) -> Result<ControlFlow<(), (BgpUpdateMessage, OutputStreamQueue)>, String>,
     {
         let mut tried_peer_configs = SmallVec::<[SessionConfig; 4]>::new();
 
@@ -592,9 +598,9 @@ where
                     let update_msg = roto::types::builtin::UpdateMessage(update); // clone is cheap here
                     let delta_id = (RotondaId(0), 0); // TODO
                     let roto_bgp_msg = BgpUpdateMessage::new(delta_id, update_msg);
-                    let update = match filter_map(roto_bgp_msg, filter_data) {
-                        Ok(ControlFlow::Continue(new_or_modified_msg)) => {
-                            new_or_modified_msg.raw_message().0.clone()
+                    let (update, possible_osq) = match filter_map(roto_bgp_msg, filter_data) {
+                        Ok(ControlFlow::Continue((new_or_modified_msg, osq))) => {
+                            (new_or_modified_msg.raw_message().0.clone(), Some(osq))
                         }
                         _ => return saved_self.mk_other_result(),
                     };
@@ -619,7 +625,18 @@ where
                         0, //self.details.get_stored_routes().prefixes_len(), // TODO
                     );
 
-                    saved_self.mk_routing_update_result(Update::Bulk(routes))
+                    let mut updates = SmallVec::<[Update; 1]>::new();
+                    match possible_osq {
+                        Some(osq) if !osq.is_empty() => {
+                            updates.push(Update::Bulk(routes));
+                            updates.push(Update::OutputStreamMessage(osq));
+                        }
+                        _ => {
+                            updates.push(Update::Bulk(routes));
+                        }
+                    };
+
+                    saved_self.mk_routing_update_result(updates)
                 }
 
                 Err(err) => {
@@ -750,8 +767,10 @@ impl BmpState {
 
     #[allow(dead_code)]
     pub async fn process_msg(self, msg_buf: Bytes) -> ProcessingResult {
-        self.process_msg_with_filter(msg_buf, None::<()>, |msg, _| Ok(ControlFlow::Continue(msg)))
-            .await
+        self.process_msg_with_filter(msg_buf, None::<()>, |msg, _| {
+            Ok(ControlFlow::Continue((msg, OutputStreamQueue::new())))
+        })
+        .await
     }
 
     /// `filter` should return true if the BGP message should be ignored, i.e. be filtered out.
@@ -763,7 +782,11 @@ impl BmpState {
     ) -> ProcessingResult
     where
         D: UnwindSafe,
-        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>
+        F: Fn(
+                BgpUpdateMessage,
+                Option<D>,
+            )
+                -> Result<ControlFlow<(), (BgpUpdateMessage, OutputStreamQueue)>, String>
             + UnwindSafe,
     {
         let saved_addr = self.addr();

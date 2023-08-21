@@ -12,7 +12,7 @@ filter-map my-module {
     action send-message {
         mqtt.send({
             name: "Some name",
-            topic: "rotonda/testing", 
+            topic: "testing",
             message: String.format("🤭 I encountered {}", "1818")
         });
     }

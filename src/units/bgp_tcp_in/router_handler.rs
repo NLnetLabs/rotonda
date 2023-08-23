@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
-use log::{debug, error};
+use log::{debug, error, trace};
 use roto::types::builtin::{
     /*Asn as RotoAsn,*/
     BuiltinTypeValue,
@@ -231,6 +231,7 @@ impl Processor {
                                 rejected = true;
                                 break;
                             }
+                            {
                             let mut live_sessions = live_sessions.lock().unwrap();
                             live_sessions.insert(
                                 (negotiated.remote_addr(), negotiated.remote_asn()),
@@ -240,6 +241,7 @@ impl Processor {
                                 "inserted into live_sessions (current count: {})",
                                 live_sessions.len()
                             );
+                            }
                         }
                         Some(Message::Attributes(_)) => unimplemented!(),
                     }
@@ -279,7 +281,7 @@ impl Processor {
 
         let mut nlris = vec![];
         self.observed_prefixes.iter().for_each(|p| {
-            nlris.push(Nlri::Basic((*p).into()));
+            nlris.push(Nlri::Unicast((*p).into()));
         });
         let mut withdrawals_iter = nlris.into_iter().peekable();
         let mut observed_prefixes = self.observed_prefixes.iter();
@@ -306,29 +308,32 @@ impl Processor {
                     break;
                 }
             }
-            let pdu = match builder.finish() {
+            let pdu = match builder.into_message() {
                 Ok(pdu) => pdu,
-                Err(_) => {
-                    // Only possible error is an AppendError, which is
-                    // unlikely.
-                    error!("AppendError while constructing withdrawal PDU");
+                Err(e) => {
+                    error!("error constructing withdrawal PDU: {e}");
                     break
                 }
             };
+
             let in_pdu = old_len - withdrawals_iter.len();
             let rot_id = RotondaId(0_usize);
             let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
+
             let msg = Arc::new(BgpUpdateMessage::new(
                     (rot_id, ltime),
-                    UpdateMessage::new(pdu, SessionConfig::modern())
+                    UpdateMessage(pdu)
             ));
+
             let mut sent_out = 0;
-            //for _ in 0..num_processed {
 
             while sent_out < in_pdu {
                 let mut bulk = SmallVec::new();
                 while bulk.len() < 8 {
-                    debug!("bulk.len() / sent_out: {}/{}", bulk.len(), sent_out);
+                    trace!(
+                        "bulk.len() / sent_out: {}/{}",
+                        bulk.len(), sent_out
+                    );
                     let prefix = if let Some(p) = observed_prefixes.next() {
                         p
                     } else {
@@ -336,7 +341,8 @@ impl Processor {
                     };
 
                     let rot_id = RotondaId(0_usize);
-                    let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
+                    let ltime = self.bgp_ltime.checked_add(1)
+                        .expect(">u64 ltime?");
                     let rrwd = RawRouteWithDeltas::new_with_message_ref(
                         (rot_id, ltime),
                         RotoPrefix::new(*prefix),
@@ -348,14 +354,11 @@ impl Processor {
                     sent_out += 1;
                     bulk.push(payload);
                 } 
-                debug!("sending bulk payload withdrawal");
                 self.gate.update_data(Update::Bulk(bulk.into())).await;
             }
         }
 
         assert!(observed_prefixes.len() == 0);
-
-
 
         (session, rx_sess)
     }
@@ -414,10 +417,10 @@ impl Processor {
         for chunk in pdu.nlris().iter().collect::<Vec<_>>().chunks(8) {
             let mut bulk = SmallVec::new();
             for nlri in chunk {
-                let prefix = if let Some(prefix) = nlri.prefix() {
-                    prefix
+                let prefix = if let Nlri::Unicast(b) = nlri {
+                    b.prefix()
                 } else {
-                    debug!("NLRI without actual prefix");
+                    debug!("non unicast NLRI, skipping");
                     continue
                 };
 
@@ -442,10 +445,10 @@ impl Processor {
         for chunk in pdu.withdrawals().iter().collect::<Vec<_>>().chunks(8) {
             let mut bulk = SmallVec::new();
             for withdrawal in chunk {
-                let prefix = if let Some(prefix) = withdrawal.prefix() {
-                    prefix
+                let prefix = if let Nlri::Unicast(b) = withdrawal {
+                    b.prefix()
                 } else {
-                    debug!("Withdrawal without actual prefix");
+                    debug!("non unicast Withdrawal, skipping");
                     continue
                 };
 
@@ -465,8 +468,8 @@ impl Processor {
             self.gate.update_data(Update::Bulk(bulk.into())).await;
         }
     }
-
 }
+
 
 pub async fn handle_connection(
     gate: Gate,

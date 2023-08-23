@@ -22,9 +22,7 @@ use routecore::asn::Asn;
 use serde::Deserialize;
 
 /// Enum carrying either a exact IP address, or a `Prefix`.
-#[derive(
-    Clone, Copy, Debug, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd
-)]
+#[derive(Clone, Copy, Debug, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
 #[serde(untagged)]
 pub enum PrefixOrExact {
     Exact(IpAddr),
@@ -35,14 +33,14 @@ impl PrefixOrExact {
     pub fn is_exact(&self) -> bool {
         match self {
             Self::Exact(_) => true,
-            Self::Prefix(_) => false
+            Self::Prefix(_) => false,
         }
     }
 
     pub fn contains(&self, addr: IpAddr) -> bool {
         match self {
             Self::Exact(a) => *a == addr,
-            Self::Prefix(p) => p.contains(addr)
+            Self::Prefix(p) => p.contains(addr),
         }
     }
 }
@@ -59,8 +57,6 @@ impl From<IpAddr> for PrefixOrExact {
     }
 }
 
-
-
 /// Enum carrying one specific ASN, or a list of zero or multiple ASNs.
 #[derive(Clone, Debug, Deserialize, Hash, Eq, PartialEq)]
 #[serde(untagged)]
@@ -73,17 +69,16 @@ impl OneOrManyAsns {
     fn is_single(&self) -> bool {
         match self {
             OneOrManyAsns::One(_) => true,
-            OneOrManyAsns::Many(_) => false
+            OneOrManyAsns::Many(_) => false,
         }
     }
 
     fn contains(&self, other: Asn) -> bool {
         match self {
             OneOrManyAsns::One(asn) => *asn == other,
-            OneOrManyAsns::Many(asns) => asns.contains(&other)
+            OneOrManyAsns::Many(asns) => asns.contains(&other),
         }
     }
-
 }
 
 /// Ordered collection of `PeerConfig`s, keyed on `PrefixOrExact`.
@@ -93,17 +88,14 @@ pub struct PeerConfigs(BTreeMap<PrefixOrExact, PeerConfig>);
 impl PeerConfigs {
     /// Returns the PrefixOrExact and PeerConfig for `key`, if any.
     pub fn get(&self, key: IpAddr) -> Option<(PrefixOrExact, &PeerConfig)> {
-        if let Some(hit) = self.0.iter()
-            .find(|&(k, _cfg)|
-                  match k {
-                      PrefixOrExact::Exact(e) => *e == key,
-                      PrefixOrExact::Prefix(p) => p.contains(key)
-                  }
-            ) {
-                Some((*hit.0, hit.1))
-            } else {
-                None
-            }
+        if let Some(hit) = self.0.iter().find(|&(k, _cfg)| match k {
+            PrefixOrExact::Exact(e) => *e == key,
+            PrefixOrExact::Prefix(p) => p.contains(key),
+        }) {
+            Some((*hit.0, hit.1))
+        } else {
+            None
+        }
     }
 
     /// Returns the PeerConfig for `key`, if any.
@@ -132,22 +124,18 @@ impl PeerConfig {
     fn accept_remote_asn(&self, remote: Asn) -> bool {
         if let OneOrManyAsns::Many(ref asns) = self.remote_asn {
             if asns.is_empty() {
-                return true
+                return true;
             }
         }
         self.remote_asn.contains(remote)
     }
 }
 
-
 impl PartialEq for PeerConfig {
     fn eq(&self, other: &PeerConfig) -> bool {
-        self.remote_asn == other.remote_asn &&
-        self.hold_time == other.hold_time
+        self.remote_asn == other.remote_asn && self.hold_time == other.hold_time
     }
-
 }
-
 
 /// Combination of general and peer specific parameters.
 pub struct CombinedConfig {
@@ -163,13 +151,13 @@ impl CombinedConfig {
     pub fn new(
         b: BgpTcpIn,
         peer_config: PeerConfig,
-        remote_prefix_or_exact: PrefixOrExact
+        remote_prefix_or_exact: PrefixOrExact,
     ) -> CombinedConfig {
         CombinedConfig {
             my_asn: b.my_asn,
             my_bgp_id: b.my_bgp_id,
             remote_prefix_or_exact,
-            peer_config
+            peer_config,
         }
     }
     pub fn peer_config(&self) -> &PeerConfig {
@@ -202,8 +190,7 @@ impl BgpConfig for CombinedConfig {
     }
 
     fn is_exact(&self) -> bool {
-        self.remote_prefix_or_exact.is_exact() &&
-            self.peer_config.single_asn()
+        self.remote_prefix_or_exact.is_exact() && self.peer_config.single_asn()
     }
 }
 
@@ -221,15 +208,14 @@ impl ConfigExt for CombinedConfig {
 
 #[cfg(test)]
 mod tests {
-    use std::str::FromStr;
     use crate::units::Unit;
+    use std::str::FromStr;
 
     use super::*;
 
     #[test]
     fn it_works() {
-        let toml =
-r#"
+        let toml = r#"
 
 type = "bgp-tcp-in"
 listen = "10.1.0.254:11179"
@@ -267,25 +253,24 @@ hold_time = 10
         for k in cfg.peer_configs.0.keys() {
             println!("key: {:?}", k);
         }
-        assert!(cfg1.1.name == "Peer-in-subnet" );
+        assert!(cfg1.1.name == "Peer-in-subnet");
         assert!(cfg1.1.remote_asn.contains(asn1));
         assert!(cfg1.1.accept_remote_asn(asn1));
         assert!(!cfg1.1.accept_remote_asn(asn2));
 
         let ip2 = IpAddr::from_str("2.3.4.6").unwrap();
         let cfg2 = cfg.peer_configs.get(ip2).unwrap();
-        assert!(cfg.peer_configs.get(ip2).unwrap().1.name == "Peer-exact" );
+        assert!(cfg.peer_configs.get(ip2).unwrap().1.name == "Peer-exact");
         assert!(!cfg2.1.accept_remote_asn(Asn::from_u32(1234)));
 
-
-        let cfg3 = cfg.peer_configs.get(IpAddr::from_str("10.10.10.10").unwrap()).unwrap();
+        let cfg3 = cfg
+            .peer_configs
+            .get(IpAddr::from_str("10.10.10.10").unwrap())
+            .unwrap();
         assert!(cfg3.1.name == "Bgpsink");
         assert!(cfg3.1.accept_remote_asn(Asn::from_u32(1234)));
 
-
         let ip6 = IpAddr::from_str("2001:0db8::1").unwrap();
         assert!(cfg.peer_configs.get(ip6).is_none());
-
-
     }
 }

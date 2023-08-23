@@ -4,26 +4,20 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 use log::{debug, error, trace};
 use roto::types::builtin::{
-    /*Asn as RotoAsn,*/
-    BuiltinTypeValue,
-    Prefix as RotoPrefix,
-    RawRouteWithDeltas
+    BgpUpdateMessage, /*IpAddress,*/
+    RotondaId, RouteStatus, UpdateMessage,
 };
 use roto::types::builtin::{
-    BgpUpdateMessage,
-    /*IpAddress,*/
-    RotondaId,
-    RouteStatus,
-    UpdateMessage
+    /*Asn as RotoAsn,*/
+    BuiltinTypeValue, Prefix as RotoPrefix, RawRouteWithDeltas,
 };
 use roto::types::typevalue::TypeValue;
 use routecore::addr::Prefix;
 use routecore::asn::Asn;
 use routecore::bgp::message::{
     nlri::Nlri,
-    SessionConfig,
     update::{ComposeError, UpdateBuilder},
-    UpdateMessage as UpdatePdu
+    SessionConfig, UpdateMessage as UpdatePdu,
 };
 use smallvec::SmallVec;
 use tokio::net::TcpStream;
@@ -34,18 +28,16 @@ use rotonda_fsm::bgp::session::{
     Command,
     DisconnectReason,
     Message,
-    Session as BgpSession
+    Session as BgpSession,
 };
-
 
 use crate::comms::{Gate, GateStatus, Terminated};
 use crate::payload::{Payload, Update};
 use crate::units::bgp_tcp_in::status_reporter::BgpTcpInStatusReporter;
 use crate::units::Unit;
 
-use super::unit::BgpTcpIn;
 use super::peer_config::{CombinedConfig, ConfigExt};
-
+use super::unit::BgpTcpIn;
 
 struct Processor {
     gate: Gate,
@@ -54,7 +46,7 @@ struct Processor {
     tx: mpsc::Sender<Command>,
     status_reporter: Arc<BgpTcpInStatusReporter>,
 
-    observed_prefixes: BTreeSet<Prefix>
+    observed_prefixes: BTreeSet<Prefix>,
 }
 
 impl Processor {
@@ -71,10 +63,9 @@ impl Processor {
             bgp_ltime: 0,
             tx,
             status_reporter,
-            observed_prefixes: BTreeSet::new()
+            observed_prefixes: BTreeSet::new(),
         }
     }
-
 
     async fn process<C: BgpConfig + ConfigExt>(
         &mut self,
@@ -86,7 +77,7 @@ impl Processor {
 
         let mut rejected = false;
 
-        // XXX is this all OK cancel-safety-wise? 
+        // XXX is this all OK cancel-safety-wise?
         loop {
             tokio::select! {
                 fsm_res = session.tick() => {
@@ -129,7 +120,7 @@ impl Processor {
                                 if new_unit != self.unit_cfg {
                                     debug!("GateStatus::Reconfiguring, \
                                            change in unit config, break.");
-                                    // XXX 
+                                    // XXX
                                     // unsure what the correct subcode is:
                                     // 4 Administrative Reset, or
                                     // 6 'Other Configuration Change'?
@@ -187,7 +178,7 @@ impl Processor {
                 }
                 res = rx_sess.recv() => {
                     match res {
-                        None => { break; } 
+                        None => { break; }
                         Some(Message::UpdateMessage(pdu)) => {
                             // We can only receive UPDATE messages over an
                             // established session, so not having a
@@ -247,7 +238,6 @@ impl Processor {
                     }
                 }
             }
-
         }
         // Done, for whatever reason. Remove ourselves form the live sessions.
         // But only if this was not an 'early reject' case, because we would
@@ -256,16 +246,18 @@ impl Processor {
         // live_sessions set.
         if !rejected {
             if let Some(negotiated) = session.negotiated() {
-                live_sessions.lock().unwrap().remove(
-                    &(negotiated.remote_addr(), negotiated.remote_asn()),
-                );
+                live_sessions
+                    .lock()
+                    .unwrap()
+                    .remove(&(negotiated.remote_addr(), negotiated.remote_asn()));
                 debug!(
                     "removed {}@{} from live_sessions (current count: {})",
-                    negotiated.remote_asn(), negotiated.remote_addr(),
+                    negotiated.remote_asn(),
+                    negotiated.remote_addr(),
                     live_sessions.lock().unwrap().len()
-               );
+                );
             }
-        } 
+        }
 
         if rejected {
             assert!(self.observed_prefixes.is_empty());
@@ -274,7 +266,7 @@ impl Processor {
         // attempt using new withdrawals_from_iter methods in routecore
         // XXX see https://github.com/rust-lang/rust/issues/102211
         // we can not do observed_prefixes.iter().map(|p| ...).peekable()
-        // because that results in an error 
+        // because that results in an error
         //  "higher-ranked lifetime error"
         //
         // For now, we create a separate vec and push Nlri in there.
@@ -294,14 +286,14 @@ impl Processor {
                     // Everything fit into this PDU, done after this one.
 
                     debug!("Ok(()) from builder, last PDU");
-
                 }
                 Err(ComposeError::PduTooLarge(_)) => {
                     // There is more in prefix_iter to process in a next PDU.
 
-                    debug!("PduTooLarge from builder, remaining: {}",
-                           withdrawals_iter.len()
-                           );
+                    debug!(
+                        "PduTooLarge from builder, remaining: {}",
+                        withdrawals_iter.len()
+                    );
                 }
                 Err(e) => {
                     error!("error while building withdrawal PDUs: {}", e);
@@ -312,7 +304,7 @@ impl Processor {
                 Ok(pdu) => pdu,
                 Err(e) => {
                     error!("error constructing withdrawal PDU: {e}");
-                    break
+                    break;
                 }
             };
 
@@ -320,40 +312,33 @@ impl Processor {
             let rot_id = RotondaId(0_usize);
             let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
 
-            let msg = Arc::new(BgpUpdateMessage::new(
-                    (rot_id, ltime),
-                    UpdateMessage(pdu)
-            ));
+            let msg = Arc::new(BgpUpdateMessage::new((rot_id, ltime), UpdateMessage(pdu)));
 
             let mut sent_out = 0;
 
             while sent_out < in_pdu {
                 let mut bulk = SmallVec::new();
                 while bulk.len() < 8 {
-                    trace!(
-                        "bulk.len() / sent_out: {}/{}",
-                        bulk.len(), sent_out
-                    );
+                    trace!("bulk.len() / sent_out: {}/{}", bulk.len(), sent_out);
                     let prefix = if let Some(p) = observed_prefixes.next() {
                         p
                     } else {
-                        break
+                        break;
                     };
 
                     let rot_id = RotondaId(0_usize);
-                    let ltime = self.bgp_ltime.checked_add(1)
-                        .expect(">u64 ltime?");
+                    let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
                     let rrwd = RawRouteWithDeltas::new_with_message_ref(
                         (rot_id, ltime),
                         RotoPrefix::new(*prefix),
                         &msg,
-                        RouteStatus::InConvergence
+                        RouteStatus::InConvergence,
                     );
                     let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
                     let payload = Payload::TypeValue(typval);
                     sent_out += 1;
                     bulk.push(payload);
-                } 
+                }
                 self.gate.update_data(Update::Bulk(bulk.into())).await;
             }
         }
@@ -409,11 +394,12 @@ impl Processor {
         // where such an invalid PDU results in a specific NOTIFICATION that
         // needs to go out. Also, check whether 7606 comes into play here.
 
-
-
         let rot_id = RotondaId(0_usize);
         let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
-        let msg = Arc::new(BgpUpdateMessage::new((rot_id, ltime), UpdateMessage(pdu.clone())));
+        let msg = Arc::new(BgpUpdateMessage::new(
+            (rot_id, ltime),
+            UpdateMessage(pdu.clone()),
+        ));
         for chunk in pdu.nlris().iter().collect::<Vec<_>>().chunks(8) {
             let mut bulk = SmallVec::new();
             for nlri in chunk {
@@ -421,7 +407,7 @@ impl Processor {
                     b.prefix()
                 } else {
                     debug!("non unicast NLRI, skipping");
-                    continue
+                    continue;
                 };
 
                 self.observed_prefixes.insert(prefix);
@@ -430,8 +416,8 @@ impl Processor {
                     (rot_id, ltime),
                     RotoPrefix::new(prefix),
                     &msg,
-                    RouteStatus::InConvergence
-                    );
+                    RouteStatus::InConvergence,
+                );
                 let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
                 let payload = Payload::TypeValue(typval);
                 //self.gate.update_data(Update::Single(payload)).await;
@@ -440,8 +426,6 @@ impl Processor {
             self.gate.update_data(Update::Bulk(bulk.into())).await;
         }
 
-
-
         for chunk in pdu.withdrawals().iter().collect::<Vec<_>>().chunks(8) {
             let mut bulk = SmallVec::new();
             for withdrawal in chunk {
@@ -449,7 +433,7 @@ impl Processor {
                     b.prefix()
                 } else {
                     debug!("non unicast Withdrawal, skipping");
-                    continue
+                    continue;
                 };
 
                 self.observed_prefixes.remove(&prefix);
@@ -458,8 +442,8 @@ impl Processor {
                     (rot_id, ltime),
                     RotoPrefix::new(prefix),
                     &msg,
-                    RouteStatus::Withdrawn
-                    );
+                    RouteStatus::Withdrawn,
+                );
                 let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
                 let payload = Payload::TypeValue(typval);
                 //self.gate.update_data(Update::Single(payload)).await;
@@ -469,7 +453,6 @@ impl Processor {
         }
     }
 }
-
 
 pub async fn handle_connection(
     gate: Gate,
@@ -485,7 +468,7 @@ pub async fn handle_connection(
     //  "neighbor 1.2.3.4 timers delayopen 15"
     // the socket is not readable until their delayopen has passed.
     // Not sure whether this is correct/intentional.
-    // 
+    //
     // To work around that, instead of checking for both writability and
     // readability, we do not wait for the latter.
     // So instead of:
@@ -495,7 +478,7 @@ pub async fn handle_connection(
     //      );
     // we do:
     let _ = tcp_stream.writable().await;
-    
+
     let (sess_tx, sess_rx) = mpsc::channel::<Message>(100);
 
     /*
@@ -503,16 +486,15 @@ pub async fn handle_connection(
     //  Ugly use of temp bool here, because candidate_config is moved.
     //  We do not want to put this logic in BgpSession itself, because this
     //  all looks a bit to rotonda-unit specific.
-    */
+     */
     let delay_open = !candidate_config.is_exact();
-    debug!("delay_open for {}: {}", candidate_config.peer_config().name(), delay_open);
-
-    let mut session = BgpSession::new(
-        candidate_config,
-        tcp_stream,
-        sess_tx,
-        cmds_rx
+    debug!(
+        "delay_open for {}: {}",
+        candidate_config.peer_config().name(),
+        delay_open
     );
+
+    let mut session = BgpSession::new(candidate_config, tcp_stream, sess_tx, cmds_rx);
 
     if delay_open {
         session.enable_delay_open();

@@ -25,7 +25,10 @@ log-reroute        = "^0.1"
 pin-project-lite   = "^0.2"
 rand               = "^0.8"
 reqwest            = { version = "^0.11", default-features = false }
-routecore          = { version = "0.4.0-dev", features = ["bgp", "bmp", "serde"], git = "https://github.com/NLnetLabs/routecore.git" }
+routecore          = { version = "0.4.0-dev", branch = "compose-messages-nlri-v2", features = ["bgp", "bmp", "serde"], git = "https://github.com/NLnetLabs/routecore.git" }
+#routecore          = { path = "../routecore",  features = ["bgp", "bmp", "serde"] }
+rotonda-fsm        = { version = "0.1.0-dev", git = "https://github.com/NLnetLabs/rotonda-fsm.git" }
+#rotonda-fsm        = { path = "../rotonda-fsm" }
 sanitise-file-name = "^1.0"
 serde              = { version = "^1.0", features = ["derive", "rc"] }
 serde_json         = { version = "^1.0", features = ["preserve_order"] }

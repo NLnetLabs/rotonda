@@ -570,7 +570,7 @@ mod tests {
         // Given
         let processor = mk_test_processor();
         let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
-        let (pph, peer_up_msg_buf, real_pph) =
+        let (pph, peer_up_msg_buf, _real_pph) =
             mk_peer_up_notification_msg_without_rfc4724_support("127.0.0.1", 12345);
         let stats_report_msg_buf = mk_statistics_report_msg(&pph);
 

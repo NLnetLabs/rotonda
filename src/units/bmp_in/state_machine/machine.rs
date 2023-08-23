@@ -498,6 +498,7 @@ where
                             SessionConfig::modern(),
                         ) {
                             Ok(update) => {
+                                // TODO: filter with roto
                                 for prefix in prefixes_to_withdraw {
                                     let route = Self::mk_route_for_prefix(
                                         self.router_id.clone(),
@@ -598,6 +599,7 @@ where
                     let update_msg = roto::types::builtin::UpdateMessage(update); // clone is cheap here
                     let delta_id = (RotondaId(0), 0); // TODO
                     let roto_bgp_msg = BgpUpdateMessage::new(delta_id, update_msg);
+                    // TODO: move filtering out of the BMP state machine
                     let (update, possible_osq) = match filter_map(roto_bgp_msg, filter_data) {
                         Ok(ControlFlow::Continue((new_or_modified_msg, osq))) => {
                             (new_or_modified_msg.raw_message().0.clone(), Some(osq))

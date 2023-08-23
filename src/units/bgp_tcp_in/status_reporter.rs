@@ -5,7 +5,7 @@ use std::sync::{atomic::Ordering::Relaxed, Arc};
 use log::{debug, info, trace, warn};
 
 use crate::common::status_reporter::{
-    AnyStatusReporter, Chainable, Named, sr_log, UnitStatusReporter
+    sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter,
 };
 
 use super::metrics::BgpTcpInMetrics;
@@ -19,7 +19,7 @@ impl BgpTcpInStatusReporter {
     pub fn new<T: Display>(name: T, metrics: Arc<BgpTcpInMetrics>) -> Self {
         Self {
             name: format!("{}", name),
-            metrics
+            metrics,
         }
     }
 
@@ -48,8 +48,8 @@ impl BgpTcpInStatusReporter {
     }
 }
 
-impl UnitStatusReporter for BgpTcpInStatusReporter { }
-impl AnyStatusReporter for BgpTcpInStatusReporter { }
+impl UnitStatusReporter for BgpTcpInStatusReporter {}
+impl AnyStatusReporter for BgpTcpInStatusReporter {}
 
 impl Chainable for BgpTcpInStatusReporter {
     fn add_child<T: Display>(&self, child_name: T) -> Self {

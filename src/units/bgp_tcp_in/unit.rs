@@ -1,6 +1,6 @@
+use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
-use std::collections::HashMap;
 
 use futures::future::select;
 use futures::pin_mut;
@@ -11,10 +11,9 @@ use serde::Deserialize;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
-
 use crate::common::status_reporter::{Chainable, UnitStatusReporter};
 use crate::common::unit::UnitActivity;
-use crate::comms::{GateStatus,Terminated};
+use crate::comms::{GateStatus, Terminated};
 use crate::manager::{Component, WaitPoint};
 use crate::units::{Gate, Unit};
 
@@ -74,24 +73,28 @@ pub struct BgpTcpIn {
 
 impl PartialEq for BgpTcpIn {
     fn eq(&self, other: &Self) -> bool {
-       self.listen == other.listen &&
-       self.my_asn == other.my_asn &&
-       self.my_bgp_id == other.my_bgp_id
+        self.listen == other.listen
+            && self.my_asn == other.my_asn
+            && self.my_bgp_id == other.my_bgp_id
     }
 }
 
 impl BgpTcpIn {
-    pub async fn run (
+    pub async fn run(
         self,
         component: Component,
         gate: Gate,
         waitpoint: WaitPoint,
     ) -> Result<(), crate::comms::Terminated> {
-        BgpTcpInRunner::new(self).run(
-            component, gate, Arc::new(StandardTcpListenerFactory), waitpoint
-        ).await
+        BgpTcpInRunner::new(self)
+            .run(
+                component,
+                gate,
+                Arc::new(StandardTcpListenerFactory),
+                waitpoint,
+            )
+            .await
     }
-
 }
 
 pub type LiveSessions = HashMap<(IpAddr, Asn), mpsc::Sender<Command>>;
@@ -99,7 +102,7 @@ pub type LiveSessions = HashMap<(IpAddr, Asn), mpsc::Sender<Command>>;
 struct BgpTcpInRunner {
     // The configuration from the .conf.
     bgp: BgpTcpIn,
-    
+
     // To send commands to a Session based on peer IP + ASN.
     live_sessions: Arc<Mutex<LiveSessions>>,
 }
@@ -123,16 +126,14 @@ impl BgpTcpInRunner {
         T: TcpListenerFactory<U>,
         U: TcpListener,
     {
-        let unit_name = component.name().clone(); 
+        let unit_name = component.name().clone();
 
         // Setup metrics
         let metrics = Arc::new(BgpTcpInMetrics::new(&gate));
         component.register_metrics(metrics.clone());
 
         // Setup status reporting
-        let status_reporter = Arc::new(
-            BgpTcpInStatusReporter::new(&unit_name, metrics.clone())
-        );
+        let status_reporter = Arc::new(BgpTcpInStatusReporter::new(&unit_name, metrics.clone()));
 
         // Wait for other components to be, and signal to other components
         // that we are, ready to start. All units and targets start together,
@@ -169,9 +170,10 @@ impl BgpTcpInRunner {
                                 GateStatus::Reconfiguring {
                                     new_config: Unit::BgpTcpIn(new_unit),
                                 } => {
-                                    debug!("pre reconfigure, current live sessions: {:?}",
-                                           self.live_sessions
-                                           );
+                                    debug!(
+                                        "pre reconfigure, current live sessions: {:?}",
+                                        self.live_sessions
+                                    );
                                     debug!("new_config: {:?}", new_unit);
                                     let rebind = self.bgp.listen != new_unit.listen;
                                     self.bgp = new_unit;
@@ -213,7 +215,6 @@ impl BgpTcpInRunner {
                 };
 
                 if let Some((tcp_stream, peer_addr)) = res {
-
                     // Now:
                     // check for the peer_addr.ip() in the new PeerConfig
                     // and spawn a Session for it.
@@ -223,13 +224,10 @@ impl BgpTcpInRunner {
                     // are exchanged and we know the remote ASN.
 
                     if let Some((remote_net, cfg)) = self.bgp.peer_configs.get(peer_addr.ip()) {
-                        let child_name = format!(
-                            "bgp[{}:{}]", peer_addr.ip(), peer_addr.port()
-                        );
-                        let child_status_reporter = Arc::new(
-                            status_reporter.add_child(&child_name)
-                        );
-                        debug!("[{}] config matched: {}", peer_addr.ip(), cfg.name()); 
+                        let child_name = format!("bgp[{}:{}]", peer_addr.ip(), peer_addr.port());
+                        let child_status_reporter =
+                            Arc::new(status_reporter.add_child(&child_name));
+                        debug!("[{}] config matched: {}", peer_addr.ip(), cfg.name());
                         let (cmds_tx, cmds_rx) = mpsc::channel(16);
                         crate::tokio::spawn(
                             &child_name,
@@ -238,17 +236,13 @@ impl BgpTcpInRunner {
                                 self.bgp.clone(),
                                 tcp_stream,
                                 //cfg.clone(),
-                                CombinedConfig::new(
-                                    self.bgp.clone(),
-                                    cfg.clone(),
-                                    remote_net,
-                                    ),
+                                CombinedConfig::new(self.bgp.clone(), cfg.clone(), remote_net),
                                 cmds_tx.clone(),
                                 cmds_rx,
                                 child_status_reporter,
                                 self.live_sessions.clone(),
-                                )
-                            );
+                            ),
+                        );
                     } else {
                         debug!("No config to accept {}", peer_addr.ip());
                     }

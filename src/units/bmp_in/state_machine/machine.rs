@@ -705,9 +705,9 @@ where
                         &pph,
                         prefix,
                         route_status,
-                        )
+                    )
                     .into(),
-                    );
+                );
             }
         }
 
@@ -723,10 +723,12 @@ where
                 //  this form.  A BGP speaker SHOULD treat an UPDATE message of this form
                 //  as though the WITHDRAWN ROUTES do not contain the address prefix.
 
-                if nlris.iter().all(|nlri| if let Nlri::Unicast(b) = nlri {
-                    b.prefix() != prefix
-                } else {
-                    true
+                if nlris.iter().all(|nlri| {
+                    if let Nlri::Unicast(b) = nlri {
+                        b.prefix() != prefix
+                    } else {
+                        true
+                    }
                 }) {
                     // clone is cheap due to use of Bytes
                     routes.push(

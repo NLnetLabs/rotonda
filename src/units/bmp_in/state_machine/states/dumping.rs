@@ -1,7 +1,10 @@
 use std::{collections::hash_map::Keys, fmt::Debug, ops::ControlFlow};
 
 use bytes::Bytes;
-use roto::types::builtin::{BgpUpdateMessage, RouteStatus};
+use roto::{
+    types::builtin::{BgpUpdateMessage, RouteStatus},
+    vm::OutputStreamQueue,
+};
 use routecore::{
     addr::Prefix,
     bgp::{
@@ -174,8 +177,10 @@ pub struct Dumping {
 impl BmpStateDetails<Dumping> {
     #[allow(dead_code)]
     pub async fn process_msg(self, msg_buf: Bytes) -> ProcessingResult {
-        self.process_msg_with_filter(msg_buf, None::<()>, |msg, _| Ok(ControlFlow::Continue(msg)))
-            .await
+        self.process_msg_with_filter(msg_buf, None::<()>, |msg, _| {
+            Ok(ControlFlow::Continue((msg, OutputStreamQueue::new())))
+        })
+        .await
     }
 
     /// `filter` should return true if the BGP message should be ignored, i.e. be filtered out.
@@ -186,7 +191,10 @@ impl BmpStateDetails<Dumping> {
         filter: F,
     ) -> ProcessingResult
     where
-        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>,
+        F: Fn(
+            BgpUpdateMessage,
+            Option<D>,
+        ) -> Result<ControlFlow<(), (BgpUpdateMessage, OutputStreamQueue)>, String>,
     {
         match BmpMsg::from_octets(msg_buf).unwrap() {
             // already verified upstream
@@ -277,7 +285,7 @@ impl BmpStateDetails<Dumping> {
         if routes.is_empty() {
             Self::mk_state_transition_result(next_state)
         } else {
-            Self::mk_final_routing_update_result(next_state, Update::Bulk(routes.into()))
+            Self::mk_final_routing_update_result(next_state, [Update::Bulk(routes.into())].into())
         }
     }
 }
@@ -398,6 +406,9 @@ mod tests {
 
     use roto::types::{
         builtin::{BuiltinTypeValue, MaterializedRoute},
+        collections::Record,
+        outputs::OutputStreamMessage,
+        typedef::TypeDef,
         typevalue::TypeValue,
     };
     use routecore::{asn::Asn, bmp::message::PeerType};
@@ -703,34 +714,36 @@ mod tests {
             res.processing_result,
             MessageType::RoutingUpdate { .. }
         ));
-        if let MessageType::RoutingUpdate {
-            update: Update::Bulk(mut bulk),
-        } = res.processing_result
-        {
-            assert_eq!(bulk.len(), 1);
-            let mut expected_roto_prefixes: Vec<TypeValue> =
-                vec![Prefix::from_str("2001:2000:3080:e9c::2/128")
-                    .unwrap()
-                    .into()];
-            for item in bulk.drain(..) {
-                if let Payload::TypeValue(type_value) = item {
-                    if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = type_value {
-                        let materialized_route = MaterializedRoute::from(route);
-                        let found_pfx = materialized_route.route.prefix.as_ref().unwrap();
-                        let position = expected_roto_prefixes
-                            .iter()
-                            .position(|pfx| pfx == found_pfx)
-                            .unwrap();
-                        expected_roto_prefixes.remove(position);
-                        assert_eq!(materialized_route.status, RouteStatus::Withdrawn);
+        if let MessageType::RoutingUpdate { mut updates } = res.processing_result {
+            assert_eq!(updates.len(), 1);
+            let update = updates.pop().unwrap();
+            assert!(matches!(update, Update::Bulk(_)));
+            if let Update::Bulk(mut bulk) = update {
+                assert_eq!(bulk.len(), 1);
+                let mut expected_roto_prefixes: Vec<TypeValue> =
+                    vec![Prefix::from_str("2001:2000:3080:e9c::2/128")
+                        .unwrap()
+                        .into()];
+                for item in bulk.drain(..) {
+                    if let Payload::TypeValue(type_value) = item {
+                        if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = type_value {
+                            let materialized_route = MaterializedRoute::from(route);
+                            let found_pfx = materialized_route.route.prefix.as_ref().unwrap();
+                            let position = expected_roto_prefixes
+                                .iter()
+                                .position(|pfx| pfx == found_pfx)
+                                .unwrap();
+                            expected_roto_prefixes.remove(position);
+                            assert_eq!(materialized_route.status, RouteStatus::Withdrawn);
+                        } else {
+                            panic!("Expected TypeValue::Builtin(BuiltinTypeValue::Route(_)");
+                        }
                     } else {
-                        panic!("Expected TypeValue::Builtin(BuiltinTypeValue::Route(_)");
+                        panic!("Expected Payload::TypeValue");
                     }
-                } else {
-                    panic!("Expected Payload::TypeValue");
                 }
+                assert!(expected_roto_prefixes.is_empty());
             }
-            assert!(expected_roto_prefixes.is_empty());
         } else {
             unreachable!();
         }
@@ -938,14 +951,23 @@ mod tests {
         let eor_msg_buf = mk_route_monitoring_end_of_rib_msg(&pph);
         let termination_msg_buf = mk_termination_msg();
 
+        let mut dummy_osq = OutputStreamQueue::new();
+        let dummy_typedef =
+            TypeDef::new_record_type(vec![("dummy-field", Box::new(TypeDef::StringLiteral))])
+                .unwrap();
+
+        let dummy_fields = vec![("dummy-field", "dummy-value".into())];
+        let dummy_record = Record::create_instance_with_sort(&dummy_typedef, dummy_fields).unwrap();
+        dummy_osq.push(dummy_record.into());
+
         let ctr = Arc::new(AtomicU8::new(0));
         let count_cb = |msg: BgpUpdateMessage, ctr: Option<Arc<AtomicU8>>| {
             ctr.unwrap().fetch_add(1, Ordering::SeqCst);
-            Ok(ControlFlow::Continue(msg))
+            Ok(ControlFlow::Continue((msg, dummy_osq.clone())))
         };
 
         // BMP Initiation messages do not carry a BGP UPDATE message and so the filter should NOT be invoked (ctr += 0)
-        let accept_cb = |msg, _| Ok(ControlFlow::Continue(msg));
+        let accept_cb = |msg, _| Ok(ControlFlow::Continue((msg, OutputStreamQueue::new())));
         let cb_ctr = Some(ctr.clone());
         let processor = processor
             .process_msg_with_filter(initiation_msg_buf, cb_ctr, accept_cb)
@@ -962,11 +984,23 @@ mod tests {
         assert_eq!(0, ctr.load(Ordering::SeqCst));
 
         // BMP Route Monitoring non-EoR messages DO carry a BGP UPDATE message and so the filter SHOULD be invoked (ctr += 1)
+        // Ensure that any output stream messages that the simulated filter produced are preserved
         let cb_ctr = Some(ctr.clone());
-        let processor = processor
+        let res = processor
             .process_msg_with_filter(route_mon_msg_buf.clone(), cb_ctr, count_cb)
-            .await
-            .next_state;
+            .await;
+        assert!(
+            matches!(&res.processing_result, MessageType::RoutingUpdate { updates } if updates.len() == 2)
+        );
+        if let MessageType::RoutingUpdate { updates } = &res.processing_result {
+            let routing_update = &updates[0];
+            assert!(matches!(routing_update, Update::Bulk(routes) if !routes.is_empty()));
+            let output_stream_message_update = &updates[1];
+            assert!(
+                matches!(output_stream_message_update, Update::OutputStreamMessage(msgs) if msgs.len() == 1)
+            );
+        }
+        let processor = res.next_state;
         assert_eq!(1, ctr.load(Ordering::SeqCst));
 
         // BMP Route Monitoring EoR messages are handled specially and so the filter should NOT be invoked (ctr += 0)
@@ -1015,9 +1049,12 @@ mod tests {
             res.processing_result,
             MessageType::RoutingUpdate { .. }
         ));
-        if let MessageType::RoutingUpdate { update } = res.processing_result {
-            dbg!(&update); // TODO: assert the content of the update
-            if let Update::Bulk(updates) = &update {
+        if let MessageType::RoutingUpdate { mut updates } = res.processing_result {
+            dbg!(&updates); // TODO: assert the content of the update
+            assert_eq!(updates.len(), 1);
+            let bulk = updates.pop().unwrap();
+            assert!(matches!(bulk, Update::Bulk(_)));
+            if let Update::Bulk(updates) = &bulk {
                 assert_eq!(updates.len(), 1);
                 if let Payload::TypeValue(TypeValue::Builtin(BuiltinTypeValue::Route(route))) =
                     &updates[0]

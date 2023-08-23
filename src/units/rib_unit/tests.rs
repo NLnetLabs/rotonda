@@ -23,6 +23,7 @@ mod tests {
         custom_alloc::Upsert, epoch, prelude::multi::PrefixStoreError, MatchOptions, MatchType,
     };
     use routecore::{addr::Prefix, bgp::message::SessionConfig};
+    use smallvec::SmallVec;
 
     use std::{str::FromStr, sync::Arc, time::Instant};
 
@@ -34,15 +35,17 @@ mod tests {
         let payload = Payload::TypeValue(TypeValue::Unknown);
 
         // When it is processed by this unit
-        let update = run_process_single_update(payload.clone(), rib.clone(), metrics).await;
+        let mut update = run_process_single_update(payload.clone(), rib.clone(), metrics).await;
 
         // Then it should NOT be added to the route store
         assert_eq!(rib.load().as_ref().unwrap().prefixes_count(), 0);
 
         // But should be output for forwarding to downstream units
+        assert_eq!(update.len(), 1); // (modified) RIB input only, no streaming output
+        let update = update.pop().unwrap();
         assert!(matches!(
             update,
-            Some(Update::Single(Payload::TypeValue(TypeValue::Unknown)))
+            Update::Single(Payload::TypeValue(TypeValue::Unknown))
         ));
     }
 
@@ -70,23 +73,27 @@ mod tests {
             RouteStatus::InConvergence,
         );
         let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
-        let saved_input_payload = payload.clone();
-        let gate_update = run_process_single_update(payload.clone(), rib.clone(), metrics).await;
+        let update = run_process_single_update(payload.clone(), rib.clone(), metrics).await;
 
         // Then it SHOULD be added to the route store
         assert_eq!(rib.load().as_ref().unwrap().prefixes_count(), 1);
 
-        // And SHOULD be output for forwarding to downstream units
-        assert!(matches!(&gate_update, Some(Update::Single(p)) if p == &payload));
-
+        // And SHOULD be output twice for forwarding to downstream units
         // And the BGP UPDATE bytes should be the same for both the input and output route
         // (at the time of writing the BgpUpdateMessage PartialEq implementation only compares BgpUpdateMessage.message_id,
         // not the actual underlying message bytes)
-        let Some(Update::Single(output_payload)) = &gate_update else { unreachable!() };
-        assert_eq!(
-            get_payload_bytes(&saved_input_payload),
-            get_payload_bytes(&output_payload)
-        );
+        for (input, output) in [(payload, update)].iter_mut() {
+            assert_eq!(output.len(), 1); // (modified) RIB input only, no streaming output
+            let update = output.pop().unwrap();
+            if let Update::Single(output_payload) = update {
+                assert_eq!(
+                    get_payload_bytes(&input),
+                    get_payload_bytes(&output_payload)
+                );
+            } else {
+                unreachable!();
+            }
+        }
     }
 
     #[tokio::test]
@@ -113,30 +120,29 @@ mod tests {
             RouteStatus::InConvergence,
         );
         let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
-        let gate_update1 =
+        let updates1 =
             run_process_single_update(payload.clone(), rib.clone(), metrics.clone()).await;
-        let gate_update2 = run_process_single_update(payload.clone(), rib.clone(), metrics).await;
+        let updates2 = run_process_single_update(payload.clone(), rib.clone(), metrics).await;
 
         // Then it SHOULD be added to the route store only once
         assert_eq!(rib.load().as_ref().unwrap().prefixes_count(), 1);
 
         // And SHOULD be output twice for forwarding to downstream units
-        assert!(matches!(&gate_update1, Some(Update::Single(p)) if p == &payload));
-        assert!(matches!(&gate_update2, Some(Update::Single(p)) if p == &payload));
-
         // And the BGP UPDATE bytes should be the same for both the input and output route
         // (at the time of writing the BgpUpdateMessage PartialEq implementation only compares BgpUpdateMessage.message_id,
         // not the actual underlying message bytes)
-        let Some(Update::Single(output_payload)) = gate_update1 else { unreachable!() };
-        assert_eq!(
-            get_payload_bytes(&payload),
-            get_payload_bytes(&output_payload)
-        );
-        let Some(Update::Single(output_payload)) = gate_update2 else { unreachable!() };
-        assert_eq!(
-            get_payload_bytes(&payload),
-            get_payload_bytes(&output_payload)
-        );
+        for (input, output) in [&payload, &payload].iter().zip([updates1, updates2].iter_mut()) {
+            assert_eq!(output.len(), 1); // (modified) RIB input only, no streaming output
+            let update = output.pop().unwrap();
+            if let Update::Single(output_payload) = update {
+                assert_eq!(
+                    get_payload_bytes(&input),
+                    get_payload_bytes(&output_payload)
+                );
+            } else {
+                unreachable!();
+            }
+        }
     }
 
     #[tokio::test]
@@ -156,8 +162,8 @@ mod tests {
             let bgp_update_bytes2 = mk_bgp_update(&Prefixes::default(), &announcements2, &[]);
 
             // When they are processed by this unit
-            let mut input_payloads = vec![];
-            let mut output_payloads = vec![];
+            let mut inputs = vec![];
+            let mut outputs = vec![];
             for bgp_update_bytes in [bgp_update_bytes1, bgp_update_bytes2] {
                 let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
                 let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
@@ -168,11 +174,10 @@ mod tests {
                     RouteStatus::InConvergence,
                 );
                 let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
-                input_payloads.push(payload.clone());
-                let gate_update =
+                inputs.push(payload.clone());
+                let updates =
                     run_process_single_update(payload, rib.clone(), metrics.clone()).await;
-                let Some(Update::Single(output_payload)) = gate_update else { unreachable!() };
-                output_payloads.push(output_payload);
+                outputs.push(updates);
             }
 
             // Then only the one common prefix SHOULD be added to the route store
@@ -211,17 +216,22 @@ mod tests {
             }
 
             // And SHOULD be output for forwarding to downstream units
-            assert_eq!(output_payloads.len(), 2);
+            assert_eq!(outputs.len(), 2);
 
             // And the BGP UPDATE bytes should be the same for both the input and output route
             // (at the time of writing the BgpUpdateMessage PartialEq implementation only compares BgpUpdateMessage.message_id,
             // not the actual underlying message bytes)
-            for (input_payload, output_payload) in input_payloads.iter().zip(output_payloads.iter())
-            {
-                assert_eq!(
-                    get_payload_bytes(&input_payload),
-                    get_payload_bytes(&output_payload)
-                );
+            for (input, output) in inputs.iter().zip(outputs.iter_mut()) {
+                assert_eq!(output.len(), 1); // (modified) RIB input only, no streaming output
+                let update = output.pop().unwrap();
+                if let Update::Single(output_payload) = update {
+                    assert_eq!(
+                        get_payload_bytes(&input),
+                        get_payload_bytes(&output_payload)
+                    );
+                } else {
+                    unreachable!();
+                }
             }
 
             // If we repeat the match prefix query while still holding the previous match prefix query results, we should
@@ -281,8 +291,8 @@ mod tests {
         let bgp_update_bytes2 = mk_bgp_update(&Prefixes::default(), &announcements2, &[]);
 
         // When they are processed by this unit
-        let mut input_payloads = vec![];
-        let mut output_payloads = vec![];
+        let mut inputs = vec![];
+        let mut outputs = vec![];
         for (prefix, bgp_update_bytes) in
             [(prefix1, bgp_update_bytes1), (prefix2, bgp_update_bytes2)]
         {
@@ -295,11 +305,9 @@ mod tests {
                 RouteStatus::InConvergence,
             );
             let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
-            input_payloads.push(payload.clone());
-            let gate_update =
-                run_process_single_update(payload, rib.clone(), metrics.clone()).await;
-            let Some(Update::Single(output_payload)) = gate_update else { unreachable!() };
-            output_payloads.push(output_payload);
+            inputs.push(payload.clone());
+            let updates = run_process_single_update(payload, rib.clone(), metrics.clone()).await;
+            outputs.push(updates);
         }
 
         // Then two separate prefixes SHOULD be added to the route store
@@ -325,16 +333,22 @@ mod tests {
         }
 
         // And SHOULD be output for forwarding to downstream units
-        assert_eq!(output_payloads.len(), 2);
+        assert_eq!(outputs.len(), 2);
 
         // And the BGP UPDATE bytes should be the same for both the input and output route
         // (at the time of writing the BgpUpdateMessage PartialEq implementation only compares BgpUpdateMessage.message_id,
         // not the actual underlying message bytes)
-        for (input_payload, output_payload) in input_payloads.iter().zip(output_payloads.iter()) {
-            assert_eq!(
-                get_payload_bytes(&input_payload),
-                get_payload_bytes(&output_payload)
-            );
+        for (input, output) in inputs.iter().zip(outputs.iter_mut()) {
+            assert_eq!(output.len(), 1); // (modified) RIB input only, no streaming output
+            let update = output.pop().unwrap();
+            if let Update::Single(output_payload) = update {
+                assert_eq!(
+                    get_payload_bytes(&input),
+                    get_payload_bytes(&output_payload)
+                );
+            } else {
+                unreachable!();
+            }
         }
     }
 
@@ -367,7 +381,7 @@ mod tests {
         payload: Payload,
         rib: Arc<ArcSwapOption<PhysicalRib>>,
         metrics: Arc<RibUnitMetrics>,
-    ) -> Option<Update> {
+    ) -> SmallVec<[Update; 8]> {
         let status_reporter = RibUnitStatusReporter::new("test metrics", metrics.clone());
         let status_reporter = Arc::new(status_reporter);
 

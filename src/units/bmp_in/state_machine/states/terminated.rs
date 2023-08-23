@@ -5,7 +5,7 @@ use crate::units::bmp_in::state_machine::{machine::BmpStateDetails, processing::
 use super::{dumping::Dumping, initiating::Initiating, updating::Updating};
 
 use bytes::Bytes;
-use roto::types::builtin::BgpUpdateMessage;
+use roto::{types::builtin::BgpUpdateMessage, vm::OutputStreamQueue};
 use routecore::bmp::message::Message as BmpMsg;
 
 /// BmpState machine state 'Terminated'.
@@ -74,7 +74,9 @@ impl From<Updating> for Terminated {
 
 impl BmpStateDetails<Terminated> {
     pub fn process_msg(self, msg_buf: Bytes) -> ProcessingResult {
-        self.process_msg_with_filter(msg_buf, None::<()>, |msg, _| Ok(ControlFlow::Continue(msg)))
+        self.process_msg_with_filter(msg_buf, None::<()>, |msg, _| {
+            Ok(ControlFlow::Continue((msg, OutputStreamQueue::new())))
+        })
     }
 
     pub fn process_msg_with_filter<F, D>(
@@ -84,7 +86,10 @@ impl BmpStateDetails<Terminated> {
         _filter: F,
     ) -> ProcessingResult
     where
-        F: Fn(BgpUpdateMessage, Option<D>) -> Result<ControlFlow<(), BgpUpdateMessage>, String>,
+        F: Fn(
+            BgpUpdateMessage,
+            Option<D>,
+        ) -> Result<ControlFlow<(), (BgpUpdateMessage, OutputStreamQueue)>, String>,
     {
         let bmp_msg = BmpMsg::from_octets(&msg_buf).unwrap(); // already verified upstream
         self.mk_invalid_message_result(format!(

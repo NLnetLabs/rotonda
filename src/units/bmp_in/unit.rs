@@ -43,6 +43,7 @@ use non_empty_vec::NonEmpty;
 use roto::{
     traits::RotoType,
     types::{builtin::BuiltinTypeValue, typevalue::TypeValue},
+    vm::OutputStreamQueue,
 };
 use serde::Deserialize;
 use tokio::{runtime::Handle, sync::Mutex};
@@ -339,18 +340,49 @@ impl BmpInRunner {
         }
 
         let roto_source = self.roto_source.clone();
-        let res = bmp_state.process_msg_with_filter(
-            msg_buf,
-            Some(roto_source),
-            |raw_bgp_msg, roto_source| {
+        let res = bmp_state
+            .process_msg_with_filter(msg_buf, Some(roto_source), |raw_bgp_msg, roto_source| {
                 // map the result type from TypeValue to BgpUpdateMessage
-                match Self::is_filtered(raw_bgp_msg, roto_source) {
-                    Ok(ControlFlow::Break(())) => Ok(ControlFlow::Break(())),
-                    // TODO: Modify roto to not output an Arc if the given rx wasn't an Arc, so then we don't have to do the Arc::try_unwrap() dance.
-                    Ok(ControlFlow::Continue(TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(raw_bgp_msg)))) => Ok(ControlFlow::Continue(Arc::try_unwrap(raw_bgp_msg).unwrap())),
-                    Ok(ControlFlow::Continue(some_unsupported_type)) => Err(format!("Filter result type must be BgpUpdateMessage, found: {some_unsupported_type}")),
-                    Err(err) => Err(format!("Filter execution failed: {err}")),
-                }
+                Self::is_filtered(raw_bgp_msg, roto_source)
+                    .and_then(|control_flow| match control_flow {
+                        // Filter rejected the message, propagate the rejection
+                        ControlFlow::Break(()) => Ok(ControlFlow::Break(())),
+
+                        // Filter accepted the message unchanged, pass the (should be) unmodified input on
+                        // TODO: Modify roto to not output an Arc if the given rx wasn't an Arc, so then we don't have to do the Arc::try_unwrap() dance.
+                        ControlFlow::Continue((
+                            TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(raw_bgp_msg)),
+                            None,
+                            osq,
+                        )) => Ok(ControlFlow::Continue((
+                            Arc::try_unwrap(raw_bgp_msg).unwrap(),
+                            osq,
+                        ))),
+
+                        // Filter-map accepted the message, pass the possibly modified message on
+                        // TODO: Modify roto to not output an Arc if the given rx wasn't an Arc, so then we don't have to do the Arc::try_unwrap() dance.
+                        ControlFlow::Continue((
+                            _rx,
+                            Some(TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(
+                                raw_bgp_msg,
+                            ))),
+                            osq,
+                        )) => Ok(ControlFlow::Continue((
+                            Arc::try_unwrap(raw_bgp_msg).unwrap(),
+                            osq,
+                        ))),
+
+                        // The rx type resulting from the roto script execution is not what we expected
+                        ControlFlow::Continue((rx, None, _osq)) => Err(format!(
+                            "Filter rx output type must be BgpUpdateMessage, found: {rx}"
+                        )),
+
+                        // The tx type resulting from the roto script execution is not what we expected
+                        ControlFlow::Continue((_, Some(tx), _osq)) => Err(format!(
+                            "Filter-map output type must be BgpUpdateMessage, found: {tx}"
+                        )),
+                    })
+                    .map_err(|err| format!("Filter execution failed: {err}"))
             })
             .await;
 
@@ -400,10 +432,12 @@ impl BmpInRunner {
                 }
             }
 
-            MessageType::RoutingUpdate { update } => {
+            MessageType::RoutingUpdate { updates } => {
                 // Pass the routing update on to downstream units and/or targets.
                 // This is where we send an update down the pipeline.
-                self.gate.update_data(update).await;
+                for update in updates {
+                    self.gate.update_data(update).await;
+                }
             }
 
             MessageType::Other => {} // Nothing to do
@@ -569,25 +603,39 @@ impl BmpInRunner {
                 self.status_reporter
                     .input_mismatch("Update::Single(_)", "Update::QueryResult(_)");
             }
+
+            Update::OutputStreamMessage(_) => {
+                self.status_reporter.input_mismatch(
+                    "Update::Single(Payload::RawBmp)",
+                    "Update::OutputStreaMessage(_)",
+                );
+            }
         }
     }
 
     fn is_filtered<R: RotoType>(
         rx: R,
         roto_source: Option<Arc<ArcSwap<(Instant, String)>>>,
-    ) -> Result<ControlFlow<(), TypeValue>, String> {
+    ) -> Result<ControlFlow<(), (TypeValue, Option<TypeValue>, OutputStreamQueue)>, String> {
         match roto_source {
             None => {
                 // No Roto filter defined, accept the BGP UPDATE messsage
-                Ok(ControlFlow::Continue(rx.into()))
+                Ok(ControlFlow::Continue((
+                    rx.into(),
+                    None,
+                    OutputStreamQueue::new(),
+                )))
             }
             Some(roto_source) => {
                 // TODO: Run the Roto VM on a dedicated thread pool, to prevent blocking the Tokio async runtime, as we
                 // don't know how long we will have to wait for the VM execution to complete (as it depends on the
                 // behaviour of the user provided script). Timeouts might be a good idea!
-                Self::VM.with(move |vm| -> Result<ControlFlow<(), TypeValue>, String> {
-                    is_filtered_in_vm(vm, roto_source, rx)
-                })
+                Self::VM.with(
+                    move |vm| -> Result<
+                        ControlFlow<(), (TypeValue, Option<TypeValue>, OutputStreamQueue)>,
+                        String,
+                    > { is_filtered_in_vm(vm, roto_source, rx) },
+                )
             }
         }
     }
@@ -694,12 +742,13 @@ mod tests {
         // Then we should be told that it is okay to proceed and the output of the script should match the BGP UPDATE
         // message that we passed in (as the script doesn't modify the output).
         let expected_raw_bgp_message = Arc::new(mk_filter_input(bgp_update_bytes));
-        assert_eq!(
+        assert!(matches!(
             res,
-            Ok(ControlFlow::Continue(TypeValue::Builtin(
-                BuiltinTypeValue::BgpUpdateMessage(expected_raw_bgp_message)
-            )))
-        );
+            Ok(ControlFlow::Continue((
+                TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(msg)),
+                ..
+            ))) if msg == expected_raw_bgp_message
+        ));
     }
 
     #[tokio::test]
@@ -736,7 +785,7 @@ mod tests {
         let res = BmpInRunner::is_filtered(bgp_update_msg, Some(roto_source));
 
         // Then we should be told to sotp as the filter has rejected the input
-        assert_eq!(res, Ok(ControlFlow::Break(())));
+        assert!(matches!(res, Ok(ControlFlow::Break(()))));
     }
 
     // --- Test helpers ------------------------------------------------------

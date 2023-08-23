@@ -11,9 +11,8 @@ pub mod manager;
 pub mod metrics;
 pub mod payload;
 pub mod targets;
+pub mod tests;
+pub use tests::util::bgp;
 pub mod tokio;
 pub mod units;
 
-pub(crate) mod tests;
-
-pub use tests::util::bgp;

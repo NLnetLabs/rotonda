@@ -3,13 +3,10 @@ use std::{fmt::Display, sync::Arc, time::Duration};
 use super::{metrics::MqttMetrics, status_reporter::MqttStatusReporter};
 
 use crate::{
-    common::{
-        json::mk_communities_json,
-        status_reporter::{AnyStatusReporter, TargetStatusReporter},
-    },
+    common::status_reporter::{AnyStatusReporter, TargetStatusReporter},
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
     manager::{Component, TargetCommand, WaitPoint},
-    payload::{Action, Payload, RawBmpPayload, RouterId, Update},
+    payload::{Payload, RawBmpPayload, Update},
 };
 
 use async_trait::async_trait;
@@ -19,11 +16,11 @@ use mqtt::{
     QoS,
 };
 use non_empty_vec::NonEmpty;
+use roto::types::{builtin::BuiltinTypeValue, outputs::OutputStreamMessage};
 use routecore::bmp::message::Message as BmpMsg;
-use routecore::{addr::Prefix, bgp::communities::Community};
 use serde::Deserialize;
-use serde_json::{json, Value};
-use serde_with::{serde_as, DisplayFromStr};
+use serde_json::json;
+use serde_with::serde_as;
 use tokio::{
     sync::mpsc,
     time::{interval, timeout},
@@ -51,24 +48,6 @@ pub struct Mqtt {
 
     #[serde(flatten)]
     config: Config,
-}
-
-#[derive(Copy, Clone, Debug, Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum Mode {
-    /// In filtering mode only announcements which match the defined triggers will be published
-    /// to the MQTT broker.
-    Filtering,
-
-    /// In mirroring mode every update (both announcements and withdrawals) is published to the
-    /// MQTT broker.
-    Mirroring,
-}
-
-impl Default for Mode {
-    fn default() -> Self {
-        Self::Filtering
-    }
 }
 
 #[serde_as]
@@ -100,12 +79,6 @@ struct Config {
     /// How many messages to buffer if publishing encounters delays
     #[serde(default = "Config::default_queue_size")]
     queue_size: u16,
-
-    #[serde(default)]
-    mode: Mode,
-
-    #[serde_as(as = "Vec<DisplayFromStr>")]
-    communities: Vec<Community>,
 }
 
 impl Config {
@@ -138,7 +111,11 @@ impl Config {
     }
 }
 
-type SenderMsg = (DateTime<Utc>, (Value, String), Arc<RouterId>);
+struct SenderMsg {
+    received: DateTime<Utc>,
+    content: String,
+    topic: String,
+}
 
 impl Mqtt {
     pub async fn run(
@@ -316,15 +293,17 @@ impl MqttRunner {
         // component is not yet ready to accept it.
         waitpoint.running().await;
 
-        while let Some((received, (event, prefix_str), router_id)) = rx.recv().await {
-            let content = event.to_string();
-            let topic = config.topic_template.replace("{id}", &router_id);
+        while let Some(SenderMsg {
+            received,
+            content,
+            topic,
+        }) = rx.recv().await
+        {
             Self::publish_msg(
                 status_reporter.clone(),
                 Some(client.clone()),
                 topic,
                 received,
-                prefix_str,
                 content,
                 config.qos,
                 config.publish_max_secs,
@@ -340,7 +319,6 @@ impl MqttRunner {
         client: Option<Arc<AsyncClient>>,
         topic: String,
         received: DateTime<Utc>,
-        prefix_str: String,
         content: String,
         qos: i32,
         duration: Duration,
@@ -352,7 +330,7 @@ impl MqttRunner {
 
         match Self::do_publish(client, &topic, content, qos, duration, test_publish).await {
             Ok(_) => {
-                status_reporter.publish_ok(prefix_str, topic, received);
+                status_reporter.publish_ok(topic, received);
             }
             Err(err) => {
                 status_reporter.publish_error(err);
@@ -393,134 +371,13 @@ impl MqttRunner {
         }
     }
 
-    // fn prepare_for_publication(
-    //     &self,
-    //     action: Action,
-    //     router_id: Arc<RouterId>,
-    //     pfx: &Prefix,
-    //     rib_el: &RibElement,
-    // ) -> Option<(Value, String)> {
-    //     match (self.config.mode, action) {
-    //         (Mode::Filtering, Action::Announce) | (Mode::Mirroring, Action::Announce) => {
-    //             if let Some(advert) = &rib_el.advert {
-    //                 let triggered = advert.has_communities(&self.config.communities);
-
-    //                 let publish = match self.config.mode {
-    //                     Mode::Mirroring => true,
-    //                     Mode::Filtering => triggered,
-    //                 };
-
-    //                 if publish {
-    //                     let (addr, len) = pfx.addr_and_len();
-    //                     let prefix_str = format!("{}/{}", addr, len);
-    //                     let routing_information_base_name =
-    //                         rib_el.routing_information_base.to_string();
-
-    //                     let description = match self.config.mode {
-    //                         Mode::Filtering => {
-    //                             format!(
-    //                                 "{} RTBH received from router {} on {}",
-    //                                 prefix_str, router_id, routing_information_base_name
-    //                             )
-    //                         }
-    //                         Mode::Mirroring => {
-    //                             format!(
-    //                                 "{} announcement received from router {} on {}",
-    //                                 prefix_str, router_id, routing_information_base_name
-    //                             )
-    //                         }
-    //                     };
-
-    //                     let communities = mk_communities_json(
-    //                         advert.standard_communities(),
-    //                         advert.ext_communities(),
-    //                         advert.large_communities(),
-    //                     );
-
-    //                     let as_path: Vec<String> =
-    //                         advert.as_path.iter().map(|asn| asn.to_string()).collect();
-
-    //                     let event = json!({
-    //                         "prefix": &prefix_str,
-    //                         "router": router_id,
-    //                         "sourceAs": rib_el.neighbor.0.to_string(),
-    //                         "routingInformationBaseName": routing_information_base_name,
-    //                         "asPath": as_path,
-    //                         "neighbor": rib_el.neighbor.1,
-    //                         "communities": communities,
-    //                         "description": description,
-    //                     });
-
-    //                     return Some((event, prefix_str));
-    //                 }
-    //             }
-    //         }
-
-    //         (Mode::Filtering, Action::Withdraw) => {
-    //             // Nothing to do
-    //         }
-
-    //         (Mode::Mirroring, Action::Withdraw) => {
-    //             let (addr, len) = pfx.addr_and_len();
-    //             let prefix_str = format!("{}/{}", addr, len);
-    //             let routing_information_base_name = rib_el.routing_information_base.to_string();
-    //             let description = format!(
-    //                 "{} withdrawal received from router {} on {}",
-    //                 prefix_str, router_id, routing_information_base_name
-    //             );
-
-    //             let event = json!({
-    //                 "prefix": &prefix_str,
-    //                 "router": router_id,
-    //                 "sourceAs": rib_el.neighbor.0.to_string(),
-    //                 "routingInformationBaseName": routing_information_base_name,
-    //                 "asPath": [],
-    //                 "neighbor": rib_el.neighbor.1,
-    //                 "communities": [],
-    //                 "description": description,
-    //             });
-
-    //             return Some((event, prefix_str));
-    //         }
-    //     }
-
-    //     None
-    // }
-}
-
-#[async_trait]
-impl DirectUpdate for MqttRunner {
-    async fn direct_update(&self, update: Update) {
-        match update {
-            Update::Bulk(updates) => {
-                todo!()
-            }
-
-            // Update::Bulk(updates) => {
-            //     log::trace!("MQTT: Received direct update");
-            //     for payload in updates {
-            //         log::trace!("MQTT: Processing direct update payload");
-            //         if let Payload::RouterSpecificRibElement(pfx, meta) = payload {
-            //             let rib_el = meta.rib_el.load();
-            //             let publish_details = self.prepare_for_publication(
-            //                 todo!(), //action,
-            //                 meta.router_id.clone(),
-            //                 &pfx,
-            //                 &rib_el,
-            //             );
-
-            //             if let Some(publish_details) = publish_details {
-            //                 let msg = (rib_el.received, publish_details, meta.router_id.clone());
-            //                 self.sender.as_ref().unwrap().send(msg).unwrap();
-            //             }
-            //         }
-            //     }
-            // }
-            Update::Single(Payload::RawBmp {
+    fn payload_to_msg(&self, payload: Payload) -> Option<SenderMsg> {
+        match payload {
+            Payload::RawBmp {
                 received,
                 router_addr,
                 msg: RawBmpPayload::Msg(bytes),
-            }) => {
+            } => {
                 let msg = BmpMsg::from_octets(bytes).unwrap();
 
                 let (msg_type, pph, msg_type_specific) = match &msg {
@@ -537,33 +394,131 @@ impl DirectUpdate for MqttRunner {
                     BmpMsg::RouteMirroring(msg) => (6, Some(msg.per_peer_header()), None),
                 };
 
-                let pph_str: String = match pph {
-                    Some(pph) => format!("{}", pph),
-                    None => "No PPH".to_string(),
-                };
+                let pph_str: Option<String> = pph.map(|v| v.to_string());
 
-                let event = json!({
+                let content = json!({
                     "router": router_addr,
                     "msg_type": msg_type,
                     "pph": pph_str,
                     "msg_type_specific": msg_type_specific,
-                });
+                })
+                .to_string();
 
-                let publish_details = (event, "no-prefix".to_string());
-                let msg = (received, publish_details, Arc::new(router_addr.to_string()));
-                self.sender.as_ref().unwrap().send(msg).unwrap();
+                let topic = self
+                    .config
+                    .topic_template
+                    .replace("{id}", &router_addr.to_string());
+                let msg = SenderMsg {
+                    received,
+                    content,
+                    topic,
+                };
+                Some(msg)
             }
 
-            Update::Single(_) => {
+            Payload::TypeValue(tv) => {
+                let received = Utc::now();
+
+                let router_id = match &tv {
+                    roto::types::typevalue::TypeValue::Builtin(BuiltinTypeValue::Route(route)) => {
+                        route.router_id()
+                    }
+                    _ => None,
+                };
+
+                let router_id = router_id.or(Some(Arc::new("unknown".to_string()))).unwrap();
+
+                match serde_json::to_string(&tv) {
+                    Ok(content) => {
+                        let topic = self.config.topic_template.replace("{id}", &router_id);
+                        let msg = SenderMsg {
+                            received,
+                            content,
+                            topic,
+                        };
+                        Some(msg)
+                    }
+                    Err(_err) => {
+                        // TODO
+                        None
+                    }
+                }
+            }
+
+            _ => {
                 self.status_reporter.input_mismatch(
-                    "Update::Single(Payload::RawBmp)",
-                    "Update::Single(RawBmp)|Update::Bulk(_)",
+                    "Update::Single(Payload::RawBmp)|Update::Bulk(Payload::RawBmp)|Update::OutputStreamMessage",
+                    "Update::Single(_)|Update::Bulk(_)",
                 );
+                None
+            }
+        }
+    }
+
+    fn output_stream_message_to_msg(
+        &self,
+        output_stream_message: OutputStreamMessage,
+    ) -> Option<SenderMsg> {
+        let received = Utc::now();
+        match serde_json::to_string(output_stream_message.get_record()) {
+            Ok(content) => {
+                let topic = self
+                    .config
+                    .topic_template
+                    .replace("{id}", output_stream_message.get_topic());
+                let msg = SenderMsg {
+                    received,
+                    content,
+                    topic,
+                };
+                Some(msg)
+            }
+            Err(_err) => {
+                /* TODO */
+                None
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl DirectUpdate for MqttRunner {
+    async fn direct_update(&self, update: Update) {
+        match update {
+            Update::Single(payload) => {
+                if let Some(msg) = self.payload_to_msg(payload) {
+                    if let Err(_err) = self.sender.as_ref().unwrap().send(msg) {
+                        // TODO
+                    }
+                }
+            }
+
+            Update::Bulk(updates) => {
+                for payload in updates {
+                    if let Some(msg) = self.payload_to_msg(payload) {
+                        if let Err(_err) = self.sender.as_ref().unwrap().send(msg) {
+                            // TODO
+                        }
+                    }
+                }
             }
 
             Update::QueryResult(..) => {
+                // QueryResults are only intended to be sent from physical RIB to virtual RIBs. If we receive one it has
+                // mistakenly escaped (been wrongly propagated onward by the last vRIB in a chain), but it wasn't
+                // intended for nor can we do anything with it.
                 self.status_reporter
-                    .input_mismatch("Update::Single(Payload::RawBmp)", "Update::QueryResult(_)");
+                    .input_mismatch("Update::Single(Payload::RawBmp)|Update::Bulk(Payload::RawBmp)|Update::OutputStreamMessage", "Update::QueryResult(..)");
+            }
+
+            Update::OutputStreamMessage(output_stream_messages) => {
+                for output_stream_message in output_stream_messages {
+                    if let Some(msg) = self.output_stream_message_to_msg(output_stream_message) {
+                        if let Err(_err) = self.sender.as_ref().unwrap().send(msg) {
+                            // TODO
+                        }
+                    }
+                }
             }
         }
     }
@@ -579,439 +534,395 @@ impl std::fmt::Debug for MqttRunner {
 
 //------------ Tests ---------------------------------------------------------
 
-// #[cfg(test)]
-// mod tests {
-//     use std::{net::IpAddr, str::FromStr};
-
-//     use assert_json_diff::{assert_json_matches_no_panic, CompareMode};
-//     use routecore::{
-//         asn::Asn,
-//         bgp::{
-//             communities::{ExtendedCommunity, LargeCommunity, StandardCommunity, Wellknown},
-//             types::NextHop,
-//         },
-//     };
-
-//     use crate::{
-//         bgp::raw::communities::{
-//             extended::sample_as2_specific_route_target_extended_community,
-//             large::sample_large_community,
-//         },
-//         payload::{AdvertisedRouteDetails, RoutingInformationBase},
-//     };
-
-//     use super::*;
-
-//     use routecore::bgp::communities::ExtendedCommunitySubType::*;
-//     use routecore::bgp::communities::ExtendedCommunityType::*;
-
-//     #[test]
-//     fn server_host_and_port_and_communities_config_settings_must_be_provided() {
-//         let empty = r#""#;
-//         let empty_server_host_only = r#"server_host = """#;
-//         let empty_server_port_only = r#"server_port = 0"#;
-//         let empty_server_host_and_port_only = r#"
-//         server_host = ""
-//         server_port = 0
-//         "#;
-//         let empty_server_host_and_port_and_communities = r#"
-//         server_host = ""
-//         server_port = 0
-//         communities = []
-//         "#;
-
-//         assert!(mk_config_from_toml(empty).is_err());
-//         assert!(mk_config_from_toml(empty_server_host_only).is_err());
-//         assert!(mk_config_from_toml(empty_server_port_only).is_err());
-//         assert!(mk_config_from_toml(empty_server_host_and_port_only).is_err());
-//         assert!(mk_config_from_toml(empty_server_host_and_port_and_communities).is_ok());
-//     }
-
-//     #[test]
-//     fn communities_config_setting_supports_standard_well_known_community_names() {
-//         let cfg = r#"
-//         server_host = ""
-//         server_port = 0
-//         communities = ["NO_EXPORT", "BLACKHOLE", "NO_ADVERTISE", "NO_EXPORT_SUBCONFED"]
-//         "#;
-
-//         let communities = mk_config_from_toml(cfg).unwrap().communities;
-//         assert_eq!(communities.len(), 4);
-//         assert!(communities.contains(&Wellknown::Blackhole.into()));
-//         assert!(communities.contains(&Wellknown::NoAdvertise.into()));
-//         assert!(communities.contains(&Wellknown::NoExport.into()));
-//         assert!(communities.contains(&Wellknown::NoExportSubconfed.into()));
-//     }
-
-//     #[test]
-//     fn communities_config_setting_supports_rfc1997_private_communities() {
-//         let cfg = r#"
-//         server_host = ""
-//         server_port = 0
-//         communities = ["123:456"]
-//         "#;
-
-//         let communities = mk_config_from_toml(cfg).unwrap().communities;
-//         assert_eq!(communities.len(), 1);
-//         let actual_community = &communities[0];
-
-//         let [asn_high, asn_low] = 123u16.to_be_bytes();
-//         let [tag_high, tag_low] = 456u16.to_be_bytes();
-//         let expected_community = Community::from([asn_high, asn_low, tag_high, tag_low]);
-
-//         assert!(matches!(actual_community, Community::Standard(_)));
-//         assert!(matches!(expected_community, Community::Standard(_)));
-//         assert_eq!(*actual_community, expected_community);
-//         if let Community::Standard(actual_community) = actual_community {
-//             assert_eq!(actual_community.asn(), Some(Asn::from_u32(123)));
-//             assert_eq!(actual_community.tag().unwrap().value(), 456);
-//         }
-//     }
-
-//     #[test]
-//     fn communities_config_setting_supports_rfc4360_extended_communities() {
-//         let cfg = r#"
-//         server_host = ""
-//         server_port = 0
-//         communities = ["0x000200220000D508"]
-//         "#;
-
-//         let communities = mk_config_from_toml(cfg).unwrap().communities;
-//         assert_eq!(communities.len(), 1);
-//         let actual_community = &communities[0];
-
-//         let expected_community = Community::from([0x00, 0x02, 0x00, 0x22, 0x00, 0x00, 0xD5, 0x08]);
-
-//         assert!(matches!(actual_community, Community::Extended(_)));
-//         assert!(matches!(expected_community, Community::Extended(_)));
-//         assert_eq!(*actual_community, expected_community);
-//         if let Community::Extended(actual_community) = actual_community {
-//             assert_eq!(
-//                 actual_community.types(),
-//                 (TransitiveTwoOctetSpecific, RouteTarget)
-//             )
-//         }
-//     }
-
-//     #[test]
-//     fn communities_config_setting_supports_rfc8092_large_communities() {
-//         let cfg = r#"
-//         server_host = ""
-//         server_port = 0
-//         communities = ["64496:4294967295:2"]
-//         "#;
-
-//         let communities = mk_config_from_toml(cfg).unwrap().communities;
-//         assert_eq!(communities.len(), 1);
-//         let actual_community = &communities[0];
-
-//         let expected_community = Community::from([
-//             0x00, 0x00, 0xFB, 0xF0, 0xFF, 0xFF, 0xFF, 0xFF, 0x00, 0x00, 0x00, 0x02,
-//         ]);
-
-//         assert!(matches!(actual_community, Community::Large(_)));
-//         assert!(matches!(expected_community, Community::Large(_)));
-//         assert_eq!(*actual_community, expected_community);
-//         if let Community::Large(actual_community) = actual_community {
-//             assert_eq!(actual_community.global(), 64496_u32);
-//             assert_eq!(actual_community.local1(), 4294967295_u32);
-//             assert_eq!(actual_community.local2(), 2_u32);
-//         }
-//     }
-
-//     #[test]
-//     fn filter_withdrawals() {
-//         // Given an MQTT target runner that will match on a particular community
-//         let runner = mk_mqtt_runner(Mode::Filtering, vec![mk_expected_standard_community()]);
-
-//         // And a candidate that should NOT be selected by the runner for publication
-//         let bad = mk_qualifying_publication_candidate().with_action(Action::Withdraw);
-
-//         // Then the candidate should NOT be selected for publication
-//         assert!(prepare_candidate_for_publication(&runner, bad).is_none());
-//     }
-
-//     #[test]
-//     fn filter_incomplete_announcements() {
-//         // Given an MQTT target runner that will match on a particular community
-//         let runner = mk_mqtt_runner(Mode::Filtering, vec![mk_expected_standard_community()]);
-
-//         // And a candidate that should NOT be selected by the runner for publication
-//         let bad = mk_qualifying_publication_candidate().with_advert(None);
-
-//         // Then the candidate should NOT be selected for publication
-//         assert!(prepare_candidate_for_publication(&runner, bad).is_none());
-//     }
-
-//     #[test]
-//     fn filter_unmatched_community() {
-//         // Given an MQTT target runner that will match on a particular community
-//         let runner = mk_mqtt_runner(Mode::Filtering, vec![mk_expected_standard_community()]);
-
-//         // And a candidate that should NOT be selected by the runner for publication
-//         let bad = mk_qualifying_publication_candidate()
-//             .with_communities(vec![Wellknown::NoExport.into()]);
-
-//         // Then the candidate should NOT be selected for publication
-//         assert!(prepare_candidate_for_publication(&runner, bad).is_none());
-//     }
-
-//     #[test]
-//     fn publish_matching_standard_community() {
-//         // Given an MQTT target runner that will match on a particular community
-//         let runner = mk_mqtt_runner(Mode::Filtering, vec![mk_expected_standard_community()]);
-
-//         // And a candidate that should be selected by the runner for publication
-//         let good = mk_qualifying_publication_candidate();
-
-//         // Then the candidate should be selected for publication
-//         assert!(prepare_candidate_for_publication(&runner, good).is_some());
-//     }
-
-//     #[test]
-//     fn publish_matching_extended_community() {
-//         // Given an MQTT target runner that will match on a particular community
-//         let runner = mk_mqtt_runner(Mode::Filtering, vec![mk_expected_extended_community()]);
-
-//         // And a candidate that should be selected by the runner for publication
-//         let good = mk_qualifying_publication_candidate();
-
-//         // Then the candidate should be selected for publication
-//         assert!(prepare_candidate_for_publication(&runner, good).is_some());
-//     }
-
-//     #[test]
-//     fn publish_matching_large_community() {
-//         // Given an MQTT target runner that will match on a particular community
-//         let runner = mk_mqtt_runner(Mode::Filtering, vec![mk_expected_large_community()]);
-
-//         // And a candidate that should be selected by the runner for publication
-//         let good = mk_qualifying_publication_candidate();
-
-//         // Then the candidate should be selected for publication
-//         assert!(prepare_candidate_for_publication(&runner, good).is_some());
-//     }
-
-//     #[test]
-//     fn generate_correct_json_for_publishing() {
-//         // Given an MQTT target runner that will match on a particular community
-//         let runner = mk_mqtt_runner(Mode::Filtering, vec![mk_expected_standard_community()]);
-
-//         // And a candidate that should be selected by the runner for publication
-//         let good = mk_qualifying_publication_candidate();
-
-//         // Then the candidate should be selected for publication
-//         let (actual_json, _) = prepare_candidate_for_publication(&runner, good).unwrap();
-
-//         // And the produced message to be published should match the expected JSON format
-//         let expected_json = json!({
-//             "prefix": "1.2.3.0/24",
-//             "router": "test-router",
-//             "sourceAs": "AS1818",
-//             "routingInformationBaseName": "Post-Policy-RIB",
-//             "asPath": [
-//                 "AS123",
-//                 "AS456"
-//             ],
-//             "neighbor": "4.5.6.7",
-//             "communities": [
-//                 {
-//                     "rawFields": ["0xFFFF029A"],
-//                     "type": "standard",
-//                     "parsed": {
-//                         "value": { "type": "well-known", "attribute": "BLACKHOLE" }
-//                     }
-//                 },
-//                 {
-//                     "rawFields": ["0x00", "0x02", "0x0022", "0x0000D508"],
-//                     "type": "extended",
-//                     "parsed": {
-//                         "type": "as2-specific",
-//                         "rfc7153SubType": "route-target",
-//                         "transitive": true,
-//                         "globalAdmin": { "type": "asn", "value": "AS34" },
-//                         "localAdmin": 54536
-//                     }
-//                 },
-//                 {
-//                     "type": "large",
-//                     "rawFields": ["0x0022", "0x0100", "0x0200"],
-//                     "parsed": {
-//                       "globalAdmin": { "type": "asn", "value": "AS34" },
-//                       "localDataPart1": 256,
-//                       "localDataPart2": 512
-//                     }
-//                 }
-//             ],
-//             "description": "1.2.3.0/24 RTBH received from router test-router on Post-Policy-RIB"
-//         });
-
-//         assert_json_eq(actual_json, expected_json);
-//     }
-
-//     // --- Test helpers -----------------------------------------------------------------------------------------------
-
-//     struct CandidatePublicationDetails {
-//         action: Action,
-//         router_id: Arc<String>,
-//         prefix: Prefix,
-//         rib_el: RibElement,
-//     }
-
-//     impl CandidatePublicationDetails {
-//         fn new(action: Action, router_id: &str, prefix: Prefix, rib_el: RibElement) -> Self {
-//             Self {
-//                 action,
-//                 router_id: Arc::new(router_id.to_string()),
-//                 prefix,
-//                 rib_el,
-//             }
-//         }
-
-//         fn with_action(mut self, action: Action) -> Self {
-//             self.action = action;
-//             self
-//         }
-
-//         fn with_advert(mut self, advert: Option<AdvertisedRouteDetails>) -> Self {
-//             self.rib_el.advert = advert;
-//             self
-//         }
-
-//         fn with_communities(mut self, communities: Vec<Community>) -> Self {
-//             if let Some(advert) = &mut self.rib_el.advert {
-//                 advert.communities = mk_raw_communities_tuple(communities);
-//             }
-//             self
-//         }
-//     }
-
-//     #[rustfmt::skip]
-//     type PublishableMessage = (Value /* msg json */, String /* mqtt topic prefix */);
-
-//     fn mk_config_from_toml(toml: &str) -> Result<Config, toml::de::Error> {
-//         toml::de::from_slice::<Config>(toml.as_bytes())
-//     }
-
-//     fn assert_json_eq(actual_json: Value, expected_json: Value) {
-//         let config = assert_json_diff::Config::new(CompareMode::Strict);
-//         if let Err(err) = assert_json_matches_no_panic(&actual_json, &expected_json, config) {
-//             eprintln!(
-//                 "Actual JSON: {}",
-//                 serde_json::to_string_pretty(&actual_json).unwrap()
-//             );
-//             eprintln!(
-//                 "Expected JSON: {}",
-//                 serde_json::to_string_pretty(&expected_json).unwrap()
-//             );
-//             panic!("JSON doesn't match expectations: {}", err);
-//         }
-//     }
-
-//     fn prepare_candidate_for_publication(
-//         runner: &MqttRunner,
-//         CandidatePublicationDetails {
-//             action,
-//             router_id,
-//             prefix,
-//             rib_el,
-//         }: CandidatePublicationDetails,
-//     ) -> Option<PublishableMessage> {
-//         runner.prepare_for_publication(action, router_id, &prefix, &rib_el)
-//     }
-
-//     /// Make an internal event that should qualify for MQTT publication
-//     fn mk_qualifying_publication_candidate() -> CandidatePublicationDetails {
-//         mk_event(
-//             Action::Announce,
-//             "1.2.3.0/24",
-//             1818,
-//             "4.5.6.7",
-//             &[123, 456],
-//             vec![
-//                 mk_expected_standard_community(),
-//                 mk_expected_extended_community(),
-//                 mk_expected_large_community(),
-//             ],
-//         )
-//     }
-
-//     fn mk_expected_standard_community() -> Community {
-//         Wellknown::Blackhole.into()
-//     }
-
-//     fn mk_expected_extended_community() -> Community {
-//         sample_as2_specific_route_target_extended_community().into()
-//     }
-
-//     fn mk_expected_large_community() -> Community {
-//         sample_large_community().into()
-//     }
-
-//     fn mk_event(
-//         action: Action,
-//         pfx: &str,
-//         asn: u32,
-//         peer: &str,
-//         as_path: &[u32],
-//         communities: Vec<Community>,
-//     ) -> CandidatePublicationDetails {
-//         let router_id = "test-router";
-//         let pfx = Prefix::from_str(pfx).unwrap();
-//         let rib_name = RoutingInformationBase::PostPolicy;
-//         let neighbor = (Asn::from_u32(asn), IpAddr::from_str(peer).unwrap());
-//         let as_path = as_path
-//             .iter()
-//             .map(|&v| Asn::from_u32(v))
-//             .collect::<Vec<_>>();
-
-//         let advert = if as_path.is_empty() || communities.is_empty() {
-//             None
-//         } else {
-//             Some(AdvertisedRouteDetails {
-//                 as_path,
-//                 next_hop: NextHop::Empty,
-//                 communities: mk_raw_communities_tuple(communities),
-//             })
-//         };
-
-//         let rib_el = RibElement::new(rib_name, neighbor, advert);
-
-//         CandidatePublicationDetails::new(action, router_id, pfx, rib_el)
-//     }
-
-//     fn mk_raw_communities_tuple(
-//         communities: Vec<Community>,
-//     ) -> (
-//         Vec<StandardCommunity>,
-//         Vec<ExtendedCommunity>,
-//         Vec<LargeCommunity>,
-//     ) {
-//         let mut standard = vec![];
-//         let mut extended = vec![];
-//         let mut large = vec![];
-
-//         for c in communities {
-//             match c {
-//                 Community::Standard(c) => standard.push(c),
-//                 Community::Extended(c) => extended.push(c),
-//                 Community::Ipv6Extended(_) => { /* TODO */ }
-//                 Community::Large(c) => large.push(c),
-//             }
-//         }
-
-//         (standard, extended, large)
-//     }
-
-//     fn mk_mqtt_runner(mode: Mode, communities: Vec<Community>) -> MqttRunner {
-//         let config = Config {
-//             mode,
-//             communities,
-//             ..Default::default()
-//         };
-
-//         MqttRunner::new(config, Component::default())
-//     }
-
-//     // TODO: test Mode::Mirroring
-// }
+#[cfg(test)]
+mod tests {
+    use std::{net::IpAddr, str::FromStr};
+
+    use bytes::Bytes;
+    use roto::types::{
+        builtin::{
+            BgpUpdateMessage, BuiltinTypeValue, RawRouteWithDeltas, RotondaId, RouteStatus,
+            UpdateMessage,
+        },
+        collections::Record,
+        typedef::TypeDef,
+        typevalue::TypeValue,
+    };
+    use routecore::{
+        addr::Prefix,
+        asn::Asn,
+        bgp::message::SessionConfig,
+        bmp::message::{MessageType, PeerType},
+    };
+
+    use crate::{
+        bgp::encode::{
+            mk_bgp_update, mk_initiation_msg, mk_route_monitoring_msg, Announcements, MyPeerType,
+            PerPeerHeader, Prefixes,
+        },
+        tests::util::assert_json_eq,
+    };
+
+    use super::*;
+
+    #[test]
+    fn server_host_and_port_and_communities_config_settings_must_be_provided() {
+        let empty = r#""#;
+        let empty_server_host_only = r#"server_host = """#;
+        let empty_server_port_only = r#"server_port = 0"#;
+        let empty_server_host_and_port_only = r#"
+        server_host = ""
+        server_port = 0
+        "#;
+
+        assert!(mk_config_from_toml(empty).is_err());
+        assert!(mk_config_from_toml(empty_server_host_only).is_err());
+        assert!(mk_config_from_toml(empty_server_port_only).is_err());
+        assert!(mk_config_from_toml(empty_server_host_and_port_only).is_ok());
+    }
+
+    #[test]
+    fn generate_correct_json_for_publishing_from_raw_bmp_initiate_msg() {
+        // Given an MQTT target runner
+        let runner = mk_mqtt_runner();
+
+        // And a payload that should be published
+        let payload = mk_raw_bmp_payload(bmp_initiate());
+
+        // Then the candidate should be selected for publication
+        let SenderMsg { content, topic, .. } = runner.payload_to_msg(payload).unwrap();
+
+        // And the topic should be based on the router socket address
+        assert_eq!(topic, "rotonda/10.0.0.1:1818");
+
+        // And the produced message to be published should match the expected JSON format
+        let expected_json = json!({
+          "router": "10.0.0.1:1818",
+          "msg_type": u8::from(MessageType::InitiationMessage),
+          "pph": null,
+          "msg_type_specific": null
+        });
+
+        let actual_json = serde_json::from_str(&content).unwrap();
+        assert_json_eq(actual_json, expected_json);
+    }
+
+    #[test]
+    fn generate_correct_json_for_publishing_from_raw_bmp_peer_up_msg() {
+        // Given an MQTT target runner
+        let runner = mk_mqtt_runner();
+
+        // And a payload that should be published
+        let payload = mk_raw_bmp_payload(bmp_peer_up_notification());
+
+        // Then the candidate should be selected for publication
+        let SenderMsg { content, topic, .. } = runner.payload_to_msg(payload).unwrap();
+
+        // And the topic should be based on the router socket address
+        assert_eq!(topic, "rotonda/10.0.0.1:1818");
+
+        // And the produced message to be published should match the expected JSON format
+        let expected_json = json!({
+          "router": "10.0.0.1:1818",
+          "msg_type": u8::from(MessageType::PeerUpNotification),
+          "pph": "10.0.0.1/AS12345/[00, 00, 00, 00]",
+          "msg_type_specific": null
+        });
+
+        let actual_json = serde_json::from_str(&content).unwrap();
+        assert_json_eq(actual_json, expected_json);
+    }
+
+    #[test]
+    fn generate_correct_json_for_publishing_from_raw_bmp_peer_down_msg() {
+        // Given an MQTT target runner
+        let runner = mk_mqtt_runner();
+
+        // And a payload that should be published
+        let payload = mk_raw_bmp_payload(bmp_peer_down_notification());
+
+        // Then the candidate should be selected for publication
+        let SenderMsg { content, topic, .. } = runner.payload_to_msg(payload).unwrap();
+
+        // And the topic should be based on the router socket address
+        assert_eq!(topic, "rotonda/10.0.0.1:1818");
+
+        // And the produced message to be published should match the expected JSON format
+        let expected_json = json!({
+          "router": "10.0.0.1:1818",
+          "msg_type": u8::from(MessageType::PeerDownNotification),
+          "pph": "10.0.0.1/AS12345/[00, 00, 00, 00]",
+          "msg_type_specific": "PeerDeconfigured"
+        });
+
+        let actual_json = serde_json::from_str(&content).unwrap();
+        assert_json_eq(actual_json, expected_json);
+    }
+
+    #[test]
+    fn generate_correct_json_for_publishing_from_raw_bmp_route_monitoring_msg() {
+        // Given an MQTT target runner
+        let runner = mk_mqtt_runner();
+
+        // And a payload that should be published
+        let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
+        let payload = mk_raw_bmp_payload(bmp_route_announce(prefix));
+
+        // Then the candidate should be selected for publication
+        let SenderMsg { content, topic, .. } = runner.payload_to_msg(payload).unwrap();
+
+        // And the topic should be based on the router socket address
+        assert_eq!(topic, "rotonda/10.0.0.1:1818");
+
+        // And the produced message to be published should match the expected JSON format
+        let expected_json = json!({
+          "router": "10.0.0.1:1818",
+          "msg_type": u8::from(MessageType::RouteMonitoring),
+          "pph": "10.0.0.1/AS12345/[00, 00, 00, 00]",
+          "msg_type_specific": null
+        });
+
+        let actual_json = serde_json::from_str(&content).unwrap();
+        assert_json_eq(actual_json, expected_json);
+    }
+
+    #[test]
+    fn generate_correct_json_for_publishing_from_bgp_update_roto_type_value() {
+        // Given an MQTT target runner
+        let runner = mk_mqtt_runner();
+
+        // And a payload that should be published
+        let payload = mk_raw_route_with_deltas_payload(Prefix::from_str("1.2.3.0/24").unwrap());
+
+        // Then the candidate should be selected for publication
+        let SenderMsg { content, topic, .. } = runner.payload_to_msg(payload).unwrap();
+
+        // And the topic should be based on the rouuter id recorded with the route, if any
+        assert_eq!(topic, "rotonda/test-router");
+
+        // And the produced message to be published should match the expected JSON format
+        let expected_json = json!({
+            "route": {
+                "prefix": "1.2.3.0/24",
+                "as_path": [
+                    "AS123",
+                    "AS456"
+                ],
+                "origin_type": "Egp",
+                "next_hop": {
+                    "Ipv4": "10.0.0.1"
+                },
+                "atomic_aggregate": false,
+                "communities": [
+                    {
+                        "rawFields": [
+                            "0xFFFF029A"
+                        ],
+                        "type": "standard",
+                        "parsed": {
+                            "value": {
+                                "type": "well-known",
+                                "attribute": "BLACKHOLE"
+                            }
+                        }
+                    },
+                    {
+                        "rawFields": [
+                            "0x00",
+                            "0x02",
+                            "0x0022",
+                            "0x0000D508"
+                        ],
+                        "type": "extended",
+                        "parsed": {
+                            "type": "as2-specific",
+                            "transitive": true,
+                            "rfc7153SubType": "route-target",
+                            "globalAdmin": {
+                                "type": "asn",
+                                "value": "AS34"
+                            },
+                            "localAdmin": 54536
+                        }
+                    },
+                    {
+                        "rawFields": [
+                            "0x0022",
+                            "0x0100",
+                            "0x0200"
+                        ],
+                        "type": "large",
+                        "parsed": {
+                            "globalAdmin": {
+                                "type": "asn",
+                                "value": "AS34"
+                            },
+                            "localDataPart1": 256,
+                            "localDataPart2": 512
+                        }
+                    }
+                ],
+                "peer_ip": "4.5.6.7",
+                "peer_asn": 1818,
+                "router_id": "test-router"
+            },
+            "status": "InConvergence",
+            "route_id": [
+                0,
+                0
+            ]
+        });
+
+        let actual_json = serde_json::from_str(&content).unwrap();
+        assert_json_eq(actual_json, expected_json);
+    }
+
+    #[test]
+    fn generate_correct_json_for_publishing_from_output_stream_roto_type_value() {
+        // Given an MQTT target runner
+        let runner = mk_mqtt_runner();
+
+        // And a payload that should be published
+        let output_stream = mk_roto_output_stream_payload();
+
+        // Then the candidate should be selected for publication
+        let SenderMsg { content, topic, .. } =
+            runner.output_stream_message_to_msg(output_stream).unwrap();
+
+        // And the topic should be based on the rouuter id recorded with the route, if any
+        assert_eq!(topic, "rotonda/my-topic");
+
+        // And the produced message to be published should match the expected JSON format
+        let expected_json = json!({
+            "some-asn": 1818,
+            "some-str": "some-value",
+            "topic": "my-topic"
+        });
+
+        let actual_json = serde_json::from_str(&content).unwrap();
+        assert_json_eq(actual_json, expected_json);
+    }
+
+    // --- Test helpers -----------------------------------------------------------------------------------------------
+
+    fn mk_mqtt_runner() -> MqttRunner {
+        let config = Config {
+            topic_template: Config::default_topic_template(),
+            ..Default::default()
+        };
+        MqttRunner::new(config, Component::default())
+    }
+
+    fn mk_config_from_toml(toml: &str) -> Result<Config, toml::de::Error> {
+        toml::de::from_slice::<Config>(toml.as_bytes())
+    }
+
+    fn mk_raw_bmp_payload(bmp_bytes: Bytes) -> Payload {
+        let received = Utc::now();
+        let router_addr = "10.0.0.1:1818".parse().unwrap();
+        let msg = RawBmpPayload::Msg(bmp_bytes);
+        Payload::RawBmp {
+            received,
+            router_addr,
+            msg,
+        }
+    }
+
+    fn mk_raw_route_with_deltas_payload(prefix: Prefix) -> Payload {
+        let bytes = bgp_route_announce(prefix);
+        let update_msg = UpdateMessage::new(bytes, SessionConfig::modern());
+        let delta_id = (RotondaId(0), 0);
+        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, update_msg));
+        let route = RawRouteWithDeltas::new_with_message_ref(
+            (RotondaId(0), 0),
+            prefix.into(),
+            &bgp_update_msg,
+            RouteStatus::InConvergence,
+        )
+        .with_peer_asn("AS1818".parse().unwrap())
+        .with_peer_ip("4.5.6.7".parse().unwrap())
+        .with_router_id("test-router".to_string().into());
+        let tv = TypeValue::Builtin(BuiltinTypeValue::Route(route));
+        Payload::TypeValue(tv)
+    }
+
+    fn mk_roto_output_stream_payload() -> OutputStreamMessage {
+        let typedef = TypeDef::new_record_type(vec![
+            ("topic", Box::new(TypeDef::StringLiteral)),
+            ("some-str", Box::new(TypeDef::StringLiteral)),
+            ("some-asn", Box::new(TypeDef::Asn)),
+        ])
+        .unwrap();
+
+        let fields = vec![
+            ("topic", "my-topic".into()),
+            ("some-str", "some-value".into()),
+            ("some-asn", routecore::asn::Asn::from_u32(1818).into()),
+        ];
+        let record = Record::create_instance_with_sort(&typedef, fields).unwrap();
+        OutputStreamMessage::from(record)
+    }
+
+    fn bmp_initiate() -> Bytes {
+        mk_initiation_msg("test-router", "Mock BMP router")
+    }
+
+    fn bmp_peer_up_notification() -> Bytes {
+        crate::bgp::encode::mk_peer_up_notification_msg(
+            &mk_per_peer_header(),
+            "10.0.0.1".parse().unwrap(),
+            11019,
+            4567,
+            111,
+            222,
+            0,
+            0,
+            vec![],
+            false,
+        )
+    }
+
+    fn bmp_peer_down_notification() -> Bytes {
+        crate::bgp::encode::mk_peer_down_notification_msg(&mk_per_peer_header())
+    }
+
+    fn bmp_route_announce(prefix: Prefix) -> Bytes {
+        let per_peer_header = mk_per_peer_header();
+        let withdrawals = Prefixes::default();
+        let announcements = Announcements::from_str(&format!(
+            "e [123,456] 10.0.0.1 BLACKHOLE,rt:34:54536,AS34:256:512 {}",
+            prefix
+        ))
+        .unwrap();
+
+        mk_route_monitoring_msg(&per_peer_header, &withdrawals, &announcements, &[])
+    }
+
+    fn bgp_route_announce(prefix: Prefix) -> Bytes {
+        let withdrawals = Prefixes::default();
+        let announcements = Announcements::from_str(&format!(
+            "e [123,456] 10.0.0.1 BLACKHOLE,rt:34:54536,AS34:256:512 {}",
+            prefix
+        ))
+        .unwrap();
+        mk_bgp_update(&withdrawals, &announcements, &[])
+    }
+
+    fn mk_per_peer_header() -> PerPeerHeader {
+        let peer_type: MyPeerType = PeerType::GlobalInstance.into();
+        let peer_flags: u8 = 0;
+        let peer_address: IpAddr = IpAddr::from_str("10.0.0.1").unwrap();
+        let peer_as: Asn = Asn::from_u32(12345);
+        let peer_bgp_id = 0u32.to_be_bytes();
+        let peer_distinguisher: [u8; 8] = [0; 8];
+
+        PerPeerHeader {
+            peer_type,
+            peer_flags,
+            peer_distinguisher,
+            peer_address,
+            peer_as,
+            peer_bgp_id,
+        }
+    }
+}

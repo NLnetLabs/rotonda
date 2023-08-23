@@ -157,6 +157,11 @@ impl BmpFilterRunner {
             Update::QueryResult(..) => {
                 status_reporter.input_mismatch("Update::Single(_)", "Update::QueryResult(_)");
             }
+
+            Update::OutputStreamMessage(_) => {
+                // pass it on, we don't (yet?) support doing anything with these
+                gate.update_data(update).await;
+            }
         }
     }
 }

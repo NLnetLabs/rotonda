@@ -63,13 +63,12 @@ impl MqttStatusReporter {
             .fetch_add(1, atomic::Ordering::SeqCst);
     }
 
-    pub fn publish_ok<T: Display>(&self, prefix: T, topic: String, received: DateTime<Utc>) {
+    pub fn publish_ok(&self, topic: String, received: DateTime<Utc>) {
         let delay = Utc::now() - received;
 
         sr_log!(
             trace: self,
-            "Published message for prefix {} to topic {}",
-            prefix,
+            "Published message to topic {}",
             topic
         );
 

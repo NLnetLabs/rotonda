@@ -1,5 +1,5 @@
-use std::sync::Arc;
 use std::sync::atomic::{self, AtomicUsize, Ordering};
+use std::sync::Arc;
 
 use crate::comms::{Gate, GateMetrics, GraphStatus};
 
@@ -27,7 +27,9 @@ impl BgpTcpInMetrics {
 impl GraphStatus for BgpTcpInMetrics {
     fn status_text(&self) -> String {
         //let num_sessions = self.established_session_count.load(Ordering::Relaxed);
-        let num_msgs_out = self.gate.as_ref()
+        let num_msgs_out = self
+            .gate
+            .as_ref()
             .map(|gate| gate.num_updates.load(Ordering::Relaxed))
             .unwrap_or_default();
 
@@ -77,7 +79,6 @@ impl BgpTcpInMetrics {
         MetricType::Counter,
         MetricUnit::Total,
     );
-
 }
 
 impl metrics::Source for BgpTcpInMetrics {
@@ -95,7 +96,8 @@ impl metrics::Source for BgpTcpInMetrics {
         target.append_simple(
             &Self::CONNECTION_ACCEPTED_COUNT_METRIC,
             Some(unit_name),
-            self.connection_accepted_count.load(atomic::Ordering::Relaxed),
+            self.connection_accepted_count
+                .load(atomic::Ordering::Relaxed),
         );
 
         target.append_simple(

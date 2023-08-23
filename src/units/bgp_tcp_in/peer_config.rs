@@ -222,6 +222,8 @@ impl ConfigExt for CombinedConfig {
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
+    use crate::units::Unit;
+
     use super::*;
 
     #[test]
@@ -255,10 +257,7 @@ hold_time = 10
 
 "#;
 
-        let Unit::BgpTcpIn(cfg) = match toml::from_str::<Unit>(toml) {
-            Ok(u) => { println!("{:#?}", u); u },
-            Err(e) => { eprintln!("{e}"); panic!() }
-        };
+        let Unit::BgpTcpIn(cfg) = toml::from_str::<Unit>(toml).unwrap() else { unreachable!() };
 
         let ip1 = IpAddr::from_str("1.2.3.10").unwrap();
         let asn1 = Asn::from_u32(100);
@@ -268,20 +267,20 @@ hold_time = 10
         for k in cfg.peer_configs.0.keys() {
             println!("key: {:?}", k);
         }
-        assert!(cfg1.name == "Peer-in-subnet" );
-        assert!(cfg1.remote_asn.contains(asn1));
-        assert!(cfg1.accept_remote_asn(asn1));
-        assert!(!cfg1.accept_remote_asn(asn2));
+        assert!(cfg1.1.name == "Peer-in-subnet" );
+        assert!(cfg1.1.remote_asn.contains(asn1));
+        assert!(cfg1.1.accept_remote_asn(asn1));
+        assert!(!cfg1.1.accept_remote_asn(asn2));
 
         let ip2 = IpAddr::from_str("2.3.4.6").unwrap();
         let cfg2 = cfg.peer_configs.get(ip2).unwrap();
-        assert!(cfg.peer_configs.get(ip2).unwrap().name == "Peer-exact" );
-        assert!(!cfg2.accept_remote_asn(Asn::from_u32(1234)));
+        assert!(cfg.peer_configs.get(ip2).unwrap().1.name == "Peer-exact" );
+        assert!(!cfg2.1.accept_remote_asn(Asn::from_u32(1234)));
 
 
         let cfg3 = cfg.peer_configs.get(IpAddr::from_str("10.10.10.10").unwrap()).unwrap();
-        assert!(cfg3.name == "Bgpsink");
-        assert!(cfg3.accept_remote_asn(Asn::from_u32(1234)));
+        assert!(cfg3.1.name == "Bgpsink");
+        assert!(cfg3.1.accept_remote_asn(Asn::from_u32(1234)));
 
 
         let ip6 = IpAddr::from_str("2001:0db8::1").unwrap();

@@ -25,7 +25,8 @@ log-reroute        = "^0.1"
 pin-project-lite   = "^0.2"
 rand               = "^0.8"
 reqwest            = { version = "^0.11", default-features = false }
-routecore          = { version = "0.4.0-dev", features = ["bgp", "bmp", "serde"], git = "https://github.com/NLnetLabs/routecore.git" }
+routecore          = { version = "0.4.0-dev",features = ["bgp", "bmp", "serde"], git = "https://github.com/NLnetLabs/routecore.git", branch = "compose-messages-nlri-v2" }
+rotonda-fsm        = { version = "0.1.0-dev", git = "https://github.com/NLnetLabs/rotonda-fsm.git" }
 sanitise-file-name = "^1.0"
 serde              = { version = "^1.0", features = ["derive", "rc"] }
 serde_json         = { version = "^1.0", features = ["preserve_order"] }
@@ -50,8 +51,8 @@ layout-rs          = { version = "^0.1", optional = true }
 mqtt               = { version = "0.18.0", package = "rumqttc", default-features = false, optional = true }
 non-empty-vec      = { version = "^0.2", features = ["serde"]}
 percent-encoding   = "^2.2"
-roto               = { version = "0.1.0", git = "https://github.com/NLnetLabs/roto.git", branch = "main" }
-rotonda-store      = { version = "0.3.0-pre.3", git = "https://github.com/NLnetLabs/rotonda-store.git" }
+roto               = { version = "0.1.0", git = "https://github.com/NLnetLabs/roto.git", branch = "compose-messages-nlri-v2" }
+rotonda-store      = { version = "0.3.0-pre.3", git = "https://github.com/NLnetLabs/rotonda-store.git", branch = "compose-messages-nlri-v2" }
 serde_with         = "^3"
 smallvec           = { version = "^1.10", features = ["const_generics", "const_new", "union"] }
 tokio-metrics      = "^0.2"

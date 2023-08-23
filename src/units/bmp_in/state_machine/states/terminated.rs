@@ -73,6 +73,7 @@ impl From<Updating> for Terminated {
 }
 
 impl BmpStateDetails<Terminated> {
+    #[allow(dead_code)]
     pub fn process_msg(self, msg_buf: Bytes) -> ProcessingResult {
         self.process_msg_with_filter(msg_buf, None::<()>, |msg, _| {
             Ok(ControlFlow::Continue((msg, OutputStreamQueue::new())))

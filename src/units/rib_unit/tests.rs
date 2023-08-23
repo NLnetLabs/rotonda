@@ -1,301 +1,168 @@
-#[cfg(test)]
-mod tests {
-    use crate::units::rib_unit::rib::StoreInsertionReport;
-    use crate::units::rib_unit::statistics::RibMergeUpdateStatistics;
-    use crate::{
-        bgp::encode::{mk_bgp_update, Announcements, Prefixes},
-        comms::Gate,
-        payload::{Payload, Update},
-        units::rib_unit::{
-            metrics::RibUnitMetrics, rib::PhysicalRib, status_reporter::RibUnitStatusReporter,
-            unit::RibUnitRunner,
-        },
-    };
-    use arc_swap::{ArcSwap, ArcSwapOption};
-    use roto::types::{
-        builtin::{
-            BgpUpdateMessage, BuiltinTypeValue, RawRouteWithDeltas, RotondaId, RouteStatus,
-            UpdateMessage,
-        },
-        typevalue::TypeValue,
-    };
-    use rotonda_store::{
-        custom_alloc::Upsert, epoch, prelude::multi::PrefixStoreError, MatchOptions, MatchType,
-    };
-    use routecore::{addr::Prefix, bgp::message::SessionConfig};
-    use smallvec::SmallVec;
+use crate::units::rib_unit::rib::StoreInsertionReport;
+use crate::units::rib_unit::statistics::RibMergeUpdateStatistics;
+use crate::{
+    bgp::encode::{mk_bgp_update, Announcements, Prefixes},
+    comms::Gate,
+    payload::{Payload, Update},
+    units::rib_unit::{
+        metrics::RibUnitMetrics, rib::PhysicalRib, status_reporter::RibUnitStatusReporter,
+        unit::RibUnitRunner,
+    },
+};
+use arc_swap::{ArcSwap, ArcSwapOption};
+use roto::types::{
+    builtin::{
+        BgpUpdateMessage, BuiltinTypeValue, RawRouteWithDeltas, RotondaId, RouteStatus,
+        UpdateMessage,
+    },
+    typevalue::TypeValue,
+};
+use rotonda_store::{
+    custom_alloc::Upsert, epoch, prelude::multi::PrefixStoreError, MatchOptions, MatchType,
+};
+use routecore::{addr::Prefix, bgp::message::SessionConfig};
+use smallvec::SmallVec;
 
-    use std::{str::FromStr, sync::Arc, time::Instant};
+use std::{str::FromStr, sync::Arc, time::Instant};
 
-    #[tokio::test]
-    async fn process_non_route_update() {
-        let (_gate, rib, metrics) = test_init();
+#[tokio::test]
+async fn process_non_route_update() {
+    let (_gate, rib, metrics) = test_init();
 
-        // Given an update that is not a route
-        let payload = Payload::TypeValue(TypeValue::Unknown);
+    // Given an update that is not a route
+    let payload = Payload::TypeValue(TypeValue::Unknown);
 
-        // When it is processed by this unit
-        let mut update = run_process_single_update(payload.clone(), rib.clone(), metrics).await;
+    // When it is processed by this unit
+    let mut update = run_process_single_update(payload.clone(), rib.clone(), metrics).await;
 
-        // Then it should NOT be added to the route store
-        assert_eq!(rib.load().as_ref().unwrap().prefixes_count(), 0);
+    // Then it should NOT be added to the route store
+    assert_eq!(rib.load().as_ref().unwrap().prefixes_count(), 0);
 
-        // But should be output for forwarding to downstream units
-        assert_eq!(update.len(), 1); // (modified) RIB input only, no streaming output
-        let update = update.pop().unwrap();
-        assert!(matches!(
-            update,
-            Update::Single(Payload::TypeValue(TypeValue::Unknown))
-        ));
-    }
+    // But should be output for forwarding to downstream units
+    assert_eq!(update.len(), 1); // (modified) RIB input only, no streaming output
+    let update = update.pop().unwrap();
+    assert!(matches!(
+        update,
+        Update::Single(Payload::TypeValue(TypeValue::Unknown))
+    ));
+}
 
-    #[tokio::test]
-    async fn process_update_single_route() {
-        let (_gate, rib, metrics) = test_init();
+#[tokio::test]
+async fn process_update_single_route() {
+    let (_gate, rib, metrics) = test_init();
 
-        // Given a BGP update containing a single route announcement
-        let delta_id = (RotondaId(0), 0);
-        let prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32)
-            .unwrap()
-            .into();
-        let announcements =
-            Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32")
-                .unwrap();
-        let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
+    // Given a BGP update containing a single route announcement
+    let delta_id = (RotondaId(0), 0);
+    let prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32)
+        .unwrap()
+        .into();
+    let announcements =
+        Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32")
+            .unwrap();
+    let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
 
-        // When it is processed by this unit
-        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
-        let route = RawRouteWithDeltas::new_with_message_ref(
-            delta_id,
-            prefix,
-            &bgp_update_msg,
-            RouteStatus::InConvergence,
-        );
-        let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
-        let update = run_process_single_update(payload.clone(), rib.clone(), metrics).await;
+    // When it is processed by this unit
+    let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+    let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+    let route = RawRouteWithDeltas::new_with_message_ref(
+        delta_id,
+        prefix,
+        &bgp_update_msg,
+        RouteStatus::InConvergence,
+    );
+    let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
+    let update = run_process_single_update(payload.clone(), rib.clone(), metrics).await;
 
-        // Then it SHOULD be added to the route store
-        assert_eq!(rib.load().as_ref().unwrap().prefixes_count(), 1);
+    // Then it SHOULD be added to the route store
+    assert_eq!(rib.load().as_ref().unwrap().prefixes_count(), 1);
 
-        // And SHOULD be output twice for forwarding to downstream units
-        // And the BGP UPDATE bytes should be the same for both the input and output route
-        // (at the time of writing the BgpUpdateMessage PartialEq implementation only compares BgpUpdateMessage.message_id,
-        // not the actual underlying message bytes)
-        for (input, output) in [(payload, update)].iter_mut() {
-            assert_eq!(output.len(), 1); // (modified) RIB input only, no streaming output
-            let update = output.pop().unwrap();
-            if let Update::Single(output_payload) = update {
-                assert_eq!(
-                    get_payload_bytes(&input),
-                    get_payload_bytes(&output_payload)
-                );
-            } else {
-                unreachable!();
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn process_update_same_route_twice() {
-        let (_gate, rib, metrics) = test_init();
-
-        // Given a BGP update containing a single route announcement
-        let delta_id = (RotondaId(0), 0);
-        let prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32)
-            .unwrap()
-            .into();
-        let announcements =
-            Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32")
-                .unwrap();
-        let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
-
-        // When it is processed by this unit
-        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
-        let route = RawRouteWithDeltas::new_with_message_ref(
-            delta_id,
-            prefix,
-            &bgp_update_msg,
-            RouteStatus::InConvergence,
-        );
-        let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
-        let updates1 =
-            run_process_single_update(payload.clone(), rib.clone(), metrics.clone()).await;
-        let updates2 = run_process_single_update(payload.clone(), rib.clone(), metrics).await;
-
-        // Then it SHOULD be added to the route store only once
-        assert_eq!(rib.load().as_ref().unwrap().prefixes_count(), 1);
-
-        // And SHOULD be output twice for forwarding to downstream units
-        // And the BGP UPDATE bytes should be the same for both the input and output route
-        // (at the time of writing the BgpUpdateMessage PartialEq implementation only compares BgpUpdateMessage.message_id,
-        // not the actual underlying message bytes)
-        for (input, output) in [&payload, &payload].iter().zip([updates1, updates2].iter_mut()) {
-            assert_eq!(output.len(), 1); // (modified) RIB input only, no streaming output
-            let update = output.pop().unwrap();
-            if let Update::Single(output_payload) = update {
-                assert_eq!(
-                    get_payload_bytes(&input),
-                    get_payload_bytes(&output_payload)
-                );
-            } else {
-                unreachable!();
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn process_update_two_routes_to_the_same_prefix() {
-        let (_match_result, match_result2) = {
-            let (_gate, rib, metrics) = test_init();
-
-            // Given BGP updates for two different routes to the same prefix
-            let delta_id = (RotondaId(0), 0);
-            let raw_prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32).unwrap();
-            let prefix = raw_prefix.into();
-            let announcements1 =
-                Announcements::from_str("e [111,222,333] 10.0.0.1 none 127.0.0.1/32").unwrap();
-            let announcements2 =
-                Announcements::from_str("e [111,444,333] 10.0.0.1 none 127.0.0.1/32").unwrap();
-            let bgp_update_bytes1 = mk_bgp_update(&Prefixes::default(), &announcements1, &[]);
-            let bgp_update_bytes2 = mk_bgp_update(&Prefixes::default(), &announcements2, &[]);
-
-            // When they are processed by this unit
-            let mut inputs = vec![];
-            let mut outputs = vec![];
-            for bgp_update_bytes in [bgp_update_bytes1, bgp_update_bytes2] {
-                let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-                let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
-                let route = RawRouteWithDeltas::new_with_message_ref(
-                    delta_id,
-                    prefix,
-                    &bgp_update_msg,
-                    RouteStatus::InConvergence,
-                );
-                let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
-                inputs.push(payload.clone());
-                let updates =
-                    run_process_single_update(payload, rib.clone(), metrics.clone()).await;
-                outputs.push(updates);
-            }
-
-            // Then only the one common prefix SHOULD be added to the route store
-            assert_eq!(rib.load().as_ref().unwrap().prefixes_count(), 1);
-
-            // And at that prefix there should be one RibValue containing two routes
-            let match_options = MatchOptions {
-                match_type: MatchType::ExactMatch,
-                include_all_records: true,
-                include_less_specifics: true,
-                include_more_specifics: true,
-            };
-            eprintln!("Querying store match_prefix the first time");
-            let match_result = rib.load().as_ref().unwrap().match_prefix(
-                &raw_prefix,
-                &match_options,
-                &epoch::pin(),
+    // And SHOULD be output twice for forwarding to downstream units
+    // And the BGP UPDATE bytes should be the same for both the input and output route
+    // (at the time of writing the BgpUpdateMessage PartialEq implementation only compares BgpUpdateMessage.message_id,
+    // not the actual underlying message bytes)
+    for (input, output) in [(payload, update)].iter_mut() {
+        assert_eq!(output.len(), 1); // (modified) RIB input only, no streaming output
+        let update = output.pop().unwrap();
+        if let Update::Single(output_payload) = update {
+            assert_eq!(
+                get_payload_bytes(&input),
+                get_payload_bytes(&output_payload)
             );
-            assert!(matches!(match_result.match_type, MatchType::ExactMatch));
-            let rib_value = match_result.prefix_meta.as_ref().unwrap();
-            assert_eq!(rib_value.len(), 2);
-
-            // Check the Arc reference counts. The routes HashSet should have a strong reference count of 2 because the
-            // MultiThreadedStore has the original Arc around the metadata that was inserted into the store, and it clones
-            // that Arc when making a "copy" to include in the match prefix result set, thereby incrementing the strong
-            // reference count. The items in the routes HashSet however should have a strong reference count of 1. This is
-            // because we are accessing the one and only copy of the HashSet via the Arc and are thus seeing the actual
-            // HashSet copy held by the store and thus its actual items, which have not been cloned and thus have a strong
-            // reference count of 1. As we don't at this point use any Weak references to the HashSet or its items the
-            // weak reference counts should be 0.
-            assert_eq!(Arc::strong_count(rib_value.test_inner()), 2);
-            assert_eq!(Arc::weak_count(rib_value.test_inner()), 0);
-            for item in rib_value.iter() {
-                assert_eq!(Arc::strong_count(item), 1);
-                assert_eq!(Arc::weak_count(item), 0);
-            }
-
-            // And SHOULD be output for forwarding to downstream units
-            assert_eq!(outputs.len(), 2);
-
-            // And the BGP UPDATE bytes should be the same for both the input and output route
-            // (at the time of writing the BgpUpdateMessage PartialEq implementation only compares BgpUpdateMessage.message_id,
-            // not the actual underlying message bytes)
-            for (input, output) in inputs.iter().zip(outputs.iter_mut()) {
-                assert_eq!(output.len(), 1); // (modified) RIB input only, no streaming output
-                let update = output.pop().unwrap();
-                if let Update::Single(output_payload) = update {
-                    assert_eq!(
-                        get_payload_bytes(&input),
-                        get_payload_bytes(&output_payload)
-                    );
-                } else {
-                    unreachable!();
-                }
-            }
-
-            // If we repeat the match prefix query while still holding the previous match prefix query results, we should
-            // see that the routes HashSet Arc strong reference count increases from 2 to 3 while the inner items of the
-            // HashSet still have a strong reference count of 1.
-            eprintln!("Querying store match_prefix the second time");
-            let match_result2 = rib.load().as_ref().unwrap().match_prefix(
-                &raw_prefix,
-                &match_options,
-                &epoch::pin(),
-            );
-            assert!(matches!(match_result2.match_type, MatchType::ExactMatch));
-            let rib_value = match_result2.prefix_meta.as_ref().unwrap();
-            assert_eq!(rib_value.len(), 2);
-            assert_eq!(Arc::strong_count(rib_value.test_inner()), 3);
-            assert_eq!(Arc::weak_count(rib_value.test_inner()), 0);
-            for item in rib_value.iter() {
-                assert_eq!(Arc::strong_count(&item), 1);
-                assert_eq!(Arc::weak_count(&item), 0);
-            }
-
-            eprintln!("About to drop the store by making it go out of scope");
-            if Arc::try_unwrap(rib).is_err() {
-                // We can't call unwrap() because Rib doesn't implement Debug.
-                unreachable!();
-            };
-
-            (match_result, match_result2)
-        };
-
-        // The MultiThreadedStore has been dropped so the HashSet strong reference count should decrease from 3 to 2.
-        eprintln!("Checking the reference counts of the `match_result` query result var inner metadata item");
-        let rib_value = match_result2.prefix_meta.unwrap();
-        // assert_eq!(Arc::strong_count(&rib_value.per_prefix_items), 2); // TODO: MultiThreadedStore doesn't cleanup on drop...
-        assert_eq!(Arc::weak_count(rib_value.test_inner()), 0);
-        for item in rib_value.iter() {
-            assert_eq!(Arc::strong_count(&item), 1);
-            assert_eq!(Arc::weak_count(&item), 0);
+        } else {
+            unreachable!();
         }
     }
+}
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn process_update_two_routes_to_different_prefixes() {
+#[tokio::test]
+async fn process_update_same_route_twice() {
+    let (_gate, rib, metrics) = test_init();
+
+    // Given a BGP update containing a single route announcement
+    let delta_id = (RotondaId(0), 0);
+    let prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32)
+        .unwrap()
+        .into();
+    let announcements =
+        Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32")
+            .unwrap();
+    let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
+
+    // When it is processed by this unit
+    let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+    let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+    let route = RawRouteWithDeltas::new_with_message_ref(
+        delta_id,
+        prefix,
+        &bgp_update_msg,
+        RouteStatus::InConvergence,
+    );
+    let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
+    let updates1 =
+        run_process_single_update(payload.clone(), rib.clone(), metrics.clone()).await;
+    let updates2 = run_process_single_update(payload.clone(), rib.clone(), metrics).await;
+
+    // Then it SHOULD be added to the route store only once
+    assert_eq!(rib.load().as_ref().unwrap().prefixes_count(), 1);
+
+    // And SHOULD be output twice for forwarding to downstream units
+    // And the BGP UPDATE bytes should be the same for both the input and output route
+    // (at the time of writing the BgpUpdateMessage PartialEq implementation only compares BgpUpdateMessage.message_id,
+    // not the actual underlying message bytes)
+    for (input, output) in [&payload, &payload].iter().zip([updates1, updates2].iter_mut()) {
+        assert_eq!(output.len(), 1); // (modified) RIB input only, no streaming output
+        let update = output.pop().unwrap();
+        if let Update::Single(output_payload) = update {
+            assert_eq!(
+                get_payload_bytes(&input),
+                get_payload_bytes(&output_payload)
+            );
+        } else {
+            unreachable!();
+        }
+    }
+}
+
+#[tokio::test]
+async fn process_update_two_routes_to_the_same_prefix() {
+    let (_match_result, match_result2) = {
         let (_gate, rib, metrics) = test_init();
 
-        // Given BGP updates for two different routes to two different prefixes
+        // Given BGP updates for two different routes to the same prefix
         let delta_id = (RotondaId(0), 0);
-        let raw_prefix1 = Prefix::new("127.0.0.1".parse().unwrap(), 32).unwrap();
-        let raw_prefix2 = Prefix::new("127.0.0.2".parse().unwrap(), 32).unwrap();
-        let prefix1 = raw_prefix1.into();
-        let prefix2 = raw_prefix2.into();
+        let raw_prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32).unwrap();
+        let prefix = raw_prefix.into();
         let announcements1 =
             Announcements::from_str("e [111,222,333] 10.0.0.1 none 127.0.0.1/32").unwrap();
         let announcements2 =
-            Announcements::from_str("e [111,444,333] 10.0.0.1 none 127.0.0.2/32").unwrap();
+            Announcements::from_str("e [111,444,333] 10.0.0.1 none 127.0.0.1/32").unwrap();
         let bgp_update_bytes1 = mk_bgp_update(&Prefixes::default(), &announcements1, &[]);
         let bgp_update_bytes2 = mk_bgp_update(&Prefixes::default(), &announcements2, &[]);
 
         // When they are processed by this unit
         let mut inputs = vec![];
         let mut outputs = vec![];
-        for (prefix, bgp_update_bytes) in
-            [(prefix1, bgp_update_bytes1), (prefix2, bgp_update_bytes2)]
-        {
+        for bgp_update_bytes in [bgp_update_bytes1, bgp_update_bytes2] {
             let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
             let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
             let route = RawRouteWithDeltas::new_with_message_ref(
@@ -306,30 +173,44 @@ mod tests {
             );
             let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
             inputs.push(payload.clone());
-            let updates = run_process_single_update(payload, rib.clone(), metrics.clone()).await;
+            let updates =
+                run_process_single_update(payload, rib.clone(), metrics.clone()).await;
             outputs.push(updates);
         }
 
-        // Then two separate prefixes SHOULD be added to the route store
-        assert_eq!(rib.load().as_ref().unwrap().prefixes_count(), 2);
+        // Then only the one common prefix SHOULD be added to the route store
+        assert_eq!(rib.load().as_ref().unwrap().prefixes_count(), 1);
 
-        // And at that prefix there should be two RibValues
+        // And at that prefix there should be one RibValue containing two routes
         let match_options = MatchOptions {
             match_type: MatchType::ExactMatch,
             include_all_records: true,
             include_less_specifics: true,
             include_more_specifics: true,
         };
+        eprintln!("Querying store match_prefix the first time");
+        let match_result = rib.load().as_ref().unwrap().match_prefix(
+            &raw_prefix,
+            &match_options,
+            &epoch::pin(),
+        );
+        assert!(matches!(match_result.match_type, MatchType::ExactMatch));
+        let rib_value = match_result.prefix_meta.as_ref().unwrap();
+        assert_eq!(rib_value.len(), 2);
 
-        for prefix in [raw_prefix1, raw_prefix2] {
-            let match_result =
-                rib.load()
-                    .as_ref()
-                    .unwrap()
-                    .match_prefix(&prefix, &match_options, &epoch::pin());
-            assert!(matches!(match_result.match_type, MatchType::ExactMatch));
-            let rib_value = match_result.prefix_meta.unwrap(); // TODO: Why do we get the actual value out of the store here and not an Arc?
-            assert_eq!(rib_value.len(), 1);
+        // Check the Arc reference counts. The routes HashSet should have a strong reference count of 2 because the
+        // MultiThreadedStore has the original Arc around the metadata that was inserted into the store, and it clones
+        // that Arc when making a "copy" to include in the match prefix result set, thereby incrementing the strong
+        // reference count. The items in the routes HashSet however should have a strong reference count of 1. This is
+        // because we are accessing the one and only copy of the HashSet via the Arc and are thus seeing the actual
+        // HashSet copy held by the store and thus its actual items, which have not been cloned and thus have a strong
+        // reference count of 1. As we don't at this point use any Weak references to the HashSet or its items the
+        // weak reference counts should be 0.
+        assert_eq!(Arc::strong_count(rib_value.test_inner()), 2);
+        assert_eq!(Arc::weak_count(rib_value.test_inner()), 0);
+        for item in rib_value.iter() {
+            assert_eq!(Arc::strong_count(item), 1);
+            assert_eq!(Arc::weak_count(item), 0);
         }
 
         // And SHOULD be output for forwarding to downstream units
@@ -350,62 +231,178 @@ mod tests {
                 unreachable!();
             }
         }
+
+        // If we repeat the match prefix query while still holding the previous match prefix query results, we should
+        // see that the routes HashSet Arc strong reference count increases from 2 to 3 while the inner items of the
+        // HashSet still have a strong reference count of 1.
+        eprintln!("Querying store match_prefix the second time");
+        let match_result2 = rib.load().as_ref().unwrap().match_prefix(
+            &raw_prefix,
+            &match_options,
+            &epoch::pin(),
+        );
+        assert!(matches!(match_result2.match_type, MatchType::ExactMatch));
+        let rib_value = match_result2.prefix_meta.as_ref().unwrap();
+        assert_eq!(rib_value.len(), 2);
+        assert_eq!(Arc::strong_count(rib_value.test_inner()), 3);
+        assert_eq!(Arc::weak_count(rib_value.test_inner()), 0);
+        for item in rib_value.iter() {
+            assert_eq!(Arc::strong_count(&item), 1);
+            assert_eq!(Arc::weak_count(&item), 0);
+        }
+
+        eprintln!("About to drop the store by making it go out of scope");
+        if Arc::try_unwrap(rib).is_err() {
+            // We can't call unwrap() because Rib doesn't implement Debug.
+            unreachable!();
+        };
+
+        (match_result, match_result2)
+    };
+
+    // The MultiThreadedStore has been dropped so the HashSet strong reference count should decrease from 3 to 2.
+    eprintln!("Checking the reference counts of the `match_result` query result var inner metadata item");
+    let rib_value = match_result2.prefix_meta.unwrap();
+    // assert_eq!(Arc::strong_count(&rib_value.per_prefix_items), 2); // TODO: MultiThreadedStore doesn't cleanup on drop...
+    assert_eq!(Arc::weak_count(rib_value.test_inner()), 0);
+    for item in rib_value.iter() {
+        assert_eq!(Arc::strong_count(&item), 1);
+        assert_eq!(Arc::weak_count(&item), 0);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn process_update_two_routes_to_different_prefixes() {
+    let (_gate, rib, metrics) = test_init();
+
+    // Given BGP updates for two different routes to two different prefixes
+    let delta_id = (RotondaId(0), 0);
+    let raw_prefix1 = Prefix::new("127.0.0.1".parse().unwrap(), 32).unwrap();
+    let raw_prefix2 = Prefix::new("127.0.0.2".parse().unwrap(), 32).unwrap();
+    let prefix1 = raw_prefix1.into();
+    let prefix2 = raw_prefix2.into();
+    let announcements1 =
+        Announcements::from_str("e [111,222,333] 10.0.0.1 none 127.0.0.1/32").unwrap();
+    let announcements2 =
+        Announcements::from_str("e [111,444,333] 10.0.0.1 none 127.0.0.2/32").unwrap();
+    let bgp_update_bytes1 = mk_bgp_update(&Prefixes::default(), &announcements1, &[]);
+    let bgp_update_bytes2 = mk_bgp_update(&Prefixes::default(), &announcements2, &[]);
+
+    // When they are processed by this unit
+    let mut inputs = vec![];
+    let mut outputs = vec![];
+    for (prefix, bgp_update_bytes) in
+        [(prefix1, bgp_update_bytes1), (prefix2, bgp_update_bytes2)]
+    {
+        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        let route = RawRouteWithDeltas::new_with_message_ref(
+            delta_id,
+            prefix,
+            &bgp_update_msg,
+            RouteStatus::InConvergence,
+        );
+        let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
+        inputs.push(payload.clone());
+        let updates = run_process_single_update(payload, rib.clone(), metrics.clone()).await;
+        outputs.push(updates);
     }
 
-    // --- Test helpers ------------------------------------------------------
+    // Then two separate prefixes SHOULD be added to the route store
+    assert_eq!(rib.load().as_ref().unwrap().prefixes_count(), 2);
 
-    fn test_init() -> (
-        Arc<Gate>,
-        Arc<ArcSwapOption<PhysicalRib>>,
-        Arc<RibUnitMetrics>,
-    ) {
-        let (gate, _gate_agent) = Gate::new(0);
-        let gate = Arc::new(gate);
-        let physical_rib = PhysicalRib::default();
-        let stats = Arc::new(RibMergeUpdateStatistics::default());
+    // And at that prefix there should be two RibValues
+    let match_options = MatchOptions {
+        match_type: MatchType::ExactMatch,
+        include_all_records: true,
+        include_less_specifics: true,
+        include_more_specifics: true,
+    };
 
-        let rib = Arc::new(ArcSwapOption::from_pointee(physical_rib));
-        let metrics = Arc::new(RibUnitMetrics::new(&gate, stats.clone()));
-        (gate, rib, metrics)
+    for prefix in [raw_prefix1, raw_prefix2] {
+        let match_result =
+            rib.load()
+                .as_ref()
+                .unwrap()
+                .match_prefix(&prefix, &match_options, &epoch::pin());
+        assert!(matches!(match_result.match_type, MatchType::ExactMatch));
+        let rib_value = match_result.prefix_meta.unwrap(); // TODO: Why do we get the actual value out of the store here and not an Arc?
+        assert_eq!(rib_value.len(), 1);
     }
 
-    fn get_payload_bytes(payload: &Payload) -> Option<&[u8]> {
-        if let Payload::TypeValue(TypeValue::Builtin(BuiltinTypeValue::Route(route))) = payload {
-            Some(route.raw_message.raw_message().0.as_ref())
+    // And SHOULD be output for forwarding to downstream units
+    assert_eq!(outputs.len(), 2);
+
+    // And the BGP UPDATE bytes should be the same for both the input and output route
+    // (at the time of writing the BgpUpdateMessage PartialEq implementation only compares BgpUpdateMessage.message_id,
+    // not the actual underlying message bytes)
+    for (input, output) in inputs.iter().zip(outputs.iter_mut()) {
+        assert_eq!(output.len(), 1); // (modified) RIB input only, no streaming output
+        let update = output.pop().unwrap();
+        if let Update::Single(output_payload) = update {
+            assert_eq!(
+                get_payload_bytes(&input),
+                get_payload_bytes(&output_payload)
+            );
         } else {
-            None
+            unreachable!();
         }
     }
+}
 
-    async fn run_process_single_update(
-        payload: Payload,
-        rib: Arc<ArcSwapOption<PhysicalRib>>,
-        metrics: Arc<RibUnitMetrics>,
-    ) -> SmallVec<[Update; 8]> {
-        let status_reporter = RibUnitStatusReporter::new("test metrics", metrics.clone());
-        let status_reporter = Arc::new(status_reporter);
+// --- Test helpers ------------------------------------------------------
 
-        fn insert(
-            prefix: &Prefix,
-            value: TypeValue,
-            rib: &PhysicalRib,
-        ) -> Result<(Upsert<StoreInsertionReport>, u32), PrefixStoreError> {
-            eprintln!("Inserting {prefix} into the store");
-            let res = rib.insert(prefix, value);
-            eprintln!("Insert complete");
-            res
-        }
+fn test_init() -> (
+    Arc<Gate>,
+    Arc<ArcSwapOption<PhysicalRib>>,
+    Arc<RibUnitMetrics>,
+) {
+    let (gate, _gate_agent) = Gate::new(0);
+    let gate = Arc::new(gate);
+    let physical_rib = PhysicalRib::default();
+    let stats = Arc::new(RibMergeUpdateStatistics::default());
 
-        let roto_source = Arc::new(ArcSwap::from_pointee((Instant::now(), String::new())));
+    let rib = Arc::new(ArcSwapOption::from_pointee(physical_rib));
+    let metrics = Arc::new(RibUnitMetrics::new(&gate, stats.clone()));
+    (gate, rib, metrics)
+}
 
-        RibUnitRunner::process_update_single(
-            payload,
-            rib.clone(),
-            insert,
-            roto_source,
-            status_reporter,
-            metrics.rib_merge_update_stats.clone(),
-        )
-        .await
+fn get_payload_bytes(payload: &Payload) -> Option<&[u8]> {
+    if let Payload::TypeValue(TypeValue::Builtin(BuiltinTypeValue::Route(route))) = payload {
+        Some(route.raw_message.raw_message().0.as_ref())
+    } else {
+        None
     }
+}
+
+async fn run_process_single_update(
+    payload: Payload,
+    rib: Arc<ArcSwapOption<PhysicalRib>>,
+    metrics: Arc<RibUnitMetrics>,
+) -> SmallVec<[Update; 8]> {
+    let status_reporter = RibUnitStatusReporter::new("test metrics", metrics.clone());
+    let status_reporter = Arc::new(status_reporter);
+
+    fn insert(
+        prefix: &Prefix,
+        value: TypeValue,
+        rib: &PhysicalRib,
+    ) -> Result<(Upsert<StoreInsertionReport>, u32), PrefixStoreError> {
+        eprintln!("Inserting {prefix} into the store");
+        let res = rib.insert(prefix, value);
+        eprintln!("Insert complete");
+        res
+    }
+
+    let roto_source = Arc::new(ArcSwap::from_pointee((Instant::now(), String::new())));
+
+    RibUnitRunner::process_update_single(
+        payload,
+        rib.clone(),
+        insert,
+        roto_source,
+        status_reporter,
+        metrics.rib_merge_update_stats.clone(),
+    )
+    .await
 }

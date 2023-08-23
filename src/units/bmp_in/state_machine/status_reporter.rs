@@ -4,7 +4,6 @@ use std::{
 };
 
 use bytes::Bytes;
-use routecore::bgp::types::{AFI, SAFI};
 
 use crate::{
     common::status_reporter::{AnyStatusReporter, Chainable, Named, UnitStatusReporter},
@@ -151,13 +150,6 @@ impl BmpStatusReporter {
         metrics
             .num_withdrawals
             .fetch_add(n_withdrawals, Ordering::SeqCst);
-    }
-
-    pub fn routing_update_filtered(&self, router_id: Arc<RouterId>, _afi: AFI, _safi: SAFI) {
-        self.metrics
-            .router_metrics(router_id)
-            .num_bgp_updates_filtered
-            .fetch_add(1, Ordering::SeqCst);
     }
 }
 

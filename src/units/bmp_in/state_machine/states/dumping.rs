@@ -407,7 +407,6 @@ mod tests {
     use roto::types::{
         builtin::{BuiltinTypeValue, MaterializedRoute},
         collections::Record,
-        outputs::OutputStreamMessage,
         typedef::TypeDef,
         typevalue::TypeValue,
     };

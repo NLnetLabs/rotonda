@@ -67,18 +67,6 @@ impl BgpTcpInMetrics {
         MetricType::Counter,
         MetricUnit::Total,
     );
-    const NUM_BGP_MESSAGES_RECEIVED_METRIC: Metric = Metric::new(
-        "bgp_tcp_in_num_bgp_messages_received",
-        "the number of BGP messages successfully received",
-        MetricType::Counter,
-        MetricUnit::Total,
-    );
-    const NUM_RECEIVE_IO_ERRORS_METRIC: Metric = Metric::new(
-        "bgp_tcp_in_num_receive_io_errors",
-        "the number of BGP messages that could not be received due to an I/O error",
-        MetricType::Counter,
-        MetricUnit::Total,
-    );
 }
 
 impl metrics::Source for BgpTcpInMetrics {

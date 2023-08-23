@@ -15,7 +15,6 @@
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 
-use log::debug;
 use rotonda_fsm::bgp::session::BgpConfig;
 use routecore::addr::Prefix;
 use routecore::asn::Asn;

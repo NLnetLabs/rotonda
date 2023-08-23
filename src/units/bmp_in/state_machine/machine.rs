@@ -457,7 +457,7 @@ where
             // corresponding prior Peer Up Notification for the same
             // peer?
             return self.mk_invalid_message_result(
-                format!("PeerDownNotification received for peer that was not 'up'",),
+                "PeerDownNotification received for peer that was not 'up'",
                 Some(false),
                 // TODO: Silly to_copy the bytes, but PDN won't give us the octets back..
                 Some(Bytes::copy_from_slice(msg.as_ref())),
@@ -1053,6 +1053,7 @@ mod tests {
 pub struct PeerStates(HashMap<PerPeerHeader<Bytes>, PeerState>);
 
 impl PeerStates {
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }

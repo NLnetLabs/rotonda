@@ -25,6 +25,7 @@ pub struct TrackingAllocator<T: Allocator> {
 // ---
 
 impl<T: Allocator> TrackingAllocator<T> {
+    #[allow(dead_code)]
     pub fn new(allocator: T) -> Self {
         Self {
             allocator: Arc::new(allocator),
@@ -32,10 +33,12 @@ impl<T: Allocator> TrackingAllocator<T> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn allocator(&self) -> Arc<T> {
         self.allocator.clone()
     }
 
+    #[allow(dead_code)]
     pub fn reset(&self) {
         self.bytes_allocated.store(0, SeqCst);
     }

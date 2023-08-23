@@ -488,7 +488,7 @@ impl BmpInRunner {
                     .await
                     .register_http_resource(processor.clone());
 
-                let mut updatable_router_info = Arc::make_mut(&mut this_router_info);
+                let updatable_router_info = Arc::make_mut(&mut this_router_info);
                 updatable_router_info.api_processor = Some(processor);
 
                 self.router_info.insert(*router_addr, this_router_info);

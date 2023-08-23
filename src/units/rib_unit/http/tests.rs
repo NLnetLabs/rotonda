@@ -932,15 +932,3 @@ impl FromStr for RawCommunityTuple {
         Ok(RawCommunityTuple(normal, extended, large))
     }
 }
-
-impl RawCommunityTuple {
-    pub fn as_tuple(
-        self,
-    ) -> (
-        Vec<StandardCommunity>,
-        Vec<ExtendedCommunity>,
-        Vec<LargeCommunity>,
-    ) {
-        (self.0, self.1, self.2)
-    }
-}

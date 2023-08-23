@@ -110,6 +110,7 @@ mod fileio {
     }
 
     impl MockFileIo {
+        #[allow(dead_code)]
         pub fn new<T>(readable_paths: T) -> Self
         where
             T: Into<HashMap<PathBuf, String>>,

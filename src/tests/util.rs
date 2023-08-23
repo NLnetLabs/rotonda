@@ -5,6 +5,7 @@ pub(crate) mod internal {
     /// Tries to enable logging. Intended for use in tests.
     ///
     /// Accepts a log level name as a string, e.g. "trace".
+    #[allow(dead_code)]
     pub(crate) fn enable_logging(log_level: &str) {
         let _ = env_logger::Builder::from_env(Env::default().default_filter_or(log_level))
             .is_test(true)

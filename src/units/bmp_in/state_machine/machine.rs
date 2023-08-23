@@ -33,6 +33,7 @@ use routecore::{
     addr::Prefix,
     bgp::{
         message::{
+            nlri::Nlri,
             open::CapabilityType,
             update::{AddPath, FourOctetAsn},
             SessionConfig, UpdateMessage,
@@ -682,7 +683,16 @@ where
         let nlris = &update.nlris();
 
         for nlri in nlris.iter() {
-            if let Some(prefix) = nlri.prefix() {
+            // If we want to process multicast here, use a `match nlri { }`:
+            //      match nlri {
+            //          Nlri::Unicast(b) | Nlri::Multicast(b) => {
+            //          }
+            //          _ => unimplemented!()
+            //
+            // For unicast only, the `if let` suffices, at the cost of hiding
+            // any possibly unprocessed non-unicast NLRI.
+            if let Nlri::Unicast(b) = nlri {
+                let prefix = b.prefix();
                 if self.details.add_announced_prefix(&pph, prefix) {
                     num_new_prefixes += 1;
                 }
@@ -695,14 +705,16 @@ where
                         &pph,
                         prefix,
                         route_status,
-                    )
+                        )
                     .into(),
-                );
+                    );
             }
         }
 
         for nlri in update.withdrawals().iter() {
-            if let Some(prefix) = nlri.prefix() {
+            if let Nlri::Unicast(b) = nlri {
+                let prefix = b.prefix();
+
                 // RFC 4271 section "4.3 UPDATE Message Format" states:
                 //
                 // "An UPDATE message SHOULD NOT include the same address prefix in the
@@ -710,7 +722,12 @@ where
                 //  However, a BGP speaker MUST be able to process UPDATE messages in
                 //  this form.  A BGP speaker SHOULD treat an UPDATE message of this form
                 //  as though the WITHDRAWN ROUTES do not contain the address prefix.
-                if nlris.iter().all(|nlri| nlri.prefix() != Some(prefix)) {
+
+                if nlris.iter().all(|nlri| if let Nlri::Unicast(b) = nlri {
+                    b.prefix() != prefix
+                } else {
+                    true
+                }) {
                     // clone is cheap due to use of Bytes
                     routes.push(
                         Self::mk_route_for_prefix(

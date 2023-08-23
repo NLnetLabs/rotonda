@@ -623,6 +623,19 @@ checksum = "c34f04666d835ff5d62e058c3995147c06f42fe86ff053337632bca83e42702d"
 
 [[package]]
 name = "env_logger"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a12e6657c4c97ebab115a42dcee77225f7f482cdd841cf7088c657a42e9e00e7"
+dependencies = [
+ "atty",
+ "humantime",
+ "log",
+ "regex",
+ "termcolor",
+]
+
+[[package]]
+name = "env_logger"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85cdab6a89accf66733ad5a1693a4dcced6aeff64602b634530dd73c1f3ee9f0"
@@ -1591,6 +1604,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "octseq"
+version = "0.2.1-dev"
+source = "git+https://github.com/NLnetLabs/octseq#9bce0227142b996a44a70a7f043858ff1d339294"
+dependencies = [
+ "bytes",
+]
+
+[[package]]
 name = "once_cell"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2022,7 +2043,7 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0"
-source = "git+https://github.com/NLnetLabs/roto.git#daad1392c948c36eba29efee05656a1bb1f0a3fb"
+source = "git+https://github.com/NLnetLabs/roto.git?branch=compose-messages-nlri-v2#0465169fb05a27aab8ec619749e9b7b548273b17"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -2050,7 +2071,7 @@ dependencies = [
  "clap 3.2.25",
  "crossbeam-utils",
  "easy-repl",
- "env_logger",
+ "env_logger 0.10.0",
  "fern",
  "flate2",
  "futures",
@@ -2074,6 +2095,7 @@ dependencies = [
  "rand_pcg",
  "reqwest",
  "roto",
+ "rotonda-fsm",
  "rotonda-store",
  "routecore",
  "rumqttc",
@@ -2093,6 +2115,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "rotonda-fsm"
+version = "0.1.0-dev"
+source = "git+https://github.com/NLnetLabs/rotonda-fsm.git#249919b478be0fa5c0edba017dbea5bb8fe532d0"
+dependencies = [
+ "bytes",
+ "env_logger 0.9.3",
+ "log",
+ "octseq 0.2.1-dev",
+ "routecore",
+ "tokio",
+]
+
+[[package]]
 name = "rotonda-macros"
 version = "0.3.0-pre.3"
 source = "git+https://github.com/NLnetLabs/rotonda-macros.git#6352b71155c044329452139ab72186985600d249"
@@ -2104,7 +2139,7 @@ dependencies = [
 [[package]]
 name = "rotonda-store"
 version = "0.3.0-pre.3"
-source = "git+https://github.com/NLnetLabs/rotonda-store.git#ee7159e1f459ac46b10f3680931bba72f2202547"
+source = "git+https://github.com/NLnetLabs/rotonda-store.git?branch=compose-messages-nlri-v2#f124e591c61f1a61e986bb47f44607bc0cce5b85"
 dependencies = [
  "arc-swap",
  "crossbeam-epoch",
@@ -2118,13 +2153,13 @@ dependencies = [
 [[package]]
 name = "routecore"
 version = "0.4.0-dev"
-source = "git+https://github.com/NLnetLabs/routecore.git#e6df2ba88158ab8f0f49b4c7a9d3cd9678d81043"
+source = "git+https://github.com/NLnetLabs/routecore.git?branch=compose-messages-nlri-v2#0235bca5ad4a29bf30c636f210e2f3ef4d1a4be3"
 dependencies = [
  "bytes",
  "chrono",
  "const-str",
  "log",
- "octseq",
+ "octseq 0.2.0",
  "serde",
 ]
 

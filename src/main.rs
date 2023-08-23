@@ -287,7 +287,10 @@ mod tests {
 
             // We have to subscribe to the broker _before_ we publish to it
             link_tx.subscribe("rotonda/#").unwrap();
-            assert!(matches!(link_rx.recv(), Ok(Some(Notification::DeviceAck(_)))));
+            assert!(matches!(
+                link_rx.recv(),
+                Ok(Some(Notification::DeviceAck(_)))
+            ));
 
             eprintln!("Subscribed to MQTT broker, sending BMP messages...");
             let mut bmp_conn = wait_for_bmp_connect().await;
@@ -298,16 +301,58 @@ mod tests {
 
             // check to see if the internal "gate" counters are correct
             eprintln!("Checking counter metrics...");
-            assert_metric_eq(manager.metrics(), "num_updates_total", Some(("component", "bmp-tcp-in")), 3).await;
-            assert_metric_eq(manager.metrics(), "num_updates_total", Some(("component", "filter")), 3).await;
-            assert_metric_eq(manager.metrics(), "num_updates_total", Some(("component", "routers")), 1).await;
-            assert_metric_eq(manager.metrics(), "num_updates_total", Some(("component", "global-rib")), 1).await;
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                Some(("component", "bmp-tcp-in")),
+                3,
+            )
+            .await;
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                Some(("component", "filter")),
+                3,
+            )
+            .await;
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                Some(("component", "routers")),
+                1,
+            )
+            .await;
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                Some(("component", "global-rib")),
+                1,
+            )
+            .await;
 
             // check metrics to see if the number of routes etc is as expected
             eprintln!("Checking state metrics...");
-            assert_metric_eq(manager.metrics(), "bmp_state_num_up_peers_total", Some(("router", &sys_name)), 1).await;
-            assert_metric_eq(manager.metrics(), "bmp_tcp_in_num_bmp_messages_received_total", Some(("router", &local_addr)), 3).await;
-            assert_metric_eq(manager.metrics(), "rib_unit_num_routes_announced_total", Some(("component", "global-rib")), 1).await;
+            assert_metric_eq(
+                manager.metrics(),
+                "bmp_state_num_up_peers_total",
+                Some(("router", &sys_name)),
+                1,
+            )
+            .await;
+            assert_metric_eq(
+                manager.metrics(),
+                "bmp_tcp_in_num_bmp_messages_received_total",
+                Some(("router", &local_addr)),
+                3,
+            )
+            .await;
+            assert_metric_eq(
+                manager.metrics(),
+                "rib_unit_num_routes_announced_total",
+                Some(("component", "global-rib")),
+                1,
+            )
+            .await;
 
             // query the route to make sure it was stored
             eprintln!("Querying prefix store...");
@@ -315,11 +360,22 @@ mod tests {
             assert_eq!(res.get("data").unwrap().as_array().unwrap().len(), 1);
 
             // verify that there is no MQTT connection yet
-            assert_metric_ne(manager.metrics(), "mqtt_target_connection_established_count_total", Some(("component", "local-broker")), 0).await;
+            assert_metric_ne(
+                manager.metrics(),
+                "mqtt_target_connection_established_count_total",
+                Some(("component", "local-broker")),
+                0,
+            )
+            .await;
 
             // save the last link report update time
             // wait for the manager to update the link report so that it will be included in the trace log output
-            while manager.link_report_updated_at().duration_since(link_report_update_time).as_secs() < 1 {
+            while manager
+                .link_report_updated_at()
+                .duration_since(link_report_update_time)
+                .as_secs()
+                < 1
+            {
                 eprintln!("Waiting for link report to be updated");
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
@@ -334,22 +390,70 @@ mod tests {
             manager.spawn(&mut config);
 
             // verify that there is now an MQTT connection
-            assert_metric_eq(manager.metrics(), "mqtt_target_connection_established_count_total", Some(("component", "local-broker")), 1).await;
+            assert_metric_eq(
+                manager.metrics(),
+                "mqtt_target_connection_established_count_total",
+                Some(("component", "local-broker")),
+                1,
+            )
+            .await;
 
             // push another route in and check the metrics
             eprintln!("Sending another BMP route announcement");
             bmp_route_announce(&mut bmp_conn, test_prefix2).await;
 
             eprintln!("Checking counter metrics...");
-            assert_metric_eq(manager.metrics(), "num_updates_total", Some(("component", "bmp-tcp-in")), 4).await;
-            assert_metric_eq(manager.metrics(), "num_updates_total", Some(("component", "filter")), 4).await;
-            assert_metric_eq(manager.metrics(), "num_updates_total", Some(("component", "routers")), 2).await;
-            assert_metric_eq(manager.metrics(), "num_updates_total", Some(("component", "global-rib")), 2).await;
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                Some(("component", "bmp-tcp-in")),
+                4,
+            )
+            .await;
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                Some(("component", "filter")),
+                4,
+            )
+            .await;
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                Some(("component", "routers")),
+                2,
+            )
+            .await;
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                Some(("component", "global-rib")),
+                2,
+            )
+            .await;
 
             eprintln!("Checking state metrics...");
-            assert_metric_eq(manager.metrics(), "bmp_tcp_in_num_bmp_messages_received_total", Some(("router", &local_addr)), 4).await;
-            assert_metric_eq(manager.metrics(), "rib_unit_num_routes_announced_total", Some(("component", "global-rib")), 2).await;
-            assert_metric_eq(manager.metrics(), "mqtt_target_publish_count_total", Some(("component", "local-broker")), 4).await;
+            assert_metric_eq(
+                manager.metrics(),
+                "bmp_tcp_in_num_bmp_messages_received_total",
+                Some(("router", &local_addr)),
+                4,
+            )
+            .await;
+            assert_metric_eq(
+                manager.metrics(),
+                "rib_unit_num_routes_announced_total",
+                Some(("component", "global-rib")),
+                2,
+            )
+            .await;
+            assert_metric_eq(
+                manager.metrics(),
+                "mqtt_target_publish_count_total",
+                Some(("component", "local-broker")),
+                4,
+            )
+            .await;
 
             // query the route to make sure it was stored
             eprintln!("Querying prefix store...");
@@ -357,7 +461,12 @@ mod tests {
             assert_eq!(res.get("data").unwrap().as_array().unwrap().len(), 1);
 
             // wait for the manager to update the link report so that it will be included in the trace log output
-            while manager.link_report_updated_at().duration_since(link_report_update_time).as_secs() < 1 {
+            while manager
+                .link_report_updated_at()
+                .duration_since(link_report_update_time)
+                .as_secs()
+                < 1
+            {
                 eprintln!("Waiting for link report to be updated");
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }

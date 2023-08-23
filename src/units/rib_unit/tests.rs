@@ -57,8 +57,7 @@ async fn process_update_single_route() {
         .unwrap()
         .into();
     let announcements =
-        Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32")
-            .unwrap();
+        Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32").unwrap();
     let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
 
     // When it is processed by this unit
@@ -104,8 +103,7 @@ async fn process_update_same_route_twice() {
         .unwrap()
         .into();
     let announcements =
-        Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32")
-            .unwrap();
+        Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32").unwrap();
     let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
 
     // When it is processed by this unit
@@ -118,8 +116,7 @@ async fn process_update_same_route_twice() {
         RouteStatus::InConvergence,
     );
     let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
-    let updates1 =
-        run_process_single_update(payload.clone(), rib.clone(), metrics.clone()).await;
+    let updates1 = run_process_single_update(payload.clone(), rib.clone(), metrics.clone()).await;
     let updates2 = run_process_single_update(payload.clone(), rib.clone(), metrics).await;
 
     // Then it SHOULD be added to the route store only once
@@ -129,7 +126,10 @@ async fn process_update_same_route_twice() {
     // And the BGP UPDATE bytes should be the same for both the input and output route
     // (at the time of writing the BgpUpdateMessage PartialEq implementation only compares BgpUpdateMessage.message_id,
     // not the actual underlying message bytes)
-    for (input, output) in [&payload, &payload].iter().zip([updates1, updates2].iter_mut()) {
+    for (input, output) in [&payload, &payload]
+        .iter()
+        .zip([updates1, updates2].iter_mut())
+    {
         assert_eq!(output.len(), 1); // (modified) RIB input only, no streaming output
         let update = output.pop().unwrap();
         if let Update::Single(output_payload) = update {
@@ -173,8 +173,7 @@ async fn process_update_two_routes_to_the_same_prefix() {
             );
             let payload = Payload::TypeValue(BuiltinTypeValue::Route(route).into());
             inputs.push(payload.clone());
-            let updates =
-                run_process_single_update(payload, rib.clone(), metrics.clone()).await;
+            let updates = run_process_single_update(payload, rib.clone(), metrics.clone()).await;
             outputs.push(updates);
         }
 
@@ -189,11 +188,11 @@ async fn process_update_two_routes_to_the_same_prefix() {
             include_more_specifics: true,
         };
         eprintln!("Querying store match_prefix the first time");
-        let match_result = rib.load().as_ref().unwrap().match_prefix(
-            &raw_prefix,
-            &match_options,
-            &epoch::pin(),
-        );
+        let match_result =
+            rib.load()
+                .as_ref()
+                .unwrap()
+                .match_prefix(&raw_prefix, &match_options, &epoch::pin());
         assert!(matches!(match_result.match_type, MatchType::ExactMatch));
         let rib_value = match_result.prefix_meta.as_ref().unwrap();
         assert_eq!(rib_value.len(), 2);
@@ -236,11 +235,11 @@ async fn process_update_two_routes_to_the_same_prefix() {
         // see that the routes HashSet Arc strong reference count increases from 2 to 3 while the inner items of the
         // HashSet still have a strong reference count of 1.
         eprintln!("Querying store match_prefix the second time");
-        let match_result2 = rib.load().as_ref().unwrap().match_prefix(
-            &raw_prefix,
-            &match_options,
-            &epoch::pin(),
-        );
+        let match_result2 =
+            rib.load()
+                .as_ref()
+                .unwrap()
+                .match_prefix(&raw_prefix, &match_options, &epoch::pin());
         assert!(matches!(match_result2.match_type, MatchType::ExactMatch));
         let rib_value = match_result2.prefix_meta.as_ref().unwrap();
         assert_eq!(rib_value.len(), 2);
@@ -261,7 +260,9 @@ async fn process_update_two_routes_to_the_same_prefix() {
     };
 
     // The MultiThreadedStore has been dropped so the HashSet strong reference count should decrease from 3 to 2.
-    eprintln!("Checking the reference counts of the `match_result` query result var inner metadata item");
+    eprintln!(
+        "Checking the reference counts of the `match_result` query result var inner metadata item"
+    );
     let rib_value = match_result2.prefix_meta.unwrap();
     // assert_eq!(Arc::strong_count(&rib_value.per_prefix_items), 2); // TODO: MultiThreadedStore doesn't cleanup on drop...
     assert_eq!(Arc::weak_count(rib_value.test_inner()), 0);
@@ -291,9 +292,7 @@ async fn process_update_two_routes_to_different_prefixes() {
     // When they are processed by this unit
     let mut inputs = vec![];
     let mut outputs = vec![];
-    for (prefix, bgp_update_bytes) in
-        [(prefix1, bgp_update_bytes1), (prefix2, bgp_update_bytes2)]
-    {
+    for (prefix, bgp_update_bytes) in [(prefix1, bgp_update_bytes1), (prefix2, bgp_update_bytes2)] {
         let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
         let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
         let route = RawRouteWithDeltas::new_with_message_ref(

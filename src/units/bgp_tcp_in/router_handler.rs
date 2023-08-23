@@ -16,7 +16,8 @@ use routecore::addr::Prefix;
 use routecore::asn::Asn;
 use routecore::bgp::message::{
     nlri::Nlri,
-    update::{ComposeError, UpdateBuilder}, UpdateMessage as UpdatePdu,
+    update::{ComposeError, UpdateBuilder},
+    UpdateMessage as UpdatePdu,
 };
 use smallvec::SmallVec;
 use tokio::net::TcpStream;

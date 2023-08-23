@@ -2,6 +2,7 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use roto::types::builtin::{BuiltinTypeValue, RawRouteWithDeltas};
 use roto::types::typevalue::TypeValue;
+use roto::vm::OutputStreamQueue;
 use rotonda_store::QueryResult;
 
 use serde::{Deserialize, Serialize};
@@ -112,4 +113,5 @@ pub enum Update {
     Single(Payload),
     Bulk(SmallVec<[Payload; 8]>),
     QueryResult(Uuid, Result<QueryResult<RibValue>, String>),
+    OutputStreamMessage(OutputStreamQueue),
 }

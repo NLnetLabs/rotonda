@@ -162,6 +162,7 @@ where
     }
 
     /// Returns true if the FrimMap is empty.
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.inner.load().is_empty()
     }

@@ -16,8 +16,7 @@ use routecore::addr::Prefix;
 use routecore::asn::Asn;
 use routecore::bgp::message::{
     nlri::Nlri,
-    update::{ComposeError, UpdateBuilder},
-    SessionConfig, UpdateMessage as UpdatePdu,
+    update::{ComposeError, UpdateBuilder}, UpdateMessage as UpdatePdu,
 };
 use smallvec::SmallVec;
 use tokio::net::TcpStream;
@@ -183,7 +182,7 @@ impl Processor {
                             // We can only receive UPDATE messages over an
                             // established session, so not having a
                             // NegotiatedConfig should never happen.
-                            if let Some(negotiated) = session.negotiated() {
+                            if let Some(_negotiated) = session.negotiated() {
                                 self.process_update(
                                     pdu,
                                     //negotiated.remote_addr(),
@@ -348,6 +347,7 @@ impl Processor {
         (session, rx_sess)
     }
 
+    #[allow(dead_code)]
     fn print_pcap<T: AsRef<[u8]>>(buf: T) {
         print!("000000 ");
         for b in buf.as_ref() {

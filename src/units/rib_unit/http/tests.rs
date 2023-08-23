@@ -25,7 +25,7 @@ use crate::{
     http::ProcessRequest,
     units::{
         rib_unit::{
-            rib::{PhysicalRib, PreHashedTypeValue},
+            rib::PhysicalRib,
             unit::{MoreSpecifics, QueryLimits},
         },
         RibType,

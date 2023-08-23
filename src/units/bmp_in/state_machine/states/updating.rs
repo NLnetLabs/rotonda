@@ -142,7 +142,7 @@ impl BmpStateDetails<Updating> {
         if routes.is_empty() {
             Self::mk_state_transition_result(next_state)
         } else {
-            Self::mk_final_routing_update_result(next_state, [Update::Bulk(routes.into())].into())
+            Self::mk_final_routing_update_result(next_state, [Update::Bulk(routes)].into())
         }
     }
 }

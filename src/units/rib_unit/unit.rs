@@ -27,6 +27,7 @@ use roto::{
         collections::ElementTypeValue,
         typevalue::TypeValue,
     },
+    vm::OutputStreamQueue,
 };
 use rotonda_store::{
     custom_alloc::Upsert,
@@ -37,6 +38,7 @@ use rotonda_store::{
 
 use routecore::addr::Prefix;
 use serde::Deserialize;
+use smallvec::SmallVec;
 use std::{
     cell::RefCell,
     ops::{ControlFlow, Deref},
@@ -464,7 +466,7 @@ impl RibUnitRunner {
         match update {
             Update::Bulk(updates) => {
                 for payload in updates {
-                    if let Some(update) = process_metrics
+                    let updates = process_metrics
                         .instrument(Self::process_update_single(
                             payload,
                             rib.clone(),
@@ -473,8 +475,9 @@ impl RibUnitRunner {
                             status_reporter.clone(),
                             rib_merge_update_stats.clone(),
                         ))
-                        .await
-                    {
+                        .await;
+
+                    for update in updates {
                         gate.update_data(update).await;
                     }
                 }
@@ -486,7 +489,7 @@ impl RibUnitRunner {
 
             Update::Single(payload) => {
                 // TODO: update status reporter/metrics as is done in the bulk case
-                if let Some(update) = process_metrics
+                let updates = process_metrics
                     .instrument(Self::process_update_single(
                         payload,
                         rib.clone(),
@@ -495,8 +498,9 @@ impl RibUnitRunner {
                         status_reporter.clone(),
                         rib_merge_update_stats,
                     ))
-                    .await
-                {
+                    .await;
+
+                for update in updates {
                     gate.update_data(update).await;
                 }
             }
@@ -528,6 +532,11 @@ impl RibUnitRunner {
                         .await;
                 }
             }
+
+            Update::OutputStreamMessage(_) => {
+                // pass it on, we don't (yet?) support doing anything with these
+                gate.update_data(update).await;
+            }
         }
     }
 
@@ -538,7 +547,7 @@ impl RibUnitRunner {
         roto_source: Arc<ArcSwap<(Instant, String)>>,
         status_reporter: Arc<RibUnitStatusReporter>,
         rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
-    ) -> Option<Update>
+    ) -> SmallVec<[Update; 8]>
     where
         F: Fn(
                 &Prefix,
@@ -556,10 +565,10 @@ impl RibUnitRunner {
                         // Nothing to do
                     }
 
-                    Ok(ControlFlow::Continue(output)) => {
+                    Ok(ControlFlow::Continue((rx, _tx, output_stream_queue))) => {
                         // Only physical RIBs have a store to insert into.
                         if let Some(rib) = rib.load().as_ref() {
-                            let prefix: Option<Prefix> = match &output {
+                            let prefix: Option<Prefix> = match &rx {
                                 TypeValue::Builtin(BuiltinTypeValue::Route(route)) => {
                                     Some(route.prefix.into())
                                 }
@@ -577,10 +586,10 @@ impl RibUnitRunner {
                             };
 
                             if let Some(prefix) = prefix {
-                                let is_withdraw = output.is_withdrawn();
+                                let is_withdraw = rx.is_withdrawn();
 
                                 let pre_insert = Utc::now();
-                                match insert(&prefix, output.clone(), rib) {
+                                match insert(&prefix, rx.clone(), rib) {
                                     Ok((upsert, num_retries)) => {
                                         let post_insert = Utc::now();
                                         let insert_delay = (post_insert - pre_insert)
@@ -650,7 +659,12 @@ impl RibUnitRunner {
                             }
                         }
 
-                        return Some(Update::Single(Payload::TypeValue(output)));
+                        let mut updates = SmallVec::<[Update; 8]>::new();
+                        updates.push(Update::Single(Payload::TypeValue(rx)));
+                        if !output_stream_queue.is_empty() {
+                            updates.push(Update::OutputStreamMessage(output_stream_queue));
+                        }
+                        return updates;
                     }
 
                     Err(err) => {
@@ -665,7 +679,7 @@ impl RibUnitRunner {
             }
         }
 
-        None
+        SmallVec::default()
     }
 
     async fn reprocess_query_results(
@@ -753,7 +767,7 @@ impl RibUnitRunner {
 
             trace!("Reprocessing route");
 
-            let processed_update = Self::process_update_single(
+            let mut processed_updates = Self::process_update_single(
                 payload,
                 Arc::default(),
                 |_, _, _| unreachable!(),
@@ -763,8 +777,10 @@ impl RibUnitRunner {
             )
             .await;
 
+            assert_eq!(processed_updates.len(), 1);
             #[allow(clippy::collapsible_match)]
-            if let Some(Update::Single(Payload::TypeValue(out_type_value))) = processed_update {
+            if let Update::Single(Payload::TypeValue(out_type_value)) = processed_updates.remove(0)
+            {
                 // Add this processed query result route into the new query result
                 let hash = rib
                     .load()
@@ -817,19 +833,26 @@ impl RibUnitRunner {
     fn is_filtered<R: RotoType>(
         rx: R,
         roto_source: Option<Arc<ArcSwap<(Instant, String)>>>,
-    ) -> Result<ControlFlow<(), TypeValue>, String> {
+    ) -> Result<ControlFlow<(), (TypeValue, Option<TypeValue>, OutputStreamQueue)>, String> {
         match roto_source {
             None => {
                 // No Roto filter defined, accept the BGP UPDATE messsage
-                Ok(ControlFlow::Continue(rx.into()))
+                Ok(ControlFlow::Continue((
+                    rx.into(),
+                    None,
+                    OutputStreamQueue::new(),
+                )))
             }
             Some(roto_source) => {
                 // TODO: Run the Roto VM on a dedicated thread pool, to prevent blocking the Tokio async runtime, as we
                 // don't know how long we will have to wait for the VM execution to complete (as it depends on the
                 // behaviour of the user provided script). Timeouts might be a good idea!
-                Self::VM.with(move |vm| -> Result<ControlFlow<(), TypeValue>, String> {
-                    is_filtered_in_vm(vm, roto_source, rx)
-                })
+                Self::VM.with(
+                    move |vm| -> Result<
+                        ControlFlow<(), (TypeValue, Option<TypeValue>, OutputStreamQueue)>,
+                        String,
+                    > { is_filtered_in_vm(vm, roto_source, rx) },
+                )
             }
         }
     }

@@ -37,6 +37,7 @@ url                = { version = "^2.2", features = ["serde"] }
 
 # Dependencies specifically used by the BGP/BMP related modifications to the original RTRTR base
 allocator-api2     = "^0.2"
+assert-json-diff   = "^2.0"
 async-trait        = "^0.1"
 atomic_enum        = "^0.2.0"
 flate2             = { version = "^1.0", optional = true }
@@ -62,7 +63,6 @@ uuid               = { version = "^1.1", features = ["v4", "fast-rng"] }
 syslog             = "^6.0"
 
 [dev-dependencies]
-assert-json-diff   = "^2.0"
 easy-repl          = "^0.1"
 hex                = "^0.4"
 jsonschema         = { version = "0.16.0", default-features = false, features = ["draft202012"] }

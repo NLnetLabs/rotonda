@@ -163,6 +163,8 @@ mod tests {
     #[cfg(feature = "mqtt")]
     #[test]
     fn integration_test() {
+        use rotonda::tests::util::assert_json_eq;
+
         Config::init().unwrap();
 
         let base_config_toml = r#"
@@ -215,6 +217,7 @@ mod tests {
         client_id = "rotonda"
         communities = ["BLACKHOLE"]
         sources = ["global-rib"]
+        connect_retry_secs = 1
         "#;
 
         let test_prefix = Prefix::from_str("127.0.0.1/32").unwrap();
@@ -346,7 +349,7 @@ mod tests {
             eprintln!("Checking state metrics...");
             assert_metric_eq(manager.metrics(), "bmp_tcp_in_num_bmp_messages_received_total", Some(("router", &local_addr)), 4).await;
             assert_metric_eq(manager.metrics(), "rib_unit_num_routes_announced_total", Some(("component", "global-rib")), 2).await;
-            assert_metric_eq(manager.metrics(), "mqtt_target_publish_count_total", Some(("component", "local-broker")), 1).await;
+            assert_metric_eq(manager.metrics(), "mqtt_target_publish_count_total", Some(("component", "local-broker")), 4).await;
 
             // query the route to make sure it was stored
             eprintln!("Querying prefix store...");
@@ -362,58 +365,101 @@ mod tests {
             // shut down rotonda, we're finished with it
             manager.terminate();
 
-            // receive the message that was published to the MQTT broker topic
+            // receive the BGP UPDATE message that was published to the MQTT broker topic
             eprintln!("Receiving MQTT message...");
             let msg = link_rx.recv().unwrap();
             assert!(matches!(msg, Some(Notification::Forward(_))));
 
             eprintln!("Checking MQTT message...");
             if let Some(Notification::Forward(forward)) = msg {
+                assert_eq!(forward.publish.topic, "rotonda/my-sys-name");
                 let expected_json = serde_json::json!({
-                    "prefix": "127.0.0.2/32",
-                    "router": "my-sys-name",
-                    "sourceAs": "AS12345",
-                    "routingInformationBaseName": "Pre-Policy-RIB",
-                    "asPath": [
-                        "AS123",
-                        "AS456",
-                        "AS789"
-                    ],
-                    "neighbor": "10.0.0.1",
-                    "communities": [
-                        {
-                            "rawFields": [
-                                "0xFFFF029A"
-                            ],
-                            "type": "standard",
-                            "parsed": {
-                                "value": {
-                                    "type": "well-known",
-                                    "attribute": "BLACKHOLE"
-                                }
-                            }
+                    "route": {
+                        "prefix": "127.0.0.2/32",
+                        "as_path": [
+                            "AS123",
+                            "AS456",
+                            "AS789"
+                        ],
+                        "origin_type": "Egp",
+                        "next_hop": {
+                            "Ipv4": "10.0.0.1"
                         },
-                        {
-                            "rawFields": [
-                                "0x007B",
-                                "0x002C"
-                            ],
-                            "type": "standard",
-                            "parsed": {
-                                "value": {
-                                    "type": "private",
-                                    "asn": "AS123",
-                                    "tag": 44
+                        "atomic_aggregate": false,
+                        "communities": [
+                            {
+                                "rawFields": [
+                                    "0xFFFF029A"
+                                ],
+                                "type": "standard",
+                                "parsed": {
+                                    "value": {
+                                        "type": "well-known",
+                                        "attribute": "BLACKHOLE"
+                                    }
+                                }
+                            },
+                            {
+                                "rawFields": [
+                                    "0x007B",
+                                    "0x002C"
+                                ],
+                                "type": "standard",
+                                "parsed": {
+                                    "value": {
+                                        "type": "private",
+                                        "asn": "AS123",
+                                        "tag": 44
+                                    }
                                 }
                             }
-                        }
-                    ],
-                    "description": "127.0.0.2/32 RTBH received from router my-sys-name on Pre-Policy-RIB"
+                        ],
+                        "peer_ip": "10.0.0.1",
+                        "peer_asn": 12345,
+                        "router_id": "my-sys-name"
+                    },
+                    "status": "InConvergence",
+                    "route_id": [
+                        0,
+                        0
+                    ]
                 });
-                let actual_json: serde_json::Value = serde_json::from_slice(&forward.publish.payload).unwrap();
+                let actual_json: serde_json::Value =
+                    serde_json::from_slice(&forward.publish.payload).unwrap();
                 assert_json_eq(actual_json, expected_json);
             } else {
                 unreachable!();
+            }
+
+            // Three additional MQTT messages are published, one for every time the etc/filter.roto script was
+            // executed due to this line in the the application config file defined above:
+            //     roto_path = ["etc/filter.roto", "etc/filter.roto", "etc/filter.roto"]
+            // This line created a physical RIB and two eastward virtual RIBs, each configured to use the same Roto
+            // script. The physical RIB receives the route from our test BMP client and on success passes the route
+            // down the pipeline to the first vRIB, which does the same and passes it to the next vRIB. At each stage
+            // the roto script also produces an output message which is injected into the pipeline, resulting in the
+            // original BGP UPDATE message and 3 additional output messages flowing out of the final vRIB to the MQTT
+            // target. The MQTT message generated in response to the BGP UPDATE message was handled above. Below we
+            // handle the three MQTT messages generated in response to the output messages generated by the RIB unit.
+            for _ in 1..=3 {
+                eprintln!("Receiving MQTT message...");
+                let msg = link_rx.recv().unwrap();
+                assert!(matches!(msg, Some(Notification::Forward(_))));
+
+                eprintln!("Checking MQTT message...");
+                if let Some(Notification::Forward(forward)) = msg {
+                    assert_eq!(forward.publish.topic, "rotonda/testing");
+                    let expected_json = serde_json::json!({
+                        "message": "🤭 I encountered 1818",
+                        "name": "Some name",
+                        "topic": "testing"
+                    });
+                    let actual_json: serde_json::Value =
+                        serde_json::from_slice(&forward.publish.payload).unwrap();
+                    rotonda::tests::util::assert_json_eq(actual_json, expected_json);
+                } else {
+                    unreachable!();
+                }
             }
         })
     }
@@ -694,23 +740,6 @@ mod tests {
                 .iter()
                 .find(|sample| is_wanted(sample, metric_name, &label, result.clone()))
                 .map(sample_as_i64)
-        }
-    }
-
-    pub fn assert_json_eq(actual_json: serde_json::Value, expected_json: serde_json::Value) {
-        use assert_json_diff::{assert_json_matches_no_panic, CompareMode};
-
-        let config = assert_json_diff::Config::new(CompareMode::Strict);
-        if let Err(err) = assert_json_matches_no_panic(&actual_json, &expected_json, config) {
-            eprintln!(
-                "Actual JSON: {}",
-                serde_json::to_string_pretty(&actual_json).unwrap()
-            );
-            eprintln!(
-                "Expected JSON: {}",
-                serde_json::to_string_pretty(&expected_json).unwrap()
-            );
-            panic!("JSON doesn't match expectations: {}", err);
         }
     }
 }

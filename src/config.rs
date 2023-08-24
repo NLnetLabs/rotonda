@@ -376,7 +376,7 @@ impl ConfigFile {
                 let unit_type = unit_table.get("type");
                 let rib_type = unit_table.get("rib_type");
                 #[allow(clippy::collapsible_if)]
-                if unit_type == Some(&Value::String("rib-unit".to_string())) {
+                if unit_type == Some(&Value::String("rib".to_string())) {
                     if Option::is_none(&rib_type)
                         || rib_type == Some(&Value::String("Physical".to_string()))
                     {
@@ -387,7 +387,7 @@ impl ConfigFile {
                                 //
                                 //     [unit.shorthand_unit]
                                 //     sources = ["a"]
-                                //     type = "rib-unit"
+                                //     type = "rib"
                                 //     roto_paths = ["pRib.roto", "vRib1.roto", "vRib2.roto"]
                                 //
                                 //     [unit.some_other_unit]
@@ -397,7 +397,7 @@ impl ConfigFile {
                                 //
                                 //     [unit.shorthand_unit]
                                 //     sources = ["a"]
-                                //     type = "rib-unit"
+                                //     type = "rib"
                                 //     roto_path = "pRib.roto"               # <-- changed
                                 //     rib_type = "Physical"                 # <-- new
                                 //
@@ -406,7 +406,7 @@ impl ConfigFile {
                                 //
                                 //     [unit.shorthand_unit-vRIB-0]          # new
                                 //     sources = ["shorthand_unit"]
-                                //     type = "rib-unit"
+                                //     type = "rib"
                                 //     roto_path = "vRib1.roto"
                                 //
                                 //     [unit.shorthand_unit-vRIB-0.rib_type] # new
@@ -414,7 +414,7 @@ impl ConfigFile {
                                 //
                                 //     [unit.shorthand_unit-vRIB-1]
                                 //     sources = ["shorthand_unit-vRIB-0"]   # new
-                                //     type = "rib-unit"
+                                //     type = "rib"
                                 //     roto_path = "vRib2.roto"
                                 //
                                 //     [unit.shorthand_unit-vRIB-1.rib_type] # new

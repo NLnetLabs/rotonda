@@ -193,7 +193,7 @@ mod tests {
         sources = ["filter"]
 
         [units.global-rib]
-        type = "rib-unit"
+        type = "rib"
         sources = ["routers"]
         roto_path = ["etc/filter.roto", "etc/filter.roto", "etc/filter.roto"]
 

@@ -391,7 +391,7 @@ impl Processor {
         // [2023-08-02 21:13:18] DEBUG rotonda::units::bgp_tcp_in::router_handler: removed AS200@10.1.0.2 from live_sessions (current count: 0)
         //
         // And all previously announced correct prefixes are withdrawn from
-        // rib-unit. Perhaps this can serve when further developing the part
+        // rib. Perhaps this can serve when further developing the part
         // where such an invalid PDU results in a specific NOTIFICATION that
         // needs to go out. Also, check whether 7606 comes into play here.
 

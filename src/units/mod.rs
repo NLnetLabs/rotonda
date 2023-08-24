@@ -56,7 +56,7 @@ pub enum Unit {
     #[serde(rename = "bmp-in")]
     BmpIn(bmp_in::unit::BmpIn),
 
-    #[serde(rename = "rib-unit")]
+    #[serde(rename = "rib")]
     RibUnit(rib_unit::unit::RibUnit),
 }
 
@@ -69,7 +69,6 @@ impl Unit {
             Unit::RotoFilter(unit) => unit.run(component, gate, waitpoint).await,
             Unit::BmpIn(unit) => unit.run(component, gate, waitpoint).await,
             Unit::RibUnit(unit) => unit.run(component, gate, waitpoint).await,
-            // Unit::Rotoro(unit) => unit.run(component, gate).await,
         };
     }
 }

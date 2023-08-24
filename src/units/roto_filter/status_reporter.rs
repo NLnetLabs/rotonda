@@ -4,7 +4,9 @@ use std::{
     sync::{atomic::Ordering, Arc},
 };
 
-use crate::common::status_reporter::{AnyStatusReporter, Chainable, Named, UnitStatusReporter};
+use log::error;
+
+use crate::common::status_reporter::{AnyStatusReporter, Chainable, Named, UnitStatusReporter, sr_log};
 
 use super::metrics::RotoFilterMetrics;
 
@@ -35,6 +37,10 @@ impl RotoFilterStatusReporter {
             .router_metrics(router_addr)
             .num_filtered_messages
             .fetch_add(1, Ordering::SeqCst);
+    }
+
+    pub fn message_filtering_failure<T: Display>(&self, err: T) {
+        sr_log!(error: self, "Filtering error: {}", err);
     }
 }
 

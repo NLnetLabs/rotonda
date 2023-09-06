@@ -157,6 +157,8 @@ pub enum GateState {
 pub struct Gate {
     id: Arc<Mutex<Uuid>>,
 
+    name: Arc<String>,
+
     /// Receiver for commands sent in by the links.
     commands: Arc<RwLock<mpsc::Receiver<GateCommand>>>,
 
@@ -206,6 +208,7 @@ impl Gate {
         let (tx, rx) = mpsc::channel(COMMAND_QUEUE_LEN);
         let gate = Gate {
             id: Arc::new(Mutex::new(Uuid::new_v4())),
+            name: Arc::default(),
             commands: Arc::new(RwLock::new(rx)),
             updates: Default::default(),
             queue_size,
@@ -378,7 +381,7 @@ impl Gate {
                         let new_id = *new_gate.id.lock().unwrap();
                         let mut id = self.id.lock().unwrap();
                         if log_enabled!(log::Level::Trace) {
-                            trace!("Gate[{}]: Reconfiguring: new ID={}", id, new_id);
+                            trace!("Gate[{} ({})]: Reconfiguring: new ID={}", self.name, id, new_id);
                         }
                         *id = new_id;
                     }
@@ -514,7 +517,7 @@ impl Gate {
         let mut sent_at_least_once = false;
 
         if log_enabled!(log::Level::Trace) {
-            trace!("Gate[{}]: starting update", self.id());
+            trace!("Gate[{} ({})]: starting update", self.name, self.id());
         }
         for (uuid, item) in self.updates.guard().iter() {
             match (&item.queue, &item.direct) {
@@ -527,7 +530,8 @@ impl Gate {
                 (None, Some(direct)) => {
                     if log_enabled!(log::Level::Trace) {
                         trace!(
-                            "Gate[{}]: sending direct update for slot {}",
+                            "Gate[{} ({})]: sending direct update for slot {}",
+                            self.name,
                             self.id(),
                             uuid
                         );
@@ -546,7 +550,7 @@ impl Gate {
             // sender_lost = true;
         }
         if log_enabled!(log::Level::Trace) {
-            trace!("Gate[{}]: finished update", self.id());
+            trace!("Gate[{} ({})]: finished update", self.name, self.id());
         }
 
         // if sender_lost {
@@ -667,6 +671,14 @@ impl Gate {
         self.notify_clones(GateCommand::FollowUnsubscribe { slot })
             .await;
     }
+
+    pub(crate) fn set_name(&mut self, name: &str) {
+        self.name = Arc::new(name.to_string());
+    }
+
+    pub fn name(&self) -> Arc<String> {
+        self.name.clone()
+    }
 }
 
 impl Clone for Gate {
@@ -694,6 +706,7 @@ impl Clone for Gate {
 
         let gate = Gate {
             id: self.id.clone(),
+            name: self.name.clone(),
             commands: Arc::new(RwLock::new(rx)),
             updates: self.updates.clone(),
             queue_size: self.queue_size,

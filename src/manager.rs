@@ -675,27 +675,27 @@ impl Manager {
     /// Before:
     ///
     /// ```text
-    ///     unit                                  target
-    ///     ┌───┐                                 ┌───┐
-    ///     │ a │gate◀────────────────────────link│ c │
-    ///     └───┘                                 └───┘
+    ///     unit                                    target
+    ///     ┌───┐                                   ┌───┐
+    ///     │ a │gate◀─────────────────────────link│ c │
+    ///     └───┘                                   └───┘
     /// ```
     /// After:
     ///
     /// ```text
     ///     running:
     ///     --------
-    ///     unit                                  target
-    ///     ┌───┐                                 ┌───┐
-    ///     │ a │gate◀────────────────────────link│ c │
-    ///     └───┘                                 └───┘
+    ///     unit                                    target
+    ///     ┌───┐                                   ┌───┐
+    ///     │ a │gate◀─────────────────────────link│ c │
+    ///     └───┘                                   └───┘
     ///
     ///     pending:
     ///     --------
-    ///     unit               unit              target
-    ///     ┌───┐              ┌───┐              ┌───┐
+    ///     unit                unit                target
+    ///     ┌───┐               ┌───┐               ┌───┐
     ///     │ a'│gate'◀───link'│ b'│gate'◀───link'│ c'│
-    ///     └───┘              └───┘              └───┘
+    ///     └───┘               └───┘               └───┘
     /// ```
     /// In this example unit a and target c still exist in the config file,
     /// possibly with changed settings, and new unit b has been added. The
@@ -709,25 +709,25 @@ impl Manager {
     /// ```text
     ///     current:
     ///     --------
-    ///     unit                                  target
-    ///     ┌───┐                                 ┌───┐
-    ///     │ a │gate◀────────────────────────link│ c │
-    ///     └───┘                                 └───┘
+    ///     unit                                    target
+    ///     ┌───┐                                   ┌───┐
+    ///     │ a │gate◀─────────────────────────link│ c │
+    ///     └───┘                                   └───┘
     ///
-    ///     unit               unit               target
-    ///     ┌───┐              ┌───┐              ┌───┐
+    ///     unit                 unit               target
+    ///     ┌───┐               ┌───┐               ┌───┐
     ///     │ a'│gate◀╴╴╴╴link'│ b'│gate'◀╴╴╴link'│ c'│
-    ///     └───┘              └───┘              └───┘
+    ///     └───┘               └───┘               └───┘
     /// ```
     /// Versus:
     ///
     /// ```text
     ///     desired:
     ///     --------
-    ///     unit               unit               target
-    ///     ┌───┐              ┌───┐              ┌───┐
+    ///     unit                unit                target
+    ///     ┌───┐               ┌───┐               ┌───┐
     ///     │ a │gate◀────link'│ b'│gate'◀───link'│ c │
-    ///     └───┘              └───┘              └───┘
+    ///     └───┘               └───┘               └───┘
     /// ```
     /// If we blindly replace unit a with a' and target c with c' we risk
     /// breaking existing connections or discarding state unnecessarily. So

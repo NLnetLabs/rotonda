@@ -258,16 +258,17 @@ impl LogConfig {
 
     /// Creates and returns a fern logger.
     fn fern_logger(&self, timestamp_and_level: bool) -> fern::Dispatch {
-        let mqtt_log_level = if std::env::var("ROTONDA_MQTT_LOG").is_ok() {
-            self.log_level.0.min(LevelFilter::Trace)
-        } else {
-            self.log_level.0.min(LevelFilter::Warn)
+        let mqtt_log_level = match std::env::var("ROTONDA_MQTT_LOG") {
+            Ok(_) => self.log_level.0.min(LevelFilter::Trace),
+            Err(_) => self.log_level.0.min(LevelFilter::Warn),
         };
-
-        let rotonda_store_log_level = if std::env::var("ROTONDA_STORE_LOG").is_ok() {
-            self.log_level.0.min(LevelFilter::Trace)
-        } else {
-            self.log_level.0.min(LevelFilter::Warn)
+        let rotonda_store_log_level = match std::env::var("ROTONDA_STORE_LOG") {
+            Ok(_) => self.log_level.0.min(LevelFilter::Trace),
+            Err(_) => self.log_level.0.min(LevelFilter::Warn),
+        };
+        let roto_log_level = match std::env::var("ROTONDA_ROTO_LOG") {
+            Ok(_) => self.log_level.0.min(LevelFilter::Trace),
+            Err(_) => self.log_level.0.min(LevelFilter::Warn),
         };
 
         let debug_enabled = self.log_level.0 >= LevelFilter::Debug;
@@ -334,7 +335,8 @@ impl LogConfig {
         // Boost the log level of modules for which the operator has requested more diagnostics for.
         res = res
             .level_for("rotonda_store", rotonda_store_log_level)
-            .level_for("rumqttc", mqtt_log_level);
+            .level_for("rumqttc", mqtt_log_level)
+            .level_for("roto", roto_log_level);
 
         if debug_enabled {
             // Don't enable too much logging for some modules even if the main log level is set to debug or trace.

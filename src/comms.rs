@@ -269,7 +269,7 @@ impl Gate {
                 })
                 .await
             {
-                // TO DO
+                // TODO
             }
         }
     }
@@ -284,7 +284,7 @@ impl Gate {
             if let Err(_err) = parent_command_sender.blocking_send(GateCommand::DetachClone {
                 clone_id: *clone_id,
             }) {
-                // TO DO
+                // TODO
             }
         }
     }

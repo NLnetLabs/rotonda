@@ -15,7 +15,7 @@ use futures::pin_mut;
 use hyper::server::accept::Accept;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, StatusCode, Uri};
-use log::{debug, error};
+use log::{debug, error, trace};
 use percent_encoding::percent_decode;
 use serde::Deserialize;
 use serde_with::{serde_as, OneOrMany};
@@ -131,14 +131,28 @@ impl Server {
         metrics: metrics::Collection,
         resources: Resources,
     ) {
-        let make_service = make_service_fn(|_conn| {
+        let make_service = make_service_fn(|conn: &HttpStream| {
             let metrics = metrics.clone();
             let resources = resources.clone();
+            let client_ip = Arc::new(conn.sock().peer_addr().map_or_else(|_err| "-".to_string(), |addr| addr.to_string()));
             async move {
                 Ok::<_, Infallible>(service_fn(move |req| {
                     let metrics = metrics.clone();
                     let resources = resources.clone();
-                    async move { Self::handle_request(req, &metrics, &resources).await }
+                    let client_ip = client_ip.clone();
+                    async move {
+                        if log::log_enabled!(log::Level::Trace) {
+                            let request_line = format!("{} {} {:?}", req.method(), req.uri(), req.version());
+                            let res = Self::handle_request(req, &metrics, &resources).await;
+                            if let Ok(res) = &res {
+                                let status_code = res.status().as_u16();
+                                trace!("{client_ip} - - {request_line} {status_code} -");
+                            }
+                            res
+                        } else {
+                            Self::handle_request(req, &metrics, &resources).await
+                        }
+                    }
                 }))
             }
         });
@@ -417,6 +431,12 @@ impl Accept for HttpAccept {
 /// A TCP stream wrapped for use with Hyper.
 struct HttpStream {
     sock: TcpStream,
+}
+
+impl HttpStream {
+    fn sock(&self) -> &TcpStream {
+        &self.sock
+    }
 }
 
 impl AsyncRead for HttpStream {

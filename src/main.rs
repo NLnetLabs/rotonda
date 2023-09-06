@@ -211,7 +211,7 @@ mod tests {
         let mqtt_target_toml = r#"
         [targets.local-broker]
         type = "mqtt-out"
-        qos = 1 # 1=at-least-once, as rumqttd doesn't support the default value 2=exactly-once
+        qos = 2
         server_host = "127.0.0.1"
         server_port = 1883
         client_id = "rotonda"
@@ -243,6 +243,7 @@ mod tests {
         max_segment_count = 10
         max_read_len = 10240
         max_connections = 10001
+        max_outgoing_packet_count = 10
 
         [v4.1]
         name = "v4-1"

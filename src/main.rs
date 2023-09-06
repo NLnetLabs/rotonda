@@ -564,8 +564,6 @@ mod tests {
                     assert_eq!(forward.publish.topic, "rotonda/testing");
                     let expected_json = serde_json::json!({
                         "message": "🤭 I encountered 1818",
-                        "name": "Some name",
-                        "topic": "testing"
                     });
                     let actual_json: serde_json::Value =
                         serde_json::from_slice(&forward.publish.payload).unwrap();

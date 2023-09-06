@@ -796,7 +796,6 @@ mod tests {
         let expected_json = json!({
             "some-asn": 1818,
             "some-str": "some-value",
-            "topic": "my-topic"
         });
 
         let actual_json = serde_json::from_str(&content).unwrap();

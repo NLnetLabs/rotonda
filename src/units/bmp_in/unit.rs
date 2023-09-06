@@ -6,7 +6,6 @@ use std::{
 use super::state_machine::processing::ProcessingResult;
 use crate::{
     common::{
-        file_io::TheFileIo,
         frim::FrimMap,
         roto::ThreadLocalVM,
         status_reporter::{AnyStatusReporter, Chainable, UnitStatusReporter},
@@ -77,7 +76,6 @@ impl BmpIn {
             self.router_id_template,
             #[cfg(feature = "router-list")]
             self.http_api_path,
-            TheFileIo::default(),
         )
         .run(self.sources, waitpoint)
         .await
@@ -108,7 +106,6 @@ struct BmpInRunner {
     #[cfg(feature = "router-list")]
     _api_processor: Arc<dyn ProcessRequest>,
     state_machine_metrics: Arc<TokioTaskMetrics>,
-    file_io: TheFileIo,
 }
 
 impl BmpInRunner {
@@ -122,7 +119,6 @@ impl BmpInRunner {
         gate: Gate,
         router_id_template: Arc<String>,
         #[cfg(feature = "router-list")] http_api_path: Arc<String>,
-        file_io: TheFileIo,
     ) -> Self {
         let unit_name = component.name().clone();
 
@@ -183,7 +179,6 @@ impl BmpInRunner {
             #[cfg(feature = "router-list")]
             _api_processor,
             state_machine_metrics,
-            file_io,
         }
     }
 

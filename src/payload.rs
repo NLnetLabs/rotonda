@@ -1,5 +1,4 @@
 use roto::types::typevalue::TypeValue;
-use roto::vm::OutputStreamQueue;
 use rotonda_store::QueryResult;
 
 use smallvec::{smallvec, SmallVec};

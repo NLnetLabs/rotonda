@@ -200,6 +200,7 @@ impl RibUnit {
 
 pub struct RibUnitRunner {
     gate: Arc<Gate>,
+    #[allow(dead_code)] // A strong ref needs to be held to http_processor but not used otherwise the HTTP resource manager will discard its registration
     http_processor: Arc<PrefixesApi>,
     query_limits: Arc<ArcSwap<QueryLimits>>,
     rib: Arc<ArcSwapOption<PhysicalRib>>,

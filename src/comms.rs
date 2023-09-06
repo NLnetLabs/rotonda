@@ -1715,7 +1715,7 @@ mod tests {
         //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│◀╌╌╌╌╌╌╌╌╌╌┘
 
         fn mk_test_payload() -> Payload {
-            Payload::TypeValue(U8::new(18).into())
+            Payload::new("test", U8::new(18))
         }
 
         eprintln!("STARTING");
@@ -1732,8 +1732,8 @@ mod tests {
         impl DirectUpdate for TestDirectUpdateTarget {
             async fn direct_update(&self, update: Update) {
                 assert!(matches!(update, Update::Single(_)));
-                if let Update::Single(payload) = &update {
-                    assert_eq!(*payload, mk_test_payload());
+                if let Update::Single(payload) = update {
+                    assert_eq!(payload, mk_test_payload());
                     self.0.fetch_add(1, Ordering::SeqCst);
                 }
             }

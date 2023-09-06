@@ -1,29 +1,26 @@
 use crate::{
     common::{
         file_io::{FileIo, TheFileIo},
-        roto::{is_filtered_in_vm, ThreadLocalVM},
+        roto::ThreadLocalVM,
         status_reporter::{AnyStatusReporter, UnitStatusReporter},
     },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus, Terminated},
     manager::{Component, WaitPoint},
-    payload::{Payload, RawBmpPayload, Update},
+    payload::{Filterable, Update, UpstreamStatus},
     units::Unit,
 };
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use log::info;
 use non_empty_vec::NonEmpty;
-use roto::types::{
-    builtin::BuiltinTypeValue, collections::BytesRecord, lazyrecord_types::BmpMessage,
-    typedef::TypeDef, typevalue::TypeValue,
-};
+use roto::types::typedef::TypeDef;
 use serde::Deserialize;
-use std::{cell::RefCell, ops::ControlFlow, path::PathBuf, sync::Arc, time::Instant};
+use std::{cell::RefCell, path::PathBuf, sync::Arc, time::Instant};
 
 use super::{metrics::RotoFilterMetrics, status_reporter::RotoFilterStatusReporter};
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct RotoFilter {
+pub struct Filter {
     /// The set of units to receive updates from.
     sources: NonEmpty<DirectLink>,
 
@@ -31,7 +28,7 @@ pub struct RotoFilter {
     roto_path: PathBuf,
 }
 
-impl RotoFilter {
+impl Filter {
     pub async fn run(
         self,
         component: Component,
@@ -81,6 +78,22 @@ impl RotoFilterRunner {
         }
     }
 
+    #[cfg(test)]
+    fn mock(roto_source_code: &str) -> Self {
+        let (gate, _) = Gate::new(0);
+        let gate = gate.into();
+        let status_reporter = RotoFilterStatusReporter::default().into();
+        let roto_source = (Instant::now(), roto_source_code.into());
+        let roto_source = Arc::new(ArcSwap::from_pointee(roto_source));
+        let file_io = TheFileIo::default();
+        Self {
+            gate,
+            status_reporter,
+            roto_source,
+            file_io,
+        }
+    }
+
     pub async fn run(
         self,
         mut sources: NonEmpty<DirectLink>,
@@ -109,7 +122,7 @@ impl RotoFilterRunner {
                     match status {
                         GateStatus::Reconfiguring {
                             new_config:
-                                Unit::RotoFilter(RotoFilter {
+                                Unit::Filter(Filter {
                                     sources: new_sources,
                                     roto_path: new_roto_path,
                                 }),
@@ -156,89 +169,73 @@ impl RotoFilterRunner {
         }
     }
 
-    async fn process_update(
-        gate: Arc<Gate>,
-        status_reporter: Arc<RotoFilterStatusReporter>,
-        update: Update,
-        roto_source: Arc<ArcSwap<(Instant, String)>>,
-    ) {
-        // ---
-        match &update {
-            Update::Single(payload) => match Self::is_filtered(payload, roto_source).await {
-                Ok(false) => gate.update_data(update).await,
-                Ok(true) => {
-                    if let Payload::RawBmp { router_addr, .. } = &payload {
-                        status_reporter.message_filtered(*router_addr);
-                    }
-                }
-                Err(err) => {
-                    status_reporter.message_filtering_failure(err);
-                }
-            },
-
-            Update::Bulk(_) => {
-                status_reporter.input_mismatch("Update::Single(_)", "Update::Bulk(_)");
+    async fn process_update(&self, update: Update) -> Result<(), String> {
+        match update {
+            Update::UpstreamStatusChange(UpstreamStatus::EndOfStream { .. }) => {
+                // Nothing to do, pass it on
+                self.gate.update_data(update).await;
             }
 
-            Update::QueryResult(..) => {
-                // These should only be received by virtual RIBs, we shouldn't see these.
-                status_reporter.input_mismatch("Update::Single(_)", "Update::QueryResult(_)");
-            }
-
-            Update::OutputStreamMessage(_) => {
-                // pass it on, we don't (yet?) support filtering of these
-                gate.update_data(update).await;
-            }
-        }
-    }
-
-    async fn is_filtered(
-        payload: &Payload,
-        roto_source: Arc<ArcSwap<(Instant, String)>>,
-    ) -> Result<bool, String> {
-        match payload {
-            Payload::RawBmp {
-                msg: RawBmpPayload::Msg(bytes),
-                ..
-            } => match BytesRecord::<BmpMessage>::new(bytes.clone()) {
-                Ok(bmp_msg) => {
-                    let payload =
-                        TypeValue::Builtin(BuiltinTypeValue::BmpMessage(Arc::new(bmp_msg)));
-                    Self::VM.with(
-                        move |vm| match is_filtered_in_vm(vm, roto_source, payload) {
-                            Ok(ControlFlow::Continue(_)) => Ok(false),
-                            Ok(ControlFlow::Break(_)) => Ok(true),
-                            Err(err) => Err(format!("Failed to execute Roto script: {err}")),
-                        },
-                    )
+            Update::Single(payload) => {
+                if let Some(filtered_update) = Self::VM
+                    .with(|vm| {
+                        let filter_fn = |value| {
+                            crate::common::roto::filter(vm, self.roto_source.clone(), value)
+                        };
+                        payload.filter(filter_fn).and_then(|mut filtered_payloads| {
+                            match filtered_payloads.len() {
+                                0 => Ok(None),
+                                1 => Ok(Some(Update::Single(filtered_payloads.pop().unwrap()))),
+                                _ => Ok(Some(Update::Bulk(filtered_payloads))),
+                            }
+                        })
+                    })
+                    .or_else(|err| {
+                        self.status_reporter.message_filtering_failure(&err);
+                        Err(err)
+                    })?
+                {
+                    self.gate.update_data(filtered_update).await;
                 }
+            }
 
-                Err(err) => Err(format!("Failed to parse BMP message: {err}")),
-            },
-
-            Payload::RawBmp {
-                msg: RawBmpPayload::Eof,
-                ..
-            } => {
-                // Don't filter these out
-                Ok(false)
+            Update::Bulk(payloads) => {
+                if let Some(filtered_update) = Self::VM
+                    .with(|vm| {
+                        let filter_fn = |value| {
+                            crate::common::roto::filter(vm, self.roto_source.clone(), value)
+                        };
+                        payloads
+                            .filter(filter_fn)
+                            .and_then(|mut filtered_payloads| match filtered_payloads.len() {
+                                0 => Ok(None),
+                                1 => Ok(Some(Update::Single(filtered_payloads.pop().unwrap()))),
+                                _ => Ok(Some(Update::Bulk(filtered_payloads))),
+                            })
+                    })
+                    .or_else(|err| {
+                        self.status_reporter.message_filtering_failure(&err);
+                        Err(err)
+                    })?
+                {
+                    self.gate.update_data(filtered_update).await;
+                }
             }
 
             _ => {
-                // Everything else gets filtered out
-                Ok(true)
+                self.status_reporter
+                    .input_mismatch("Update::Single(_)", update);
             }
         }
+
+        Ok(())
     }
 }
 
 #[async_trait]
 impl DirectUpdate for RotoFilterRunner {
     async fn direct_update(&self, update: Update) {
-        let gate = self.gate.clone();
-        let status_reporter = self.status_reporter.clone();
-        let roto_source = self.roto_source.clone();
-        Self::process_update(gate, status_reporter, update, roto_source).await;
+        let _ = self.process_update(update).await;
     }
 }
 
@@ -252,12 +249,18 @@ impl std::fmt::Debug for RotoFilterRunner {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::Ordering;
+
     use bytes::Bytes;
-    use chrono::Utc;
+    use roto::types::{
+        builtin::BuiltinTypeValue, collections::BytesRecord, lazyrecord_types::BmpMessage,
+        typevalue::TypeValue,
+    };
     use routecore::{asn::Asn, bmp::message::PeerType};
 
     use crate::{
         bgp::encode::{Announcements, Prefixes},
+        payload::{Payload, SourceId},
         tests::util::internal::enable_logging,
     };
 
@@ -334,10 +337,10 @@ mod tests {
             term is_wanted_bmp_msg_type {
                 match msg with {
                     InitiationMessage(i_msg) -> 1 == 0,
-                    PeerDownNotification(pd_msg) -> 1 == 0,
-                    PeerUpNotification(pu_msg) -> 1 == 0,
-                    RouteMonitoring(rm_msg) -> 1 == 1,
-                    StatisticsReport(sr_msg) -> 1 == 1,
+                    PeerDownNotification(pd_msg) -> 1 == 1,
+                    PeerUpNotification(pu_msg) -> 1 == 1,
+                    RouteMonitoring(rm_msg) -> 1 == 0,
+                    StatisticsReport(sr_msg) -> 1 == 0,
                     TerminationMessage(t_msg) -> 1 == 0,
                 }
             }
@@ -348,6 +351,57 @@ mod tests {
             }
         }
     "###;
+
+    #[tokio::test]
+    async fn bmp_messages_without_a_per_peer_header_should_not_be_filtered() {
+        enable_logging("trace");
+        let asn_to_ignore = TEST_PEER_ASN.into();
+        let roto_source = interpolate_source(FILTER_OUT_ASN_ROTO, asn_to_ignore);
+
+        assert!(!is_filtered(mk_filter_payload(mk_initiation_msg()), &roto_source).await);
+        assert!(!is_filtered(mk_filter_payload(mk_termination_msg()), &roto_source).await);
+    }
+
+    #[rustfmt::skip]
+    #[tokio::test]
+    async fn populated_asn_set_should_filter_out_only_matching() {
+        let asn_to_ignore = TEST_PEER_ASN.into();
+        let roto_source = interpolate_source(FILTER_OUT_ASN_ROTO, asn_to_ignore);
+
+        assert!(!is_filtered(mk_filter_payload(mk_initiation_msg()), &roto_source).await);
+        assert!(is_filtered(mk_filter_payload(mk_route_monitoring_msg()), &roto_source).await);
+        assert!(is_filtered(mk_filter_payload(mk_peer_down_notification_msg()), &roto_source).await);
+        assert!(is_filtered(mk_filter_payload(mk_peer_up_notification_msg()), &roto_source).await);
+        assert!(is_filtered(mk_filter_payload(mk_statistics_report_msg()), &roto_source).await);
+        assert!(!is_filtered(mk_filter_payload(mk_termination_msg()), &roto_source).await);
+    }
+
+    #[rustfmt::skip]
+    #[tokio::test]
+    async fn populated_asn_set_should_filter_in_only_matching() {
+        let asn_to_ignore = TEST_PEER_ASN.into();
+        let roto_source = interpolate_source(FILTER_IN_ASN_ROTO, asn_to_ignore);
+
+        assert!(!is_filtered(mk_filter_payload(mk_initiation_msg()), &roto_source).await);
+        assert!(!is_filtered(mk_filter_payload(mk_route_monitoring_msg()), &roto_source).await);
+        assert!(!is_filtered(mk_filter_payload(mk_peer_down_notification_msg()), &roto_source).await);
+        assert!(!is_filtered(mk_filter_payload(mk_peer_up_notification_msg()), &roto_source).await);
+        assert!(!is_filtered(mk_filter_payload(mk_statistics_report_msg()), &roto_source).await);
+        assert!(!is_filtered(mk_filter_payload(mk_termination_msg()), &roto_source).await);
+    }
+
+    #[rustfmt::skip]
+    #[tokio::test]
+    #[ignore = "this test doesn't work with roto yet"]
+    async fn bmp_msg_type_should_match_as_expected() {
+        enable_logging("trace");
+        let roto_source = MSG_TYPE_MATCHING_ROTO;
+
+        assert!(!is_filtered(mk_filter_payload(mk_route_monitoring_msg()), &roto_source).await);
+        assert!(is_filtered(mk_filter_payload(mk_peer_down_notification_msg()), &roto_source).await);
+        assert!(is_filtered(mk_filter_payload(mk_peer_up_notification_msg()), &roto_source).await);
+        assert!(!is_filtered(mk_filter_payload(mk_statistics_report_msg()), &roto_source).await);
+    }
 
     fn interpolate_source(source: &'static str, asn_to_ignore: Asn) -> String {
         source.replace("<ASN>", &asn_to_ignore.to_string())
@@ -404,74 +458,19 @@ mod tests {
         crate::bgp::encode::mk_statistics_report_msg(&mk_per_peer_header())
     }
 
-    fn mk_filter_payload(bmp_msg: Bytes) -> Payload {
-        Payload::RawBmp {
-            msg: RawBmpPayload::Msg(bmp_msg),
-            received: Utc::now(),
-            router_addr: "127.0.0.1:8080".parse().unwrap(),
-        }
+    fn mk_filter_payload(msg_buf: Bytes) -> Update {
+        let source_id = SourceId::SocketAddr("127.0.0.1:8080".parse().unwrap());
+        let bmp_msg = Arc::new(BytesRecord(BmpMessage::from_octets(msg_buf).unwrap()));
+        let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
+        Update::Single(Payload::new(source_id, value))
     }
 
-    #[tokio::test]
-    async fn bmp_messages_without_a_per_peer_header_should_not_be_filtered() {
-        let asn_to_ignore = TEST_PEER_ASN.into();
-        let roto_source = Arc::new(ArcSwap::from_pointee((
-            Instant::now(),
-            interpolate_source(FILTER_OUT_ASN_ROTO, asn_to_ignore),
-        )));
-
-        assert!(!RotoFilterRunner::is_filtered(
-            &mk_filter_payload(mk_initiation_msg()),
-            roto_source.clone()
-        )
-        .await
-        .unwrap());
-        assert!(!RotoFilterRunner::is_filtered(
-            &mk_filter_payload(mk_termination_msg()),
-            roto_source
-        )
-        .await
-        .unwrap());
-    }
-
-    #[rustfmt::skip]
-    #[tokio::test]
-    async fn populated_asn_set_should_filter_out_only_matching() {
-        let asn_to_ignore = TEST_PEER_ASN.into();
-        let roto_source = Arc::new(ArcSwap::from_pointee((Instant::now(), interpolate_source(FILTER_OUT_ASN_ROTO, asn_to_ignore))));
-
-        assert!(!RotoFilterRunner::is_filtered(&mk_filter_payload(mk_initiation_msg()), roto_source.clone()).await.unwrap());
-        assert!(RotoFilterRunner::is_filtered(&mk_filter_payload(mk_route_monitoring_msg()), roto_source.clone()).await.unwrap());
-        assert!(RotoFilterRunner::is_filtered(&mk_filter_payload(mk_peer_down_notification_msg()), roto_source.clone()).await.unwrap());
-        assert!(RotoFilterRunner::is_filtered(&mk_filter_payload(mk_peer_up_notification_msg()), roto_source.clone()).await.unwrap());
-        assert!(RotoFilterRunner::is_filtered(&mk_filter_payload(mk_statistics_report_msg()), roto_source.clone()).await.unwrap());
-        assert!(!RotoFilterRunner::is_filtered(&mk_filter_payload(mk_termination_msg()), roto_source).await.unwrap());
-    }
-
-    #[rustfmt::skip]
-    #[tokio::test]
-    async fn populated_asn_set_should_filter_in_only_matching() {
-        let asn_to_ignore = TEST_PEER_ASN.into();
-        let roto_source = Arc::new(ArcSwap::from_pointee((Instant::now(), interpolate_source(FILTER_IN_ASN_ROTO, asn_to_ignore))));
-
-        assert!(!RotoFilterRunner::is_filtered(&mk_filter_payload(mk_initiation_msg()), roto_source.clone()).await.unwrap());
-        assert!(!RotoFilterRunner::is_filtered(&mk_filter_payload(mk_route_monitoring_msg()), roto_source.clone()).await.unwrap());
-        assert!(!RotoFilterRunner::is_filtered(&mk_filter_payload(mk_peer_down_notification_msg()), roto_source.clone()).await.unwrap());
-        assert!(!RotoFilterRunner::is_filtered(&mk_filter_payload(mk_peer_up_notification_msg()), roto_source.clone()).await.unwrap());
-        assert!(!RotoFilterRunner::is_filtered(&mk_filter_payload(mk_statistics_report_msg()), roto_source.clone()).await.unwrap());
-        assert!(!RotoFilterRunner::is_filtered(&mk_filter_payload(mk_termination_msg()), roto_source).await.unwrap());
-    }
-
-    #[rustfmt::skip]
-    #[tokio::test]
-    #[ignore = "roto enum matching cannot do this yet"]
-    async fn bmp_msg_type_should_match_as_expected() {
-        enable_logging("trace");
-        let roto_source = Arc::new(ArcSwap::from_pointee((Instant::now(), MSG_TYPE_MATCHING_ROTO.to_string())));
-
-        assert!(!RotoFilterRunner::is_filtered(&mk_filter_payload(mk_route_monitoring_msg()), roto_source.clone()).await.unwrap());
-        assert!(RotoFilterRunner::is_filtered(&mk_filter_payload(mk_peer_down_notification_msg()), roto_source.clone()).await.unwrap());
-        assert!(RotoFilterRunner::is_filtered(&mk_filter_payload(mk_peer_up_notification_msg()), roto_source.clone()).await.unwrap());
-        assert!(!RotoFilterRunner::is_filtered(&mk_filter_payload(mk_statistics_report_msg()), roto_source).await.unwrap());
+    async fn is_filtered(update: Update, roto_source_code: &str) -> bool {
+        let filter = RotoFilterRunner::mock(roto_source_code);
+        filter.process_update(update).await.unwrap();
+        let gate_metrics = filter.gate.metrics();
+        let num_dropped_updates = gate_metrics.num_dropped_updates.load(Ordering::SeqCst);
+        let num_updates = gate_metrics.num_updates.load(Ordering::SeqCst);
+        num_dropped_updates == 0 && num_updates == 0
     }
 }

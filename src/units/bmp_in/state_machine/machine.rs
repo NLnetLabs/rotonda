@@ -2,10 +2,7 @@ use atomic_enum::atomic_enum;
 use bytes::{BufMut, Bytes, BytesMut};
 use futures::FutureExt;
 use log::error;
-use roto::{
-    types::builtin::{BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus},
-    vm::OutputStreamQueue,
-};
+use roto::types::builtin::{BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus};
 
 /// RFC 7854 BMP processing.
 ///
@@ -41,23 +38,22 @@ use routecore::{
         types::{PathAttributeType, AFI, SAFI},
     },
     bmp::message::{
-        InformationTlvType, InitiationMessage, PeerDownNotification, PeerUpNotification,
-        PerPeerHeader, RibType, RouteMonitoring, TerminationMessage,
+        InformationTlvType, InitiationMessage, Message as BmpMsg, PeerDownNotification,
+        PeerUpNotification, PerPeerHeader, RibType, RouteMonitoring, TerminationMessage,
     },
 };
 use smallvec::SmallVec;
 
 use std::{
     collections::{hash_map::Keys, HashMap, HashSet},
-    net::{IpAddr, SocketAddr},
+    net::IpAddr,
     ops::ControlFlow,
-    panic::UnwindSafe,
     sync::Arc,
 };
 
 use crate::{
     common::{routecore_extra::generate_alternate_config, status_reporter::AnyStatusReporter},
-    payload::{Payload, RouterId, Update},
+    payload::{Payload, RouterId, SourceId, Update},
 };
 
 use super::{
@@ -152,7 +148,7 @@ pub enum BmpState {
     Dumping(BmpStateDetails<Dumping>),
     Updating(BmpStateDetails<Updating>),
     Terminated(BmpStateDetails<Terminated>),
-    Aborted(SocketAddr, Arc<String>),
+    Aborted(SourceId, Arc<String>),
 }
 
 // Rust enums with fields cannot have custom discriminant values assigned to them so we have to use separate
@@ -193,20 +189,20 @@ pub struct BmpStateDetails<T>
 where
     BmpState: From<BmpStateDetails<T>>,
 {
-    pub addr: SocketAddr,
+    pub source_id: SourceId,
     pub router_id: Arc<String>,
     pub status_reporter: Arc<BmpStatusReporter>,
     pub details: T,
 }
 
 impl BmpState {
-    pub fn addr(&self) -> SocketAddr {
+    pub fn source_id(&self) -> SourceId {
         match self {
-            BmpState::Initiating(v) => v.addr,
-            BmpState::Dumping(v) => v.addr,
-            BmpState::Updating(v) => v.addr,
-            BmpState::Terminated(v) => v.addr,
-            BmpState::Aborted(addr, _) => *addr,
+            BmpState::Initiating(v) => v.source_id.clone(),
+            BmpState::Dumping(v) => v.source_id.clone(),
+            BmpState::Updating(v) => v.source_id.clone(),
+            BmpState::Terminated(v) => v.source_id.clone(),
+            BmpState::Aborted(source_id, _) => source_id.clone(),
         }
     }
 
@@ -276,15 +272,15 @@ where
         ProcessingResult::new(MessageType::Other, self.into())
     }
 
-    pub fn mk_routing_update_result(self, updates: SmallVec<[Update; 1]>) -> ProcessingResult {
-        ProcessingResult::new(MessageType::RoutingUpdate { updates }, self.into())
+    pub fn mk_routing_update_result(self, update: Update) -> ProcessingResult {
+        ProcessingResult::new(MessageType::RoutingUpdate { update }, self.into())
     }
 
     pub fn mk_final_routing_update_result(
         next_state: BmpState,
-        updates: SmallVec<[Update; 1]>,
+        update: Update,
     ) -> ProcessingResult {
-        ProcessingResult::new(MessageType::RoutingUpdate { updates }, next_state)
+        ProcessingResult::new(MessageType::RoutingUpdate { update }, next_state)
     }
 
     pub fn mk_state_transition_result(next_state: BmpState) -> ProcessingResult {
@@ -465,7 +461,7 @@ where
         } else if routes.is_empty() {
             self.mk_other_result()
         } else {
-            self.mk_routing_update_result([Update::Bulk(routes)].into())
+            self.mk_routing_update_result(Update::Bulk(routes))
         }
     }
 
@@ -489,7 +485,7 @@ where
         self.status_reporter
             .peer_down(self.router_id.clone(), eor_capable);
 
-        let mut routes = SmallVec::new();
+        let mut payloads = SmallVec::new();
         if let Some(prefixes_to_withdraw) = self.details.get_announced_prefixes(pph) {
             if prefixes_to_withdraw.clone().peekable().next().is_some() {
                 match mk_bgp_update(prefixes_to_withdraw.clone()) {
@@ -507,9 +503,9 @@ where
                                         &pph,
                                         *prefix,
                                         RouteStatus::Withdrawn,
-                                    )
-                                    .into();
-                                    routes.push(route);
+                                    );
+                                    let payload = Payload::new(self.source_id.clone(), route);
+                                    payloads.push(payload);
                                 }
                             }
 
@@ -530,17 +526,15 @@ where
             }
         }
 
-        routes
+        payloads
     }
 
     /// `filter` should return `None` if the BGP message should be ignored, i.e. be filtered out, otherwise `Some(msg)`
     /// where `msg` is either the original unmodified `msg` or a modified or completely new message.
-    pub async fn route_monitoring<CB, F, D>(
+    pub async fn route_monitoring<CB>(
         mut self,
         msg: RouteMonitoring<Bytes>,
         route_status: RouteStatus,
-        filter_data: Option<D>,
-        filter_map: F,
         do_state_specific_pre_processing: CB,
     ) -> ProcessingResult
     where
@@ -549,10 +543,6 @@ where
             &PerPeerHeader<Bytes>,
             &UpdateMessage<Bytes>,
         ) -> ControlFlow<ProcessingResult, Self>,
-        F: Fn(
-            BgpUpdateMessage,
-            Option<D>,
-        ) -> Result<ControlFlow<(), (BgpUpdateMessage, OutputStreamQueue)>, String>,
     {
         let mut tried_peer_configs = SmallVec::<[SessionConfig; 4]>::new();
 
@@ -597,18 +587,7 @@ where
                         ControlFlow::Continue(saved_self) => saved_self,
                     };
 
-                    let update_msg = roto::types::builtin::UpdateMessage(update); // clone is cheap here
-                    let delta_id = (RotondaId(0), 0); // TODO
-                    let roto_bgp_msg = BgpUpdateMessage::new(delta_id, update_msg);
-                    // TODO: move filtering out of the BMP state machine
-                    let (update, possible_osq) = match filter_map(roto_bgp_msg, filter_data) {
-                        Ok(ControlFlow::Continue((new_or_modified_msg, osq))) => {
-                            (new_or_modified_msg.raw_message().0.clone(), Some(osq))
-                        }
-                        _ => return saved_self.mk_other_result(),
-                    };
-
-                    let (routes, n_new_prefixes, n_announcements, n_withdrawals) = saved_self
+                    let (payloads, n_new_prefixes, n_announcements, n_withdrawals) = saved_self
                         .extract_route_monitoring_routes(pph.clone(), &update, route_status);
 
                     if n_announcements > 0
@@ -628,18 +607,7 @@ where
                         0, //self.details.get_stored_routes().prefixes_len(), // TODO
                     );
 
-                    let mut updates = SmallVec::<[Update; 1]>::new();
-                    match possible_osq {
-                        Some(osq) if !osq.is_empty() => {
-                            updates.push(Update::Bulk(routes));
-                            updates.push(Update::OutputStreamMessage(osq));
-                        }
-                        _ => {
-                            updates.push(Update::Bulk(routes));
-                        }
-                    };
-
-                    saved_self.mk_routing_update_result(updates)
+                    saved_self.mk_routing_update_result(Update::Bulk(payloads))
                 }
 
                 Err(err) => {
@@ -666,19 +634,16 @@ where
         }
     }
 
-    pub fn extract_route_monitoring_routes<R>(
+    pub fn extract_route_monitoring_routes(
         &mut self,
         pph: PerPeerHeader<Bytes>,
         update: &UpdateMessage<Bytes>,
         route_status: RouteStatus,
-    ) -> (SmallVec<[R; 8]>, usize, usize, usize)
-    where
-        R: From<RawRouteWithDeltas>,
-    {
+    ) -> (SmallVec<[Payload; 8]>, usize, usize, usize) {
         let mut num_new_prefixes = 0;
         let num_announcements: usize = update.nlris().iter().count();
         let mut num_withdrawals: usize = update.withdrawn_routes_len().into();
-        let mut routes = SmallVec::with_capacity(num_announcements + num_withdrawals);
+        let mut payloads = SmallVec::with_capacity(num_announcements + num_withdrawals);
 
         let nlris = &update.nlris();
 
@@ -698,16 +663,15 @@ where
                 }
 
                 // clone is cheap due to use of Bytes
-                routes.push(
-                    Self::mk_route_for_prefix(
-                        self.router_id.clone(),
-                        update.clone(),
-                        &pph,
-                        prefix,
-                        route_status,
-                    )
-                    .into(),
+                let route = Self::mk_route_for_prefix(
+                    self.router_id.clone(),
+                    update.clone(),
+                    &pph,
+                    prefix,
+                    route_status,
                 );
+
+                payloads.push(Payload::new(self.source_id.clone(), route));
             }
         }
 
@@ -731,16 +695,15 @@ where
                     }
                 }) {
                     // clone is cheap due to use of Bytes
-                    routes.push(
-                        Self::mk_route_for_prefix(
-                            self.router_id.clone(),
-                            update.clone(),
-                            &pph,
-                            prefix,
-                            RouteStatus::Withdrawn,
-                        )
-                        .into(),
+                    let route = Self::mk_route_for_prefix(
+                        self.router_id.clone(),
+                        update.clone(),
+                        &pph,
+                        prefix,
+                        RouteStatus::Withdrawn,
                     );
+
+                    payloads.push(Payload::new(self.source_id.clone(), route));
 
                     self.details.remove_announced_prefix(&pph, &prefix);
                 } else {
@@ -749,7 +712,12 @@ where
             }
         }
 
-        (routes, num_new_prefixes, num_announcements, num_withdrawals)
+        (
+            payloads,
+            num_new_prefixes,
+            num_announcements,
+            num_withdrawals,
+        )
     }
 
     fn mk_route_for_prefix(
@@ -771,7 +739,7 @@ where
 
 impl BmpState {
     pub fn new<T: AnyStatusReporter>(
-        addr: SocketAddr,
+        source_id: SourceId,
         router_id: Arc<RouterId>,
         parent_status_reporter: Arc<T>,
         metrics: Arc<BmpMetrics>,
@@ -780,37 +748,15 @@ impl BmpState {
         let status_reporter = Arc::new(BmpStatusReporter::new(child_name, metrics));
 
         BmpState::Initiating(BmpStateDetails::<Initiating>::new(
-            addr,
+            source_id,
             router_id,
             status_reporter,
         ))
     }
 
     #[allow(dead_code)]
-    pub async fn process_msg(self, msg_buf: Bytes) -> ProcessingResult {
-        self.process_msg_with_filter(msg_buf, None::<()>, |msg, _| {
-            Ok(ControlFlow::Continue((msg, OutputStreamQueue::new())))
-        })
-        .await
-    }
-
-    /// `filter` should return true if the BGP message should be ignored, i.e. be filtered out.
-    pub async fn process_msg_with_filter<F, D>(
-        self,
-        msg_buf: Bytes,
-        filter_data: Option<D>,
-        filter: F,
-    ) -> ProcessingResult
-    where
-        D: UnwindSafe,
-        F: Fn(
-                BgpUpdateMessage,
-                Option<D>,
-            )
-                -> Result<ControlFlow<(), (BgpUpdateMessage, OutputStreamQueue)>, String>
-            + UnwindSafe,
-    {
-        let saved_addr = self.addr();
+    pub async fn process_msg(self, bmp_msg: BmpMsg<Bytes>) -> ProcessingResult {
+        let saved_addr = self.source_id();
         let saved_router_id = self.router_id().clone();
         let saved_state_idx = self.state_idx();
 
@@ -834,12 +780,12 @@ impl BmpState {
         #[rustfmt::skip]
         let may_panic = async {
             match self {
-                BmpState::Initiating(inner) => inner.process_msg_with_filter(msg_buf, filter_data, filter).await,
-                BmpState::Dumping(inner) => inner.process_msg_with_filter(msg_buf, filter_data, filter).await,
-                BmpState::Updating(inner) => inner.process_msg_with_filter(msg_buf, filter_data, filter).await,
-                BmpState::Terminated(inner) => inner.process_msg_with_filter(msg_buf, filter_data, filter),
-                BmpState::Aborted(addr, router_id) => {
-                    ProcessingResult::new(MessageType::Aborted, BmpState::Aborted(addr, router_id))
+                BmpState::Initiating(inner) => inner.process_msg(bmp_msg).await,
+                BmpState::Dumping(inner) => inner.process_msg(bmp_msg).await,
+                BmpState::Updating(inner) => inner.process_msg(bmp_msg).await,
+                BmpState::Terminated(inner) => inner.process_msg(bmp_msg),
+                BmpState::Aborted(source_id, router_id) => {
+                    ProcessingResult::new(MessageType::Aborted, BmpState::Aborted(source_id, router_id))
                 }
             }
         };
@@ -910,7 +856,7 @@ impl From<BmpStateDetails<Terminated>> for BmpState {
 
 #[cfg(test)]
 mod tests {
-    use std::{ffi::OsStr, fs::File, io::Read, time::Instant};
+    use std::{ffi::OsStr, fs::File, io::Read, net::SocketAddr, time::Instant};
 
     use bytes::BytesMut;
     // use chrono::{DateTime, NaiveDateTime};
@@ -952,7 +898,7 @@ mod tests {
                 let router_id = Arc::new(format!("{}-{}", client_addr.ip(), client_addr.port()));
                 let status_reporter = status_reporter.clone();
                 let mut bmp_state = BmpState::new(
-                    client_addr,
+                    SourceId::SocketAddr(client_addr),
                     router_id.clone(),
                     status_reporter.clone(),
                     bmp_metrics.clone(),
@@ -992,7 +938,8 @@ mod tests {
                             }
                         }
 
-                        let mut res = bmp_state.process_msg(bmp_bytes.freeze()).await;
+                        let bmp_msg = BmpMsg::from_octets(bmp_bytes.freeze()).unwrap();
+                        let mut res = bmp_state.process_msg(bmp_msg).await;
 
                         match res.processing_result {
                             MessageType::InvalidMessage { err, .. } => {

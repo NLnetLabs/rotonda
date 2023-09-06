@@ -1,12 +1,14 @@
 use std::{
     fmt::Display,
-    net::SocketAddr,
     sync::{atomic::Ordering, Arc},
 };
 
 use log::error;
 
-use crate::common::status_reporter::{AnyStatusReporter, Chainable, Named, UnitStatusReporter, sr_log};
+use crate::{
+    common::status_reporter::{sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter},
+    payload::SourceId,
+};
 
 use super::metrics::RotoFilterMetrics;
 
@@ -32,11 +34,17 @@ impl RotoFilterStatusReporter {
     // metric.entry().and_modify().or_insert(1) to ensure that the key exists
     // if it didn't already.
 
-    pub fn message_filtered(&self, router_addr: SocketAddr) {
+    pub fn message_filtered(&self, source_id: SourceId) {
+        if let SourceId::SocketAddr(router_addr) = source_id {
+            self.metrics
+                .router_metrics(router_addr)
+                .num_filtered_messages
+                .fetch_add(1, Ordering::Relaxed);
+        }
+
         self.metrics
-            .router_metrics(router_addr)
             .num_filtered_messages
-            .fetch_add(1, Ordering::SeqCst);
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn message_filtering_failure<T: Display>(&self, err: T) {

@@ -1,10 +1,9 @@
-use std::{net::SocketAddr, ops::ControlFlow, sync::Arc};
+use std::sync::Arc;
 
 use bytes::Bytes;
-use roto::{types::builtin::BgpUpdateMessage, vm::OutputStreamQueue};
 use routecore::bmp::message::{Message as BmpMsg, TerminationMessage};
 
-use crate::payload::RouterId;
+use crate::payload::{RouterId, SourceId};
 
 use super::super::{
     machine::{BmpState, BmpStateDetails, Initiable},
@@ -45,12 +44,12 @@ pub struct Initiating {
 
 impl BmpStateDetails<Initiating> {
     pub fn new(
-        addr: SocketAddr,
+        source_id: SourceId,
         router_id: Arc<RouterId>,
         status_reporter: Arc<BmpStatusReporter>,
     ) -> Self {
         BmpStateDetails {
-            addr,
+            source_id,
             router_id,
             status_reporter,
             details: Initiating::default(),
@@ -58,26 +57,8 @@ impl BmpStateDetails<Initiating> {
     }
 
     #[allow(dead_code)]
-    pub async fn process_msg(self, msg_buf: Bytes) -> ProcessingResult {
-        self.process_msg_with_filter(msg_buf, None::<()>, |msg, _| {
-            Ok(ControlFlow::Continue((msg, OutputStreamQueue::new())))
-        })
-        .await
-    }
-
-    pub async fn process_msg_with_filter<F, D>(
-        self,
-        msg_buf: Bytes,
-        _filter_data: Option<D>,
-        _filter: F,
-    ) -> ProcessingResult
-    where
-        F: Fn(
-            BgpUpdateMessage,
-            Option<D>,
-        ) -> Result<ControlFlow<(), (BgpUpdateMessage, OutputStreamQueue)>, String>,
-    {
-        match BmpMsg::from_octets(&msg_buf).unwrap() {
+    pub async fn process_msg(self, bmp_msg: BmpMsg<Bytes>) -> ProcessingResult {
+        match bmp_msg {
             // already verified upstream
             BmpMsg::InitiationMessage(msg) => {
                 let res = self.initiate(msg).await;
@@ -108,7 +89,7 @@ impl BmpStateDetails<Initiating> {
                         other_msg_type
                     ),
                     None,
-                    Some(Bytes::copy_from_slice(msg_buf.as_ref())),
+                    Some(Bytes::copy_from_slice(other_msg_type.as_ref())),
                 )
             }
         }
@@ -184,9 +165,10 @@ mod tests {
         // Given
         let processor = mk_test_processor();
         let msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
+        let bmp_msg = BmpMsg::from_octets(msg_buf).unwrap();
 
         // When
-        let res = processor.process_msg(msg_buf).await;
+        let res = processor.process_msg(bmp_msg).await;
 
         // Then
         assert!(matches!(
@@ -214,9 +196,10 @@ mod tests {
         // Given
         let processor = mk_test_processor();
         let msg_buf = mk_invalid_initiation_message_that_lacks_information_tlvs();
+        let bmp_msg = BmpMsg::from_octets(msg_buf).unwrap();
 
         // When
-        let res = processor.process_msg(msg_buf).await;
+        let res = processor.process_msg(bmp_msg).await;
 
         // Then
         assert!(matches!(
@@ -237,9 +220,10 @@ mod tests {
         // Given
         let processor = mk_test_processor();
         let msg_buf = mk_peer_up_notification_msg();
+        let bmp_msg = BmpMsg::from_octets(msg_buf).unwrap();
 
         // When
-        let res = processor.process_msg(msg_buf).await;
+        let res = processor.process_msg(bmp_msg).await;
 
         // Then
         assert!(matches!(
@@ -254,7 +238,8 @@ mod tests {
 
     fn mk_test_processor() -> BmpStateDetails<Initiating> {
         let router_addr = "127.0.0.1:1818".parse().unwrap();
+        let source_id = SourceId::SocketAddr(router_addr);
         let router_id = Arc::new(TEST_ROUTER_ID.to_string());
-        BmpStateDetails::<Initiating>::new(router_addr, router_id, Arc::default())
+        BmpStateDetails::<Initiating>::new(source_id, router_id, Arc::default())
     }
 }

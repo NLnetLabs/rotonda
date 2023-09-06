@@ -1,5 +1,4 @@
 use bytes::Bytes;
-use smallvec::SmallVec;
 
 use crate::payload::Update;
 
@@ -31,7 +30,7 @@ pub enum MessageType {
     Other,
 
     RoutingUpdate {
-        updates: SmallVec<[Update; 1]>,
+        update: Update,
     },
 
     StateTransition,

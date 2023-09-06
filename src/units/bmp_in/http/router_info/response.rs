@@ -1,14 +1,11 @@
-use std::{
-    net::SocketAddr,
-    sync::{atomic::Ordering, Arc, RwLock},
-};
+use std::sync::{atomic::Ordering, Arc, RwLock};
 
 use chrono::{DateTime, Utc};
 use hyper::{Body, Response, StatusCode};
 use indoc::formatdoc;
 
 use crate::{
-    payload::RouterId,
+    payload::{RouterId, SourceId},
     units::bmp_in::{
         metrics::{BmpInMetrics, RouterMetrics},
         state_machine::{
@@ -32,7 +29,7 @@ impl RouterInfoApi {
     #[allow(clippy::too_many_arguments)]
     pub fn build_response(
         base_http_path: String,
-        router_addr: SocketAddr,
+        source_id: SourceId,
         router_id: Arc<RouterId>,
         sys_name: &str,
         sys_desc: &str,
@@ -49,7 +46,7 @@ impl RouterInfoApi {
 
             response_body.push_str(&Self::build_response_body(
                 base_http_path,
-                router_addr,
+                source_id,
                 router_id,
                 router_conn_metrics,
                 sys_name,
@@ -103,7 +100,7 @@ impl RouterInfoApi {
     #[allow(clippy::too_many_arguments)]
     pub fn build_response_body(
         base_http_path: String,
-        router_addr: SocketAddr,
+        source_id: SourceId,
         router_id: Arc<RouterId>,
         router_conn_metrics: Arc<RouterMetrics>,
         sys_name: &str,
@@ -255,7 +252,7 @@ impl RouterInfoApi {
         let response_body = formatdoc!(
             r#"
             Router:
-                Address      : {router_addr}
+                Source       : {source_id}
                 State:       : {state} [Initiating -> Dumping -> Updating -> Terminated, or Aborted]
                 SysName      : {sys_name}
                 SysDesc      : {sys_desc}

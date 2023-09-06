@@ -165,6 +165,9 @@ mod tests {
     fn integration_test() {
         use rotonda::tests::util::assert_json_eq;
 
+        // Uncomment this to investigate roto script parsing and execution issues.
+        // std::env::set_var("ROTONDA_ROTO_LOG", "1");
+
         Config::init().unwrap();
 
         let base_config_toml = r#"

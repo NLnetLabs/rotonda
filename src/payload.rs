@@ -3,6 +3,7 @@ use rotonda_store::QueryResult;
 
 use smallvec::{smallvec, SmallVec};
 use std::{
+    fmt::Display,
     net::{IpAddr, SocketAddr},
     ops::ControlFlow,
     sync::Arc,
@@ -10,7 +11,7 @@ use std::{
 use uuid::Uuid;
 
 use crate::{
-    common::roto::{FilterOutput, FilterResult},
+    common::roto::{FilterOutput, FilterResult, RotoError},
     units::RibValue,
 };
 
@@ -55,7 +56,7 @@ impl SourceId {
     }
 }
 
-impl std::fmt::Display for SourceId {
+impl Display for SourceId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SourceId::SocketAddr(addr) => addr.fmt(f),
@@ -99,9 +100,36 @@ pub enum UpstreamStatus {
 //------------ Payload -------------------------------------------------------
 
 pub trait Filterable {
-    fn filter<T>(self, filter_fn: T) -> Result<SmallVec<[Payload; 8]>, String>
+    fn filter<E, T>(self, filter_fn: T) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
-        T: Fn(TypeValue) -> FilterResult<String> + Clone;
+        T: Fn(TypeValue) -> FilterResult<E> + Clone,
+        FilterError: From<E>;
+}
+
+#[derive(Debug)]
+pub enum FilterError {
+    RotoScriptError(RotoError),
+    OtherError(String),
+}
+
+impl From<RotoError> for FilterError {
+    fn from(err: RotoError) -> Self {
+        FilterError::RotoScriptError(err)
+    }
+}
+
+impl Display for FilterError {
+    #[rustfmt::skip]
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FilterError::RotoScriptError(err) => {
+                f.write_fmt(format_args!("Filtering failed due to Roto script error: {err}"))
+            }
+            FilterError::OtherError(err) => {
+                f.write_fmt(format_args!("Filtering failed: {err}"))
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -128,9 +156,10 @@ impl Payload {
 }
 
 impl Filterable for Payload {
-    fn filter<T>(self, filter_fn: T) -> Result<SmallVec<[Payload; 8]>, String>
+    fn filter<E, T>(self, filter_fn: T) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
-        T: Fn(TypeValue) -> FilterResult<String> + Clone,
+        T: Fn(TypeValue) -> FilterResult<E> + Clone,
+        FilterError: From<E>,
     {
         if let ControlFlow::Continue(filter_output) = filter_fn(self.value)? {
             Ok(Payload::from_filter_output(
@@ -144,9 +173,10 @@ impl Filterable for Payload {
 }
 
 impl Filterable for SmallVec<[Payload; 8]> {
-    fn filter<T>(self, filter_fn: T) -> Result<SmallVec<[Payload; 8]>, String>
+    fn filter<E, T>(self, filter_fn: T) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
-        T: Fn(TypeValue) -> FilterResult<String> + Clone,
+        T: Fn(TypeValue) -> FilterResult<E> + Clone,
+        FilterError: From<E>,
     {
         let mut out_payloads = smallvec![];
 

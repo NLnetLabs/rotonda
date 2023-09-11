@@ -2006,7 +2006,7 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0"
-source = "git+https://github.com/NLnetLabs/roto.git?branch=compose-messages-nlri-v2#c0149d570d94871b6fc060061697ba6ff704a9ca"
+source = "git+https://github.com/NLnetLabs/roto.git?branch=compose-messages-nlri-v2#6547540ae6aa2e873189ead3f3192c2e7ac2a809"
 dependencies = [
  "arc-swap",
  "bytes",

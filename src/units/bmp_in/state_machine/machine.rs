@@ -495,7 +495,6 @@ where
                             SessionConfig::modern(),
                         ) {
                             Ok(update) => {
-                                // TODO: filter with roto
                                 for prefix in prefixes_to_withdraw {
                                     let route = Self::mk_route_for_prefix(
                                         self.router_id.clone(),

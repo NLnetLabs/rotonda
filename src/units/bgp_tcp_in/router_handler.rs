@@ -29,7 +29,7 @@ use rotonda_fsm::bgp::session::{
 };
 
 use crate::comms::{Gate, GateStatus, Terminated};
-use crate::payload::{Payload, Update};
+use crate::payload::{Payload, SourceId, Update};
 use crate::units::bgp_tcp_in::status_reporter::BgpTcpInStatusReporter;
 use crate::units::Unit;
 
@@ -260,6 +260,8 @@ impl Processor {
             assert!(self.observed_prefixes.is_empty());
         }
 
+        let source_id: SourceId = "unknown".into(); // TODO
+
         // attempt using new withdrawals_from_iter methods in routecore
         // XXX see https://github.com/rust-lang/rust/issues/102211
         // we can not do observed_prefixes.iter().map(|p| ...).peekable()
@@ -332,7 +334,7 @@ impl Processor {
                         RouteStatus::InConvergence,
                     );
                     let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
-                    let payload = Payload::TypeValue(typval);
+                    let payload = Payload::new(source_id.clone(), typval);
                     sent_out += 1;
                     bulk.push(payload);
                 }
@@ -392,6 +394,7 @@ impl Processor {
         // where such an invalid PDU results in a specific NOTIFICATION that
         // needs to go out. Also, check whether 7606 comes into play here.
 
+        let source_id: SourceId = "unknown".into(); // TODO
         let rot_id = RotondaId(0_usize);
         let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
         let msg = Arc::new(BgpUpdateMessage::new(
@@ -417,7 +420,7 @@ impl Processor {
                     RouteStatus::InConvergence,
                 );
                 let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
-                let payload = Payload::TypeValue(typval);
+                let payload = Payload::new(source_id.clone(), typval);
                 //self.gate.update_data(Update::Single(payload)).await;
                 bulk.push(payload);
             }
@@ -443,7 +446,7 @@ impl Processor {
                     RouteStatus::Withdrawn,
                 );
                 let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
-                let payload = Payload::TypeValue(typval);
+                let payload = Payload::new(source_id.clone(), typval);
                 //self.gate.update_data(Update::Single(payload)).await;
                 bulk.push(payload);
             }

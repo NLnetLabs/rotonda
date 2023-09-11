@@ -1,10 +1,7 @@
 use std::{collections::hash_map::Keys, ops::ControlFlow};
 
 use bytes::Bytes;
-use roto::{
-    types::builtin::{BgpUpdateMessage, RouteStatus},
-    vm::OutputStreamQueue,
-};
+use roto::types::builtin::RouteStatus;
 use routecore::{
     addr::Prefix,
     bgp::{
@@ -62,27 +59,8 @@ pub struct Updating {
 
 impl BmpStateDetails<Updating> {
     #[allow(dead_code)]
-    pub async fn process_msg(self, msg_buf: Bytes) -> ProcessingResult {
-        self.process_msg_with_filter(msg_buf, None::<()>, |msg, _| {
-            Ok(ControlFlow::Continue((msg, OutputStreamQueue::new())))
-        })
-        .await
-    }
-
-    /// `filter` should return true if the BGP message should be ignored, i.e. be filtered out.
-    pub async fn process_msg_with_filter<F, D>(
-        self,
-        msg_buf: Bytes,
-        filter_data: Option<D>,
-        filter: F,
-    ) -> ProcessingResult
-    where
-        F: Fn(
-            BgpUpdateMessage,
-            Option<D>,
-        ) -> Result<ControlFlow<(), (BgpUpdateMessage, OutputStreamQueue)>, String>,
-    {
-        match BmpMsg::from_octets(msg_buf).unwrap() {
+    pub async fn process_msg(self, bmp_msg: BmpMsg<Bytes>) -> ProcessingResult {
+        match bmp_msg {
             // already verified upstream
             BmpMsg::InitiationMessage(msg) => self.initiate(msg).await,
 
@@ -91,13 +69,9 @@ impl BmpStateDetails<Updating> {
             BmpMsg::PeerDownNotification(msg) => self.peer_down(msg).await,
 
             BmpMsg::RouteMonitoring(msg) => {
-                self.route_monitoring(
-                    msg,
-                    RouteStatus::UpToDate,
-                    filter_data,
-                    filter,
-                    |s, pph, update| s.route_monitoring_preprocessing(pph, update),
-                )
+                self.route_monitoring(msg, RouteStatus::UpToDate, |s, pph, update| {
+                    s.route_monitoring_preprocessing(pph, update)
+                })
                 .await
             }
 
@@ -143,7 +117,7 @@ impl BmpStateDetails<Updating> {
         if routes.is_empty() {
             Self::mk_state_transition_result(next_state)
         } else {
-            Self::mk_final_routing_update_result(next_state, [Update::Bulk(routes)].into())
+            Self::mk_final_routing_update_result(next_state, Update::Bulk(routes))
         }
     }
 }
@@ -163,7 +137,7 @@ impl From<BmpStateDetails<Dumping>> for BmpStateDetails<Updating> {
     fn from(v: BmpStateDetails<Dumping>) -> Self {
         let details: Updating = v.details.into();
         Self {
-            addr: v.addr,
+            source_id: v.source_id,
             router_id: v.router_id,
             status_reporter: v.status_reporter,
             details,

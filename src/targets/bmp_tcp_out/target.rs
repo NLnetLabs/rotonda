@@ -12,11 +12,12 @@ use crate::{
     },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
     manager::{Component, TargetCommand, WaitPoint},
-    payload::{Payload, RawBmpPayload, Update},
+    payload::{Payload, SourceId, Update, UpstreamStatus},
 };
 
 use async_trait::async_trait;
 use non_empty_vec::NonEmpty;
+use roto::types::{builtin::BuiltinTypeValue, collections::BytesRecord, typevalue::TypeValue};
 use serde::Deserialize;
 use tokio::sync::{mpsc, RwLock};
 
@@ -65,7 +66,7 @@ impl BmpTcpOut {
 struct BmpTcpOutRunner {
     component: Component,
     config: Arc<Config>,
-    proxies: Arc<FrimMap<SocketAddr, Arc<RwLock<BmpProxy>>>>,
+    proxies: Arc<FrimMap<SourceId, Arc<RwLock<BmpProxy>>>>,
     status_reporter: Arc<BmpProxyStatusReporter>,
 }
 
@@ -174,48 +175,31 @@ impl BmpTcpOutRunner {
 impl DirectUpdate for BmpTcpOutRunner {
     async fn direct_update(&self, update: Update) {
         match update {
-            Update::Single(Payload::RawBmp {
-                router_addr, msg, ..
-            }) => {
-                match msg {
-                    RawBmpPayload::Eof => {
-                        // The connection to the router has been lost so drop the
-                        // connection state machine we have for it, if any.
-                        self.proxies.remove(&router_addr);
-                    }
+            Update::UpstreamStatusChange(UpstreamStatus::EndOfStream { source_id }) => {
+                // The connection to the router has been lost so drop the connection state machine we have for it, if
+                // any.
+                self.proxies.remove(&source_id);
+            }
 
-                    RawBmpPayload::Msg(bytes) => {
-                        // Dispatch the message to the proxy for this
-                        // router. Create the proxy if it doesn't
-                        // exist yet.
-                        let proxy = self.proxies.entry(router_addr).or_insert_with(|| {
-                            Arc::new(RwLock::new(self.spawn_proxy(router_addr)))
-                        });
-                        proxy.write().await.send(&bytes).await;
-                    }
+            Update::Single(Payload {
+                source_id,
+                value: TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bytes)),
+            }) => {
+                // Dispatch the message to the proxy for this router. Create the proxy if it doesn't exist yet.
+                if let Some(addr) = source_id.socket_addr() {
+                    let bytes = BytesRecord::as_ref(&bytes);
+
+                    let proxy = self
+                        .proxies
+                        .entry(source_id.clone())
+                        .or_insert_with(|| Arc::new(RwLock::new(self.spawn_proxy(*addr))));
+                    proxy.write().await.send(bytes).await;
                 }
             }
 
-            Update::Single(_) => {
+            _ => {
                 self.status_reporter
-                    .input_mismatch("Update::Single(Payload::RawBmp)", "Update::Single(_)");
-            }
-
-            Update::Bulk(_) => {
-                self.status_reporter
-                    .input_mismatch("Update::Single(Payload::RawBmp)", "Update::Bulk(_)");
-            }
-
-            Update::QueryResult(..) => {
-                self.status_reporter
-                    .input_mismatch("Update::Single(Payload::RawBmp)", "Update::QueryResult(_)");
-            }
-
-            Update::OutputStreamMessage(_) => {
-                self.status_reporter.input_mismatch(
-                    "Update::Single(Payload::RawBmp)",
-                    "Update::OutputStreamMessage(_)",
-                );
+                    .input_mismatch("Update::Single(BmpMessage)", update);
             }
         }
     }

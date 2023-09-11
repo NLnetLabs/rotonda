@@ -858,11 +858,11 @@ pub mod bgp {
                                     communities_attribute_bytes.extend_from_slice(&c.to_raw())
                                 }
                                 Community::Extended(c) => {
-                                    extended_communities_attribute_bytes.extend_from_slice(&c.raw())
+                                    extended_communities_attribute_bytes.extend_from_slice(&c.to_raw())
                                 }
                                 Community::Ipv6Extended(_) => todo!(),
                                 Community::Large(c) => {
-                                    large_communities_attribute_bytes.extend_from_slice(&c.raw())
+                                    large_communities_attribute_bytes.extend_from_slice(&c.to_raw())
                                 }
                             }
                         }

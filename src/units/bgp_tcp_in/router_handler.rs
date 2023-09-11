@@ -333,6 +333,9 @@ impl Processor {
                         &msg,
                         RouteStatus::Withdrawn,
                     );
+                    // TODO: .with_peer_ip()
+                    // TODO: .with_peer_asn()
+                    // TODO: .with_router_id()
                     let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
                     let payload = Payload::new(source_id.clone(), typval);
                     sent_out += 1;

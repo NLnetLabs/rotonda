@@ -1,5 +1,6 @@
 //! Controlling the entire operation.
 
+use crate::common::roto::RotoScripts;
 use crate::comms::{DirectLink, Gate, GateAgent, GraphStatus, Link, UPDATE_QUEUE_LEN};
 use crate::config::{Config, ConfigFile, Marked};
 use crate::log::Failed;
@@ -46,6 +47,9 @@ pub struct Component {
 
     /// A reference to the HTTP resources collection.
     http_resources: http::Resources,
+
+    /// A reference to the Roto script collection.
+    roto_scripts: RotoScripts,
 }
 
 #[cfg(test)]
@@ -56,6 +60,7 @@ impl Default for Component {
             http_client: Default::default(),
             metrics: Default::default(),
             http_resources: Default::default(),
+            roto_scripts: Default::default(),
         }
     }
 }
@@ -67,12 +72,14 @@ impl Component {
         http_client: HttpClient,
         metrics: metrics::Collection,
         http_resources: http::Resources,
+        roto_scripts: RotoScripts,
     ) -> Self {
         Component {
             name: name.into(),
             http_client: Some(http_client),
             metrics: Some(metrics),
             http_resources,
+            roto_scripts,
         }
     }
 
@@ -84,6 +91,10 @@ impl Component {
     /// Returns a reference to an HTTP Client.
     pub fn http_client(&self) -> &HttpClient {
         self.http_client.as_ref().unwrap()
+    }
+
+    pub fn roto_scripts(&self) -> RotoScripts {
+        self.roto_scripts.clone()
     }
 
     /// Register a metrics source.
@@ -389,6 +400,9 @@ pub struct Manager {
     /// The HTTP resources collection maintained by this manager.
     http_resources: http::Resources,
 
+    /// A reference to the Roto script collection.
+    roto_scripts: RotoScripts,
+
     #[cfg(feature = "config-graph")]
     graph_svg_processor: Arc<dyn ProcessRequest>,
 
@@ -417,6 +431,7 @@ impl Manager {
             http_client: Default::default(),
             metrics: Default::default(),
             http_resources: Default::default(),
+            roto_scripts: Default::default(),
             #[cfg(feature = "config-graph")]
             graph_svg_processor,
             graph_svg_data,
@@ -829,6 +844,7 @@ impl Manager {
                 self.http_client.clone(),
                 self.metrics.clone(),
                 self.http_resources.clone(),
+                self.roto_scripts.clone(),
             );
 
             let target_type = std::mem::discriminant(&new_target);
@@ -888,6 +904,7 @@ impl Manager {
                 self.http_client.clone(),
                 self.metrics.clone(),
                 self.http_resources.clone(),
+                self.roto_scripts.clone(),
             );
 
             let unit_type = std::mem::discriminant(&new_unit);

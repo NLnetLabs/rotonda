@@ -177,6 +177,10 @@ where
         }
     }
 
+    pub fn contains_key(&self, key: &K) -> bool {
+        self.get(key).is_some()
+    }
+
     pub fn get(&self, key: &K) -> Option<V> {
         self.inner
             .load()

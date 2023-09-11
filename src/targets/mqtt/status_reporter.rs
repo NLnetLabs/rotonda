@@ -1,5 +1,5 @@
 use std::{
-    fmt::Display,
+    fmt::{Debug, Display},
     sync::{
         atomic::{self, Ordering},
         Arc,
@@ -57,17 +57,23 @@ impl MqttStatusReporter {
             .store(false, atomic::Ordering::SeqCst);
     }
 
-    pub fn publishing(&self) {
+    pub fn publishing<T: Display, C: Display>(&self, topic: T, content: C) {
         self.metrics
             .in_flight_count
             .fetch_add(1, atomic::Ordering::SeqCst);
+
+        sr_log!(
+            trace: self,
+            "Publishing message {} to topic {}",
+            content, topic
+        );
     }
 
     pub fn publish_ok(&self, topic: String, received: DateTime<Utc>) {
         let delay = Utc::now() - received;
 
         sr_log!(
-            trace: self,
+            debug: self,
             "Published message to topic {}",
             topic
         );

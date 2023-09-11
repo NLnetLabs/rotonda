@@ -1,5 +1,4 @@
 use std::{
-    net::SocketAddr,
     ops::Deref,
     sync::{Arc, RwLock, Weak},
 };
@@ -17,14 +16,14 @@ use crate::{
             machine::{BmpState, BmpStateDetails},
             metrics::BmpMetrics,
         },
-    },
+    }, payload::SourceId,
 };
 
 use super::response::Focus;
 
 pub struct RouterInfoApi {
     http_api_path: Arc<String>,
-    router_addr: SocketAddr,
+    source_id: SourceId,
     conn_metrics: Arc<BmpInMetrics>,
     bmp_metrics: Arc<BmpMetrics>,
     connected_at: DateTime<Utc>,
@@ -35,7 +34,7 @@ pub struct RouterInfoApi {
 impl RouterInfoApi {
     pub fn new(
         http_api_path: Arc<String>,
-        router_addr: SocketAddr,
+        source_id: SourceId,
         conn_metrics: Arc<BmpInMetrics>,
         bmp_metrics: Arc<BmpMetrics>,
         connected_at: DateTime<Utc>,
@@ -44,7 +43,7 @@ impl RouterInfoApi {
     ) -> Self {
         Self {
             http_api_path,
-            router_addr,
+            source_id,
             conn_metrics,
             bmp_metrics,
             connected_at,
@@ -99,13 +98,13 @@ impl ProcessRequest for RouterInfoApi {
                     }
                 };
 
-                if router == self.router_addr.to_string()
+                if router == self.source_id.to_string()
                     || router == router_id.as_str()
                     || router == sys_name
                 {
                     return Some(Self::build_response(
                         format!("{}/{}", base_path, router),
-                        self.router_addr,
+                        self.source_id.clone(),
                         router_id,
                         sys_name,
                         sys_desc,

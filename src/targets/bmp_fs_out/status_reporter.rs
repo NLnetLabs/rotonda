@@ -1,9 +1,10 @@
-use std::{fmt::Display, net::SocketAddr, sync::Arc};
+use std::{fmt::Display, sync::Arc};
 
 use log::error;
 
-use crate::common::status_reporter::{
-    sr_log, AnyStatusReporter, Chainable, Named, TargetStatusReporter,
+use crate::{
+    common::status_reporter::{sr_log, AnyStatusReporter, Chainable, Named, TargetStatusReporter},
+    payload::SourceId,
 };
 
 use super::metrics::BmpFsOutMetrics;
@@ -22,11 +23,11 @@ impl BmpFsOutStatusReporter {
         }
     }
 
-    pub fn write_error<T: Display>(&self, router_addr: SocketAddr, err: T) {
+    pub fn write_error<T: Display>(&self, source_id: SourceId, err: T) {
         sr_log!(
             error: self,
             "Failed to write BMP message file for router '{}': {}",
-            router_addr,
+            source_id,
             err
         );
     }

@@ -2,11 +2,15 @@
 use std::net::SocketAddr;
 use std::sync::Arc;
 
+use roto::types::{
+    builtin::BuiltinTypeValue, collections::BytesRecord, lazyrecord_types::BmpMessage,
+    typevalue::TypeValue,
+};
 use tokio::{io::AsyncRead, net::TcpStream};
 
 use crate::{
     comms::{Gate, GateStatus},
-    payload::{Payload, Update},
+    payload::{Payload, Update, UpstreamStatus},
     units::{
         bmp_tcp_in::{io::BmpStream, status_reporter::BmpTcpInStatusReporter},
         Unit,
@@ -96,8 +100,12 @@ async fn read_from_router<T: AsyncRead + Unpin>(
                     _ => { /* Nothing to do */ }
                 }
 
-                let payload = Payload::bmp_msg(router_addr, msg_buf);
-                gate_worker.update_data(Update::Single(payload)).await;
+                if let Ok(bmp_msg) = BmpMessage::from_octets(msg_buf) {
+                    let bmp_msg = Arc::new(BytesRecord(bmp_msg));
+                    let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
+                    let payload = Payload::new(router_addr, value);
+                    gate_worker.update_data(payload.into()).await;
+                }
             }
         }
     }
@@ -106,8 +114,12 @@ async fn read_from_router<T: AsyncRead + Unpin>(
 
     // Notify downstream units that the data stream for this
     // particular monitored router has ended.
-    let payload = Payload::bmp_eof(router_addr);
-    gate_worker.update_data(Update::Single(payload)).await;
+    let new_status = UpstreamStatus::EndOfStream {
+        source_id: router_addr.into(),
+    };
+    gate_worker
+        .update_data(Update::UpstreamStatusChange(new_status))
+        .await;
 }
 
 #[cfg(test)]

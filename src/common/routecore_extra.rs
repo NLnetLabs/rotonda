@@ -4,43 +4,10 @@ use std::{
     hash::{Hash, Hasher},
 };
 
-use routecore::{
-    bgp::message::{
-        update::{AddPath, FourOctetAsn},
-        SessionConfig,
-    },
-    bmp::message::PerPeerHeader,
+use routecore::bgp::message::{
+    update::{AddPath, FourOctetAsn},
+    SessionConfig,
 };
-
-use crate::payload::RoutingInformationBase;
-
-pub trait PerPeerHeaderExt {
-    fn rib(&self) -> RoutingInformationBase;
-}
-
-impl<T: AsRef<[u8]>> PerPeerHeaderExt for PerPeerHeader<T> {
-    fn rib(&self) -> RoutingInformationBase {
-        if self.is_pre_policy() {
-            RoutingInformationBase::PrePolicy
-        } else if self.is_post_policy() {
-            RoutingInformationBase::PostPolicy
-        } else {
-            RoutingInformationBase::Unknown // should be impossible
-        }
-    }
-}
-
-// Missing derives that prevent automatic derivation on our own types
-// that have one of these types as children:
-
-// #[derive(Debug, Display)]
-// struct SingleThreadedStore
-
-// #[derive(Clone, Deserialize, Serialize)]
-// struct NextHop
-
-// #[derive(Eq)]
-// struct AsPath
 
 // Based on code in bgmp::main.rs:
 pub fn generate_alternate_config(peer_config: &SessionConfig) -> Option<SessionConfig> {

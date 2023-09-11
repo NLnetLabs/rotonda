@@ -13,6 +13,7 @@ use crate::{
 
 use super::metrics::RibUnitMetrics;
 
+#[derive(Debug, Default)]
 pub struct RibUnitStatusReporter {
     name: String,
     metrics: Arc<RibUnitMetrics>,

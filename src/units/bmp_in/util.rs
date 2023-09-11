@@ -1,4 +1,6 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::sync::Arc;
+
+use crate::payload::SourceId;
 
 #[cfg(feature = "router-list")]
 pub fn calc_u8_pc(total: usize, v: usize) -> u8 {
@@ -39,13 +41,20 @@ pub fn calc_u8_pc(total: usize, v: usize) -> u8 {
 ///   - The sysName value, possibly empty, received in one or more Initiation
 ///     Messages sent to us by each router.
 ///   - The peer IP address, AS number and BGP ID bytes.
-pub fn format_router_id(
+pub fn format_source_id(
     router_id_template: Arc<String>,
     sys_name: &str,
-    addr: &SocketAddr,
+    source_id: &SourceId,
 ) -> String {
-    router_id_template
-        .replace("{sys_name}", sys_name)
-        .replace("{router_ip}", &format!("{}", addr.ip()))
-        .replace("{router_port}", &format!("{}", addr.port()))
+    match source_id.socket_addr() {
+        Some(addr) => router_id_template
+            .replace("{sys_name}", sys_name)
+            .replace("{router_ip}", &format!("{}", addr.ip()))
+            .replace("{router_port}", &format!("{}", addr.port())),
+
+        None => router_id_template
+            .replace("{sys_name}", sys_name)
+            .replace("{router_ip}", "IP")
+            .replace("{router_port}", "PORT"),
+    }
 }

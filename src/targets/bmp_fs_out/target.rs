@@ -1,6 +1,6 @@
 use std::{
-    collections::HashMap, fs::File, marker::PhantomData, net::SocketAddr, ops::Deref,
-    path::PathBuf, sync::Arc,
+    collections::HashMap, fmt::Display, fs::File, marker::PhantomData, ops::Deref, path::PathBuf,
+    sync::Arc,
 };
 
 use super::{metrics::BmpFsOutMetrics, status_reporter::BmpFsOutStatusReporter};
@@ -14,13 +14,13 @@ use crate::{
     },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
     manager::{Component, TargetCommand, WaitPoint},
-    payload::{Payload, RawBmpPayload, Update},
+    payload::{Payload, Update, UpstreamStatus, SourceId},
 };
 
 use async_trait::async_trait;
-use bytes::Bytes;
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use non_empty_vec::NonEmpty;
+use roto::types::{builtin::BuiltinTypeValue, collections::BytesRecord, typevalue::TypeValue};
 use routecore::{
     bgp::message::{
         open::CapabilityType,
@@ -75,7 +75,7 @@ struct Config {
     pub mode: Mode,
 }
 
-type SenderMsg = (DateTime<Utc>, SocketAddr, Bytes);
+type SenderMsg = Payload;
 
 type Sender = mpsc::UnboundedSender<SenderMsg>;
 
@@ -98,7 +98,7 @@ impl BmpFsOut {
 struct BmpFsOutRunner<T: FileIo + Send + Sync> {
     component: Component,
     config: Arc<Config>,
-    senders: Arc<FrimMap<SocketAddr, Arc<Sender>>>,
+    senders: Arc<FrimMap<SourceId, Arc<Sender>>>,
     status_reporter: Arc<BmpFsOutStatusReporter>,
     _phantom: PhantomData<T>,
 }
@@ -175,9 +175,9 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
         Err(Terminated)
     }
 
-    fn spawn_writer(&self, router_addr: SocketAddr) -> Sender {
+    fn spawn_writer<G: Display>(&self, source_id: G) -> Sender {
         let file_io = T::default();
-        let writer = self.build_file_writer(router_addr);
+        let writer = self.build_file_writer(source_id);
         let format = self.config.format;
 
         let (tx, rx) = mpsc::unbounded_channel::<SenderMsg>();
@@ -189,7 +189,7 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
         tx
     }
 
-    fn build_file_writer(&self, router_addr: SocketAddr) -> tokio::io::BufWriter<tokio::fs::File> {
+    fn build_file_writer<G: Display>(&self, source_id: G) -> tokio::io::BufWriter<tokio::fs::File> {
         let file_path = match self.config.mode {
             Mode::Merge => {
                 // Merge all router messages into a single file at the given
@@ -202,14 +202,12 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                 // Write router messages into one file per router inside the
                 // given directory path per router.
                 let name = self.component.name();
-                let ip = router_addr.ip();
-                let port = router_addr.port();
                 let ext = match self.config.format {
                     Format::Log => ".log",
                     Format::PcapText => ".pcaptext",
                     Format::Raw => ".raw",
                 };
-                let filename = format!("{name}-{ip}-{port}.{ext}");
+                let filename = format!("{name}-{source_id}.{ext}");
                 let filename = sanitise_file_name::sanitise(&filename);
                 self.config.path.join(filename)
             }
@@ -230,10 +228,15 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
         let mut router_ids = HashMap::new();
         let mut peer_configs: HashMap<u64, (SessionConfig, bool)> = HashMap::new();
 
-        while let Some((received, router_addr, bytes)) = rx.recv().await {
+        while let Some(Payload {
+            source_id,
+            value: TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bytes)),
+        }) = rx.recv().await
+        {
+            let bytes = BytesRecord::as_ref(&bytes);
             match format {
                 Format::Log => {
-                    let bmp_msg = BmpMsg::from_octets(&bytes).unwrap();
+                    let bmp_msg = BmpMsg::from_octets(bytes).unwrap();
 
                     let (msg_type, extra) = match bmp_msg {
                         BmpMsg::InitiationMessage(msg) => {
@@ -251,15 +254,8 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                                 .collect::<Vec<_>>()
                                 .join("|");
 
-                            router_ids.insert(
-                                router_addr,
-                                format!(
-                                    "{}:{} [{}]",
-                                    router_addr.ip(),
-                                    router_addr.port(),
-                                    sys_name
-                                ),
-                            );
+                            let router_id = format!("{source_id} [{sys_name}]");
+                            router_ids.insert(source_id.clone(), router_id);
 
                             (
                                 "initiation message",
@@ -387,10 +383,11 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                         ),
                     };
 
-                    let router_id = router_ids.entry(router_addr).or_insert_with(|| {
-                        format!("{}:{} \"-\"", router_addr.ip(), router_addr.port())
-                    });
+                    let router_id = router_ids
+                        .entry(source_id.clone())
+                        .or_insert_with(|| format!("{source_id} \"-\""));
 
+                    let received = Utc::now();
                     let log_msg = format!(
                         "{} [{}] {}{}\n",
                         router_id,
@@ -428,6 +425,7 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                     // specific to that router. To aid replay later, the byte
                     // length of each message is written in big endian order
                     // prior to the bytes of the message itself.
+                    let received = Utc::now();
                     let timestamp = received.timestamp_millis() as u128;
                     file_io
                         .write_all(&mut file, timestamp.to_be_bytes())
@@ -450,56 +448,36 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
 impl<T: FileIo + Send + Sync + 'static> DirectUpdate for BmpFsOutRunner<T> {
     async fn direct_update(&self, update: Update) {
         match update {
-            Update::Single(Payload::RawBmp {
-                received,
-                router_addr,
-                msg,
-            }) => {
-                match msg {
-                    RawBmpPayload::Eof => {
-                        if self.config.mode == Mode::Split {
-                            // Drop the sender to the writer for this router. Any
-                            // queued messages will be written by the writer after
-                            // which the background writer task will finish.
-                            self.senders.remove(&router_addr);
-                        }
-                    }
-
-                    RawBmpPayload::Msg(bytes) => {
-                        // Dispatch the message to the writer for this
-                        // router. Create the writer if it doesn't
-                        // exist yet.
-                        let tx = self
-                            .senders
-                            .entry(router_addr)
-                            .or_insert_with(|| Arc::new(self.spawn_writer(router_addr)));
-                        if let Err(err) = tx.send((received, router_addr, bytes)) {
-                            self.status_reporter.write_error(router_addr, err);
-                        }
-                    }
+            Update::UpstreamStatusChange(UpstreamStatus::EndOfStream { source_id }) => {
+                if self.config.mode == Mode::Split {
+                    // Drop the sender to the writer for this router. Any
+                    // queued messages will be written by the writer after
+                    // which the background writer task will finish.
+                    self.senders.remove(&source_id);
                 }
             }
 
-            Update::Single(_) => {
-                self.status_reporter
-                    .input_mismatch("Update::Single(Payload::RawBmp)", "Update::Single(_)");
+            Update::Single(
+                payload @ Payload {
+                    value: TypeValue::Builtin(BuiltinTypeValue::BmpMessage(_)), ..
+                },
+            ) => {
+                // Dispatch the message to the writer for this
+                // router. Create the writer if it doesn't
+                // exist yet.
+                let source_id = payload.source_id().clone();
+                let tx = self
+                    .senders
+                    .entry(source_id.clone())
+                    .or_insert_with(|| Arc::new(self.spawn_writer(source_id.clone())));
+                if let Err(err) = tx.send(payload) {
+                    self.status_reporter.write_error(source_id, err);
+                }
             }
 
-            Update::Bulk(_) => {
+            _ => {
                 self.status_reporter
-                    .input_mismatch("Update::Single(Payload::RawBmp)", "Update::Bulk(_)");
-            }
-
-            Update::QueryResult(..) => {
-                self.status_reporter
-                    .input_mismatch("Update::Single(Payload::RawBmp)", "Update::QueryResult(_)");
-            }
-
-            Update::OutputStreamMessage(_) => {
-                self.status_reporter.input_mismatch(
-                    "Update::Single(Payload::RawBmp)",
-                    "Update::OutputStreamMessage(_)",
-                );
+                    .input_mismatch("Update::Single(Payload::RawBmp)",update);
             }
         }
     }

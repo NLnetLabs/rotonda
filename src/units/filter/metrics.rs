@@ -16,6 +16,7 @@ use crate::{
 pub struct RotoFilterMetrics {
     gate: Arc<GateMetrics>,
     routers: Arc<FrimMap<Arc<SocketAddr>, Arc<RouterMetrics>>>,
+    pub num_filtered_messages: Arc<AtomicUsize>,
 }
 
 impl RotoFilterMetrics {
@@ -61,8 +62,14 @@ impl metrics::Source for RotoFilterMetrics {
                 target,
                 socket_addr,
                 Self::NUM_FILTERED_MESSAGES_METRIC,
-                metrics.num_filtered_messages.load(Ordering::SeqCst),
+                metrics.num_filtered_messages.load(Ordering::Relaxed),
             );
         }
+
+        target.append_simple(
+            &Self::NUM_FILTERED_MESSAGES_METRIC,
+            Some(unit_name),
+            self.num_filtered_messages.load(Ordering::Relaxed),
+        );
     }
 }

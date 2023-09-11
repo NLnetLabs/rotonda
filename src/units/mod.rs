@@ -19,11 +19,10 @@
 //
 // These contain all the actual unit types grouped by shared functionality.
 mod bgp_tcp_in;
-mod bmp_filter;
+mod filter;
 mod bmp_in;
 mod bmp_tcp_in;
 mod rib_unit;
-mod roto_filter;
 pub use rib_unit::{
     unit::{RibType, RibUnit},
     RibValue,
@@ -45,11 +44,8 @@ pub enum Unit {
     #[serde(rename = "bmp-tcp-in")]
     BmpTcpIn(bmp_tcp_in::unit::BmpTcpIn),
 
-    #[serde(rename = "bmp-pre-filter")]
-    BmpFilter(bmp_filter::unit::BmpFilter),
-
-    #[serde(rename = "roto-filter")]
-    RotoFilter(roto_filter::unit::RotoFilter),
+    #[serde(rename = "filter")]
+    Filter(filter::unit::Filter),
 
     // #[serde(rename = "rotoro-in")]
     // Rotoro(rotoro::unit::RotoroIn),
@@ -65,8 +61,7 @@ impl Unit {
         let _ = match self {
             Unit::BgpTcpIn(unit) => unit.run(component, gate, waitpoint).await,
             Unit::BmpTcpIn(unit) => unit.run(component, gate, waitpoint).await,
-            Unit::BmpFilter(unit) => unit.run(component, gate, waitpoint).await,
-            Unit::RotoFilter(unit) => unit.run(component, gate, waitpoint).await,
+            Unit::Filter(unit) => unit.run(component, gate, waitpoint).await,
             Unit::BmpIn(unit) => unit.run(component, gate, waitpoint).await,
             Unit::RibUnit(unit) => unit.run(component, gate, waitpoint).await,
         };

@@ -1,14 +1,14 @@
-use std::{
-    net::SocketAddr,
-    sync::{atomic::Ordering, Arc},
-};
+use std::sync::{atomic::Ordering, Arc};
 
 use hyper::{Body, Response};
 use indoc::formatdoc;
 
-use crate::units::bmp_in::{
-    state_machine::machine::{BmpState, BmpStateDetails},
-    util::{calc_u8_pc, format_router_id},
+use crate::{
+    payload::SourceId,
+    units::bmp_in::{
+        state_machine::machine::{BmpState, BmpStateDetails},
+        util::{calc_u8_pc, format_source_id},
+    },
 };
 
 use super::request::RouterListApi;
@@ -18,7 +18,7 @@ const MAX_INFO_TLV_LEN: usize = 60;
 impl RouterListApi {
     pub async fn build_response(
         &self,
-        keys: Vec<SocketAddr>,
+        keys: Vec<SourceId>,
         http_api_path: std::borrow::Cow<'_, str>,
     ) -> Response<Body> {
         let mut response_body = self.build_response_header();
@@ -76,7 +76,7 @@ impl RouterListApi {
 
     async fn build_response_body(
         &self,
-        keys: Vec<SocketAddr>,
+        keys: Vec<SourceId>,
         http_api_path: std::borrow::Cow<'_, str>,
         response_body: &mut String,
     ) {
@@ -119,7 +119,7 @@ impl RouterListApi {
                             &sys_desc[..]
                         };
 
-                        let router_id = Arc::new(format_router_id(
+                        let router_id = Arc::new(format_source_id(
                             self.router_id_template.clone(),
                             sys_name,
                             addr,

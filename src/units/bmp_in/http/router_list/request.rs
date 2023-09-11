@@ -1,5 +1,4 @@
 use std::{
-    net::SocketAddr,
     ops::Deref,
     sync::{atomic::Ordering, Arc},
 };
@@ -10,6 +9,7 @@ use hyper::{Body, Method, Request, Response};
 use crate::{
     common::frim::FrimMap,
     http::{extract_params, get_param, MatchedParam, PercentDecodedPath, ProcessRequest},
+    payload::SourceId,
     units::bmp_in::{
         metrics::BmpInMetrics,
         state_machine::{
@@ -17,17 +17,17 @@ use crate::{
             metrics::BmpMetrics,
         },
         types::RouterInfo,
-        util::{calc_u8_pc, format_router_id},
+        util::{calc_u8_pc, format_source_id},
     },
 };
 
 pub struct RouterListApi {
     http_api_path: Arc<String>,
-    pub router_info: Arc<FrimMap<SocketAddr, Arc<RouterInfo>>>,
+    pub router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
     pub router_metrics: Arc<BmpInMetrics>,
     pub bmp_metrics: Arc<BmpMetrics>,
     pub router_id_template: Arc<String>,
-    pub router_states: Arc<FrimMap<SocketAddr, Arc<tokio::sync::Mutex<Option<BmpState>>>>>,
+    pub router_states: Arc<FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>,
 }
 
 #[async_trait]
@@ -65,11 +65,11 @@ impl ProcessRequest for RouterListApi {
 impl RouterListApi {
     pub fn new(
         http_api_path: Arc<String>,
-        router_info: Arc<FrimMap<SocketAddr, Arc<RouterInfo>>>,
+        router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
         router_metrics: Arc<BmpInMetrics>,
         bmp_metrics: Arc<BmpMetrics>,
         router_id_template: Arc<String>,
-        router_states: Arc<FrimMap<SocketAddr, Arc<tokio::sync::Mutex<Option<BmpState>>>>>,
+        router_states: Arc<FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>,
     ) -> Self {
         Self {
             http_api_path,
@@ -85,16 +85,21 @@ impl RouterListApi {
         &self,
         sort_by: Option<MatchedParam<'a>>,
         sort_order: Option<MatchedParam<'a>>,
-    ) -> Result<Vec<SocketAddr>, String> {
+    ) -> Result<Vec<SourceId>, String> {
         let sort_by = sort_by.as_ref().map(MatchedParam::value);
 
-        let mut keys: Vec<SocketAddr> = match sort_by {
-            None | Some("addr") => self.router_info.guard().iter().map(|(k, _v)| *k).collect(),
+        let mut keys: Vec<SourceId> = match sort_by {
+            None | Some("addr") => self
+                .router_info
+                .guard()
+                .iter()
+                .map(|(k, _v)| k.clone())
+                .collect(),
 
             Some("sys_name") | Some("sys_desc") => {
-                let mut sort_tmp: Vec<(String, SocketAddr)> = Vec::new();
+                let mut sort_tmp: Vec<(String, SourceId)> = Vec::new();
 
-                for (addr, state_machine) in self.router_states.guard().iter() {
+                for (source_id, state_machine) in self.router_states.guard().iter() {
                     if let Some(sm) = state_machine.lock().await.as_ref() {
                         let (sys_name, sys_desc) = match sm {
                             BmpState::Dumping(BmpStateDetails { details, .. }) => {
@@ -117,12 +122,12 @@ impl RouterListApi {
                         .map_or_else(|| "-", |v| v)
                         .to_string();
 
-                        sort_tmp.push((resolved_v, *addr));
+                        sort_tmp.push((resolved_v, source_id.clone()));
                     }
                 }
 
                 sort_tmp.sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-                sort_tmp.iter().map(|v| v.1).collect()
+                sort_tmp.iter().map(|v| v.1.clone()).collect()
             }
 
             Some("state")
@@ -134,9 +139,9 @@ impl RouterListApi {
             | Some("invalid_messages")
             | Some("soft_parse_errors")
             | Some("hard_parse_errors") => {
-                let mut sort_tmp: Vec<(usize, SocketAddr)> = Vec::new();
+                let mut sort_tmp: Vec<(usize, SourceId)> = Vec::new();
 
-                for (addr, state_machine) in self.router_states.guard().iter() {
+                for (source_id, state_machine) in self.router_states.guard().iter() {
                     if let Some(sm) = state_machine.lock().await.as_ref() {
                         let sys_name = match sm {
                             BmpState::Dumping(BmpStateDetails { details, .. }) => {
@@ -154,10 +159,10 @@ impl RouterListApi {
                         let resolved_v = if let Some(sys_name) = sys_name {
                             let sys_name = html_escape::encode_safe(sys_name);
 
-                            let router_id = Arc::new(format_router_id(
+                            let router_id = Arc::new(format_source_id(
                                 self.router_id_template.clone(),
                                 &sys_name,
-                                addr,
+                                source_id,
                             ));
                             let metrics = self.bmp_metrics.router_metrics(router_id.clone());
 
@@ -205,12 +210,12 @@ impl RouterListApi {
                             0
                         };
 
-                        sort_tmp.push((resolved_v, *addr));
+                        sort_tmp.push((resolved_v, source_id.clone()));
                     }
                 }
 
                 sort_tmp.sort_unstable_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
-                sort_tmp.iter().map(|v| v.1).collect()
+                sort_tmp.iter().map(|v| v.1.clone()).collect()
             }
 
             Some(other) => {

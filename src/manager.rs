@@ -844,7 +844,7 @@ impl Manager {
 
         // Spawn, reconfigure and terminate units according to the config
         for (name, new_unit) in config.units.units.drain() {
-            let (new_gate, new_agent) = match self.pending_gates.remove(&name) {
+            let (mut new_gate, new_agent) = match self.pending_gates.remove(&name) {
                 Some((gate, agent)) => (gate, agent),
                 None => {
                     if let Some(running_unit) = self.running_units.remove(&name) {
@@ -857,6 +857,8 @@ impl Manager {
                     continue;
                 }
             };
+
+            new_gate.set_name(&name);
 
             // For the Unit that was created for configuration file section
             // [units.<name>], see if we already have a GateAgent for a Unit by

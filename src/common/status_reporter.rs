@@ -1,4 +1,4 @@
-use std::{fmt::Display, num::NonZeroUsize};
+use std::{fmt::{Display, Debug}, num::NonZeroUsize};
 
 use log::{debug, error, trace};
 
@@ -33,10 +33,10 @@ pub trait Chainable: Named {
 }
 
 pub trait AnyStatusReporter: Chainable {
-    fn input_mismatch<T: Display, U: Display>(&self, expected: T, received: U) {
+    fn input_mismatch<T: Display, U: Debug>(&self, expected: T, received: U) {
         sr_log!(
             error: self,
-            "Configuration error: Received {} but expected {}",
+            "Configuration error: Received {:#?} but expected {}",
             received,
             expected
         );

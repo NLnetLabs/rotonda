@@ -24,7 +24,7 @@ pub struct Terminated;
 impl From<BmpStateDetails<Initiating>> for BmpStateDetails<Terminated> {
     fn from(v: BmpStateDetails<Initiating>) -> Self {
         Self {
-            addr: v.addr,
+            source_id: v.source_id,
             router_id: v.router_id,
             status_reporter: v.status_reporter,
             details: v.details.into(),
@@ -35,7 +35,7 @@ impl From<BmpStateDetails<Initiating>> for BmpStateDetails<Terminated> {
 impl From<BmpStateDetails<Dumping>> for BmpStateDetails<Terminated> {
     fn from(v: BmpStateDetails<Dumping>) -> Self {
         Self {
-            addr: v.addr,
+            source_id: v.source_id,
             router_id: v.router_id,
             status_reporter: v.status_reporter,
             details: v.details.into(),
@@ -46,7 +46,7 @@ impl From<BmpStateDetails<Dumping>> for BmpStateDetails<Terminated> {
 impl From<BmpStateDetails<Updating>> for BmpStateDetails<Terminated> {
     fn from(v: BmpStateDetails<Updating>) -> Self {
         Self {
-            addr: v.addr,
+            source_id: v.source_id,
             router_id: v.router_id,
             status_reporter: v.status_reporter,
             details: v.details.into(),
@@ -74,15 +74,15 @@ impl From<Updating> for Terminated {
 
 impl BmpStateDetails<Terminated> {
     #[allow(dead_code)]
-    pub fn process_msg(self, msg_buf: Bytes) -> ProcessingResult {
-        self.process_msg_with_filter(msg_buf, None::<()>, |msg, _| {
+    pub fn process_msg(self, bmp_msg: BmpMsg<Bytes>) -> ProcessingResult {
+        self.process_msg_with_filter(bmp_msg, None::<()>, |msg, _| {
             Ok(ControlFlow::Continue((msg, OutputStreamQueue::new())))
         })
     }
 
     pub fn process_msg_with_filter<F, D>(
         self,
-        msg_buf: Bytes,
+        bmp_msg: BmpMsg<Bytes>,
         _filter_data: Option<D>,
         _filter: F,
     ) -> ProcessingResult
@@ -92,10 +92,9 @@ impl BmpStateDetails<Terminated> {
             Option<D>,
         ) -> Result<ControlFlow<(), (BgpUpdateMessage, OutputStreamQueue)>, String>,
     {
-        let bmp_msg = BmpMsg::from_octets(&msg_buf).unwrap(); // already verified upstream
         self.mk_invalid_message_result(format!(
             "RFC 7854 4.3 violation: No messages should be received in the terminated state but received: {}",
             bmp_msg
-        ), None, Some(msg_buf))
+        ), None, Some(Bytes::copy_from_slice(bmp_msg.as_ref())))
     }
 }

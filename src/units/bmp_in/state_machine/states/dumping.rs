@@ -1,10 +1,7 @@
 use std::{collections::hash_map::Keys, fmt::Debug, ops::ControlFlow};
 
 use bytes::Bytes;
-use roto::{
-    types::builtin::{BgpUpdateMessage, RouteStatus},
-    vm::OutputStreamQueue,
-};
+use roto::types::builtin::RouteStatus;
 use routecore::{
     addr::Prefix,
     bgp::{
@@ -176,27 +173,8 @@ pub struct Dumping {
 
 impl BmpStateDetails<Dumping> {
     #[allow(dead_code)]
-    pub async fn process_msg(self, msg_buf: Bytes) -> ProcessingResult {
-        self.process_msg_with_filter(msg_buf, None::<()>, |msg, _| {
-            Ok(ControlFlow::Continue((msg, OutputStreamQueue::new())))
-        })
-        .await
-    }
-
-    /// `filter` should return true if the BGP message should be ignored, i.e. be filtered out.
-    pub async fn process_msg_with_filter<F, D>(
-        self,
-        msg_buf: Bytes,
-        filter_data: Option<D>,
-        filter: F,
-    ) -> ProcessingResult
-    where
-        F: Fn(
-            BgpUpdateMessage,
-            Option<D>,
-        ) -> Result<ControlFlow<(), (BgpUpdateMessage, OutputStreamQueue)>, String>,
-    {
-        match BmpMsg::from_octets(msg_buf).unwrap() {
+    pub async fn process_msg(self, bmp_msg: BmpMsg<Bytes>) -> ProcessingResult {
+        match bmp_msg {
             // already verified upstream
             BmpMsg::InitiationMessage(msg) => self.initiate(msg).await,
 
@@ -214,13 +192,9 @@ impl BmpStateDetails<Dumping> {
             BmpMsg::PeerDownNotification(msg) => self.peer_down(msg).await,
 
             BmpMsg::RouteMonitoring(msg) => {
-                self.route_monitoring(
-                    msg,
-                    RouteStatus::InConvergence,
-                    filter_data,
-                    filter,
-                    |s, pph, update| s.route_monitoring_preprocessing(pph, update),
-                )
+                self.route_monitoring(msg, RouteStatus::InConvergence, |s, pph, update| {
+                    s.route_monitoring_preprocessing(pph, update)
+                })
                 .await
             }
 
@@ -285,7 +259,7 @@ impl BmpStateDetails<Dumping> {
         if routes.is_empty() {
             Self::mk_state_transition_result(next_state)
         } else {
-            Self::mk_final_routing_update_result(next_state, [Update::Bulk(routes.into())].into())
+            Self::mk_final_routing_update_result(next_state, Update::Bulk(routes.into()))
         }
     }
 }
@@ -310,7 +284,7 @@ impl From<BmpStateDetails<Initiating>> for BmpStateDetails<Dumping> {
     fn from(v: BmpStateDetails<Initiating>) -> Self {
         let details: Dumping = v.details.into();
         Self {
-            addr: v.addr,
+            source_id: v.source_id,
             router_id: v.router_id,
             status_reporter: v.status_reporter,
             details,
@@ -395,29 +369,17 @@ impl PeerAware for Dumping {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        net::IpAddr,
-        str::FromStr,
-        sync::{
-            atomic::{AtomicU8, Ordering},
-            Arc,
-        },
-    };
+    use std::{net::IpAddr, str::FromStr, sync::Arc};
 
     use roto::types::{
         builtin::{BuiltinTypeValue, MaterializedRoute},
-        collections::Record,
-        typedef::TypeDef,
         typevalue::TypeValue,
     };
     use routecore::{asn::Asn, bmp::message::PeerType};
 
     use crate::{
-        bgp::encode::{
-            mk_initiation_msg, mk_peer_down_notification_msg, mk_termination_msg, Announcements,
-            Prefixes,
-        },
-        payload::{Payload, Update},
+        bgp::encode::{Announcements, Prefixes},
+        payload::{Payload, SourceId, Update},
         units::bmp_in::state_machine::{processing::MessageType, states::updating::Updating},
     };
 
@@ -425,102 +387,6 @@ mod tests {
 
     const TEST_ROUTER_SYS_NAME: &str = "test-router";
     const TEST_ROUTER_SYS_DESC: &str = "test-desc";
-
-    fn mk_per_peer_header(peer_ip: &str, peer_as: u32) -> crate::bgp::encode::PerPeerHeader {
-        crate::bgp::encode::PerPeerHeader {
-            peer_type: PeerType::GlobalInstance.into(),
-            peer_flags: 0,
-            peer_distinguisher: [0u8; 8],
-            peer_address: peer_ip.parse().unwrap(),
-            peer_as: Asn::from_u32(peer_as),
-            peer_bgp_id: [1u8, 2u8, 3u8, 4u8],
-        }
-    }
-
-    fn mk_peer_up_notification_msg_without_rfc4724_support(
-        peer_ip: &str,
-        peer_as: u32,
-    ) -> (
-        crate::bgp::encode::PerPeerHeader,
-        Bytes,
-        PerPeerHeader<Bytes>,
-    ) {
-        let pph = mk_per_peer_header(peer_ip, peer_as);
-        let (bmp_msg, real_pph) = mk_peer_up_notification_msg(&pph, false);
-        (pph, bmp_msg, real_pph)
-    }
-
-    fn mk_eor_capable_peer_up_notification_msg(
-        peer_ip: &str,
-        peer_as: u32,
-    ) -> (crate::bgp::encode::PerPeerHeader, Bytes) {
-        let pph = mk_per_peer_header(peer_ip, peer_as);
-        let (bmp_msg, _) = mk_peer_up_notification_msg(&pph, true);
-        (pph, bmp_msg)
-    }
-
-    fn mk_peer_up_notification_msg(
-        pph: &crate::bgp::encode::PerPeerHeader,
-        eor_capable: bool,
-    ) -> (Bytes, PerPeerHeader<Bytes>) {
-        let bytes = crate::bgp::encode::mk_peer_up_notification_msg(
-            pph,
-            "10.0.0.1".parse().unwrap(),
-            11019,
-            4567,
-            111,
-            222,
-            0,
-            0,
-            vec![],
-            eor_capable,
-        );
-
-        let pph = match BmpMsg::from_octets(&bytes).unwrap() {
-            BmpMsg::PeerUpNotification(msg) => msg.per_peer_header(),
-            _ => unreachable!(),
-        };
-
-        (bytes, pph)
-    }
-
-    fn mk_route_monitoring_msg(pph: &crate::bgp::encode::PerPeerHeader) -> Bytes {
-        let announcements =
-            Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32")
-                .unwrap();
-        crate::bgp::encode::mk_route_monitoring_msg(pph, &Prefixes::default(), &announcements, &[])
-    }
-
-    fn mk_ipv6_route_monitoring_msg(pph: &crate::bgp::encode::PerPeerHeader) -> Bytes {
-        let announcements = Announcements::from_str(
-            "e [123,456,789] 2001:2000:3080:e9c::1 BLACKHOLE,123:44 2001:2000:3080:e9c::2/128",
-        )
-        .unwrap();
-        crate::bgp::encode::mk_route_monitoring_msg(pph, &Prefixes::default(), &announcements, &[])
-    }
-
-    fn mk_route_monitoring_end_of_rib_msg(pph: &crate::bgp::encode::PerPeerHeader) -> Bytes {
-        crate::bgp::encode::mk_route_monitoring_msg(
-            pph,
-            &Prefixes::default(),
-            &Announcements::default(),
-            &[],
-        )
-    }
-
-    fn mk_route_monitoring_withdrawal_msg(pph: &crate::bgp::encode::PerPeerHeader) -> Bytes {
-        let prefixes = Prefixes::from_str("127.0.0.1/32").unwrap();
-        crate::bgp::encode::mk_route_monitoring_msg(pph, &prefixes, &Announcements::None, &[])
-    }
-
-    fn mk_ipv6_route_monitoring_withdrawal_msg(pph: &crate::bgp::encode::PerPeerHeader) -> Bytes {
-        let prefixes = Prefixes::from_str("2001:2000:3080:e9c::2/128").unwrap();
-        crate::bgp::encode::mk_route_monitoring_msg(pph, &prefixes, &Announcements::None, &[])
-    }
-
-    fn mk_statistics_report_msg(pph: &crate::bgp::encode::PerPeerHeader) -> Bytes {
-        crate::bgp::encode::mk_statistics_report_msg(pph)
-    }
 
     #[tokio::test]
     async fn initiate() {
@@ -713,32 +579,24 @@ mod tests {
             res.processing_result,
             MessageType::RoutingUpdate { .. }
         ));
-        if let MessageType::RoutingUpdate { mut updates } = res.processing_result {
-            assert_eq!(updates.len(), 1);
-            let update = updates.pop().unwrap();
+        if let MessageType::RoutingUpdate { update } = res.processing_result {
             assert!(matches!(update, Update::Bulk(_)));
             if let Update::Bulk(mut bulk) = update {
                 assert_eq!(bulk.len(), 1);
-                let mut expected_roto_prefixes: Vec<TypeValue> =
-                    vec![Prefix::from_str("2001:2000:3080:e9c::2/128")
-                        .unwrap()
-                        .into()];
-                for item in bulk.drain(..) {
-                    if let Payload::TypeValue(type_value) = item {
-                        if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = type_value {
-                            let materialized_route = MaterializedRoute::from(route);
-                            let found_pfx = materialized_route.route.prefix.as_ref().unwrap();
-                            let position = expected_roto_prefixes
-                                .iter()
-                                .position(|pfx| pfx == found_pfx)
-                                .unwrap();
-                            expected_roto_prefixes.remove(position);
-                            assert_eq!(materialized_route.status, RouteStatus::Withdrawn);
-                        } else {
-                            panic!("Expected TypeValue::Builtin(BuiltinTypeValue::Route(_)");
-                        }
+                let pfx = Prefix::from_str("2001:2000:3080:e9c::2/128").unwrap();
+                let mut expected_roto_prefixes: Vec<TypeValue> = vec![pfx.into()];
+                for Payload { source_id, value } in bulk.drain(..) {
+                    if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = value {
+                        let materialized_route = MaterializedRoute::from(route);
+                        let found_pfx = materialized_route.route.prefix.as_ref().unwrap();
+                        let position = expected_roto_prefixes
+                            .iter()
+                            .position(|pfx| pfx == found_pfx)
+                            .unwrap();
+                        expected_roto_prefixes.remove(position);
+                        assert_eq!(materialized_route.status, RouteStatus::Withdrawn);
                     } else {
-                        panic!("Expected Payload::TypeValue");
+                        panic!("Expected TypeValue::Builtin(BuiltinTypeValue::Route(_)");
                     }
                 }
                 assert!(expected_roto_prefixes.is_empty());
@@ -917,7 +775,7 @@ mod tests {
         )
         .unwrap();
 
-        let route_mon_msg_buf = crate::bgp::encode::mk_route_monitoring_msg(
+        let route_mon_msg_buf = mk_route_monitoring_msg_with_details(
             &pph,
             &Prefixes::default(),
             &announcements,
@@ -937,94 +795,6 @@ mod tests {
             res.processing_result,
             MessageType::InvalidMessage { err, .. } if err == expected_err
         ));
-    }
-
-    #[tokio::test]
-    async fn filter_callback() {
-        let processor = mk_test_processor();
-
-        let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
-        let (pph, peer_up_msg_buf, _) =
-            mk_peer_up_notification_msg_without_rfc4724_support("127.0.0.1", 12345);
-        let route_mon_msg_buf = mk_route_monitoring_msg(&pph);
-        let eor_msg_buf = mk_route_monitoring_end_of_rib_msg(&pph);
-        let termination_msg_buf = mk_termination_msg();
-
-        let mut dummy_osq = OutputStreamQueue::new();
-        let dummy_typedef =
-            TypeDef::new_record_type(vec![("dummy-field", Box::new(TypeDef::StringLiteral))])
-                .unwrap();
-
-        let dummy_fields = vec![("dummy-field", "dummy-value".into())];
-        let dummy_record = Record::create_instance_with_sort(&dummy_typedef, dummy_fields).unwrap();
-        dummy_osq.push(dummy_record.into());
-
-        let ctr = Arc::new(AtomicU8::new(0));
-        let count_cb = |msg: BgpUpdateMessage, ctr: Option<Arc<AtomicU8>>| {
-            ctr.unwrap().fetch_add(1, Ordering::SeqCst);
-            Ok(ControlFlow::Continue((msg, dummy_osq.clone())))
-        };
-
-        // BMP Initiation messages do not carry a BGP UPDATE message and so the filter should NOT be invoked (ctr += 0)
-        let accept_cb = |msg, _| Ok(ControlFlow::Continue((msg, OutputStreamQueue::new())));
-        let cb_ctr = Some(ctr.clone());
-        let processor = processor
-            .process_msg_with_filter(initiation_msg_buf, cb_ctr, accept_cb)
-            .await
-            .next_state;
-        assert_eq!(0, ctr.load(Ordering::SeqCst));
-
-        // BMP Peer Up messages do not carry a BGP UPDATE message and so the filter will should NOT be invoked (ctr += 0)
-        let cb_ctr = Some(ctr.clone());
-        let processor = processor
-            .process_msg_with_filter(peer_up_msg_buf, cb_ctr, accept_cb)
-            .await
-            .next_state;
-        assert_eq!(0, ctr.load(Ordering::SeqCst));
-
-        // BMP Route Monitoring non-EoR messages DO carry a BGP UPDATE message and so the filter SHOULD be invoked (ctr += 1)
-        // Ensure that any output stream messages that the simulated filter produced are preserved
-        let cb_ctr = Some(ctr.clone());
-        let res = processor
-            .process_msg_with_filter(route_mon_msg_buf.clone(), cb_ctr, count_cb)
-            .await;
-        assert!(
-            matches!(&res.processing_result, MessageType::RoutingUpdate { updates } if updates.len() == 2)
-        );
-        if let MessageType::RoutingUpdate { updates } = &res.processing_result {
-            let routing_update = &updates[0];
-            assert!(matches!(routing_update, Update::Bulk(routes) if !routes.is_empty()));
-            let output_stream_message_update = &updates[1];
-            assert!(
-                matches!(output_stream_message_update, Update::OutputStreamMessage(msgs) if msgs.len() == 1)
-            );
-        }
-        let processor = res.next_state;
-        assert_eq!(1, ctr.load(Ordering::SeqCst));
-
-        // BMP Route Monitoring EoR messages are handled specially and so the filter should NOT be invoked (ctr += 0)
-        let cb_ctr = Some(ctr.clone());
-        let processor = processor
-            .process_msg_with_filter(eor_msg_buf, cb_ctr, count_cb)
-            .await
-            .next_state;
-        assert_eq!(1, ctr.load(Ordering::SeqCst));
-
-        // BMP Route Monitoring non-EoR messages DO carry a BGP UPDATE message and so the filter SHOULD be invoked (ctr += 1)
-        let cb_ctr = Some(ctr.clone());
-        let processor = processor
-            .process_msg_with_filter(route_mon_msg_buf, cb_ctr, count_cb)
-            .await
-            .next_state;
-        assert_eq!(2, ctr.load(Ordering::SeqCst));
-
-        // BMP Termination messages do not carry a BGP UPDATE message and so the filter will should NOT be invoked (ctr += 0)
-        let cb_ctr = Some(ctr.clone());
-        processor
-            .process_msg_with_filter(termination_msg_buf, cb_ctr, accept_cb)
-            .await
-            .next_state;
-        assert_eq!(2, ctr.load(Ordering::SeqCst));
     }
 
     #[tokio::test]
@@ -1048,15 +818,14 @@ mod tests {
             res.processing_result,
             MessageType::RoutingUpdate { .. }
         ));
-        if let MessageType::RoutingUpdate { mut updates } = res.processing_result {
-            dbg!(&updates); // TODO: assert the content of the update
-            assert_eq!(updates.len(), 1);
-            let bulk = updates.pop().unwrap();
-            assert!(matches!(bulk, Update::Bulk(_)));
-            if let Update::Bulk(updates) = &bulk {
+        if let MessageType::RoutingUpdate { update } = res.processing_result {
+            assert!(matches!(update, Update::Bulk(_)));
+            if let Update::Bulk(updates) = &update {
                 assert_eq!(updates.len(), 1);
-                if let Payload::TypeValue(TypeValue::Builtin(BuiltinTypeValue::Route(route))) =
-                    &updates[0]
+                if let Payload {
+                    source_id,
+                    value: TypeValue::Builtin(BuiltinTypeValue::Route(route)),
+                } = &updates[0]
                 {
                     assert_eq!(
                         route.peer_ip().unwrap(),
@@ -1146,10 +915,136 @@ mod tests {
         //    BGP protocol."
     }
 
+    // --- Test helpers -----------------------------------------------------------------------------------------------
+
+    fn mk_per_peer_header(peer_ip: &str, peer_as: u32) -> crate::bgp::encode::PerPeerHeader {
+        crate::bgp::encode::PerPeerHeader {
+            peer_type: PeerType::GlobalInstance.into(),
+            peer_flags: 0,
+            peer_distinguisher: [0u8; 8],
+            peer_address: peer_ip.parse().unwrap(),
+            peer_as: Asn::from_u32(peer_as),
+            peer_bgp_id: [1u8, 2u8, 3u8, 4u8],
+        }
+    }
+
+    fn mk_peer_up_notification_msg_without_rfc4724_support(
+        peer_ip: &str,
+        peer_as: u32,
+    ) -> (
+        crate::bgp::encode::PerPeerHeader,
+        BmpMsg<Bytes>,
+        PerPeerHeader<Bytes>,
+    ) {
+        let pph = mk_per_peer_header(peer_ip, peer_as);
+        let (bmp_msg, real_pph) = mk_peer_up_notification_msg(&pph, false);
+        (pph, bmp_msg, real_pph)
+    }
+
+    fn mk_eor_capable_peer_up_notification_msg(
+        peer_ip: &str,
+        peer_as: u32,
+    ) -> (crate::bgp::encode::PerPeerHeader, BmpMsg<Bytes>) {
+        let pph = mk_per_peer_header(peer_ip, peer_as);
+        let (bmp_msg, _) = mk_peer_up_notification_msg(&pph, true);
+        (pph, bmp_msg)
+    }
+
+    fn mk_peer_up_notification_msg(
+        pph: &crate::bgp::encode::PerPeerHeader,
+        eor_capable: bool,
+    ) -> (BmpMsg<Bytes>, PerPeerHeader<Bytes>) {
+        let bytes = crate::bgp::encode::mk_peer_up_notification_msg(
+            pph,
+            "10.0.0.1".parse().unwrap(),
+            11019,
+            4567,
+            111,
+            222,
+            0,
+            0,
+            vec![],
+            eor_capable,
+        );
+
+        let bmp_msg = BmpMsg::from_octets(bytes).unwrap();
+        let real_pph = match &bmp_msg {
+            BmpMsg::PeerUpNotification(msg) => msg.per_peer_header(),
+            _ => unreachable!(),
+        };
+
+        (bmp_msg, real_pph)
+    }
+
+    fn mk_peer_down_notification_msg(pph: &crate::bgp::encode::PerPeerHeader) -> BmpMsg<Bytes> {
+        BmpMsg::from_octets(crate::bgp::encode::mk_peer_down_notification_msg(pph)).unwrap()
+    }
+
+    fn mk_route_monitoring_msg(pph: &crate::bgp::encode::PerPeerHeader) -> BmpMsg<Bytes> {
+        let announcements =
+            Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32")
+                .unwrap();
+        BmpMsg::from_octets(crate::bgp::encode::mk_route_monitoring_msg(
+            pph,
+            &Prefixes::default(),
+            &announcements,
+            &[],
+        ))
+        .unwrap()
+    }
+
+    fn mk_ipv6_route_monitoring_msg(pph: &crate::bgp::encode::PerPeerHeader) -> BmpMsg<Bytes> {
+        let announcements = Announcements::from_str(
+            "e [123,456,789] 2001:2000:3080:e9c::1 BLACKHOLE,123:44 2001:2000:3080:e9c::2/128",
+        )
+        .unwrap();
+        BmpMsg::from_octets(crate::bgp::encode::mk_route_monitoring_msg(
+            pph,
+            &Prefixes::default(),
+            &announcements,
+            &[],
+        ))
+        .unwrap()
+    }
+
+    fn mk_route_monitoring_end_of_rib_msg(
+        pph: &crate::bgp::encode::PerPeerHeader,
+    ) -> BmpMsg<Bytes> {
+        BmpMsg::from_octets(crate::bgp::encode::mk_route_monitoring_msg(
+            pph,
+            &Prefixes::default(),
+            &Announcements::default(),
+            &[],
+        ))
+        .unwrap()
+    }
+
+    fn mk_route_monitoring_withdrawal_msg(
+        pph: &crate::bgp::encode::PerPeerHeader,
+    ) -> BmpMsg<Bytes> {
+        let prefixes = Prefixes::from_str("127.0.0.1/32").unwrap();
+        BmpMsg::from_octets(crate::bgp::encode::mk_route_monitoring_msg(
+            pph,
+            &prefixes,
+            &Announcements::None,
+            &[],
+        ))
+        .unwrap()
+    }
+
+    fn mk_ipv6_route_monitoring_withdrawal_msg(pph: &crate::bgp::encode::PerPeerHeader) -> Bytes {
+        let prefixes = Prefixes::from_str("2001:2000:3080:e9c::2/128").unwrap();
+        crate::bgp::encode::mk_route_monitoring_msg(pph, &prefixes, &Announcements::None, &[])
+    }
+
+    fn mk_statistics_report_msg(pph: &crate::bgp::encode::PerPeerHeader) -> BmpMsg<Bytes> {
+        BmpMsg::from_octets(crate::bgp::encode::mk_statistics_report_msg(pph)).unwrap()
+    }
+
     fn mk_test_processor() -> BmpStateDetails<Dumping> {
         let addr = "127.0.0.1:1818".parse().unwrap();
         BmpStateDetails::<Dumping> {
-            addr,
+            source_id: SourceId::SocketAddr(addr),
             router_id: Arc::new("test-router".to_string()),
             status_reporter: Arc::default(),
             details: Dumping::default(),
@@ -1174,5 +1069,29 @@ mod tests {
             _ => unreachable!(),
         };
         peer_states
+    }
+
+    fn mk_initiation_msg(sys_name: &str, sys_descr: &str) -> BmpMsg<Bytes> {
+        BmpMsg::from_octets(crate::bgp::encode::mk_initiation_msg(sys_name, sys_descr)).unwrap()
+    }
+
+    fn mk_termination_msg() -> BmpMsg<Bytes> {
+        BmpMsg::from_octets(crate::bgp::encode::mk_termination_msg()).unwrap()
+    }
+
+    #[allow(clippy::vec_init_then_push)]
+    fn mk_route_monitoring_msg_with_details(
+        pph: &crate::bgp::encode::PerPeerHeader,
+        withdrawals: &Prefixes,
+        announcements: &Announcements,
+        extra_path_attributes: &[u8],
+    ) -> BmpMsg<Bytes> {
+        BmpMsg::from_octets(crate::bgp::encode::mk_route_monitoring_msg(
+            pph,
+            withdrawals,
+            announcements,
+            extra_path_attributes,
+        ))
+        .unwrap()
     }
 }

@@ -331,7 +331,7 @@ impl Processor {
                         (rot_id, ltime),
                         RotoPrefix::new(*prefix),
                         &msg,
-                        RouteStatus::InConvergence,
+                        RouteStatus::Withdrawn,
                     );
                     let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
                     let payload = Payload::new(source_id.clone(), typval);

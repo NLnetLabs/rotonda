@@ -1,21 +1,20 @@
 use crate::{
     common::{
         file_io::{FileIo, TheFileIo},
-        roto::ThreadLocalVM,
+        roto::{roto_filter, RotoScript, RotoScriptOrigin, ThreadLocalVM},
         status_reporter::{AnyStatusReporter, UnitStatusReporter},
     },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus, Terminated},
     manager::{Component, WaitPoint},
-    payload::{Filterable, Update, UpstreamStatus},
+    payload::{FilterError, Filterable, Update, UpstreamStatus},
     units::Unit,
 };
-use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use log::info;
 use non_empty_vec::NonEmpty;
 use roto::types::typedef::TypeDef;
 use serde::Deserialize;
-use std::{cell::RefCell, path::PathBuf, sync::Arc, time::Instant};
+use std::{cell::RefCell, path::PathBuf, sync::Arc};
 
 use super::{metrics::RotoFilterMetrics, status_reporter::RotoFilterStatusReporter};
 
@@ -44,7 +43,7 @@ impl Filter {
 struct RotoFilterRunner {
     gate: Arc<Gate>,
     status_reporter: Arc<RotoFilterStatusReporter>,
-    roto_source: Arc<ArcSwap<(std::time::Instant, String)>>,
+    roto_script: RotoScript,
     file_io: TheFileIo,
 }
 
@@ -66,30 +65,38 @@ impl RotoFilterRunner {
         // Setup status reporting
         let status_reporter = Arc::new(RotoFilterStatusReporter::new(&unit_name, metrics));
 
-        let roto_source_code = file_io.read_to_string(roto_path).unwrap();
-        let roto_source = (Instant::now(), roto_source_code);
-        let roto_source = Arc::new(ArcSwap::from_pointee(roto_source));
+        let roto_source_code = file_io.read_to_string(&roto_path).unwrap();
+        let roto_script = RotoScript::new(
+            roto_source_code,
+            component.roto_scripts(),
+            RotoScriptOrigin::Path(roto_path),
+        );
 
         Self {
             gate,
             status_reporter,
-            roto_source,
+            roto_script,
             file_io,
         }
     }
 
     #[cfg(test)]
     fn mock(roto_source_code: &str) -> Self {
+        use crate::common::roto::RotoScripts;
+
         let (gate, _) = Gate::new(0);
         let gate = gate.into();
         let status_reporter = RotoFilterStatusReporter::default().into();
-        let roto_source = (Instant::now(), roto_source_code.into());
-        let roto_source = Arc::new(ArcSwap::from_pointee(roto_source));
+        let roto_script = RotoScript::new(
+            roto_source_code,
+            RotoScripts::new(),
+            RotoScriptOrigin::Unknown,
+        );
         let file_io = TheFileIo::default();
         Self {
             gate,
             status_reporter,
-            roto_source,
+            roto_script,
             file_io,
         }
     }
@@ -133,10 +140,10 @@ impl RotoFilterRunner {
                                 new_roto_path.to_string_lossy()
                             );
                             let roto_source_code =
-                                arc_self.file_io.read_to_string(new_roto_path).unwrap();
-                            let roto_source = (Instant::now(), roto_source_code);
-                            let roto_source = Arc::new(roto_source);
-                            arc_self.roto_source.store(roto_source);
+                                arc_self.file_io.read_to_string(&new_roto_path).unwrap();
+                            arc_self
+                                .roto_script
+                                .update(roto_source_code, RotoScriptOrigin::Path(new_roto_path));
 
                             // Notify that we have reconfigured ourselves
                             arc_self.status_reporter.reconfigured();
@@ -169,7 +176,7 @@ impl RotoFilterRunner {
         }
     }
 
-    async fn process_update(&self, update: Update) -> Result<(), String> {
+    async fn process_update(&self, update: Update) -> Result<(), FilterError> {
         match update {
             Update::UpstreamStatusChange(UpstreamStatus::EndOfStream { .. }) => {
                 // Nothing to do, pass it on
@@ -179,16 +186,13 @@ impl RotoFilterRunner {
             Update::Single(payload) => {
                 if let Some(filtered_update) = Self::VM
                     .with(|vm| {
-                        let filter_fn = |value| {
-                            crate::common::roto::filter(vm, self.roto_source.clone(), value)
-                        };
-                        payload.filter(filter_fn).and_then(|mut filtered_payloads| {
-                            match filtered_payloads.len() {
+                        payload
+                            .filter(|value| roto_filter(vm, self.roto_script.clone(), value))
+                            .and_then(|mut filtered_payloads| match filtered_payloads.len() {
                                 0 => Ok(None),
                                 1 => Ok(Some(Update::Single(filtered_payloads.pop().unwrap()))),
                                 _ => Ok(Some(Update::Bulk(filtered_payloads))),
-                            }
-                        })
+                            })
                     })
                     .or_else(|err| {
                         self.status_reporter.message_filtering_failure(&err);
@@ -202,11 +206,8 @@ impl RotoFilterRunner {
             Update::Bulk(payloads) => {
                 if let Some(filtered_update) = Self::VM
                     .with(|vm| {
-                        let filter_fn = |value| {
-                            crate::common::roto::filter(vm, self.roto_source.clone(), value)
-                        };
                         payloads
-                            .filter(filter_fn)
+                            .filter(|value| roto_filter(vm, self.roto_script.clone(), value))
                             .and_then(|mut filtered_payloads| match filtered_payloads.len() {
                                 0 => Ok(None),
                                 1 => Ok(Some(Update::Single(filtered_payloads.pop().unwrap()))),

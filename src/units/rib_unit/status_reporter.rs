@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use log::debug;
+use log::{debug, error};
 
 use crate::{
     common::status_reporter::{sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter},
@@ -134,6 +134,10 @@ impl RibUnitStatusReporter {
         self.metrics
             .num_unique_prefixes
             .store(num_unique_prefixes, Ordering::SeqCst);
+    }
+
+    pub fn message_filtering_failure<T: Display>(&self, err: T) {
+        sr_log!(error: self, "Filtering error: {}", err);
     }
 }
 

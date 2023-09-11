@@ -2,14 +2,14 @@ use crate::{
     common::{
         file_io::{FileIo, TheFileIo},
         frim::FrimMap,
-        roto::ThreadLocalVM,
+        roto::{roto_filter, RotoScript, ThreadLocalVM},
         status_reporter::{AnyStatusReporter, UnitStatusReporter},
     },
     comms::{
         AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus, Link, Terminated, TriggerData,
     },
     manager::{Component, WaitPoint},
-    payload::{Filterable, Payload, RouterId, Update, UpstreamStatus},
+    payload::{FilterError, Filterable, Payload, RouterId, Update, UpstreamStatus},
     tokio::TokioTaskMetrics,
     units::Unit,
 };
@@ -46,8 +46,6 @@ use super::{
     status_reporter::RibUnitStatusReporter,
 };
 use super::{rib::StoreInsertionReport, statistics::RibMergeUpdateStatistics};
-
-use std::time::Instant;
 
 const RECORD_MERGE_UPDATE_SPEED_EVERY_N_CALLS: u64 = 1000;
 
@@ -200,12 +198,13 @@ impl RibUnit {
 
 pub struct RibUnitRunner {
     gate: Arc<Gate>,
-    #[allow(dead_code)] // A strong ref needs to be held to http_processor but not used otherwise the HTTP resource manager will discard its registration
+    #[allow(dead_code)]
+    // A strong ref needs to be held to http_processor but not used otherwise the HTTP resource manager will discard its registration
     http_processor: Arc<PrefixesApi>,
     query_limits: Arc<ArcSwap<QueryLimits>>,
     rib: Arc<ArcSwapOption<PhysicalRib>>,
     rib_type: RibType,
-    roto_source: Arc<ArcSwap<(std::time::Instant, String)>>,
+    roto_script: RotoScript,
     pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
     rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
     status_reporter: Arc<RibUnitStatusReporter>,
@@ -260,12 +259,16 @@ impl RibUnitRunner {
         let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> = Default::default();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
 
-        let roto_source_code = roto_path
-            .map(|v| file_io.read_to_string(v).unwrap())
-            .unwrap_or_default();
-        let roto_source = (Instant::now(), roto_source_code);
-        let roto_source = Arc::new(ArcSwap::from_pointee(roto_source));
-
+        let roto_script = if let Some(roto_path) = roto_path {
+            let roto_source_code = file_io.read_to_string(&roto_path).unwrap_or_default();
+            RotoScript::new(
+                roto_source_code,
+                component.roto_scripts(),
+                crate::common::roto::RotoScriptOrigin::Path(roto_path),
+            )
+        } else {
+            RotoScript::default()
+        };
         let process_metrics = Arc::new(TokioTaskMetrics::new());
         component.register_metrics(process_metrics.clone());
 
@@ -306,7 +309,7 @@ impl RibUnitRunner {
             rib,
             rib_type,
             status_reporter,
-            roto_source,
+            roto_script,
             pending_vrib_query_results,
             process_metrics,
             rib_merge_update_stats,
@@ -315,14 +318,19 @@ impl RibUnitRunner {
 
     #[cfg(test)]
     pub(crate) fn mock(roto_source_code: &str, rib_type: RibType) -> Self {
+        use crate::common::roto::{RotoScriptOrigin, RotoScripts};
+
         let (gate, _) = Gate::new(0);
         let gate = gate.into();
         let query_limits = Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
         let rib_keys = RibUnit::default_rib_keys();
         let rib = Self::mk_rib(rib_type, &rib_keys);
         let status_reporter = RibUnitStatusReporter::default().into();
-        let roto_source = (Instant::now(), roto_source_code.into());
-        let roto_source = Arc::new(ArcSwap::from_pointee(roto_source));
+        let roto_script = RotoScript::new(
+            roto_source_code,
+            RotoScripts::new(),
+            RotoScriptOrigin::Unknown,
+        );
         let pending_vrib_query_results = Arc::new(FrimMap::default());
         let process_metrics = Arc::new(TokioTaskMetrics::new());
         let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> = Default::default();
@@ -342,7 +350,7 @@ impl RibUnitRunner {
             rib,
             rib_type,
             status_reporter,
-            roto_source,
+            roto_script,
             pending_vrib_query_results,
             process_metrics,
             rib_merge_update_stats,
@@ -461,7 +469,11 @@ impl RibUnitRunner {
         }
     }
 
-    pub(super) async fn process_update<F>(&self, update: Update, insert_fn: F) -> Result<(), String>
+    pub(super) async fn process_update<F>(
+        &self,
+        update: Update,
+        insert_fn: F,
+    ) -> Result<(), FilterError>
     where
         F: Fn(
                 &Prefix,
@@ -481,15 +493,19 @@ impl RibUnitRunner {
             }
 
             Update::Bulk(payloads) => {
-                if let Some(filtered_update) = Self::VM.with(|vm| {
-                    let filter_fn =
-                        |value| crate::common::roto::filter(vm, self.roto_source.clone(), value);
-                    payloads
-                        .filter(filter_fn.clone())
-                        .and_then(|filtered_payloads| {
-                            self.insert_payloads(filtered_payloads, insert_fn)
-                        })
-                })? {
+                if let Some(filtered_update) = Self::VM
+                    .with(|vm| {
+                        payloads
+                            .filter(|value| roto_filter(vm, self.roto_script.clone(), value))
+                            .and_then(|filtered_payloads| {
+                                Ok(self.insert_payloads(filtered_payloads, insert_fn))
+                            })
+                    })
+                    .or_else(|err| {
+                        self.status_reporter.message_filtering_failure(&err);
+                        Err(err)
+                    })?
+                {
                     self.gate.update_data(filtered_update).await;
                 }
 
@@ -501,13 +517,19 @@ impl RibUnitRunner {
 
             Update::Single(payload) => {
                 // TODO: update status reporter/metrics as is done in the bulk case
-                if let Some(filtered_update) = Self::VM.with(|vm| {
-                    let filter_fn =
-                        |value| crate::common::roto::filter(vm, self.roto_source.clone(), value);
-                    payload.filter(filter_fn).and_then(|filtered_payloads| {
-                        self.insert_payloads(filtered_payloads, insert_fn)
+                if let Some(filtered_update) = Self::VM
+                    .with(|vm| {
+                        payload
+                            .filter(|value| roto_filter(vm, self.roto_script.clone(), value))
+                            .and_then(|filtered_payloads| {
+                                Ok(self.insert_payloads(filtered_payloads, insert_fn))
+                            })
                     })
-                })? {
+                    .or_else(|err| {
+                        self.status_reporter.message_filtering_failure(&err);
+                        Err(err)
+                    })?
+                {
                     self.gate.update_data(filtered_update).await;
                 }
             }
@@ -542,7 +564,7 @@ impl RibUnitRunner {
         &self,
         mut payloads: SmallVec<[Payload; 8]>,
         insert_fn: F,
-    ) -> Result<Option<Update>, String>
+    ) -> Option<Update>
     where
         F: Fn(
                 &Prefix,
@@ -559,13 +581,11 @@ impl RibUnitRunner {
                 .instrument(self.insert_payload(&payload, insert_fn));
         }
 
-        let update = match payloads.len() {
+        match payloads.len() {
             0 => None,
             1 => Some(Update::Single(payloads.pop().unwrap())),
             _ => Some(Update::Bulk(payloads)),
-        };
-
-        Ok(update)
+        }
     }
 
     pub fn insert_payload<F>(&self, payload: &Payload, insert_fn: F)
@@ -718,11 +738,9 @@ impl RibUnitRunner {
 
             trace!("Reprocessing route");
 
-            if let Ok(filtered_payloads) = Self::VM.with(|vm| {
-                let filter_fn =
-                    |value| crate::common::roto::filter(vm, self.roto_source.clone(), value);
-                payload.filter(filter_fn)
-            }) {
+            if let Ok(filtered_payloads) = Self::VM
+                .with(|vm| payload.filter(|value| roto_filter(vm, self.roto_script.clone(), value)))
+            {
                 for filtered_payload in filtered_payloads {
                     // Add this processed query result route into the new query result
                     let hash = self

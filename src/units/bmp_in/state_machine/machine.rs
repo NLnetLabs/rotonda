@@ -363,16 +363,16 @@ pub trait PeerAware {
 
     fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState>;
 
+    /// Remove all details about a peer.
+    ///
+    /// Returns true if the peer details (config, pending EoRs, announced routes, etc) were removed, false if the peer
+    /// is not known.
+    fn remove_peer(&mut self, pph: &PerPeerHeader<Bytes>) -> bool;
+
     fn update_peer_config(&mut self, pph: &PerPeerHeader<Bytes>, config: SessionConfig) -> bool;
 
     /// Get a reference to a previously inserted configuration.
     fn get_peer_config(&self, pph: &PerPeerHeader<Bytes>) -> Option<&SessionConfig>;
-
-    /// Remove previously recorded peer configuration.
-    ///
-    /// Returns true if the configuration was removed, false if configuration
-    /// for the peer does not exist.
-    fn remove_peer_config(&mut self, pph: &PerPeerHeader<Bytes>) -> bool;
 
     fn num_peer_configs(&self) -> usize;
 
@@ -445,9 +445,14 @@ where
         // packet captures so it seems that it is indeed sent.
         let pph = msg.per_peer_header();
 
-        let routes = self.do_peer_down(&pph);
+        let eor_capable = self.details.is_peer_eor_capable(&pph);
 
-        if !self.details.remove_peer_config(&pph) {
+        self.status_reporter
+            .peer_down(self.router_id.clone(), eor_capable);
+
+        let withdrawals = self.mk_withdrawals_for_peers_routes(&pph);
+
+        if !self.details.remove_peer(&pph) {
             // This is unexpected, we should have had configuration
             // stored for this peer but apparently don't. Did we
             // receive a Peer Down Notification without a
@@ -459,16 +464,17 @@ where
                 // TODO: Silly to_copy the bytes, but PDN won't give us the octets back..
                 Some(Bytes::copy_from_slice(msg.as_ref())),
             );
-        } else if routes.is_empty() {
+        } else if withdrawals.is_empty() {
             self.mk_other_result()
         } else {
-            self.mk_routing_update_result(Update::Bulk(routes))
+            self.mk_routing_update_result(Update::Bulk(withdrawals))
         }
     }
 
-    pub fn do_peer_down(&mut self, pph: &PerPeerHeader<Bytes>) -> SmallVec<[Payload; 8]> {
-        let eor_capable = self.details.is_peer_eor_capable(pph);
-
+    pub fn mk_withdrawals_for_peers_routes(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> SmallVec<[Payload; 8]> {
         // From https://datatracker.ietf.org/doc/html/rfc7854#section-4.9
         //
         //   "4.9.  Peer Down Notification
@@ -483,14 +489,14 @@ where
         // So, we must act as if we had received route withdrawals for
         // all of the routes previously received for this peer.
 
-        self.status_reporter
-            .peer_down(self.router_id.clone(), eor_capable);
-
-        // Loop over announced prefixes constructing BGP UPDATE PDUs with as many
-        // prefixes can fit in each one at a time until withdrawals have been generated
-        // for all announced prefixes.
-        let mut payloads = SmallVec::new();
+        // Loop over announced prefixes constructing BGP UPDATE PDUs with as many prefixes as can fit in one PDU at a
+        // time until withdrawals have been generated for all announced prefixes.
         if let Some(prefixes_to_withdraw) = self.details.get_announced_prefixes(pph) {
+            let mut payloads = if let (_lower, Some(upper)) = prefixes_to_withdraw.size_hint() {
+                SmallVec::with_capacity(upper)
+            } else {
+                SmallVec::new()
+            };
             let mut withdrawals_iter = prefixes_to_withdraw
                 .map(|&p| Nlri::Unicast(p.into()))
                 .peekable();
@@ -517,9 +523,11 @@ where
                     }
                 }
             }
-        }
 
-        payloads
+            payloads
+        } else {
+            SmallVec::new()
+        }
     }
 
     /// `filter` should return `None` if the BGP message should be ignored, i.e. be filtered out, otherwise `Some(msg)`
@@ -1040,7 +1048,7 @@ impl PeerAware for PeerStates {
         self.0.get(pph).map(|peer_state| &peer_state.session_config)
     }
 
-    fn remove_peer_config(&mut self, pph: &PerPeerHeader<Bytes>) -> bool {
+    fn remove_peer(&mut self, pph: &PerPeerHeader<Bytes>) -> bool {
         self.0.remove(pph).is_some()
     }
 

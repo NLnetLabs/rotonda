@@ -111,7 +111,7 @@ impl BmpStateDetails<Updating> {
         let peers = self.details.get_peers().cloned().collect::<Vec<_>>();
         let routes: SmallVec<[Payload; 8]> = peers
             .iter()
-            .flat_map(|pph| self.do_peer_down(pph))
+            .flat_map(|pph| self.mk_withdrawals_for_peers_routes(pph))
             .collect();
         let next_state = BmpState::Terminated(self.into());
         if routes.is_empty() {
@@ -180,8 +180,8 @@ impl PeerAware for Updating {
         self.peer_states.get_peer_config(pph)
     }
 
-    fn remove_peer_config(&mut self, pph: &PerPeerHeader<Bytes>) -> bool {
-        self.peer_states.remove_peer_config(pph)
+    fn remove_peer(&mut self, pph: &PerPeerHeader<Bytes>) -> bool {
+        self.peer_states.remove_peer(pph)
     }
 
     fn num_peer_configs(&self) -> usize {

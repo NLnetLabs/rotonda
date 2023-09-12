@@ -253,7 +253,7 @@ impl BmpStateDetails<Dumping> {
         let peers = self.details.get_peers().cloned().collect::<Vec<_>>();
         let routes: SmallVec<[Payload; 8]> = peers
             .iter()
-            .flat_map(|pph| self.do_peer_down(pph))
+            .flat_map(|pph| self.mk_withdrawals_for_peers_routes(pph))
             .collect();
         let next_state = BmpState::Terminated(self.into());
         if routes.is_empty() {
@@ -327,8 +327,8 @@ impl PeerAware for Dumping {
         self.peer_states.get_peer_config(pph)
     }
 
-    fn remove_peer_config(&mut self, pph: &PerPeerHeader<Bytes>) -> bool {
-        self.peer_states.remove_peer_config(pph)
+    fn remove_peer(&mut self, pph: &PerPeerHeader<Bytes>) -> bool {
+        self.peer_states.remove_peer(pph)
     }
 
     fn num_peer_configs(&self) -> usize {
@@ -763,7 +763,7 @@ mod tests {
         if let MessageType::RoutingUpdate { update } = res.processing_result {
             assert!(matches!(update, Update::Bulk(_)));
             if let Update::Bulk(mut bulk) = update {
-                // Verify that the update had too many payload items to fit inline into the SmallVec and so it had to 
+                // Verify that the update had too many payload items to fit inline into the SmallVec and so it had to
                 // spill over on to the heap.
                 assert!(bulk.spilled());
 
@@ -1137,7 +1137,7 @@ mod tests {
     fn mk_route_monitoring_msg(pph: &crate::bgp::encode::PerPeerHeader) -> BmpMsg<Bytes> {
         let announcements =
             Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32")
-        .unwrap();
+                .unwrap();
         BmpMsg::from_octets(crate::bgp::encode::mk_route_monitoring_msg(
             pph,
             &Prefixes::default(),

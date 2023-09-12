@@ -546,7 +546,7 @@ mod tests {
         let res = processor.process_msg(ipv6_route_mon_msg_buf).await;
 
         // Then the state should remain unchanged
-        // And the number of announced routes should increase by 2
+        // And the number of announced prefixes should increase by 2
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
         assert_eq!(get_announced_prefix_count(&res.next_state, &real_pph_2), 2);
         let processor = res.next_state;
@@ -555,7 +555,7 @@ mod tests {
         let res = processor.process_msg(route_withdraw_msg_buf.clone()).await;
 
         // Then the state should remain unchanged
-        // And the number of announced routes should decrease by 1
+        // And the number of announced prefixes should decrease by 1
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
         assert_eq!(get_announced_prefix_count(&res.next_state, &real_pph_2), 1);
         let processor = res.next_state;
@@ -563,7 +563,7 @@ mod tests {
         // Unless it is a not-before-announced/already-withdrawn route
         let res = processor.process_msg(route_withdraw_msg_buf).await;
 
-        // Then the number of announced routes should remain unchanged
+        // Then the number of announced prefixes should remain unchanged
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
         assert_eq!(get_announced_prefix_count(&res.next_state, &real_pph_2), 1);
         let processor = res.next_state;
@@ -583,6 +583,10 @@ mod tests {
             assert!(matches!(update, Update::Bulk(_)));
             if let Update::Bulk(mut bulk) = update {
                 assert_eq!(bulk.len(), 1);
+
+                // Verify that the update fits inline into the SmallVec without spilling on to the heap.
+                assert!(!bulk.spilled());
+
                 let pfx = Prefix::from_str("2001:2000:3080:e9c::2/128").unwrap();
                 let mut expected_roto_prefixes: Vec<TypeValue> = vec![pfx.into()];
                 for Payload { source_id, value } in bulk.drain(..) {
@@ -680,6 +684,154 @@ mod tests {
         ));
         if let MessageType::InvalidMessage { err, .. } = res.processing_result {
             assert!(err.starts_with("PeerDownNotification received for peer that was not 'up'"));
+        }
+    }
+
+    #[tokio::test]
+    async fn peer_down_spreads_withdrawals_across_multiple_bgp_updates_if_needed() {
+        // Given a BMP state machine in the Dumping state with no known peers
+        let processor = mk_test_processor();
+
+        // And some simulated BMP messages
+        let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
+        let (pph, peer_up_msg_buf, real_pph) =
+            mk_peer_up_notification_msg_without_rfc4724_support("127.0.0.1", 12345);
+
+        // Including a large number of prefix announcements
+        const NUM_PREFIXES: usize = 256 * 10;
+        let mut route_mon_msg_bufs = Vec::with_capacity(NUM_PREFIXES);
+        'outer: for b in 0..256 {
+            for c in 0..256 {
+                for d in 0..256 {
+                    if route_mon_msg_bufs.len() == NUM_PREFIXES {
+                        break 'outer;
+                    } else {
+                        let announcements = Announcements::from_str(&format!(
+                            "e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.{b}.{c}.{d}/32"
+                        ))
+                        .unwrap();
+                        route_mon_msg_bufs.push(mk_route_monitoring_msg_with_details(
+                            &pph,
+                            &Prefixes::default(),
+                            &announcements,
+                            &[],
+                        ));
+                    }
+                }
+            }
+        }
+
+        let peer_down_msg_buf = mk_peer_down_notification_msg(&pph);
+
+        // When the state machine processes the initiate and peer up notifications
+        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
+        let res = processor.process_msg(peer_up_msg_buf).await;
+
+        // Then the state should remain unchanged
+        assert!(matches!(res.next_state, BmpState::Dumping(_)));
+        assert!(matches!(res.processing_result, MessageType::Other));
+        let mut processor = res.next_state;
+
+        // And there should now be one known peer
+        assert_eq!(get_unique_peer_up_count(&processor), 1);
+
+        // When the state machine processes the route announcements
+        for (i, route_mon_msg_buf) in route_mon_msg_bufs.into_iter().enumerate() {
+            let res = processor.process_msg(route_mon_msg_buf).await;
+
+            // Then the state should remain unchanged
+            // And the number of announced prefixes should increase
+            assert!(matches!(res.next_state, BmpState::Dumping(_)));
+            assert_eq!(
+                get_announced_prefix_count(&res.next_state, &real_pph),
+                i + 1
+            );
+            processor = res.next_state;
+        }
+
+        // And when a peer down notification is received
+        let res = processor.process_msg(peer_down_msg_buf).await;
+
+        // Then the state should remain unchanged
+        assert!(matches!(res.next_state, BmpState::Dumping(_)));
+
+        // And a routing update to withdraw the remaining announced routes for the downed peer should be issued
+        assert!(matches!(
+            res.processing_result,
+            MessageType::RoutingUpdate { .. }
+        ));
+        if let MessageType::RoutingUpdate { update } = res.processing_result {
+            assert!(matches!(update, Update::Bulk(_)));
+            if let Update::Bulk(mut bulk) = update {
+                // Verify that the update had too many payload items to fit inline into the SmallVec and so it had to 
+                // spill over on to the heap.
+                assert!(bulk.spilled());
+
+                let mut expected_roto_prefixes = Vec::<TypeValue>::with_capacity(NUM_PREFIXES);
+                'outer: for b in 0..256 {
+                    for c in 0..256 {
+                        for d in 0..256 {
+                            if expected_roto_prefixes.len() == NUM_PREFIXES {
+                                break 'outer;
+                            } else {
+                                expected_roto_prefixes.push(
+                                    Prefix::from_str(&format!("127.{b}.{c}.{d}/32"))
+                                        .unwrap()
+                                        .into(),
+                                );
+                            }
+                        }
+                    }
+                }
+
+                let mut distinct_bgp_updates_seen = std::collections::HashSet::new();
+                let mut num_withdrawals_seen = 0;
+
+                for Payload { source_id, value } in bulk.drain(..) {
+                    if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = value {
+                        if !distinct_bgp_updates_seen.contains(&route.raw_message) {
+                            num_withdrawals_seen += route
+                                .raw_message
+                                .raw_message()
+                                .0
+                                .withdrawals()
+                                .iter()
+                                .count();
+                            distinct_bgp_updates_seen.insert(route.raw_message.clone());
+                        }
+                        let materialized_route = MaterializedRoute::from(route);
+                        let found_pfx = materialized_route.route.prefix.as_ref().unwrap();
+                        let position = expected_roto_prefixes
+                            .iter()
+                            .position(|pfx| pfx == found_pfx)
+                            .unwrap();
+                        expected_roto_prefixes.remove(position);
+                        assert_eq!(materialized_route.status, RouteStatus::Withdrawn);
+                    } else {
+                        panic!("Expected TypeValue::Builtin(BuiltinTypeValue::Route(_)");
+                    }
+                }
+
+                // All prefixes should have been seen
+                assert!(expected_roto_prefixes.is_empty());
+
+                // More than one BGP UPDATE is expected as NUM_PREFIXES don't fit in 4096 bytes
+                assert!(distinct_bgp_updates_seen.len() > 1);
+
+                // The sum of prefixes withdrawn across the set of distinct BGP UPDATE messages
+                // should be the same as the number of prefixes that were expected to be withdrawn.
+                assert_eq!(NUM_PREFIXES, num_withdrawals_seen);
+            }
+        } else {
+            unreachable!();
+        }
+
+        // And there should no longer be any known peers
+        let processor = res.next_state;
+        if let BmpState::Dumping(processor) = &processor {
+            assert!(processor.details.peer_states.is_empty());
+        } else {
+            unreachable!();
         }
     }
 
@@ -928,6 +1080,8 @@ mod tests {
         }
     }
 
+    // RFC 4724 Graceful Restart Mechanism for BGP
+    // BMP uses the End-of-RIB feature of RFC 4724.
     fn mk_peer_up_notification_msg_without_rfc4724_support(
         peer_ip: &str,
         peer_as: u32,
@@ -983,7 +1137,7 @@ mod tests {
     fn mk_route_monitoring_msg(pph: &crate::bgp::encode::PerPeerHeader) -> BmpMsg<Bytes> {
         let announcements =
             Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32")
-                .unwrap();
+        .unwrap();
         BmpMsg::from_octets(crate::bgp::encode::mk_route_monitoring_msg(
             pph,
             &Prefixes::default(),

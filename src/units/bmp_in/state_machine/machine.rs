@@ -512,8 +512,6 @@ where
                         }
                     }
 
-                    Err(ComposeError::PduTooLarge(_)) => { /* NOOP */ }
-
                     Err(err) => {
                         error!("Internal error: Failed to issue internal BGP UPDATE to withdraw routes for a down peer. Reason: BGP UPDATE construction error: {err}");
                     }
@@ -1113,8 +1111,10 @@ where
     I: Iterator<Item = Nlri<Vec<u8>>>,
 {
     let mut builder = UpdateBuilder::new_bytes();
-    builder.withdrawals_from_iter(withdrawals)?;
-    builder.into_message()
+    match builder.withdrawals_from_iter(withdrawals) {
+        Ok(_) | Err(ComposeError::PduTooLarge(_)) => builder.into_message(),
+        Err(err) => Err(err),
+    }
 }
 
 // --------- END TEMPORARY CODE TO BE REPLACED BY ROUTECORE WHEN READY ------------------------------------------------

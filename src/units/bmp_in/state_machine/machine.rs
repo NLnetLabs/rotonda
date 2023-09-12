@@ -1,8 +1,7 @@
 use atomic_enum::atomic_enum;
 use bytes::Bytes;
 use futures::FutureExt;
-use log::error;
-use roto::types::builtin::{BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus};
+use roto::types::builtin::RouteStatus;
 
 /// RFC 7854 BMP processing.
 ///
@@ -33,7 +32,6 @@ use routecore::{
             nlri::Nlri,
             open::CapabilityType,
             update::{AddPath, FourOctetAsn},
-            update_builder::{ComposeError, UpdateBuilder},
             SessionConfig, UpdateMessage,
         },
         types::{AFI, SAFI},
@@ -47,13 +45,18 @@ use smallvec::SmallVec;
 
 use std::{
     collections::{hash_map::Keys, HashMap, HashSet},
-    iter::Peekable,
     ops::ControlFlow,
     sync::Arc,
 };
 
 use crate::{
-    common::{routecore_extra::generate_alternate_config, status_reporter::AnyStatusReporter},
+    common::{
+        routecore_extra::{
+            generate_alternate_config, mk_route_for_prefix,
+            mk_withdrawals_for_peers_announced_prefixes,
+        },
+        status_reporter::AnyStatusReporter,
+    },
     payload::{Payload, RouterId, SourceId, Update},
 };
 
@@ -491,40 +494,18 @@ where
 
         // Loop over announced prefixes constructing BGP UPDATE PDUs with as many prefixes as can fit in one PDU at a
         // time until withdrawals have been generated for all announced prefixes.
-        if let Some(prefixes_to_withdraw) = self.details.get_announced_prefixes(pph) {
-            let mut payloads = if let (_lower, Some(upper)) = prefixes_to_withdraw.size_hint() {
-                SmallVec::with_capacity(upper)
-            } else {
-                SmallVec::new()
-            };
-            let mut withdrawals_iter = prefixes_to_withdraw
-                .map(|&p| Nlri::Unicast(p.into()))
-                .peekable();
-            while withdrawals_iter.peek().is_some() {
-                match mk_bgp_update(&mut withdrawals_iter) {
-                    Ok(bgp_update) => {
-                        for nlri in bgp_update.all_withdrawals_iter() {
-                            if let Nlri::Unicast(nlri) = nlri {
-                                let route = Self::mk_route_for_prefix(
-                                    self.router_id.clone(),
-                                    bgp_update.clone(),
-                                    &pph,
-                                    nlri.prefix(),
-                                    RouteStatus::Withdrawn,
-                                );
-                                let payload = Payload::new(self.source_id.clone(), route);
-                                payloads.push(payload);
-                            }
-                        }
-                    }
-
-                    Err(err) => {
-                        error!("Internal error: Failed to issue internal BGP UPDATE to withdraw routes for a down peer. Reason: BGP UPDATE construction error: {err}");
-                    }
-                }
-            }
-
-            payloads
+        if let Some(prefixes) = self.details.get_announced_prefixes(pph) {
+            let router_id = self.router_id.clone();
+            let source_id = self.source_id.clone();
+            let peer_address = pph.address();
+            let peer_asn = pph.asn();
+            mk_withdrawals_for_peers_announced_prefixes(
+                prefixes,
+                router_id,
+                peer_address,
+                peer_asn,
+                source_id,
+            )
         } else {
             SmallVec::new()
         }
@@ -664,10 +645,11 @@ where
                 }
 
                 // clone is cheap due to use of Bytes
-                let route = Self::mk_route_for_prefix(
+                let route = mk_route_for_prefix(
                     self.router_id.clone(),
                     update.clone(),
-                    &pph,
+                    pph.address(),
+                    pph.asn(),
                     prefix,
                     route_status,
                 );
@@ -696,10 +678,11 @@ where
                     }
                 }) {
                     // clone is cheap due to use of Bytes
-                    let route = Self::mk_route_for_prefix(
+                    let route = mk_route_for_prefix(
                         self.router_id.clone(),
                         update.clone(),
-                        &pph,
+                        pph.address(),
+                        pph.asn(),
                         prefix,
                         RouteStatus::Withdrawn,
                     );
@@ -719,22 +702,6 @@ where
             num_announcements,
             num_withdrawals,
         )
-    }
-
-    fn mk_route_for_prefix(
-        router_id: Arc<String>,
-        update: UpdateMessage<Bytes>,
-        pph: &PerPeerHeader<Bytes>,
-        prefix: Prefix,
-        route_status: RouteStatus,
-    ) -> RawRouteWithDeltas {
-        let delta_id = (RotondaId(0), 0); // TODO
-        let roto_update_msg = roto::types::builtin::UpdateMessage(update);
-        let raw_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
-        RawRouteWithDeltas::new_with_message_ref(delta_id, prefix.into(), &raw_msg, route_status)
-            .with_peer_ip(pph.address())
-            .with_peer_asn(pph.asn())
-            .with_router_id(router_id)
     }
 }
 
@@ -1111,18 +1078,3 @@ impl PeerAware for PeerStates {
             .map(|peer_state| peer_state.announced_prefixes.iter())
     }
 }
-
-// --------- BEGIN TEMPORARY CODE TO BE REPLACED BY ROUTECORE WHEN READY ----------------------------------------------
-
-fn mk_bgp_update<I>(withdrawals: &mut Peekable<I>) -> Result<UpdateMessage<Bytes>, ComposeError>
-where
-    I: Iterator<Item = Nlri<Vec<u8>>>,
-{
-    let mut builder = UpdateBuilder::new_bytes();
-    match builder.withdrawals_from_iter(withdrawals) {
-        Ok(_) | Err(ComposeError::PduTooLarge(_)) => builder.into_message(),
-        Err(err) => Err(err),
-    }
-}
-
-// --------- END TEMPORARY CODE TO BE REPLACED BY ROUTECORE WHEN READY ------------------------------------------------

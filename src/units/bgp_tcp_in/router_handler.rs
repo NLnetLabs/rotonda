@@ -2,7 +2,7 @@ use std::collections::BTreeSet;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
-use log::{debug, error, trace};
+use log::{debug, error};
 use roto::types::builtin::{
     BgpUpdateMessage, /*IpAddress,*/
     RotondaId, RouteStatus, UpdateMessage,
@@ -14,7 +14,6 @@ use roto::types::builtin::{
 use roto::types::typevalue::TypeValue;
 use routecore::addr::Prefix;
 use routecore::asn::Asn;
-use routecore::bgp::message::update_builder::{ComposeError, UpdateBuilder};
 use routecore::bgp::message::{nlri::Nlri, UpdateMessage as UpdatePdu};
 use smallvec::SmallVec;
 use tokio::net::TcpStream;
@@ -28,6 +27,7 @@ use rotonda_fsm::bgp::session::{
     Session as BgpSession,
 };
 
+use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
 use crate::comms::{Gate, GateStatus, Terminated};
 use crate::payload::{Payload, SourceId, Update};
 use crate::units::bgp_tcp_in::status_reporter::BgpTcpInStatusReporter;
@@ -236,6 +236,11 @@ impl Processor {
                 }
             }
         }
+
+        if rejected {
+            assert!(self.observed_prefixes.is_empty());
+        }
+
         // Done, for whatever reason. Remove ourselves form the live sessions.
         // But only if this was not an 'early reject' case, because we would
         // wrongfully remove the firstly inserted (IpAddr, Asn) (i.e., an
@@ -253,99 +258,24 @@ impl Processor {
                     negotiated.remote_addr(),
                     live_sessions.lock().unwrap().len()
                 );
+
+                let prefixes = self.observed_prefixes.iter();
+                let router_id = Arc::new("TODO".into());
+                let source_id: SourceId = "TODO".into();
+                let peer_address = negotiated.remote_addr();
+                let peer_asn = negotiated.remote_asn();
+
+                let payloads = mk_withdrawals_for_peers_announced_prefixes(
+                    prefixes,
+                    router_id,
+                    peer_address,
+                    peer_asn,
+                    source_id,
+                );
+
+                self.gate.update_data(Update::Bulk(payloads)).await;
             }
         }
-
-        if rejected {
-            assert!(self.observed_prefixes.is_empty());
-        }
-
-        let source_id: SourceId = "unknown".into(); // TODO
-
-        // attempt using new withdrawals_from_iter methods in routecore
-        // XXX see https://github.com/rust-lang/rust/issues/102211
-        // we can not do observed_prefixes.iter().map(|p| ...).peekable()
-        // because that results in an error
-        //  "higher-ranked lifetime error"
-        //
-        // For now, we create a separate vec and push Nlri in there.
-
-        let mut nlris = vec![];
-        self.observed_prefixes.iter().for_each(|p| {
-            nlris.push(Nlri::Unicast((*p).into()));
-        });
-        let mut withdrawals_iter = nlris.into_iter().peekable();
-        let mut observed_prefixes = self.observed_prefixes.iter();
-
-        while withdrawals_iter.peek().is_some() {
-            let mut builder = UpdateBuilder::new_bytes();
-            let old_len = withdrawals_iter.len();
-            match builder.withdrawals_from_iter(&mut withdrawals_iter) {
-                Ok(()) => {
-                    // Everything fit into this PDU, done after this one.
-
-                    debug!("Ok(()) from builder, last PDU");
-                }
-                Err(ComposeError::PduTooLarge(_)) => {
-                    // There is more in prefix_iter to process in a next PDU.
-
-                    debug!(
-                        "PduTooLarge from builder, remaining: {}",
-                        withdrawals_iter.len()
-                    );
-                }
-                Err(e) => {
-                    error!("error while building withdrawal PDUs: {}", e);
-                    break;
-                }
-            }
-            let pdu = match builder.into_message() {
-                Ok(pdu) => pdu,
-                Err(e) => {
-                    error!("error constructing withdrawal PDU: {e}");
-                    break;
-                }
-            };
-
-            let in_pdu = old_len - withdrawals_iter.len();
-            let rot_id = RotondaId(0_usize);
-            let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
-
-            let msg = Arc::new(BgpUpdateMessage::new((rot_id, ltime), UpdateMessage(pdu)));
-
-            let mut sent_out = 0;
-
-            while sent_out < in_pdu {
-                let mut bulk = SmallVec::new();
-                while bulk.len() < 8 {
-                    trace!("bulk.len() / sent_out: {}/{}", bulk.len(), sent_out);
-                    let prefix = if let Some(p) = observed_prefixes.next() {
-                        p
-                    } else {
-                        break;
-                    };
-
-                    let rot_id = RotondaId(0_usize);
-                    let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
-                    let rrwd = RawRouteWithDeltas::new_with_message_ref(
-                        (rot_id, ltime),
-                        RotoPrefix::new(*prefix),
-                        &msg,
-                        RouteStatus::Withdrawn,
-                    );
-                    // TODO: .with_peer_ip()
-                    // TODO: .with_peer_asn()
-                    // TODO: .with_router_id()
-                    let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
-                    let payload = Payload::new(source_id.clone(), typval);
-                    sent_out += 1;
-                    bulk.push(payload);
-                }
-                self.gate.update_data(Update::Bulk(bulk.into())).await;
-            }
-        }
-
-        assert!(observed_prefixes.len() == 0);
 
         (session, rx_sess)
     }

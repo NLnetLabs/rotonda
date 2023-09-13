@@ -37,7 +37,10 @@ pub(crate) trait FileIo: Default {
 #[cfg(not(test))]
 mod fileio {
     //! Filesystem I/O.
-    use std::path::Path;
+    use std::{
+        io::{Error, ErrorKind},
+        path::Path,
+    };
 
     use async_trait::async_trait;
     use tokio::io::AsyncWrite;
@@ -85,7 +88,12 @@ mod fileio {
         }
 
         fn read_to_string<P: AsRef<Path>>(&self, path: P) -> std::io::Result<String> {
-            std::fs::read_to_string(path)
+            std::fs::read_to_string(path.as_ref()).or_else(|err| {
+                Err(Error::new(
+                    ErrorKind::Other,
+                    format!("For path '{}': {err}", path.as_ref().display()),
+                ))
+            })
         }
     }
 }
@@ -97,6 +105,7 @@ mod fileio {
     use async_trait::async_trait;
     use std::{
         collections::HashMap,
+        io::{Error, ErrorKind},
         path::{Path, PathBuf},
     };
     use tokio::io::AsyncWrite;
@@ -168,7 +177,10 @@ mod fileio {
             self.readable_paths
                 .get(path.as_ref())
                 .map(|v| v.to_string())
-                .ok_or(std::io::ErrorKind::NotFound.into())
+                .ok_or(Error::new(
+                    ErrorKind::Other,
+                    format!("Test path {} not known", path.as_ref().display()),
+                ))
         }
     }
 }

@@ -67,7 +67,7 @@ pub struct BgpTcpIn {
     listen: String,
     pub my_asn: Asn, // TODO make getters, or impl Into<-fsm::bgp::Config>
     pub my_bgp_id: [u8; 4],
-    #[serde(rename = "peers")]
+    #[serde(rename = "peers", default)]
     pub peer_configs: PeerConfigs,
 }
 
@@ -154,7 +154,13 @@ impl BgpTcpInRunner {
             let listener = listener_factory
                 .bind(self.bgp.listen.clone())
                 .await
-                .unwrap();
+                .unwrap_or_else(|err| {
+                    status_reporter.listener_io_error(&err);
+                    panic!(
+                        "Listening for connections on {} failed: {}",
+                        self.bgp.listen, err
+                    );
+                });
 
             let mut accept_fut = Box::pin(listener.accept());
 

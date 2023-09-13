@@ -65,12 +65,18 @@ impl RotoFilterRunner {
         // Setup status reporting
         let status_reporter = Arc::new(RotoFilterStatusReporter::new(&unit_name, metrics));
 
-        let roto_source_code = file_io.read_to_string(&roto_path).unwrap();
-        let roto_script = RotoScript::new(
-            roto_source_code,
-            component.roto_scripts(),
-            RotoScriptOrigin::Path(roto_path),
-        );
+        let roto_script = {
+            let roto_source_code = file_io
+                .read_to_string(&roto_path)
+                .map_err(|err| status_reporter.roto_script_failure(err))
+                .unwrap_or_default();
+
+            RotoScript::new(
+                roto_source_code,
+                component.roto_scripts(),
+                RotoScriptOrigin::Path(roto_path),
+            )
+        };
 
         Self {
             gate,

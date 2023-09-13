@@ -456,7 +456,7 @@ impl Manager {
     ///
     /// If the method succeeds, you need to spawn all units and targets via
     /// the [`spawn`](Self::spawn) method.
-    pub fn load(&mut self, file: ConfigFile) -> Result<Config, Failed> {
+    pub fn load(&mut self, file: &ConfigFile) -> Result<Config, Failed> {
         // Now load the config file, e.g. something like this:
         //
         //     [units.a]
@@ -580,7 +580,7 @@ impl Manager {
             }
         };
 
-        self.prepare(&config, &file)?;
+        self.prepare(&config, file)?;
 
         Ok(config)
     }
@@ -633,9 +633,9 @@ impl Manager {
 
         // At this point self.pending contains the newly created but
         // disconnected Gates, and GateAgents for sending commands to them,
-        // and the returned Config object contains the newly created but
-        // not yet started Units and Targets. The caller should invoke spawn()
-        // to run each Unit and Target and assign Gates to Units by name.
+        // and the Config object contains the newly created but not yet
+        // started Units and Targets. The caller should invoke spawn() to run
+        // each Unit and Target and assign Gates to Units by name.
 
         Ok(())
     }
@@ -1434,7 +1434,7 @@ mod tests {
 
         // when loaded into the manager
         let mut manager = init_manager();
-        let res = manager.load(config_file);
+        let res = manager.load(&config_file);
 
         // then it should fail
         assert!(res.is_err());
@@ -1457,7 +1457,7 @@ mod tests {
 
         // when loaded into the manager
         let mut manager = init_manager();
-        let res = manager.load(config_file);
+        let res = manager.load(&config_file);
 
         // then it should pass
         assert!(res.is_ok());
@@ -1481,7 +1481,7 @@ mod tests {
 
         // when loaded into the manager and spawned
         let mut manager = init_manager();
-        let config = manager.load(config_file)?;
+        let config = manager.load(&config_file)?;
         spawn(&mut manager, config);
 
         // then it should spawn the unit and target
@@ -1510,7 +1510,7 @@ mod tests {
 
         // when loaded into the manager and spawned
         let mut manager = init_manager();
-        let config = manager.load(config_file.clone())?;
+        let config = manager.load(&config_file)?;
         spawn(&mut manager, config);
 
         // then it should spawn the unit and target
@@ -1520,7 +1520,7 @@ mod tests {
         assert_log_contains(&log, "null", SpawnAction::SpawnTarget);
 
         // and when re-loaded
-        let config = manager.load(config_file)?;
+        let config = manager.load(&config_file)?;
         spawn(&mut manager, config);
 
         // it should cause reconfiguration
@@ -1553,7 +1553,7 @@ mod tests {
 
         // when loaded into the manager and spawned
         let mut manager = init_manager();
-        let config = manager.load(config_file)?;
+        let config = manager.load(&config_file)?;
         spawn(&mut manager, config);
 
         // then it should spawn the unit and target
@@ -1582,7 +1582,7 @@ mod tests {
 
         // when loaded into the manager and spawned
         let mut manager = init_manager();
-        let config = manager.load(config_file)?;
+        let config = manager.load(&config_file)?;
         spawn(&mut manager, config);
 
         // then it should spawn the unit and target
@@ -1610,7 +1610,7 @@ mod tests {
         let config_file = mk_config_from_toml(toml);
 
         // when loaded into the manager and spawned
-        let config = manager.load(config_file)?;
+        let config = manager.load(&config_file)?;
         spawn(&mut manager, config);
 
         // then it should spawn the added target
@@ -1644,7 +1644,7 @@ mod tests {
 
         // when loaded into the manager and spawned
         let mut manager = init_manager();
-        let config = manager.load(config_file)?;
+        let config = manager.load(&config_file)?;
         spawn(&mut manager, config);
 
         // then it should spawn the unit and target
@@ -1673,7 +1673,7 @@ mod tests {
         let config_file = mk_config_from_toml(toml);
 
         // when loaded into the manager and spawned
-        let config = manager.load(config_file)?;
+        let config = manager.load(&config_file)?;
         spawn(&mut manager, config);
 
         // then it should terminate the removed target
@@ -1708,7 +1708,7 @@ mod tests {
 
         // when loaded into the manager and spawned
         let mut manager = init_manager();
-        let config = manager.load(config_file)?;
+        let config = manager.load(&config_file)?;
         spawn(&mut manager, config);
 
         // then it should spawn the unit and target
@@ -1732,7 +1732,7 @@ mod tests {
         let config_file = mk_config_from_toml(toml);
 
         // when loaded into the manager and spawned
-        let config = manager.load(config_file)?;
+        let config = manager.load(&config_file)?;
         spawn(&mut manager, config);
 
         // then it should terminate the removed target
@@ -1881,7 +1881,11 @@ mod tests {
     // --- Test helpers ------------------------------------------------------
 
     fn mk_config_from_toml(toml: &str) -> ConfigFile {
-        ConfigFile::new(toml.as_bytes().to_vec(), Source::default())
+        ConfigFile::new(
+            toml.as_bytes().to_vec(),
+            Source::default(),
+            Default::default(),
+        )
     }
 
     type UnitOrTargetName = String;

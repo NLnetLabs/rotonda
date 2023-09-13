@@ -42,7 +42,7 @@ fn run_with_cmdline_args() -> Result<(), ExitError> {
     runtime.block_on(handle_signals(config_path, manager))
 }
 
-async fn handle_signals(conf_path: PathBuf, mut manager: Manager) -> Result<(), ExitError> {
+async fn handle_signals(conf_path: Option<PathBuf>, mut manager: Manager) -> Result<(), ExitError> {
     let mut hup_signals = signal(SignalKind::hangup()).map_err(|err| {
         error!("Fatal: cannot listen for HUP signals ({}). Aborting.", err);
         ExitError
@@ -63,27 +63,29 @@ async fn handle_signals(conf_path: PathBuf, mut manager: Manager) -> Result<(), 
             }
             Either::Left((Some(_), _)) => {
                 // HUP signal received
-                info!(
-                    "SIGHUP signal received, re-reading configuration file '{}'",
-                    conf_path.display()
-                );
-                match ConfigFile::load(&conf_path) {
-                    Ok(config_file) => match manager.load(config_file) {
-                        Err(_) => {
-                            error!("Failed to re-read config file '{}'", conf_path.display());
+                if let Some(conf_path) = &conf_path {
+                    info!(
+                        "SIGHUP signal received, re-reading configuration file '{}'",
+                        conf_path.display()
+                    );
+                    match ConfigFile::load(&conf_path) {
+                        Ok(conf_file) => match manager.load(&conf_file) {
+                            Err(_) => {
+                                error!("Failed to re-read config file '{}'", conf_path.display());
+                            }
+                            Ok(mut config) => {
+                                config.log.switch_logging(true)?;
+                                manager.spawn(&mut config);
+                                info!("Configuration changes applied");
+                            }
+                        },
+                        Err(err) => {
+                            error!(
+                                "Failed to re-read config file '{}': {}",
+                                conf_path.display(),
+                                err
+                            );
                         }
-                        Ok(mut config) => {
-                            config.log.switch_logging(true)?;
-                            manager.spawn(&mut config);
-                            info!("Configuration changes applied");
-                        }
-                    },
-                    Err(err) => {
-                        error!(
-                            "Failed to re-read config file '{}': {}",
-                            conf_path.display(),
-                            err
-                        );
                     }
                 }
             }
@@ -189,7 +191,7 @@ mod tests {
         [units.filter]
         type = "filter"
         sources = ["bmp-tcp-in"]
-        roto_path = "etc/bmp_asn_filter.roto"
+        roto_path = "etc/bmp-asn-filter.roto"
 
         [units.routers]
         type = "bmp-in"
@@ -227,7 +229,7 @@ mod tests {
         let test_prefix2 = Prefix::from_str("127.0.0.2/32").unwrap();
         let mut config_bytes = base_config_toml.as_bytes().to_vec();
         config_bytes.extend_from_slice(null_target_toml.as_bytes());
-        let config_file = ConfigFile::new(config_bytes, Source::default());
+        let config_file = ConfigFile::new(config_bytes, Source::default(), Default::default());
 
         let mut manager = Manager::new();
         let config = Config::from_config_file(config_file, &mut manager)
@@ -396,8 +398,8 @@ mod tests {
             eprintln!("Reconfiguring...");
             let mut config_bytes = base_config_toml.as_bytes().to_vec();
             config_bytes.extend_from_slice(mqtt_target_toml.as_bytes());
-            let config_file = ConfigFile::new(config_bytes, Source::default());
-            let mut config = manager.load(config_file).unwrap();
+            let conf_file = ConfigFile::new(config_bytes, Source::default(), Default::default());
+            let mut config = manager.load(&conf_file).unwrap();
             manager.spawn(&mut config);
 
             // verify that there is now an MQTT connection

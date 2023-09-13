@@ -7,7 +7,7 @@ use std::{
     },
 };
 
-use log::{debug, trace, warn};
+use log::{debug, info, warn};
 
 use crate::common::status_reporter::{
     sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter,
@@ -30,7 +30,7 @@ impl BmpTcpInStatusReporter {
     }
 
     pub fn listener_listening(&self, server_uri: &str) {
-        sr_log!(trace: self, "Listening for connections on: {}", server_uri);
+        sr_log!(info: self, "Listening for connections on: {}", server_uri);
         self.metrics.listener_bound_count.fetch_add(1, Relaxed);
     }
 

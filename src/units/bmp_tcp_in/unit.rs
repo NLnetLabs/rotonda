@@ -153,7 +153,13 @@ impl BmpTcpInRunner {
             let listener = listener_factory
                 .bind(self.bmp.listen.clone())
                 .await
-                .unwrap();
+                .unwrap_or_else(|err| {
+                    status_reporter.listener_io_error(&err);
+                    panic!(
+                        "Listening for connections on {} failed: {}",
+                        self.bmp.listen, err
+                    );
+                });
 
             let mut accept_fut = Box::pin(accept_metrics.instrument(listener.accept()));
             loop {

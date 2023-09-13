@@ -1,6 +1,6 @@
 //! Configuration.
 //!
-//! RTRTR is configured through a single TOML configuration file. We use
+//! Rotonda is configured through a single TOML configuration file. We use
 //! [serde] to deserialize this file into the [`Config`] struct provided by
 //! this module. This struct also provides the facilities to load the config
 //! file referred to in command line options.
@@ -8,7 +8,9 @@
 use crate::http;
 use crate::log::{ExitError, Failed, LogConfig};
 use crate::manager::{Manager, TargetSet, UnitSet};
+use crate::mvp::MvpConfig;
 use clap::{Arg, ArgMatches, Command};
+use log::trace;
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -19,7 +21,7 @@ use toml::{Spanned, Value};
 
 //------------ Config --------------------------------------------------------
 
-/// The complete RTRTR configuration.
+/// The complete Rotonda configuration.
 ///
 /// All configuration is available via public fields.
 ///
@@ -44,6 +46,10 @@ pub struct Config {
     /// The HTTP server configuration.
     #[serde(flatten)]
     pub http: http::Server,
+
+    /// MVP specific configuration for overriding the embedded config.
+    #[serde(flatten)]
+    pub mvp_overrides: MvpConfig,
 }
 
 impl Config {
@@ -73,12 +79,13 @@ impl Config {
             Arg::new("config")
                 .short('c')
                 .long("config")
-                .required(true)
+                .required(false)
                 .takes_value(true)
                 .value_name("PATH")
                 .help("Read base configuration from this file"),
         );
-        LogConfig::config_args(app)
+        let app = LogConfig::config_args(app);
+        MvpConfig::config_args(app)
     }
 
     /// Loads the configuration based on command line options provided.
@@ -95,27 +102,42 @@ impl Config {
         matches: &ArgMatches,
         cur_dir: &Path,
         manager: &mut Manager,
-    ) -> Result<(PathBuf, Self), Failed> {
-        let conf_path = cur_dir.join(matches.value_of("config").unwrap());
-        let conf = match ConfigFile::load(&conf_path) {
-            Ok(conf) => conf,
-            Err(err) => {
+    ) -> Result<(Option<PathBuf>, Self), Failed> {
+        let (conf_file, conf_path) = if let Some(conf_path) = matches.value_of("config") {
+            let conf_path = cur_dir.join(conf_path);
+            let conf = ConfigFile::load(&conf_path).map_err(|err| {
                 eprintln!(
                     "Failed to read config file '{}': {}",
                     conf_path.display(),
                     err
                 );
-                return Err(Failed);
-            }
+                Failed
+            })?;
+            (conf, Some(conf_path))
+        } else {
+            let bytes = include_bytes!("../etc/rotonda.conf").to_vec();
+            let mut mvp_overrides = MvpConfig::default();
+            mvp_overrides.update_with_arg_matches(matches)?;
+            let conf = ConfigFile::new(bytes, Source::default(), mvp_overrides);
+            (conf, None)
         };
-        let mut res = manager.load(conf)?;
-        res.log.update_with_arg_matches(matches, cur_dir)?;
-        res.log.switch_logging(true)?;
-        Ok((conf_path, res))
+        let mut conf = manager.load(&conf_file)?;
+        conf.log.update_with_arg_matches(matches, cur_dir)?;
+        conf.mvp_overrides.update_with_arg_matches(matches)?;
+        conf.log.switch_logging(true)?;
+
+        if log::log_enabled!(log::Level::Trace) {
+            trace!(
+                "Post-processed config TOML:\n{}",
+                String::from_utf8_lossy(&conf_file.bytes)
+            );
+        }
+
+        Ok((conf_path, conf))
     }
 
-    pub fn from_config_file(conf: ConfigFile, manager: &mut Manager) -> Result<Self, Failed> {
-        let res = manager.load(conf)?;
+    pub fn from_config_file(conf_file: ConfigFile, manager: &mut Manager) -> Result<Self, Failed> {
+        let res = manager.load(&conf_file)?;
         res.log.switch_logging(true)?;
         Ok(res)
     }
@@ -292,10 +314,10 @@ pub struct ConfigFile {
 impl ConfigFile {
     /// Load a config file from disk.
     pub fn load(path: &impl AsRef<Path>) -> Result<Self, io::Error> {
-        fs::read(path).map(|bytes| Self::new(bytes, path.into()))
+        fs::read(path).map(|bytes| Self::new(bytes, path.into(), MvpConfig::default()))
     }
 
-    pub fn new(bytes: Vec<u8>, source: Source) -> Self {
+    pub fn new(bytes: Vec<u8>, source: Source, mvp_overrides: MvpConfig) -> Self {
         // Handle the special case of a rib unit that is actually a physical rib unit and one or more virtual rib
         // units. Rather than have the user manually configure these separate rib units by hand in the config file,
         // we expand any units with unit `type = "rib"` and `roto_path = [a, b, c, ...]` into multiple chained units
@@ -325,7 +347,39 @@ impl ConfigFile {
             }
         }
 
-        // eprintln!("Post-processed TOML: {toml}");
+        // Handle the special MVP case of allowing a user to complete or remove the proxy configuration based on the
+        // command line arguments supplied.
+        let Value::Table(ref mut root) = toml else { unreachable!() };
+
+        match mvp_overrides.proxy_destination_addr {
+            Some(addr) => {
+                // Recofigure the dummy proxy definition to use the destination
+                let Value::Table(ref mut targets) = root.get_mut("targets").unwrap() else { unreachable!() };
+                let Value::Table(ref mut proxy) = targets.get_mut("proxy").unwrap() else { unreachable!() };
+                let Value::String(ref mut destination) = proxy.get_mut("destination").unwrap() else { unreachable!() };
+                *destination = addr.to_string();
+            }
+
+            None => {
+                // Remove the dummy proxy definition as the MVP user did not supply a destination to proxy to
+                let Value::Table(ref mut targets) = root.get_mut("targets").unwrap() else { unreachable!() };
+                targets.remove("proxy");
+            }
+        }
+
+        // Handle the special MVP case of allowing the BGP and BMP listen ports to be overridden on the command line.
+        if let Some(addr) = mvp_overrides.bgp_listen_addr {
+            let Value::Table(ref mut units) = root.get_mut("units").unwrap() else { unreachable!() };
+            let Value::Table(ref mut bgp_in) = units.get_mut("bgp-in").unwrap() else { unreachable!() };
+            let Value::String(ref mut listen) = bgp_in.get_mut("listen").unwrap() else { unreachable!() };
+            *listen = addr.to_string();
+        }
+        if let Some(addr) = mvp_overrides.bmp_listen_addr {
+            let Value::Table(ref mut units) = root.get_mut("units").unwrap() else { unreachable!() };
+            let Value::Table(ref mut bmp_tcp_in) = units.get_mut("bmp-tcp-in").unwrap() else { unreachable!() };
+            let Value::String(ref mut listen) = bmp_tcp_in.get_mut("listen").unwrap() else { unreachable!() };
+            *listen = addr.to_string();
+        }
 
         let bytes = toml::to_vec(&toml).unwrap();
 
@@ -408,17 +462,19 @@ impl ConfigFile {
                                 //     sources = ["shorthand_unit"]
                                 //     type = "rib"
                                 //     roto_path = "vRib1.roto"
+                                //     vrib_upstream = "shorthand_unit"
                                 //
                                 //     [unit.shorthand_unit-vRIB-0.rib_type] # new
-                                //     Virtual = 0
+                                //     GeneratedVirtual = 0
                                 //
                                 //     [unit.shorthand_unit-vRIB-1]
                                 //     sources = ["shorthand_unit-vRIB-0"]   # new
                                 //     type = "rib"
                                 //     roto_path = "vRib2.roto"
+                                //     vrib_upstream = "shorthand_unit"
                                 //
                                 //     [unit.shorthand_unit-vRIB-1.rib_type] # new
-                                //     Virtual = 1
+                                //     GeneratedVirtual = 1
                                 let mut source = unit_name.clone();
                                 for (n, roto_path) in roto_paths[1..].iter().enumerate() {
                                     let mut new_unit_table = unit_table.clone();
@@ -431,7 +487,7 @@ impl ConfigFile {
                                         .insert("roto_path".to_string(), roto_path.clone());
                                     let mut rib_type_table = toml::map::Map::new();
                                     rib_type_table.insert(
-                                        "Virtual".to_string(),
+                                        "GeneratedVirtual".to_string(),
                                         Value::Integer(n.try_into().unwrap()),
                                     );
                                     new_unit_table.insert(

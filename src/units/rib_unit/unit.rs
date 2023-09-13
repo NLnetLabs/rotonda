@@ -2,7 +2,7 @@ use crate::{
     common::{
         file_io::{FileIo, TheFileIo},
         frim::FrimMap,
-        roto::{roto_filter, RotoScript, ThreadLocalVM},
+        roto::{roto_filter, RotoScript, RotoScriptOrigin, ThreadLocalVM},
         status_reporter::{AnyStatusReporter, UnitStatusReporter},
     },
     comms::{
@@ -111,12 +111,14 @@ pub enum RibType {
 
     /// A virtual RIB has one roto script and no prefix store. Queries to its HTTP API are answered by sending a
     /// command to the nearest physical Rib to the West of the virtual RIB. A `Link` to the gate of that physical Rib
-    /// is automatically injected as the virtuaL_upstream value in the RibUnit config below by the config loading
+    /// is automatically injected as the vrib_upstream value in the RibUnit config below by the config loading
     /// process so that it can be used to send a GateCommand::Query message upstream to the physical Rib unit that owns
     /// the Gate that the Link refers to.
-    ///
-    /// The index (zero-based) indicates how far from the physical RIB this vRIB is.
-    Virtual(u8),
+    Virtual,
+
+    /// The index (zero-based) indicates how far from the physical RIB this vRIB is. This is used to suffix the HTTP API
+    /// path differently for each vRIB compared to each other and the pRIB.
+    GeneratedVirtual(u8),
 }
 
 impl PartialEq for RibType {
@@ -259,29 +261,40 @@ impl RibUnitRunner {
         let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> = Default::default();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
 
+        // Setup metrics
+        let process_metrics = Arc::new(TokioTaskMetrics::new());
+        component.register_metrics(process_metrics.clone());
+
+        let metrics = Arc::new(RibUnitMetrics::new(&gate, rib_merge_update_stats.clone()));
+        component.register_metrics(metrics.clone());
+
+        // Setup status reporting
+        let status_reporter = Arc::new(RibUnitStatusReporter::new(&unit_name, metrics.clone()));
+
+        // Setup the Roto filter source
         let roto_script = if let Some(roto_path) = roto_path {
-            let roto_source_code = file_io.read_to_string(&roto_path).unwrap_or_default();
+            let roto_source_code = file_io
+                .read_to_string(&roto_path)
+                .map_err(|err| status_reporter.roto_script_failure(err))
+                .unwrap_or_default();
+
             RotoScript::new(
                 roto_source_code,
                 component.roto_scripts(),
-                crate::common::roto::RotoScriptOrigin::Path(roto_path),
+                RotoScriptOrigin::Path(roto_path),
             )
         } else {
             RotoScript::default()
         };
-        let process_metrics = Arc::new(TokioTaskMetrics::new());
-        component.register_metrics(process_metrics.clone());
-
-        // Setup metrics
-        let metrics = Arc::new(RibUnitMetrics::new(&gate, rib_merge_update_stats.clone()));
-        component.register_metrics(metrics.clone());
 
         // Setup REST API endpoint. vRIBs listen at the vRIB HTTP prefix + /n/ where n is the index assigned to the vRIB
         // during configuration post-processing.
         let http_api_path = http_api_path.trim_end_matches('/').to_string();
         let (http_api_path, is_sub_resource) = match rib_type {
-            RibType::Physical => (Arc::new(format!("{http_api_path}/")), false),
-            RibType::Virtual(index) => (Arc::new(format!("{http_api_path}/{index}/")), true),
+            RibType::Physical | RibType::Virtual => (Arc::new(format!("{http_api_path}/")), false),
+            RibType::GeneratedVirtual(index) => {
+                (Arc::new(format!("{http_api_path}/{index}/")), true)
+            }
         };
         let query_limits = Arc::new(ArcSwap::from_pointee(query_limits));
         let http_processor = PrefixesApi::new(
@@ -298,9 +311,6 @@ impl RibUnitRunner {
         } else {
             component.register_http_resource(http_processor.clone());
         }
-
-        // Setup status reporting
-        let status_reporter = Arc::new(RibUnitStatusReporter::new(&unit_name, metrics.clone()));
 
         Self {
             gate,
@@ -374,7 +384,7 @@ impl RibUnitRunner {
                 Arc::new(ArcSwapOption::from_pointee(PhysicalRib::new(rib_keys)))
             }
 
-            RibType::Virtual(_) => Arc::new(ArcSwapOption::empty()),
+            RibType::Virtual | RibType::GeneratedVirtual(_) => Arc::new(ArcSwapOption::empty()),
         }
     }
 

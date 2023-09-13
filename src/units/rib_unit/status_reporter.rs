@@ -139,6 +139,10 @@ impl RibUnitStatusReporter {
     pub fn message_filtering_failure<T: Display>(&self, err: T) {
         sr_log!(error: self, "Filtering error: {}", err);
     }
+
+    pub fn roto_script_failure<T: Display>(&self, err: T) {
+        sr_log!(error: self, "Roto script error: {}", err);
+    }
 }
 
 impl UnitStatusReporter for RibUnitStatusReporter {}

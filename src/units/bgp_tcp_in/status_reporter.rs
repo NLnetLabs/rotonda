@@ -2,7 +2,7 @@ use std::fmt::Display;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{atomic::Ordering::Relaxed, Arc};
 
-use log::{debug, info, trace, warn};
+use log::{debug, info, warn};
 
 use crate::common::status_reporter::{
     sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter,
@@ -24,7 +24,7 @@ impl BgpTcpInStatusReporter {
     }
 
     pub fn listener_listening(&self, server_uri: &str) {
-        sr_log!(trace: self, "Listening for connections on: {}", server_uri);
+        sr_log!(info: self, "Listening for connections on: {}", server_uri);
         self.metrics.listener_bound_count.fetch_add(1, Relaxed);
     }
 

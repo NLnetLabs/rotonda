@@ -1,9 +1,9 @@
 //! Maintaining and outputting metrics.
 //!
 //! Metrics are operational data maintained by components that allow users to
-//! understand what their instance of RTRTR is doing. Because they are updated
-//! by components and printed by other components in different threads,
-//! management is a bit tricky.
+//! understand what their instance of Rotonda is doing. Because they are
+//! updated by components and printed by other components in different
+//! threads, management is a bit tricky.
 //!
 //! Typically, all metrics of a component are kept in a single object that is
 //! shared between that component and everything that could possibly output

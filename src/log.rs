@@ -162,7 +162,7 @@ impl LogConfig {
 
     /// Initialize logging.
     ///
-    /// All diagnostic output of RTRTR is done via logging, never to
+    /// All diagnostic output of Rotonda is done via logging, never to
     /// stderr directly. Thus, it is important to initalize logging before
     /// doing anything else that may result in such output. This function
     /// does exactly that. It sets a maximum log level of `warn`, leading

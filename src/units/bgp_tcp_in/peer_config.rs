@@ -81,7 +81,7 @@ impl OneOrManyAsns {
 }
 
 /// Ordered collection of `PeerConfig`s, keyed on `PrefixOrExact`.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct PeerConfigs(BTreeMap<PrefixOrExact, PeerConfig>);
 
 impl PeerConfigs {

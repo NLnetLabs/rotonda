@@ -1,0 +1,18 @@
+filter my-module {
+    define {
+        rx msg: Route;
+    }
+
+    term dummy {
+        match {
+            1 == 1;
+        }
+    }
+
+    apply {
+        filter match dummy matching {
+             return accept;
+        };
+        accept;
+    }
+}

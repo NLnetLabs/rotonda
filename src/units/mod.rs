@@ -47,8 +47,6 @@ pub enum Unit {
     #[serde(rename = "filter")]
     Filter(filter::unit::Filter),
 
-    // #[serde(rename = "rotoro-in")]
-    // Rotoro(rotoro::unit::RotoroIn),
     #[serde(rename = "bmp-in")]
     BmpIn(bmp_in::unit::BmpIn),
 

@@ -156,7 +156,7 @@ impl BmpInRunner {
                 router_states.clone(),
             ));
 
-            component.register_http_resource(processor.clone());
+            component.register_http_resource(processor.clone(), &http_api_path);
 
             (processor, router_info)
         };
@@ -383,6 +383,7 @@ impl BmpInRunner {
                 // Setup a REST API endpoint for querying information
                 // about this particular monitored router.
                 let processor = RouterInfoApi::new(
+                    self.component.read().await.http_resources().clone(),
                     self.http_api_path.clone(),
                     source_id.clone(),
                     self.status_reporter.metrics(),
@@ -397,7 +398,7 @@ impl BmpInRunner {
                 self.component
                     .write()
                     .await
-                    .register_http_resource(processor.clone());
+                    .register_sub_http_resource(processor.clone(), &self.http_api_path);
 
                 let updatable_router_info = Arc::make_mut(&mut this_router_info);
                 updatable_router_info.api_processor = Some(processor);

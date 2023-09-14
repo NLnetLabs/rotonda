@@ -39,6 +39,9 @@ pub struct Component {
     /// The component’s name.
     name: Arc<str>,
 
+    /// The component's type name.
+    type_name: &'static str,
+
     /// An HTTP client.
     http_client: Option<HttpClient>,
 
@@ -57,6 +60,7 @@ impl Default for Component {
     fn default() -> Self {
         Self {
             name: "MOCK".into(),
+            type_name: "MOCK",
             http_client: Default::default(),
             metrics: Default::default(),
             http_resources: Default::default(),
@@ -69,6 +73,7 @@ impl Component {
     /// Creates a new component from its, well, components.
     fn new(
         name: String,
+        type_name: &'static str,
         http_client: HttpClient,
         metrics: metrics::Collection,
         http_resources: http::Resources,
@@ -76,6 +81,7 @@ impl Component {
     ) -> Self {
         Component {
             name: name.into(),
+            type_name,
             http_client: Some(http_client),
             metrics: Some(metrics),
             http_resources,
@@ -88,9 +94,18 @@ impl Component {
         &self.name
     }
 
+    /// Returns the type name of the component.
+    pub fn type_name(&self) -> &'static str {
+        self.type_name
+    }
+
     /// Returns a reference to an HTTP Client.
     pub fn http_client(&self) -> &HttpClient {
         self.http_client.as_ref().unwrap()
+    }
+
+    pub fn http_resources(&self) -> &http::Resources {
+        &self.http_resources
     }
 
     pub fn roto_scripts(&self) -> RotoScripts {
@@ -105,14 +120,27 @@ impl Component {
     }
 
     /// Register an HTTP resources.
-    pub fn register_http_resource(&mut self, process: Arc<dyn http::ProcessRequest>) {
-        self.http_resources
-            .register(Arc::downgrade(&process), false)
+    pub fn register_http_resource(
+        &mut self,
+        process: Arc<dyn http::ProcessRequest>,
+        rel_base_url: &str,
+    ) {
+        self.http_resources.register(
+            Arc::downgrade(&process),
+            self.type_name,
+            rel_base_url,
+            false,
+        )
     }
 
     /// Register a sub HTTP resources.
-    pub fn register_sub_http_resource(&mut self, process: Arc<dyn http::ProcessRequest>) {
-        self.http_resources.register(Arc::downgrade(&process), true)
+    pub fn register_sub_http_resource(
+        &mut self,
+        process: Arc<dyn http::ProcessRequest>,
+        rel_base_url: &str,
+    ) {
+        self.http_resources
+            .register(Arc::downgrade(&process), self.type_name, rel_base_url, true)
     }
 }
 
@@ -421,7 +449,8 @@ impl Manager {
         let graph_svg_data = Arc::new(ArcSwap::from_pointee((Instant::now(), LinkReport::new())));
 
         #[cfg(feature = "config-graph")]
-        let graph_svg_processor = Self::mk_svg_http_processor(graph_svg_data.clone());
+        let (graph_svg_processor, rel_base_url) =
+            Self::mk_svg_http_processor(graph_svg_data.clone());
 
         #[allow(clippy::let_and_return)]
         let manager = Manager {
@@ -439,9 +468,12 @@ impl Manager {
 
         // Register the /status/graph endpoint.
         #[cfg(feature = "config-graph")]
-        manager
-            .http_resources
-            .register(Arc::downgrade(&manager.graph_svg_processor), false);
+        manager.http_resources.register(
+            Arc::downgrade(&manager.graph_svg_processor),
+            "manager",
+            rel_base_url,
+            true,
+        );
 
         manager
     }
@@ -841,6 +873,7 @@ impl Manager {
             // Spawn the new target
             let component = Component::new(
                 name.clone(),
+                new_target.type_name(),
                 self.http_client.clone(),
                 self.metrics.clone(),
                 self.http_resources.clone(),
@@ -901,6 +934,7 @@ impl Manager {
             // Spawn the new unit
             let component = Component::new(
                 name.clone(),
+                new_unit.type_name(),
                 self.http_client.clone(),
                 self.metrics.clone(),
                 self.http_resources.clone(),
@@ -1120,10 +1154,12 @@ impl Manager {
     #[cfg(feature = "config-graph")]
     fn mk_svg_http_processor(
         graph_svg_data: Arc<arc_swap::ArcSwapAny<Arc<(Instant, LinkReport)>>>,
-    ) -> Arc<dyn ProcessRequest> {
-        Arc::new(move |request: &Request<_>| {
+    ) -> (Arc<dyn ProcessRequest>, &'static str) {
+        const REL_BASE_URL: &str = "/status/graph";
+
+        let processor = Arc::new(move |request: &Request<_>| {
             let req_path = request.uri().decoded_path();
-            if request.method() == Method::GET && req_path == "/status/graph" {
+            if request.method() == Method::GET && req_path == REL_BASE_URL {
                 let response = Response::builder()
                     .status(hyper::StatusCode::OK)
                     .header("Content-Type", "image/svg+xml")
@@ -1134,7 +1170,9 @@ impl Manager {
             } else {
                 None
             }
-        })
+        });
+
+        (processor, REL_BASE_URL)
     }
 }
 

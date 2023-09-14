@@ -13,7 +13,7 @@ use crate::{
     tokio::TokioTaskMetrics,
     units::Unit,
 };
-use arc_swap::{ArcSwap, ArcSwapOption};
+use arc_swap::ArcSwap;
 use async_trait::async_trait;
 
 use chrono::Utc;
@@ -42,7 +42,7 @@ use uuid::Uuid;
 use super::{
     http::PrefixesApi,
     metrics::RibUnitMetrics,
-    rib::{PhysicalRib, PreHashedTypeValue, RibValue, RouteExtra},
+    rib::{HashedRib, PreHashedTypeValue, RibValue, RouteExtra},
     status_reporter::RibUnitStatusReporter,
 };
 use super::{rib::StoreInsertionReport, statistics::RibMergeUpdateStatistics};
@@ -204,7 +204,7 @@ pub struct RibUnitRunner {
     // A strong ref needs to be held to http_processor but not used otherwise the HTTP resource manager will discard its registration
     http_processor: Arc<PrefixesApi>,
     query_limits: Arc<ArcSwap<QueryLimits>>,
-    rib: Arc<ArcSwapOption<PhysicalRib>>,
+    rib: Arc<ArcSwap<HashedRib>>,
     rib_type: RibType,
     roto_script: RotoScript,
     pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
@@ -367,25 +367,21 @@ impl RibUnitRunner {
         }
     }
 
-    fn mk_rib(rib_type: RibType, rib_keys: &[RouteToken]) -> Arc<ArcSwapOption<PhysicalRib>> {
-        match rib_type {
-            RibType::Physical => {
-                //
-                // --- TODO: Create the Rib based on the Roto script Rib 'contains' type
-                //
-                // TODO: If the roto script changes we have to be able to detect if the record type changed, and if it
-                // did, recreate the store, dropping the current data, right?
-                //
-                // TOOD: And that also these steps should be done at reconfiguration time as well, not just at
-                // initialisation time (i.e. where we handle GateStatus::Reconfiguring below).
-                //
-                // --- End: Create the Rib based on the Roto script Rib 'contains' type
-                //
-                Arc::new(ArcSwapOption::from_pointee(PhysicalRib::new(rib_keys)))
-            }
-
-            RibType::Virtual | RibType::GeneratedVirtual(_) => Arc::new(ArcSwapOption::empty()),
-        }
+    fn mk_rib(rib_type: RibType, rib_keys: &[RouteToken]) -> Arc<ArcSwap<HashedRib>> {
+        //
+        // --- TODO: Create the Rib based on the Roto script Rib 'contains' type
+        //
+        // TODO: If the roto script changes we have to be able to detect if the record type changed, and if it
+        // did, recreate the store, dropping the current data, right?
+        //
+        // TOOD: And that also these steps should be done at reconfiguration time as well, not just at
+        // initialisation time (i.e. where we handle GateStatus::Reconfiguring below).
+        //
+        // --- End: Create the Rib based on the Roto script Rib 'contains' type
+        //
+        let physical = matches!(rib_type, RibType::Physical);
+        let rib = HashedRib::new(rib_keys, physical);
+        Arc::new(ArcSwap::from_pointee(rib))
     }
 
     #[cfg(test)]
@@ -394,8 +390,8 @@ impl RibUnitRunner {
     }
 
     #[cfg(test)]
-    pub(super) fn rib(&self) -> Option<Arc<PhysicalRib>> {
-        Option::clone(&self.rib.load())
+    pub(super) fn rib(&self) -> Arc<HashedRib> {
+        self.rib.load().clone()
     }
 
     pub async fn run(
@@ -455,10 +451,10 @@ impl RibUnitRunner {
                         GateStatus::Triggered { data: TriggerData::MatchPrefix( uuid, prefix, match_options ) } => {
                             assert!(matches!(arc_self.rib_type, RibType::Physical));
                             let res = {
-                                if let Some(rib) = arc_self.rib.load().as_ref() {
+                                if let Ok(store) = arc_self.rib.load().store() {
                                     let guard = &epoch::pin();
                                     trace!("Performing triggered query {uuid}");
-                                    Ok(rib.match_prefix(&prefix, &match_options, guard))
+                                    Ok(store.match_prefix(&prefix, &match_options, guard))
                                 } else {
                                     Err("Cannot query non-existent RIB".to_string())
                                 }
@@ -488,7 +484,7 @@ impl RibUnitRunner {
         F: Fn(
                 &Prefix,
                 TypeValue,
-                &PhysicalRib,
+                &HashedRib,
             )
                 -> Result<(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32), PrefixStoreError>
             + Copy
@@ -519,9 +515,9 @@ impl RibUnitRunner {
                     self.gate.update_data(filtered_update).await;
                 }
 
-                if let Some(rib) = self.rib.load().as_ref() {
+                if let Ok(store) = self.rib.load().store() {
                     self.status_reporter
-                        .unique_prefix_count_updated(rib.prefixes_count());
+                        .unique_prefix_count_updated(store.prefixes_count());
                 }
             }
 
@@ -579,7 +575,7 @@ impl RibUnitRunner {
         F: Fn(
                 &Prefix,
                 TypeValue,
-                &PhysicalRib,
+                &HashedRib,
             )
                 -> Result<(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32), PrefixStoreError>
             + Copy
@@ -603,14 +599,14 @@ impl RibUnitRunner {
         F: Fn(
                 &Prefix,
                 TypeValue,
-                &PhysicalRib,
+                &HashedRib,
             )
                 -> Result<(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32), PrefixStoreError>
             + Send
             + 'static,
     {
-        // Only physical RIBs have a store to insert into.
-        if let Some(rib) = self.rib.load().as_ref() {
+        let rib = self.rib.load();
+        if rib.is_physical() {
             let prefix: Option<Prefix> = match &payload.value {
                 TypeValue::Builtin(BuiltinTypeValue::Route(route)) => Some(route.prefix.into()),
 
@@ -628,7 +624,7 @@ impl RibUnitRunner {
                 let is_withdraw = payload.value.is_withdrawn();
 
                 let pre_insert = Utc::now();
-                match insert_fn(&prefix, payload.value.clone(), rib) {
+                match insert_fn(&prefix, payload.value.clone(), &rib) {
                     Ok((upsert, num_retries)) => {
                         let post_insert = Utc::now();
                         let insert_delay = (post_insert - pre_insert)
@@ -746,7 +742,7 @@ impl RibUnitRunner {
             let in_type_value: &TypeValue = route.deref();
             let payload = Payload::from(in_type_value.clone()); // TODO: Do we really want to clone here? Or pass the Arc on?
 
-            trace!("Reprocessing route");
+            trace!("Re-processing route");
 
             if let Ok(filtered_payloads) = Self::VM
                 .with(|vm| payload.filter(|value| roto_filter(vm, self.roto_script.clone(), value)))
@@ -756,8 +752,6 @@ impl RibUnitRunner {
                     let hash = self
                         .rib
                         .load()
-                        .as_ref()
-                        .unwrap()
                         .precompute_hash_code(&filtered_payload.value);
                     let hashed_value = PreHashedTypeValue::new(filtered_payload.value, hash);
                     new_values.insert(hashed_value.into());

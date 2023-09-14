@@ -25,22 +25,15 @@ use smallvec::SmallVec;
 
 // -------- PhysicalRib -----------------------------------------------------------------------------------------------
 
-pub struct PhysicalRib {
-    rib: Rib<RibValue>,
+pub struct HashedRib {
+    /// A prefix store, only physical RIBs have this.
+    rib: Option<Rib<RibValue>>,
 
     // This TypeDef should only ever be of variant `TypeDef::Rib`
     type_def_rib: TypeDef,
 }
 
-impl std::ops::Deref for PhysicalRib {
-    type Target = MultiThreadedStore<RibValue>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.rib.store
-    }
-}
-
-impl Default for PhysicalRib {
+impl Default for HashedRib {
     fn default() -> Self {
         // What is the key that uniquely identifies routes to be withdrawn when a BGP peering session is lost?
         //
@@ -64,29 +57,44 @@ impl Default for PhysicalRib {
         // TODO: Add support for 'router group', for BMP the "id" of the monitored router from which peers are
         // learned of (either the "tcp ip address:tcp port" or the BMP Initiation message sysName TLV), or for BGP
         // a string representation of the connected peers "tcp ip address:tcp port".
-        Self::new(&[RouteToken::PeerIp, RouteToken::PeerAsn, RouteToken::AsPath])
+        Self::new(
+            &[RouteToken::PeerIp, RouteToken::PeerAsn, RouteToken::AsPath],
+            true,
+        )
     }
 }
 
-impl PhysicalRib {
-    pub fn new(key_fields: &[RouteToken]) -> Self {
+impl HashedRib {
+    pub fn new(key_fields: &[RouteToken], physical: bool) -> Self {
         let key_fields = key_fields
             .iter()
             .map(|&v| vec![v as usize].into())
             .collect::<Vec<_>>();
-        Self::with_custom_type(TypeDef::Route, key_fields)
+        Self::with_custom_type(TypeDef::Route, key_fields, physical)
     }
 
-    pub fn with_custom_type(ty: TypeDef, ty_keys: Vec<SmallVec<[usize; 8]>>) -> Self {
-        let eviction_policy = StoreEvictionPolicy::UpdateStatusOnWithdraw;
-        let store = MultiThreadedStore::<RibValue>::new()
-            .unwrap()
-            .with_user_data(eviction_policy); // TODO: handle this Err;
-        let rib = Rib::new("rib-names-are-not-used-yet", ty.clone(), store);
+    pub fn with_custom_type(
+        ty: TypeDef,
+        ty_keys: Vec<SmallVec<[usize; 8]>>,
+        physical: bool,
+    ) -> Self {
+        let rib = match physical {
+            true => {
+                let store = MultiThreadedStore::<RibValue>::new()
+                    .unwrap() // TODO: handle this Err
+                    .with_user_data(StoreEvictionPolicy::UpdateStatusOnWithdraw);
+                let rib = Rib::new("rib-names-are-not-used-yet", ty.clone(), store);
+                Some(rib)
+            }
+            false => None,
+        };
         let rib_type_def: RibTypeDef = (Box::new(ty), Some(ty_keys));
         let type_def_rib = TypeDef::Rib(rib_type_def);
-
         Self { rib, type_def_rib }
+    }
+
+    pub fn is_physical(&self) -> bool {
+        self.rib.is_some()
     }
 
     pub fn precompute_hash_code(&self, val: &TypeValue) -> u64 {
@@ -95,15 +103,23 @@ impl PhysicalRib {
         state.finish()
     }
 
+    pub fn store(&self) -> Result<&MultiThreadedStore<RibValue>, PrefixStoreError> {
+        self.rib
+            .as_ref()
+            .map(|rib| &rib.store)
+            .ok_or(PrefixStoreError::StoreNotReadyError)
+    }
+
     pub fn insert<T: Into<TypeValue>>(
         &self,
         prefix: &Prefix,
         val: T,
     ) -> Result<(Upsert<StoreInsertionReport>, u32), PrefixStoreError> {
+        let store = self.store()?;
         let ty_val = val.into();
         let hash_code = self.precompute_hash_code(&ty_val);
         let rib_value = PreHashedTypeValue::new(ty_val, hash_code).into();
-        self.rib.store.insert(prefix, rib_value)
+        store.insert(prefix, rib_value)
     }
 }
 
@@ -608,7 +624,7 @@ mod tests {
 
     #[test]
     fn test_route_comparison_using_default_hash_key_values() {
-        let rib = PhysicalRib::default();
+        let rib = HashedRib::default();
         let prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32).unwrap();
         let peer_one = IpAddr::from_str("192.168.0.1").unwrap();
         let peer_two = IpAddr::from_str("192.168.0.2").unwrap();

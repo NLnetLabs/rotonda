@@ -1,6 +1,6 @@
 use std::{ops::Deref, str::FromStr, sync::Arc};
 
-use arc_swap::{ArcSwap, ArcSwapOption};
+use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use hyper::{Body, Method, Request, Response};
 use log::trace;
@@ -18,7 +18,7 @@ use crate::{
     units::{
         rib_unit::{
             http::types::{FilterKind, FilterOp},
-            rib::PhysicalRib,
+            rib::HashedRib,
             unit::{PendingVirtualRibQueryResults, QueryLimits},
         },
         RibType,
@@ -28,7 +28,7 @@ use crate::{
 use super::types::{Details, Filter, FilterMode, Filters, Includes, SortKey};
 
 pub struct PrefixesApi {
-    rib: Arc<ArcSwapOption<PhysicalRib>>,
+    rib: Arc<ArcSwap<HashedRib>>,
     http_api_path: Arc<String>,
     query_limits: Arc<ArcSwap<QueryLimits>>,
     rib_type: RibType,
@@ -38,7 +38,7 @@ pub struct PrefixesApi {
 
 impl PrefixesApi {
     pub fn new(
-        rib: Arc<ArcSwapOption<PhysicalRib>>,
+        rib: Arc<ArcSwap<HashedRib>>,
         http_api_path: Arc<String>,
         query_limits: Arc<ArcSwap<QueryLimits>>,
         rib_type: RibType,
@@ -138,18 +138,18 @@ impl PrefixesApi {
         let res = match self.rib_type {
             RibType::Physical => {
                 let guard = &epoch::pin();
-                if let Some(rib) = self.rib.load().as_ref() {
-                    rib.match_prefix(&prefix, &options, guard)
+                if let Ok(store) = self.rib.load().store() {
+                    store.match_prefix(&prefix, &options, guard)
                 } else {
                     let res = Response::builder()
                         .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
                         .header("Content-Type", "text/plain")
-                        .body("Cannot query non-existent RIB".to_string().into())
+                        .body("Cannot query non-existent RIB store".to_string().into())
                         .unwrap();
                     return Ok(res);
                 }
             }
-            RibType::GeneratedVirtual(_)|RibType::Virtual => {
+            RibType::GeneratedVirtual(_) | RibType::Virtual => {
                 trace!("Handling virtual RIB query");
                 // Generate a unique query ID to tie the request and later response together.
                 let uuid = Uuid::new_v4();

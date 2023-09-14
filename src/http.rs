@@ -15,7 +15,7 @@ use futures::pin_mut;
 use hyper::server::accept::Accept;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, StatusCode, Uri};
-use log::{debug, error, trace};
+use log::{error, info, trace};
 use percent_encoding::percent_decode;
 use serde::Deserialize;
 use serde_with::{serde_as, OneOrMany};
@@ -98,7 +98,7 @@ impl Server {
                 );
                 return Err(ExitError);
             }
-            debug!("HTTP server listening on {}", addr);
+            info!("Listening for HTTP connections on {}", addr);
             listeners.push(listener);
         }
 

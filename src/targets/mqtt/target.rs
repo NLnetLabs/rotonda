@@ -466,7 +466,7 @@ mod tests {
         addr::Prefix,
         asn::Asn,
         bgp::message::SessionConfig,
-        bmp::message::{Message as BmpMsg, MessageType, PeerType},
+        bmp::message::{Message as BmpMsg, PeerType},
     };
     use serde_json::json;
 

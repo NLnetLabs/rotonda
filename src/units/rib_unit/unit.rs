@@ -328,7 +328,7 @@ impl RibUnitRunner {
 
     #[cfg(test)]
     pub(crate) fn mock(roto_source_code: &str, rib_type: RibType) -> Self {
-        use crate::common::roto::{RotoScriptOrigin, RotoScripts};
+        use crate::common::roto::RotoScripts;
 
         let (gate, _) = Gate::new(0);
         let gate = gate.into();

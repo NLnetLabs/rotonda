@@ -19,6 +19,7 @@ use log::{error, info, trace};
 use percent_encoding::percent_decode;
 use serde::Deserialize;
 use serde_with::{serde_as, OneOrMany};
+use smallvec::{smallvec, SmallVec};
 use std::borrow::Cow;
 use std::convert::Infallible;
 use std::fmt::Display;

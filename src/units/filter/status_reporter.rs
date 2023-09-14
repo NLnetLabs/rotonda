@@ -3,7 +3,7 @@ use std::{
     sync::{atomic::Ordering, Arc},
 };
 
-use log::error;
+use log::{error, warn};
 
 use crate::{
     common::{
@@ -61,8 +61,8 @@ impl RotoFilterStatusReporter {
         }
     }
 
-    pub fn roto_script_failure<T: Display>(&self, err: T) {
-        sr_log!(error: self, "Roto script error: {}", err);
+    pub fn filter_load_failure<T: Display>(&self, err: T) {
+        sr_log!(warn: self, "Filter could not be loaded and will be ignored: {}", err);
     }
 }
 

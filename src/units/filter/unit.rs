@@ -68,7 +68,7 @@ impl RotoFilterRunner {
         let roto_script = {
             let roto_source_code = file_io
                 .read_to_string(&roto_path)
-                .map_err(|err| status_reporter.roto_script_failure(err))
+                .map_err(|err| status_reporter.filter_load_failure(err))
                 .unwrap_or_default();
 
             RotoScript::new(

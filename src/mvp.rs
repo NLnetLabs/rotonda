@@ -20,6 +20,10 @@ pub struct MvpConfig {
     #[serde(default)]
     pub proxy_destination_addr: Option<SocketAddr>,
 
+    /// Alternate HTTP listen address
+    #[serde(default)]
+    pub http_listen_addr: Option<SocketAddr>,
+
     /// Alternate BGP listen address
     #[serde(default)]
     pub bgp_listen_addr: Option<SocketAddr>,
@@ -40,6 +44,15 @@ impl MvpConfig {
                 .value_name("IP:PORT")
                 .conflicts_with("config")
                 .help("Proxy BMP connections to this address"),
+        )
+        .arg(
+            Arg::new("http-listen")
+                .long("http-listen")
+                .required(false)
+                .takes_value(true)
+                .value_name("IP:PORT")
+                .conflicts_with("config")
+                .help("Listen for HTTP connections on this address"),
         )
         .arg(
             Arg::new("bgp-listen")
@@ -71,6 +84,7 @@ impl MvpConfig {
     /// Applies the MVP override command line arguments to the config.
     fn apply_log_matches(&mut self, matches: &ArgMatches) -> Result<(), Failed> {
         self.proxy_destination_addr = Self::from_str_value_of(matches, "proxy-destination")?;
+        self.http_listen_addr = Self::from_str_value_of(matches, "http-listen")?;
         self.bgp_listen_addr = Self::from_str_value_of(matches, "bgp-listen")?;
         self.bmp_listen_addr = Self::from_str_value_of(matches, "bmp-listen")?;
         Ok(())

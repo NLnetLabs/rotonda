@@ -367,7 +367,12 @@ impl ConfigFile {
             }
         }
 
-        // Handle the special MVP case of allowing the BGP and BMP listen ports to be overridden on the command line.
+        // Handle the special MVP case of allowing listen ports to be overridden on the command line.
+        if let Some(addr) = mvp_overrides.http_listen_addr {
+            let Value::Array(ref mut listen_array) = root.get_mut("http_listen").unwrap() else { unreachable!() };
+            let Value::String(ref mut listen) = listen_array.get_mut(0).unwrap() else { unreachable!() };
+            *listen = addr.to_string();
+        }
         if let Some(addr) = mvp_overrides.bgp_listen_addr {
             let Value::Table(ref mut units) = root.get_mut("units").unwrap() else { unreachable!() };
             let Value::Table(ref mut bgp_in) = units.get_mut("bgp-in").unwrap() else { unreachable!() };

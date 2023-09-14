@@ -9,7 +9,7 @@ use hyper::{Body, Method, Request, Response};
 use tokio::sync::Mutex;
 
 use crate::{
-    http::{PercentDecodedPath, ProcessRequest},
+    http::{PercentDecodedPath, ProcessRequest, self},
     units::bmp_in::{
         metrics::BmpInMetrics,
         state_machine::{
@@ -22,6 +22,7 @@ use crate::{
 use super::response::Focus;
 
 pub struct RouterInfoApi {
+    http_resources: http::Resources,
     http_api_path: Arc<String>,
     source_id: SourceId,
     conn_metrics: Arc<BmpInMetrics>,
@@ -33,6 +34,7 @@ pub struct RouterInfoApi {
 
 impl RouterInfoApi {
     pub fn new(
+        http_resources: http::Resources,
         http_api_path: Arc<String>,
         source_id: SourceId,
         conn_metrics: Arc<BmpInMetrics>,
@@ -42,6 +44,7 @@ impl RouterInfoApi {
         state_machine: Weak<Mutex<Option<BmpState>>>,
     ) -> Self {
         Self {
+            http_resources,
             http_api_path,
             source_id,
             conn_metrics,
@@ -103,6 +106,7 @@ impl ProcessRequest for RouterInfoApi {
                     || router == sys_name
                 {
                     return Some(Self::build_response(
+                        self.http_resources.clone(),
                         format!("{}/{}", base_path, router),
                         self.source_id.clone(),
                         router_id,

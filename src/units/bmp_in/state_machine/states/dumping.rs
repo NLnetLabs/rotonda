@@ -897,10 +897,6 @@ mod tests {
     #[ignore = "to do"]
     fn end_of_rib_for_all_pending_peers() {}
 
-    #[test]
-    #[ignore = "to do"]
-    fn peer_down_withdraws_correct_routes() {}
-
     #[tokio::test]
     async fn route_monitoring_invalid_message() {
         // Given

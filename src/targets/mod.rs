@@ -20,9 +20,7 @@ mod bmp_tcp_out;
 #[cfg(feature = "mqtt")]
 mod mqtt;
 mod null;
-// mod rotoro;
 
-// pub use rotoro::{RotoroCoder, RotoroCommand, WireMsg};
 use tokio::sync::mpsc;
 
 //------------ Target --------------------------------------------------------
@@ -46,8 +44,6 @@ pub enum Target {
     #[serde(rename = "mqtt-out")]
     Mqtt(mqtt::target::Mqtt),
 
-    // #[serde(rename = "rotoro-out")]
-    // Rotoro(rotoro::Target),
     #[serde(rename = "null-out")]
     Null(null::Target),
 }
@@ -65,7 +61,6 @@ impl Target {
             Target::BmpTcpOut(target) => target.run(component, cmd, waitpoint).await,
             #[cfg(feature = "mqtt")]
             Target::Mqtt(target) => target.run(component, cmd, waitpoint).await,
-            // Target::Rotoro(target) => target.run(component, cmd).await,
             Target::Null(target) => target.run(component, cmd, waitpoint).await,
         }
     }

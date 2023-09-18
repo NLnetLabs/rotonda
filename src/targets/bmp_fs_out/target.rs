@@ -1,5 +1,11 @@
 use std::{
-    collections::HashMap, fmt::Display, fs::File, marker::PhantomData, ops::Deref, path::PathBuf,
+    collections::{hash_map::DefaultHasher, HashMap},
+    fmt::Display,
+    fs::File,
+    hash::{Hash, Hasher},
+    marker::PhantomData,
+    ops::Deref,
+    path::PathBuf,
     sync::Arc,
 };
 
@@ -9,12 +15,12 @@ use crate::{
     common::{
         file_io::{FileIo, TheFileIo},
         frim::FrimMap,
-        routecore_extra::{generate_alternate_config, mk_hash},
+        routecore_extra::generate_alternate_config,
         status_reporter::{AnyStatusReporter, TargetStatusReporter},
     },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
     manager::{Component, TargetCommand, WaitPoint},
-    payload::{Payload, Update, UpstreamStatus, SourceId},
+    payload::{Payload, SourceId, Update, UpstreamStatus},
 };
 
 use async_trait::async_trait;
@@ -459,7 +465,8 @@ impl<T: FileIo + Send + Sync + 'static> DirectUpdate for BmpFsOutRunner<T> {
 
             Update::Single(
                 payload @ Payload {
-                    value: TypeValue::Builtin(BuiltinTypeValue::BmpMessage(_)), ..
+                    value: TypeValue::Builtin(BuiltinTypeValue::BmpMessage(_)),
+                    ..
                 },
             ) => {
                 // Dispatch the message to the writer for this
@@ -477,7 +484,7 @@ impl<T: FileIo + Send + Sync + 'static> DirectUpdate for BmpFsOutRunner<T> {
 
             _ => {
                 self.status_reporter
-                    .input_mismatch("Update::Single(Payload::RawBmp)",update);
+                    .input_mismatch("Update::Single(Payload::RawBmp)", update);
             }
         }
     }
@@ -489,4 +496,10 @@ impl<T: FileIo + Send + Sync> std::fmt::Debug for BmpFsOutRunner<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TargetRunner").finish()
     }
+}
+
+pub fn mk_hash<T: Hash>(val: &T) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    val.hash(&mut hasher);
+    hasher.finish()
 }

@@ -88,7 +88,8 @@ where
             }
 
             Err(err) => {
-                error!("Internal error: Failed to issue internal BGP UPDATE to withdraw routes for a down peer. Reason: BGP UPDATE construction error: {err}");
+                error!("Unable to construct BGP UPDATE to withdraw routes announced by a peer: {err}");
+                return SmallVec::new();
             }
         }
     }

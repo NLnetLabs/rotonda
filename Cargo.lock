@@ -2133,7 +2133,7 @@ dependencies = [
 [[package]]
 name = "routecore"
 version = "0.4.0-dev"
-source = "git+https://github.com/NLnetLabs/routecore.git?branch=compose-messages-nlri-v2#5313943bde759331bcaa7b680cb76dd75b96d0f1"
+source = "git+https://github.com/NLnetLabs/routecore.git?branch=compose-messages-nlri-v2#dcc7f0d03d10e5a1bdb6b731bfeeabe3f0bc827e"
 dependencies = [
  "bytes",
  "chrono",

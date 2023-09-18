@@ -59,14 +59,14 @@ where
     // So, we must act as if we had received route withdrawals for
     // all of the routes previously received for this peer.
 
+    let possible_num_payloads = match prefixes.size_hint() {
+        (_, Some(upper_bound)) => upper_bound,
+        (lower_bound, None) => lower_bound,
+    };
+    let mut payloads = SmallVec::with_capacity(possible_num_payloads);
+
     // Loop over announced prefixes constructing BGP UPDATE PDUs with as many prefixes as can fit in one PDU at a
     // time until withdrawals have been generated for all announced prefixes.
-    let mut payloads = if let (_lower, Some(upper)) = prefixes.size_hint() {
-        SmallVec::with_capacity(upper)
-    } else {
-        SmallVec::new()
-    };
-
     let mut withdrawals_iter = prefixes.map(|p| Nlri::Unicast((*p).into())).peekable();
     while withdrawals_iter.peek().is_some() {
         match mk_bgp_update(&mut withdrawals_iter) {

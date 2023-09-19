@@ -4,9 +4,12 @@ use futures::{
     pin_mut,
 };
 use log::{error, info, warn};
-use rotonda::config::{Config, ConfigFile};
 use rotonda::log::ExitError;
 use rotonda::manager::Manager;
+use rotonda::{
+    common::file_io::TheFileIo,
+    config::{Config, ConfigFile},
+};
 use std::process::exit;
 use std::{env::current_dir, path::PathBuf};
 use tokio::{
@@ -42,7 +45,10 @@ fn run_with_cmdline_args() -> Result<(), ExitError> {
     runtime.block_on(handle_signals(config_path, manager))
 }
 
-async fn handle_signals(conf_path: Option<PathBuf>, mut manager: Manager) -> Result<(), ExitError> {
+async fn handle_signals(
+    conf_path: Option<PathBuf>,
+    mut manager: Manager<TheFileIo>,
+) -> Result<(), ExitError> {
     let mut hup_signals = signal(SignalKind::hangup()).map_err(|err| {
         error!("Fatal: cannot listen for HUP signals ({}). Aborting.", err);
         ExitError
@@ -107,7 +113,10 @@ async fn handle_signals(conf_path: Option<PathBuf>, mut manager: Manager) -> Res
     }
 }
 
-fn run_with_config(manager: &mut Manager, mut config: Config) -> Result<Runtime, ExitError> {
+fn run_with_config(
+    manager: &mut Manager<TheFileIo>,
+    mut config: Config,
+) -> Result<Runtime, ExitError> {
     let runtime = runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -162,6 +171,7 @@ mod tests {
     const MAX_TIME_TO_WAIT_SECS: u64 = 3;
     const METRIC_PREFIX: &str = "rotonda_";
 
+    // NOTE: this test is currently flakey, sometimes it fails at the end receiving more MQTT messages than expected.
     #[cfg(feature = "mqtt")]
     #[test]
     fn integration_test() {
@@ -173,6 +183,8 @@ mod tests {
         Config::init().unwrap();
 
         let base_config_toml = r#"
+        roto_scripts_path = "etc/"
+
         http_listen = "127.0.0.1:8080"
         log_target = "stderr"
         log_level = "trace"
@@ -191,7 +203,7 @@ mod tests {
         [units.filter]
         type = "filter"
         sources = ["bmp-tcp-in"]
-        roto_path = "etc/bmp-asn-filter.roto"
+        filter_name = "my-asn-filter"
 
         [units.routers]
         type = "bmp-in"
@@ -200,7 +212,7 @@ mod tests {
         [units.global-rib]
         type = "rib"
         sources = ["routers"]
-        roto_path = ["etc/filter.roto", "etc/filter.roto", "etc/filter.roto"]
+        filter_names = ["my-module", "my-module", "my-module"]
 
         [targets.dummy-null]
         type = "null-out"
@@ -555,7 +567,7 @@ mod tests {
 
             // Three additional MQTT messages are published, one for every time the etc/filter.roto script was
             // executed due to this line in the the application config file defined above:
-            //     roto_path = ["etc/filter.roto", "etc/filter.roto", "etc/filter.roto"]
+            //     filter_names = ["etc/filter.roto", "etc/filter.roto", "etc/filter.roto"]
             // This line created a physical RIB and two eastward virtual RIBs, each configured to use the same Roto
             // script. The physical RIB receives the route from our test BMP client and on success passes the route
             // down the pipeline to the first vRIB, which does the same and passes it to the next vRIB. At each stage

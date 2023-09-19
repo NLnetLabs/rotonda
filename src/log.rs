@@ -420,7 +420,7 @@ impl FromStr for LogFacility {
 
 //------------ LogFilter -----------------------------------------------------
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize, PartialEq)]
 #[serde(try_from = "String")]
 pub struct LogFilter(log::LevelFilter);
 

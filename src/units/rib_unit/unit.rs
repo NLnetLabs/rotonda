@@ -1,8 +1,7 @@
 use crate::{
     common::{
-        file_io::{FileIo, TheFileIo},
         frim::FrimMap,
-        roto::{roto_filter, RotoScript, RotoScriptOrigin, ThreadLocalVM},
+        roto::{FilterName, RotoScripts, ThreadLocalVM},
         status_reporter::{AnyStatusReporter, UnitStatusReporter},
     },
     comms::{
@@ -35,7 +34,7 @@ use rotonda_store::{
 use routecore::addr::Prefix;
 use serde::Deserialize;
 use smallvec::SmallVec;
-use std::{cell::RefCell, ops::Deref, path::PathBuf, str::FromStr, string::ToString, sync::Arc};
+use std::{cell::RefCell, ops::Deref, str::FromStr, string::ToString, sync::Arc};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -139,11 +138,12 @@ pub struct RibUnit {
     #[serde(default = "RibUnit::default_query_limits")]
     pub query_limits: QueryLimits,
 
-    /// Path to roto script to use
-    /// Note: Due to a special hack in `config.rs` the user can actually supply a collection of paths here. This unit
-    /// will only ever see the first of them if so specified, the rest will be used to spawn additional RibUnits
-    /// downstream from this one with `rib_type` set to `Virtual`.
-    pub roto_path: Option<PathBuf>,
+    /// The name of the Roto filter to execute.
+    /// Note: Due to a special hack in `config.rs` the user can actually supply a collection of fileter names here.
+    /// Additional RibUnit instances will be spawned for the additional filter names with each additional unit
+    /// wired up downstream from this one with its `rib_type` set to `Virtual`.
+    #[serde(default)]
+    pub filter_name: Option<FilterName>,
 
     /// What type of RIB is this?
     #[serde(default)]
@@ -170,11 +170,10 @@ impl RibUnit {
             component,
             self.http_api_path,
             self.query_limits,
-            self.roto_path,
+            self.filter_name.unwrap_or_default(),
             self.rib_type,
             &self.rib_keys,
             self.vrib_upstream,
-            TheFileIo::default(),
         )
         .run(self.sources, waitpoint)
         .await
@@ -199,6 +198,7 @@ impl RibUnit {
 }
 
 pub struct RibUnitRunner {
+    roto_scripts: RotoScripts,
     gate: Arc<Gate>,
     #[allow(dead_code)]
     // A strong ref needs to be held to http_processor but not used otherwise the HTTP resource manager will discard its registration
@@ -206,7 +206,7 @@ pub struct RibUnitRunner {
     query_limits: Arc<ArcSwap<QueryLimits>>,
     rib: Arc<ArcSwapOption<PhysicalRib>>,
     rib_type: RibType,
-    roto_script: RotoScript,
+    filter_name: Arc<ArcSwap<FilterName>>,
     pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
     rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
     status_reporter: Arc<RibUnitStatusReporter>,
@@ -249,11 +249,10 @@ impl RibUnitRunner {
         mut component: Component,
         http_api_path: String,
         query_limits: QueryLimits,
-        roto_path: Option<PathBuf>,
+        filter_name: FilterName,
         rib_type: RibType,
         rib_keys: &[RouteToken],
         vrib_upstream: Option<Link>,
-        file_io: TheFileIo,
     ) -> Self {
         let unit_name = component.name().clone();
         let gate = Arc::new(gate);
@@ -272,20 +271,7 @@ impl RibUnitRunner {
         let status_reporter = Arc::new(RibUnitStatusReporter::new(&unit_name, metrics.clone()));
 
         // Setup the Roto filter source
-        let roto_script = if let Some(roto_path) = roto_path {
-            let roto_source_code = file_io
-                .read_to_string(&roto_path)
-                .map_err(|err| status_reporter.filter_load_failure(err))
-                .unwrap_or_default();
-
-            RotoScript::new(
-                roto_source_code,
-                component.roto_scripts(),
-                RotoScriptOrigin::Path(roto_path),
-            )
-        } else {
-            RotoScript::default()
-        };
+        let filter_name = Arc::new(ArcSwap::from_pointee(filter_name));
 
         // Setup REST API endpoint. vRIBs listen at the vRIB HTTP prefix + /n/ where n is the index assigned to the vRIB
         // during configuration post-processing.
@@ -312,14 +298,17 @@ impl RibUnitRunner {
             component.register_http_resource(http_processor.clone());
         }
 
+        let roto_scripts = component.roto_scripts().clone();
+
         Self {
+            roto_scripts,
             gate,
             http_processor,
             query_limits,
             rib,
             rib_type,
             status_reporter,
-            roto_script,
+            filter_name,
             pending_vrib_query_results,
             process_metrics,
             rib_merge_update_stats,
@@ -327,21 +316,23 @@ impl RibUnitRunner {
     }
 
     #[cfg(test)]
-    pub(crate) fn mock(roto_source_code: &str, rib_type: RibType) -> Self {
-        use crate::common::roto::RotoScripts;
+    pub(crate) fn mock(roto_script: &str, rib_type: RibType) -> Self {
+        use crate::common::roto::RotoScriptOrigin;
 
+        let roto_scripts = RotoScripts::default();
+        if !roto_script.is_empty() {
+            roto_scripts
+                .add_or_update_script(RotoScriptOrigin::Named("mock".to_string()), roto_script)
+                .unwrap();
+        }
         let (gate, _) = Gate::new(0);
         let gate = gate.into();
         let query_limits = Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
         let rib_keys = RibUnit::default_rib_keys();
         let rib = Self::mk_rib(rib_type, &rib_keys);
         let status_reporter = RibUnitStatusReporter::default().into();
-        let roto_script = RotoScript::new(
-            roto_source_code,
-            RotoScripts::new(),
-            RotoScriptOrigin::Unknown,
-        );
         let pending_vrib_query_results = Arc::new(FrimMap::default());
+        let filter_name = Arc::new(ArcSwap::from_pointee(FilterName::default()));
         let process_metrics = Arc::new(TokioTaskMetrics::new());
         let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> = Default::default();
         let http_processor = Arc::new(PrefixesApi::new(
@@ -354,13 +345,14 @@ impl RibUnitRunner {
         ));
 
         Self {
+            roto_scripts,
             gate,
             http_processor,
             query_limits,
             rib,
             rib_type,
             status_reporter,
-            roto_script,
+            filter_name,
             pending_vrib_query_results,
             process_metrics,
             rib_merge_update_stats,
@@ -506,7 +498,9 @@ impl RibUnitRunner {
                 if let Some(filtered_update) = Self::VM
                     .with(|vm| {
                         payloads
-                            .filter(|value| roto_filter(vm, self.roto_script.clone(), value))
+                            .filter(|value| {
+                                self.roto_scripts.exec(vm, &self.filter_name.load(), value)
+                            })
                             .and_then(|filtered_payloads| {
                                 Ok(self.insert_payloads(filtered_payloads, insert_fn))
                             })
@@ -530,7 +524,9 @@ impl RibUnitRunner {
                 if let Some(filtered_update) = Self::VM
                     .with(|vm| {
                         payload
-                            .filter(|value| roto_filter(vm, self.roto_script.clone(), value))
+                            .filter(|value| {
+                                self.roto_scripts.exec(vm, &self.filter_name.load(), value)
+                            })
                             .and_then(|filtered_payloads| {
                                 Ok(self.insert_payloads(filtered_payloads, insert_fn))
                             })
@@ -748,9 +744,9 @@ impl RibUnitRunner {
 
             trace!("Reprocessing route");
 
-            if let Ok(filtered_payloads) = Self::VM
-                .with(|vm| payload.filter(|value| roto_filter(vm, self.roto_script.clone(), value)))
-            {
+            if let Ok(filtered_payloads) = Self::VM.with(|vm| {
+                payload.filter(|value| self.roto_scripts.exec(vm, &self.filter_name.load(), value))
+            }) {
                 for filtered_payload in filtered_payloads {
                     // Add this processed query result route into the new query result
                     let hash = self

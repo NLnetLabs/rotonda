@@ -3,13 +3,10 @@ use std::{
     sync::{atomic::Ordering, Arc},
 };
 
-use log::{error, warn};
+use log::error;
 
 use crate::{
-    common::{
-        roto::RotoError,
-        status_reporter::{sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter},
-    },
+    common::status_reporter::{sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter},
     payload::{FilterError, SourceId},
 };
 
@@ -51,18 +48,7 @@ impl RotoFilterStatusReporter {
     }
 
     pub fn message_filtering_failure(&self, err: &FilterError) {
-        // Avoid reporting the same error over and over again because the roto
-        // script is unusable.
-        if !matches!(
-            err,
-            FilterError::RotoScriptError(RotoError::Unusable { .. })
-        ) {
-            sr_log!(error: self, "Filtering error: {}", err);
-        }
-    }
-
-    pub fn filter_load_failure<T: Display>(&self, err: T) {
-        sr_log!(warn: self, "Filter could not be loaded and will be ignored: {}", err);
+        sr_log!(error: self, "Filtering error: {}", err);
     }
 }
 

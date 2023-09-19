@@ -5,6 +5,7 @@
 //! this module. This struct also provides the facilities to load the config
 //! file referred to in command line options.
 
+use crate::common::file_io::TheFileIo;
 use crate::http;
 use crate::log::{ExitError, Failed, LogConfig};
 use crate::manager::{Manager, TargetSet, UnitSet};
@@ -33,6 +34,9 @@ use toml::{Spanned, Value};
 /// referenced in the command line and, upon success, return the config.
 #[derive(Deserialize)]
 pub struct Config {
+    /// The location from which to load user defined Roto script files.
+    pub roto_scripts_path: Option<PathBuf>,
+
     /// The set of configured units.
     pub units: UnitSet,
 
@@ -101,7 +105,7 @@ impl Config {
     pub fn from_arg_matches(
         matches: &ArgMatches,
         cur_dir: &Path,
-        manager: &mut Manager,
+        manager: &mut Manager<TheFileIo>,
     ) -> Result<(Option<PathBuf>, Self), Failed> {
         let (conf_file, conf_path) = if let Some(conf_path) = matches.value_of("config") {
             let conf_path = cur_dir.join(conf_path);
@@ -118,7 +122,7 @@ impl Config {
             let bytes = include_bytes!("../etc/rotonda.conf").to_vec();
             let mut mvp_overrides = MvpConfig::default();
             mvp_overrides.update_with_arg_matches(matches)?;
-            let conf = ConfigFile::new(bytes, Source::default(), mvp_overrides);
+            let conf = ConfigFile::new(bytes, Source::default(), Some(mvp_overrides));
             (conf, None)
         };
         let mut conf = manager.load(&conf_file)?;
@@ -136,7 +140,7 @@ impl Config {
         Ok((conf_path, conf))
     }
 
-    pub fn from_config_file(conf_file: ConfigFile, manager: &mut Manager) -> Result<Self, Failed> {
+    pub fn from_config_file(conf_file: ConfigFile, manager: &mut Manager<TheFileIo>) -> Result<Self, Failed> {
         let res = manager.load(&conf_file)?;
         res.log.switch_logging(true)?;
         Ok(res)
@@ -314,13 +318,13 @@ pub struct ConfigFile {
 impl ConfigFile {
     /// Load a config file from disk.
     pub fn load(path: &impl AsRef<Path>) -> Result<Self, io::Error> {
-        fs::read(path).map(|bytes| Self::new(bytes, path.into(), MvpConfig::default()))
+        fs::read(path).map(|bytes| Self::new(bytes, path.into(), None))
     }
 
-    pub fn new(bytes: Vec<u8>, source: Source, mvp_overrides: MvpConfig) -> Self {
+    pub fn new(bytes: Vec<u8>, source: Source, mvp_overrides: Option<MvpConfig>) -> Self {
         // Handle the special case of a rib unit that is actually a physical rib unit and one or more virtual rib
         // units. Rather than have the user manually configure these separate rib units by hand in the config file,
-        // we expand any units with unit `type = "rib"` and `roto_path = [a, b, c, ...]` into multiple chained units
+        // we expand any units with unit `type = "rib"` and `filter_name = [a, b, c, ...]` into multiple chained units
         // each with a single roto script path.
         //
         // Why don't we do this as part of the normal config deserialization then unit/target/gate creation and
@@ -347,43 +351,45 @@ impl ConfigFile {
             }
         }
 
-        // Handle the special MVP case of allowing a user to complete or remove the proxy configuration based on the
-        // command line arguments supplied.
-        let Value::Table(ref mut root) = toml else { unreachable!() };
+        if let Some(mvp_overrides) = mvp_overrides {
+            // Handle the special MVP case of allowing a user to complete or remove the proxy configuration based on the
+            // command line arguments supplied.
+            let Value::Table(ref mut root) = toml else { unreachable!() };
 
-        match mvp_overrides.proxy_destination_addr {
-            Some(addr) => {
-                // Recofigure the dummy proxy definition to use the destination
-                let Value::Table(ref mut targets) = root.get_mut("targets").unwrap() else { unreachable!() };
-                let Value::Table(ref mut proxy) = targets.get_mut("proxy").unwrap() else { unreachable!() };
-                let Value::String(ref mut destination) = proxy.get_mut("destination").unwrap() else { unreachable!() };
-                *destination = addr.to_string();
+            match mvp_overrides.proxy_destination_addr {
+                Some(addr) => {
+                    // Recofigure the dummy proxy definition to use the destination
+                    let Value::Table(ref mut targets) = root.get_mut("targets").unwrap() else { unreachable!() };
+                    let Value::Table(ref mut proxy) = targets.get_mut("proxy").unwrap() else { unreachable!() };
+                    let Value::String(ref mut destination) = proxy.get_mut("destination").unwrap() else { unreachable!() };
+                    *destination = addr.to_string();
+                }
+
+                None => {
+                    // Remove the dummy proxy definition as the MVP user did not supply a destination to proxy to
+                    let Value::Table(ref mut targets) = root.get_mut("targets").unwrap() else { unreachable!() };
+                    targets.remove("proxy");
+                }
             }
 
-            None => {
-                // Remove the dummy proxy definition as the MVP user did not supply a destination to proxy to
-                let Value::Table(ref mut targets) = root.get_mut("targets").unwrap() else { unreachable!() };
-                targets.remove("proxy");
+            // Handle the special MVP case of allowing listen ports to be overridden on the command line.
+            if let Some(addr) = mvp_overrides.http_listen_addr {
+                let Value::Array(ref mut listen_array) = root.get_mut("http_listen").unwrap() else { unreachable!() };
+                let Value::String(ref mut listen) = listen_array.get_mut(0).unwrap() else { unreachable!() };
+                *listen = addr.to_string();
             }
-        }
-
-        // Handle the special MVP case of allowing listen ports to be overridden on the command line.
-        if let Some(addr) = mvp_overrides.http_listen_addr {
-            let Value::Array(ref mut listen_array) = root.get_mut("http_listen").unwrap() else { unreachable!() };
-            let Value::String(ref mut listen) = listen_array.get_mut(0).unwrap() else { unreachable!() };
-            *listen = addr.to_string();
-        }
-        if let Some(addr) = mvp_overrides.bgp_listen_addr {
-            let Value::Table(ref mut units) = root.get_mut("units").unwrap() else { unreachable!() };
-            let Value::Table(ref mut bgp_in) = units.get_mut("bgp-in").unwrap() else { unreachable!() };
-            let Value::String(ref mut listen) = bgp_in.get_mut("listen").unwrap() else { unreachable!() };
-            *listen = addr.to_string();
-        }
-        if let Some(addr) = mvp_overrides.bmp_listen_addr {
-            let Value::Table(ref mut units) = root.get_mut("units").unwrap() else { unreachable!() };
-            let Value::Table(ref mut bmp_tcp_in) = units.get_mut("bmp-tcp-in").unwrap() else { unreachable!() };
-            let Value::String(ref mut listen) = bmp_tcp_in.get_mut("listen").unwrap() else { unreachable!() };
-            *listen = addr.to_string();
+            if let Some(addr) = mvp_overrides.bgp_listen_addr {
+                let Value::Table(ref mut units) = root.get_mut("units").unwrap() else { unreachable!() };
+                let Value::Table(ref mut bgp_in) = units.get_mut("bgp-in").unwrap() else { unreachable!() };
+                let Value::String(ref mut listen) = bgp_in.get_mut("listen").unwrap() else { unreachable!() };
+                *listen = addr.to_string();
+            }
+            if let Some(addr) = mvp_overrides.bmp_listen_addr {
+                let Value::Table(ref mut units) = root.get_mut("units").unwrap() else { unreachable!() };
+                let Value::Table(ref mut bmp_tcp_in) = units.get_mut("bmp-tcp-in").unwrap() else { unreachable!() };
+                let Value::String(ref mut listen) = bmp_tcp_in.get_mut("listen").unwrap() else { unreachable!() };
+                *listen = addr.to_string();
+            }
         }
 
         let bytes = toml::to_vec(&toml).unwrap();
@@ -439,15 +445,15 @@ impl ConfigFile {
                     if Option::is_none(&rib_type)
                         || rib_type == Some(&Value::String("Physical".to_string()))
                     {
-                        if let Some(Value::Array(roto_paths)) = unit_table.get("roto_path") {
-                            if roto_paths.len() > 1 {
+                        if let Some(Value::Array(filter_names)) = unit_table.get("filter_names") {
+                            if filter_names.len() > 1 {
                                 // This is a shorthand definition of a physical RIB with one or more virtual RIBs.
                                 // Split them out, e.g.:
                                 //
                                 //     [unit.shorthand_unit]
                                 //     sources = ["a"]
                                 //     type = "rib"
-                                //     roto_paths = ["pRib.roto", "vRib1.roto", "vRib2.roto"]
+                                //     filter_names = ["pRib.roto", "vRib1.roto", "vRib2.roto"]
                                 //
                                 //     [unit.some_other_unit]
                                 //     sources = ["shorthand_unit"]
@@ -457,7 +463,7 @@ impl ConfigFile {
                                 //     [unit.shorthand_unit]
                                 //     sources = ["a"]
                                 //     type = "rib"
-                                //     roto_path = "pRib.roto"               # <-- changed
+                                //     filter_name = "pRib.roto"             # <-- changed
                                 //     rib_type = "Physical"                 # <-- new
                                 //
                                 //     [unit.some_other_unit]
@@ -466,7 +472,7 @@ impl ConfigFile {
                                 //     [unit.shorthand_unit-vRIB-0]          # new
                                 //     sources = ["shorthand_unit"]
                                 //     type = "rib"
-                                //     roto_path = "vRib1.roto"
+                                //     filter_name = "vRib1.roto"
                                 //     vrib_upstream = "shorthand_unit"
                                 //
                                 //     [unit.shorthand_unit-vRIB-0.rib_type] # new
@@ -475,13 +481,13 @@ impl ConfigFile {
                                 //     [unit.shorthand_unit-vRIB-1]
                                 //     sources = ["shorthand_unit-vRIB-0"]   # new
                                 //     type = "rib"
-                                //     roto_path = "vRib2.roto"
+                                //     filter_name = "vRib2.roto"
                                 //     vrib_upstream = "shorthand_unit"
                                 //
                                 //     [unit.shorthand_unit-vRIB-1.rib_type] # new
                                 //     GeneratedVirtual = 1
                                 let mut source = unit_name.clone();
-                                for (n, roto_path) in roto_paths[1..].iter().enumerate() {
+                                for (n, filter_name) in filter_names[1..].iter().enumerate() {
                                     let mut new_unit_table = unit_table.clone();
                                     let new_unit_name = format!("{unit_name}-vRIB-{n}");
                                     new_unit_table.insert(
@@ -489,7 +495,7 @@ impl ConfigFile {
                                         Value::Array(vec![Value::String(source.clone())]),
                                     );
                                     new_unit_table
-                                        .insert("roto_path".to_string(), roto_path.clone());
+                                        .insert("filter_name".to_string(), filter_name.clone());
                                     let mut rib_type_table = toml::map::Map::new();
                                     rib_type_table.insert(
                                         "GeneratedVirtual".to_string(),
@@ -512,7 +518,8 @@ impl ConfigFile {
 
                                 // Replace the multiple roto script paths used by the physical rib unit with just
                                 // the first roto script path.
-                                unit_table.insert("roto_path".to_string(), roto_paths[0].clone());
+                                unit_table
+                                    .insert("filter_name".to_string(), filter_names[0].clone());
 
                                 // This unit should no longer be the source of another unit, rather the last vRIB
                                 // that we added should replace it as source in all places it was used before. See

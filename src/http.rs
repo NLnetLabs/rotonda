@@ -64,6 +64,10 @@ impl Server {
         false
     }
 
+    pub fn listen(&self) -> &[SocketAddr] {
+        &self.listen
+    }
+
     /// Runs the server.
     ///
     /// The method will start a new server listening on the sockets provided

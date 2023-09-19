@@ -139,10 +139,6 @@ impl RibUnitStatusReporter {
     pub fn message_filtering_failure<T: Display>(&self, err: T) {
         sr_log!(error: self, "Filtering error: {}", err);
     }
-
-    pub fn filter_load_failure<T: Display>(&self, err: T) {
-        sr_log!(warn: self, "Filter could not be loaded and will be ignored: {}", err);
-    }
 }
 
 impl UnitStatusReporter for RibUnitStatusReporter {}

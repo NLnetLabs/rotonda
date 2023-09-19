@@ -1,6 +1,7 @@
 //! Controlling the entire operation.
 
-use crate::common::roto::RotoScripts;
+use crate::common::file_io::{FileIo, TheFileIo};
+use crate::common::roto::{FilterName, RotoScriptOrigin, RotoScripts};
 use crate::comms::{DirectLink, Gate, GateAgent, GraphStatus, Link, UPDATE_QUEUE_LEN};
 use crate::config::{Config, ConfigFile, Marked};
 use crate::log::Failed;
@@ -14,6 +15,7 @@ use non_empty_vec::NonEmpty;
 use reqwest::Client as HttpClient;
 use serde::Deserialize;
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::{Duration, Instant};
@@ -93,8 +95,8 @@ impl Component {
         self.http_client.as_ref().unwrap()
     }
 
-    pub fn roto_scripts(&self) -> RotoScripts {
-        self.roto_scripts.clone()
+    pub fn roto_scripts(&self) -> &RotoScripts {
+        &self.roto_scripts
     }
 
     /// Register a metrics source.
@@ -381,7 +383,7 @@ impl Display for TargetCommand {
 /// A manager for components and auxiliary services.
 ///
 /// Requires a running Tokio reactor that has been "entered" (see Tokio `Handle::enter()`).
-pub struct Manager {
+pub struct Manager<T: FileIo> {
     /// The currently active units represented by agents to their gates.
     running_units: HashMap<String, (Discriminant<Unit>, GateAgent)>,
 
@@ -407,15 +409,17 @@ pub struct Manager {
     graph_svg_processor: Arc<dyn ProcessRequest>,
 
     graph_svg_data: Arc<ArcSwap<(Instant, LinkReport)>>,
+
+    file_io: T,
 }
 
-impl Default for Manager {
+impl<T: FileIo> Default for Manager<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl Manager {
+impl<T: FileIo> Manager<T> {
     /// Creates a new manager.
     pub fn new() -> Self {
         let graph_svg_data = Arc::new(ArcSwap::from_pointee((Instant::now(), LinkReport::new())));
@@ -435,6 +439,7 @@ impl Manager {
             #[cfg(feature = "config-graph")]
             graph_svg_processor,
             graph_svg_data,
+            file_io: T::default(),
         };
 
         // Register the /status/graph endpoint.
@@ -444,6 +449,11 @@ impl Manager {
             .register(Arc::downgrade(&manager.graph_svg_processor), false);
 
         manager
+    }
+
+    #[cfg(test)]
+    pub fn set_file_io(&mut self, file_io: T) {
+        self.file_io = file_io;
     }
 
     /// Loads the given config file.
@@ -596,6 +606,25 @@ impl Manager {
     /// the load -> prepare -> spawn pipeline to be tested independently of the
     /// other phases.
     fn prepare(&mut self, config: &Config, file: &ConfigFile) -> Result<(), Failed> {
+        let mut errs = Vec::new();
+
+        // Load any .roto script files that exist (and unload any that no longer exist)
+        if let Err(err) = self.load_roto_scripts(config) {
+            errs.push(err);
+        }
+
+        // Drain the singleton static ROTO_FILTER_NAMEES contents to a local variable.
+        let config_filter_names = ROTO_FILTER_NAMES
+            .with(|filter_names| filter_names.replace(Some(Default::default())))
+            .unwrap();
+
+        // Check if all filter names exist in the loaded filter set
+        let loaded_filter_names = self.roto_scripts.get_filter_names();
+        let unknown_filter_names = config_filter_names.difference(&loaded_filter_names);
+        for filter_name in unknown_filter_names {
+            errs.push(format!("Roto filter name '{filter_name}' does not exist"));
+        }
+
         // Drain the singleton static GATES contents to a local variable.
         let gates = GATES
             .with(|gates| gates.replace(Some(Default::default())))
@@ -608,7 +637,6 @@ impl Manager {
         // links the corresponding Gate will be moved to the pending
         // collection to be handled later by spawn(). For unresolvable links
         // the corresponding Gate will be dropped here.
-        let mut errs = Vec::new();
         for (name, load) in gates {
             if let Some(gate) = load.gate {
                 if !config.units.units.contains_key(&name) {
@@ -636,6 +664,63 @@ impl Manager {
         // and the Config object contains the newly created but not yet
         // started Units and Targets. The caller should invoke spawn() to run
         // each Unit and Target and assign Gates to Units by name.
+
+        Ok(())
+    }
+
+    // TODO: Use Marked for returned error so that the location in the config file in question can be reported to the
+    // user.
+    // TODO: Make FilterName an actual type that on deserialization validates that the referenced filter actually
+    // exists in the set loaded into Manager.roto_scripts.
+    // TODO: Don't load .roto script files that are not referenced by any units or targets?
+    fn load_roto_scripts(&mut self, config: &Config) -> Result<(), String> {
+        let mut new_origins = HashSet::<RotoScriptOrigin>::new();
+
+        if let Some(roto_scripts_path) = &config.roto_scripts_path {
+            let entries = self.file_io.read_dir(roto_scripts_path).map_err(|err| {
+                format!(
+                    "Failed to read from directory '{}': {err}",
+                    roto_scripts_path.display()
+                )
+            })?;
+
+            for entry in entries {
+                let entry = entry.map_err(|err| {
+                    format!(
+                        "Failed to read from directory '{}': {err}",
+                        roto_scripts_path.display()
+                    )
+                })?;
+
+                if matches!(entry.path().extension(), Some(ext) if ext == OsStr::new("roto")) {
+                    let roto_script = self.file_io.read_to_string(entry.path()).map_err(|err| {
+                        format!(
+                            "Failed to load Roto script '{}': {err}",
+                            entry.path().display()
+                        )
+                    })?;
+
+                    let origin = RotoScriptOrigin::Path(entry.path());
+                    self.roto_scripts
+                        .add_or_update_script(origin.clone(), &roto_script)
+                        .map_err(|err| {
+                            format!(
+                                "Failed to load Roto script '{}': {err}",
+                                entry.path().display()
+                            )
+                        })?;
+
+                    new_origins.insert(origin);
+                }
+            }
+        }
+
+        // Unload any no longer existing scripts
+        let loaded_origins = self.roto_scripts.get_script_origins();
+        let excess_origins = loaded_origins.difference(&new_origins);
+        for origin in excess_origins {
+            self.roto_scripts.remove_script(origin);
+        }
 
         Ok(())
     }
@@ -1269,6 +1354,12 @@ pub struct UnitSet {
     units: HashMap<String, Unit>,
 }
 
+impl UnitSet {
+    pub fn units(&self) -> &HashMap<String, Unit> {
+        &self.units
+    }
+}
+
 impl From<HashMap<String, Unit>> for UnitSet {
     fn from(v: HashMap<String, Unit>) -> Self {
         Self { units: v }
@@ -1287,6 +1378,10 @@ pub struct TargetSet {
 impl TargetSet {
     pub fn new() -> Self {
         Default::default()
+    }
+
+    pub fn targets(&self) -> &HashMap<String, Target> {
+        &self.targets
     }
 }
 
@@ -1388,6 +1483,29 @@ fn get_queue_size_for_link(link_id: String) -> (String, usize) {
     (name, queue_size)
 }
 
+//------------ Loading FilterName --------------------------------------------
+
+thread_local!(
+    static ROTO_FILTER_NAMES: RefCell<Option<HashSet<FilterName>>> =
+        RefCell::new(Some(Default::default()))
+);
+
+/// Loads a filter name with the given name.
+///
+/// # Panics
+///
+/// This funtion panics if it is called outside of a run of
+/// [`Manager::load`].
+pub fn load_filter_name(filter_name: FilterName) -> FilterName {
+    ROTO_FILTER_NAMES.with(|filter_names| {
+        let mut filter_names = filter_names.borrow_mut();
+        let filter_names = filter_names.as_mut().unwrap();
+        let filter_name = FilterName::from(filter_name);
+        filter_names.insert(filter_name.clone());
+        filter_name
+    })
+}
+
 //------------ Tests ---------------------------------------------------------
 
 #[cfg(test)]
@@ -1425,6 +1543,30 @@ mod tests {
         // given a config with only a single target with a link to a missing unit
         let toml = r#"
         http_listen = []
+
+        [targets.null]
+        type = "null-out"
+        source = "missing-unit"
+        "#;
+        let config_file = mk_config_from_toml(toml);
+
+        // when loaded into the manager
+        let mut manager = init_manager();
+        let res = manager.load(&config_file);
+
+        // then it should fail
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn config_with_unresolvable_filter_names_should_fail() {
+        // given a config with only unit that takes a filter_name referring to a roto filter that has not been loaded
+        let toml = r#"
+        http_listen = []
+
+        [units.filter]
+        type = "filter"
+        filter_name = "i-dont-exist"
 
         [targets.null]
         type = "null-out"
@@ -2055,7 +2197,7 @@ mod tests {
         SPAWN_LOG.with(|log| log.borrow_mut().push(SpawnLogItem::new(name, action, cfg)));
     }
 
-    fn spawn(manager: &mut Manager, mut config: Config) {
+    fn spawn(manager: &mut Manager<TheFileIo>, mut config: Config) {
         clear_spawn_action_log();
         manager.spawn_internal(
             &mut config,
@@ -2068,8 +2210,9 @@ mod tests {
         );
     }
 
-    fn init_manager() -> Manager {
+    fn init_manager() -> Manager<TheFileIo> {
         GATES.with(|gates| gates.replace(Some(Default::default())));
+        ROTO_FILTER_NAMES.with(|filter_names| filter_names.replace(Some(Default::default())));
         Manager::new()
     }
 }

@@ -1,7 +1,6 @@
 use crate::{
     common::{
-        file_io::{FileIo, TheFileIo},
-        roto::{roto_filter, RotoScript, RotoScriptOrigin, ThreadLocalVM},
+        roto::{FilterName, RotoScripts, ThreadLocalVM},
         status_reporter::{AnyStatusReporter, UnitStatusReporter},
     },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus, Terminated},
@@ -9,12 +8,13 @@ use crate::{
     payload::{FilterError, Filterable, Update, UpstreamStatus},
     units::Unit,
 };
+use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use log::info;
 use non_empty_vec::NonEmpty;
-use roto::types::typedef::TypeDef;
+
 use serde::Deserialize;
-use std::{cell::RefCell, path::PathBuf, sync::Arc};
+use std::{cell::RefCell, sync::Arc};
 
 use super::{metrics::RotoFilterMetrics, status_reporter::RotoFilterStatusReporter};
 
@@ -23,8 +23,8 @@ pub struct Filter {
     /// The set of units to receive updates from.
     sources: NonEmpty<DirectLink>,
 
-    /// Path to roto script to use
-    roto_path: PathBuf,
+    /// The name of the Roto filter to execute.
+    filter_name: FilterName,
 }
 
 impl Filter {
@@ -34,27 +34,26 @@ impl Filter {
         gate: Gate,
         waitpoint: WaitPoint,
     ) -> Result<(), Terminated> {
-        RotoFilterRunner::new(gate, component, self.roto_path, TheFileIo::default())
+        RotoFilterRunner::new(gate, component, self.filter_name)
             .run(self.sources, waitpoint)
             .await
     }
 }
 
 struct RotoFilterRunner {
+    roto_scripts: RotoScripts,
     gate: Arc<Gate>,
     status_reporter: Arc<RotoFilterStatusReporter>,
-    roto_script: RotoScript,
-    file_io: TheFileIo,
+    filter_name: Arc<ArcSwap<FilterName>>,
 }
 
 impl RotoFilterRunner {
     thread_local!(
         #[allow(clippy::type_complexity)]
         static VM: ThreadLocalVM = RefCell::new(None);
-        static VM_RECORD_TYPE: RefCell<Option<TypeDef>> = RefCell::new(None);
     );
 
-    fn new(gate: Gate, mut component: Component, roto_path: PathBuf, file_io: TheFileIo) -> Self {
+    fn new(gate: Gate, mut component: Component, filter_name: FilterName) -> Self {
         let unit_name = component.name().clone();
         let gate = Arc::new(gate);
 
@@ -65,45 +64,34 @@ impl RotoFilterRunner {
         // Setup status reporting
         let status_reporter = Arc::new(RotoFilterStatusReporter::new(&unit_name, metrics));
 
-        let roto_script = {
-            let roto_source_code = file_io
-                .read_to_string(&roto_path)
-                .map_err(|err| status_reporter.filter_load_failure(err))
-                .unwrap_or_default();
-
-            RotoScript::new(
-                roto_source_code,
-                component.roto_scripts(),
-                RotoScriptOrigin::Path(roto_path),
-            )
-        };
+        let filter_name = Arc::new(ArcSwap::from_pointee(filter_name));
+        let roto_scripts = component.roto_scripts().clone();
 
         Self {
+            roto_scripts,
             gate,
             status_reporter,
-            roto_script,
-            file_io,
+            filter_name,
         }
     }
 
     #[cfg(test)]
-    fn mock(roto_source_code: &str) -> Self {
-        use crate::common::roto::RotoScripts;
+    fn mock(roto_script: &str, filter_name: &str) -> Self {
+        use crate::common::roto::RotoScriptOrigin;
 
+        let roto_scripts = RotoScripts::default();
+        roto_scripts
+            .add_or_update_script(RotoScriptOrigin::Named("mock".to_string()), roto_script)
+            .unwrap();
         let (gate, _) = Gate::new(0);
         let gate = gate.into();
         let status_reporter = RotoFilterStatusReporter::default().into();
-        let roto_script = RotoScript::new(
-            roto_source_code,
-            RotoScripts::new(),
-            RotoScriptOrigin::Unknown,
-        );
-        let file_io = TheFileIo::default();
+        let filter_name = Arc::new(ArcSwap::from_pointee(FilterName::from(filter_name)));
         Self {
+            roto_scripts,
             gate,
             status_reporter,
-            roto_script,
-            file_io,
+            filter_name,
         }
     }
 
@@ -137,19 +125,14 @@ impl RotoFilterRunner {
                             new_config:
                                 Unit::Filter(Filter {
                                     sources: new_sources,
-                                    roto_path: new_roto_path,
+                                    filter_name: new_filter_name,
                                 }),
                         } => {
                             // Replace the roto script with the new one
-                            info!(
-                                "Using roto script at path '{}'",
-                                new_roto_path.to_string_lossy()
-                            );
-                            let roto_source_code =
-                                arc_self.file_io.read_to_string(&new_roto_path).unwrap();
-                            arc_self
-                                .roto_script
-                                .update(roto_source_code, RotoScriptOrigin::Path(new_roto_path));
+                            if **arc_self.filter_name.load() != new_filter_name {
+                                info!("Using new roto filter '{new_filter_name}'");
+                                arc_self.filter_name.store(new_filter_name.into());
+                            }
 
                             // Notify that we have reconfigured ourselves
                             arc_self.status_reporter.reconfigured();
@@ -193,7 +176,9 @@ impl RotoFilterRunner {
                 if let Some(filtered_update) = Self::VM
                     .with(|vm| {
                         payload
-                            .filter(|value| roto_filter(vm, self.roto_script.clone(), value))
+                            .filter(|value| {
+                                self.roto_scripts.exec(vm, &self.filter_name.load(), value)
+                            })
                             .and_then(|mut filtered_payloads| match filtered_payloads.len() {
                                 0 => Ok(None),
                                 1 => Ok(Some(Update::Single(filtered_payloads.pop().unwrap()))),
@@ -213,7 +198,9 @@ impl RotoFilterRunner {
                 if let Some(filtered_update) = Self::VM
                     .with(|vm| {
                         payloads
-                            .filter(|value| roto_filter(vm, self.roto_script.clone(), value))
+                            .filter(|value| {
+                                self.roto_scripts.exec(vm, &self.filter_name.load(), value)
+                            })
                             .and_then(|mut filtered_payloads| match filtered_payloads.len() {
                                 0 => Ok(None),
                                 1 => Ok(Some(Update::Single(filtered_payloads.pop().unwrap()))),
@@ -473,7 +460,7 @@ mod tests {
     }
 
     async fn is_filtered(update: Update, roto_source_code: &str) -> bool {
-        let filter = RotoFilterRunner::mock(roto_source_code);
+        let filter = RotoFilterRunner::mock(roto_source_code, "my-module");
         filter.process_update(update).await.unwrap();
         let gate_metrics = filter.gate.metrics();
         let num_dropped_updates = gate_metrics.num_dropped_updates.load(Ordering::SeqCst);

@@ -78,11 +78,11 @@ impl MvpConfig {
     ///
     /// This should be called after the configuration file has been loaded.
     pub fn update_with_arg_matches(&mut self, matches: &ArgMatches) -> Result<(), Failed> {
-        self.apply_log_matches(matches)
+        self.apply_mvp_matches(matches)
     }
 
     /// Applies the MVP override command line arguments to the config.
-    fn apply_log_matches(&mut self, matches: &ArgMatches) -> Result<(), Failed> {
+    fn apply_mvp_matches(&mut self, matches: &ArgMatches) -> Result<(), Failed> {
         self.proxy_destination_addr = Self::from_str_value_of(matches, "proxy-destination")?;
         self.http_listen_addr = Self::from_str_value_of(matches, "http-listen")?;
         self.bgp_listen_addr = Self::from_str_value_of(matches, "bgp-listen")?;

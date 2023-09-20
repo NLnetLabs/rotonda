@@ -885,6 +885,6 @@ mod tests {
     }
 
     fn mk_config_from_toml(toml: &str) -> Result<RibUnit, toml::de::Error> {
-        toml::de::from_slice::<RibUnit>(toml.as_bytes())
+        toml::from_str::<RibUnit>(toml)
     }
 }

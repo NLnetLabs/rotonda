@@ -558,6 +558,6 @@ mod tests {
     // --- Test helpers ------------------------------------------------------
 
     fn mk_config_from_toml(toml: &str) -> Result<BmpIn, toml::de::Error> {
-        toml::de::from_slice::<BmpIn>(toml.as_bytes())
+        toml::from_str::<BmpIn>(toml)
     }
 }

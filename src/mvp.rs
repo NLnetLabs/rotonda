@@ -2,14 +2,14 @@
 //!
 //! This module provides facilities to override the embedded MVP configuration
 //! via [`MvpConfig`].
-use clap::{Arg, ArgMatches, Command};
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use log::error;
 use serde::Deserialize;
 use std::fmt;
 use std::net::SocketAddr;
 use std::str::FromStr;
 
-use crate::log::Failed;
+use crate::log::Terminate;
 
 //------------ MvpConfig -----------------------------------------------------
 
@@ -32,6 +32,10 @@ pub struct MvpConfig {
     #[serde(default)]
     pub bmp_listen_addr: Option<SocketAddr>,
 
+    /// Print finalised embedded config and exit
+    #[serde(default)]
+    pub print_config_and_exit: bool,
+
     /// Ignore missing Roto filters
     #[serde(default)]
     pub ignore_missing_filters: bool,
@@ -40,57 +44,63 @@ pub struct MvpConfig {
 impl MvpConfig {
     /// Configures a clap app with the options for logging.
     pub fn config_args(app: Command) -> Command {
-        app.arg(
-            Arg::new("proxy-destination")
-                .long("proxy-destination")
-                .required(false)
-                .takes_value(true)
-                .value_name("IP:PORT")
-                .conflicts_with("config")
-                .help("Proxy BMP connections to this address"),
-        )
-        .arg(
-            Arg::new("http-listen")
-                .long("http-listen")
-                .required(false)
-                .takes_value(true)
-                .value_name("IP:PORT")
-                .conflicts_with("config")
-                .help("Listen for HTTP connections on this address"),
-        )
-        .arg(
-            Arg::new("bgp-listen")
-                .long("bgp-listen")
-                .required(false)
-                .takes_value(true)
-                .value_name("IP:PORT")
-                .conflicts_with("config")
-                .help("Listen for BGP connections on this address"),
-        )
-        .arg(
-            Arg::new("bmp-listen")
-                .long("bmp-listen")
-                .required(false)
-                .takes_value(true)
-                .value_name("IP:PORT")
-                .conflicts_with("config")
-                .help("Listen for BMP connections on this address"),
-        )
+        app.next_help_heading("Options for use with the embedded config file")
+            .arg(
+                Arg::new("print-config-and-exit")
+                    .long("print-config-and-exit")
+                    .required(false)
+                    .action(ArgAction::SetTrue)
+                    .conflicts_with("config")
+                    .help("Prints the configuration that will be used and then exits"),
+            )
+            .arg(
+                Arg::new("http-listen")
+                    .long("http-listen")
+                    .required(false)
+                    .value_name("IP:PORT")
+                    .conflicts_with("config")
+                    .help("Listen for HTTP connections on this address"),
+            )
+            .arg(
+                Arg::new("bgp-listen")
+                    .long("bgp-listen")
+                    .required(false)
+                    .value_name("IP:PORT")
+                    .conflicts_with("config")
+                    .help("Listen for BGP connections on this address"),
+            )
+            .arg(
+                Arg::new("bmp-listen")
+                    .long("bmp-listen")
+                    .required(false)
+                    .value_name("IP:PORT")
+                    .conflicts_with("config")
+                    .help("Listen for BMP connections on this address"),
+            )
+            .arg(
+                Arg::new("proxy-destination")
+                    .long("proxy-destination")
+                    .required(false)
+                    .value_name("IP:PORT")
+                    .conflicts_with("config")
+                    .help("Proxy BMP connections to this address"),
+            )
     }
 
     /// Update the MVP override configuration from command line arguments.
     ///
     /// This should be called after the configuration file has been loaded.
-    pub fn update_with_arg_matches(&mut self, matches: &ArgMatches) -> Result<(), Failed> {
+    pub fn update_with_arg_matches(&mut self, matches: &ArgMatches) -> Result<(), Terminate> {
         self.apply_mvp_matches(matches)
     }
 
     /// Applies the MVP override command line arguments to the config.
-    fn apply_mvp_matches(&mut self, matches: &ArgMatches) -> Result<(), Failed> {
+    fn apply_mvp_matches(&mut self, matches: &ArgMatches) -> Result<(), Terminate> {
         self.proxy_destination_addr = Self::from_str_value_of(matches, "proxy-destination")?;
         self.http_listen_addr = Self::from_str_value_of(matches, "http-listen")?;
         self.bgp_listen_addr = Self::from_str_value_of(matches, "bgp-listen")?;
         self.bmp_listen_addr = Self::from_str_value_of(matches, "bmp-listen")?;
+        self.print_config_and_exit = matches.get_flag("print-config-and-exit");
 
         // If a config file is specified it should be valid, but if not specified then we are using an embedded MVP
         // config file that references Roto filters that the user may not have the required .roto files for, e.g.
@@ -106,17 +116,17 @@ impl MvpConfig {
     /// This helper function just changes error handling. Instead of returning
     /// the actual conversion error, it logs it as an invalid value for entry
     /// `key` and returns the standard error.
-    fn from_str_value_of<T>(matches: &ArgMatches, key: &str) -> Result<Option<T>, Failed>
+    fn from_str_value_of<T>(matches: &ArgMatches, key: &str) -> Result<Option<T>, Terminate>
     where
         T: FromStr,
         T::Err: fmt::Display,
     {
-        match matches.value_of(key) {
+        match matches.get_one::<String>(key) {
             Some(value) => match T::from_str(value) {
                 Ok(value) => Ok(Some(value)),
                 Err(err) => {
                     error!("Invalid value for {}: {}.", key, err);
-                    Err(Failed)
+                    Err(Terminate::error())
                 }
             },
             None => Ok(None),

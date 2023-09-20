@@ -7,13 +7,13 @@
 //! indicate that error information has been logged and a consumer can just
 //! return quietly.
 use crate::config::ConfigPath;
-use clap::{Arg, ArgMatches, Command};
+use clap::{Arg, ArgAction, ArgMatches, Command};
 use log::{error, LevelFilter, Log};
 use serde::Deserialize;
 use std::convert::TryFrom;
 use std::path::Path;
 use std::str::FromStr;
-use std::{fmt, io, process};
+use std::{fmt, io};
 
 //------------ LogConfig -----------------------------------------------------
 
@@ -45,36 +45,41 @@ pub struct LogConfig {
 impl LogConfig {
     /// Configures a clap app with the options for logging.
     pub fn config_args(app: Command) -> Command {
-        app.arg(
-            Arg::new("verbose")
-                .short('v')
-                .long("verbose")
-                .multiple_occurrences(true)
-                .help("Log more information, twice or thrice for even more"),
-        )
-        .arg(
-            Arg::new("quiet")
-                .short('q')
-                .long("quiet")
-                .multiple_occurrences(true)
-                .conflicts_with("verbose")
-                .help("Log less information, twice for no information"),
-        )
-        .arg(Arg::new("syslog").long("syslog").help("Log to syslog"))
-        .arg(
-            Arg::new("syslog-facility")
-                .long("syslog-facility")
-                .takes_value(true)
-                .default_value("daemon")
-                .help("Facility to use for syslog logging"),
-        )
-        .arg(
-            Arg::new("logfile")
-                .long("logfile")
-                .takes_value(true)
-                .value_name("PATH")
-                .help("Log to this file"),
-        )
+        app.next_help_heading("Options related to logging")
+            .arg(
+                Arg::new("quiet")
+                    .short('q')
+                    .long("quiet")
+                    .action(ArgAction::Count)
+                    .conflicts_with("verbose")
+                    .help(" Log less information, twice for no information"),
+            )
+            .arg(
+                Arg::new("verbose")
+                    .short('v')
+                    .long("verbose")
+                    .action(ArgAction::Count)
+                    .help(" Log more information, twice or thrice for even more"),
+            )
+            .arg(
+                Arg::new("logfile")
+                    .long("logfile")
+                    .value_name("PATH")
+                    .help(" Log to this file"),
+            )
+            .arg(
+                Arg::new("syslog")
+                    .long("syslog")
+                    .action(ArgAction::SetTrue)
+                    .help(" Log to syslog"),
+            )
+            .arg(
+                Arg::new("syslog-facility")
+                    .long("syslog-facility")
+                    .default_value("daemon")
+                    .value_name("FACILITY")
+                    .help(" Facility to use for syslog logging"),
+            )
     }
 
     /// Update the logging configuration from command line arguments.
@@ -84,12 +89,12 @@ impl LogConfig {
         &mut self,
         matches: &ArgMatches,
         cur_dir: &Path,
-    ) -> Result<(), Failed> {
+    ) -> Result<(), Terminate> {
         // log_level
-        for _ in 0..matches.occurrences_of("verbose") {
+        for _ in 0..matches.get_count("verbose") {
             self.log_level.increase()
         }
-        for _ in 0..matches.occurrences_of("quiet") {
+        for _ in 0..matches.get_count("quiet") {
             self.log_level.decrease()
         }
 
@@ -103,13 +108,13 @@ impl LogConfig {
     /// This is the Unix version that also considers syslog as a valid
     /// target.
     #[cfg(unix)]
-    fn apply_log_matches(&mut self, matches: &ArgMatches, cur_dir: &Path) -> Result<(), Failed> {
-        if matches.is_present("syslog") {
+    fn apply_log_matches(&mut self, matches: &ArgMatches, cur_dir: &Path) -> Result<(), Terminate> {
+        if matches.get_flag("syslog") {
             self.log_target = LogTarget::Syslog;
             if let Some(value) = Self::from_str_value_of(matches, "syslog-facility")? {
                 self.log_facility = value
             }
-        } else if let Some(file) = matches.value_of("logfile") {
+        } else if let Some(file) = matches.get_one::<String>("logfile") {
             if file == "-" {
                 self.log_target = LogTarget::Stderr
             } else {
@@ -125,7 +130,7 @@ impl LogConfig {
     /// This is the non-Unix version that does not use syslog.
     #[cfg(not(unix))]
     #[allow(clippy::unnecessary_wraps)]
-    fn apply_log_matches(&mut self, matches: &ArgMatches, cur_dir: &Path) -> Result<(), Failed> {
+    fn apply_log_matches(&mut self, matches: &ArgMatches, cur_dir: &Path) -> Result<(), Terminate> {
         if let Some(file) = matches.value_of("logfile") {
             if file == "-" {
                 self.log_target = LogTarget::Stderr
@@ -143,17 +148,17 @@ impl LogConfig {
     /// the actual conversion error, it logs it as an invalid value for entry
     /// `key` and returns the standard error.
     #[allow(dead_code)] // unused on Windows
-    fn from_str_value_of<T>(matches: &ArgMatches, key: &str) -> Result<Option<T>, Failed>
+    fn from_str_value_of<T>(matches: &ArgMatches, key: &str) -> Result<Option<T>, Terminate>
     where
         T: FromStr,
         T::Err: fmt::Display,
     {
-        match matches.value_of(key) {
+        match matches.get_one::<String>(key) {
             Some(value) => match T::from_str(value) {
                 Ok(value) => Ok(Some(value)),
                 Err(err) => {
                     error!("Invalid value for {}: {}.", key, err);
-                    Err(Failed)
+                    Err(Terminate::error())
                 }
             },
             None => Ok(None),
@@ -168,11 +173,11 @@ impl LogConfig {
     /// does exactly that. It sets a maximum log level of `warn`, leading
     /// only printing important information, and directs all logging to
     /// stderr.
-    pub fn init_logging() -> Result<(), ExitError> {
+    pub fn init_logging() -> Result<(), Terminate> {
         log::set_max_level(log::LevelFilter::Warn);
         if let Err(err) = log_reroute::init() {
             eprintln!("Failed to initialize logger: {}.", err);
-            return Err(ExitError);
+            Err(ExitError)?;
         };
         let dispatch = fern::Dispatch::new()
             .level(log::LevelFilter::Error)
@@ -188,7 +193,7 @@ impl LogConfig {
     /// Once the configuration has been successfully loaded, logging should
     /// be switched to whatever the user asked for via this method.
     #[allow(unused_variables)] // for cfg(not(unix))
-    pub fn switch_logging(&self, daemon: bool) -> Result<(), Failed> {
+    pub fn switch_logging(&self, daemon: bool) -> Result<(), Terminate> {
         let logger = match self.log_target {
             #[cfg(unix)]
             LogTarget::Default => {
@@ -212,7 +217,7 @@ impl LogConfig {
 
     /// Creates a syslog logger and configures correctly.
     #[cfg(unix)]
-    fn syslog_logger(&self) -> Result<Box<dyn Log>, Failed> {
+    fn syslog_logger(&self) -> Result<Box<dyn Log>, Terminate> {
         let mut formatter = syslog::Formatter3164 {
             facility: self.log_facility.0,
             ..Default::default()
@@ -228,7 +233,7 @@ impl LogConfig {
             Ok(logger) => Ok(Box::new(syslog::BasicLogger::new(logger))),
             Err(err) => {
                 error!("Cannot connect to syslog: {}", err);
-                Err(Failed)
+                Err(Terminate::error())
             }
         }
     }
@@ -241,7 +246,7 @@ impl LogConfig {
     }
 
     /// Creates a file logger using the file provided by `path`.
-    fn file_logger(&self) -> Result<Box<dyn Log>, Failed> {
+    fn file_logger(&self) -> Result<Box<dyn Log>, Terminate> {
         let file = match fern::log_file(&self.log_file) {
             Ok(file) => file,
             Err(err) => {
@@ -250,7 +255,7 @@ impl LogConfig {
                     self.log_file.display(),
                     err
                 );
-                return Err(Failed);
+                return Err(Terminate::error());
             }
         };
         Ok(self.fern_logger(true).chain(file).into_log().1)
@@ -466,14 +471,44 @@ impl TryFrom<String> for LogFilter {
     }
 }
 
-//------------ Failed --------------------------------------------------------
+//------------ Terminate -----------------------------------------------------
 
-/// An error happened that has been logged.
+#[derive(Clone, Copy, Debug)]
+pub enum TerminateReason {
+    Failed,
+    Normal,
+}
+
+/// Something happened that means the application should terminate.
 ///
 /// This is a marker type that can be used in results to indicate that if an
 /// error happend, it has been logged and doesn’t need further treatment.
+///
+/// It can also be used to trigger abort for other reasons, e.g. orderly exit
+/// on demand.
 #[derive(Clone, Copy, Debug)]
-pub struct Failed;
+pub struct Terminate(TerminateReason);
+
+impl Terminate {
+    pub fn error() -> Self {
+        Self(TerminateReason::Failed)
+    }
+
+    pub fn normal() -> Self {
+        Self(TerminateReason::Normal)
+    }
+
+    pub fn reason(&self) -> TerminateReason {
+        self.0
+    }
+
+    pub fn exit_code(&self) -> i32 {
+        match self.reason() {
+            TerminateReason::Failed => 1,
+            TerminateReason::Normal => 0,
+        }
+    }
+}
 
 //------------ ExitError -----------------------------------------------------
 
@@ -481,15 +516,17 @@ pub struct Failed;
 #[derive(Debug)]
 pub struct ExitError;
 
-impl ExitError {
-    /// Exits the process.
-    pub fn exit(self) -> ! {
-        process::exit(1)
+impl From<Terminate> for ExitError {
+    fn from(terminate: Terminate) -> ExitError {
+        match terminate.reason() {
+            TerminateReason::Failed => ExitError,
+            TerminateReason::Normal => unreachable!(),
+        }
     }
 }
 
-impl From<Failed> for ExitError {
-    fn from(_: Failed) -> ExitError {
-        ExitError
+impl From<ExitError> for Terminate {
+    fn from(_: ExitError) -> Self {
+        Terminate::error()
     }
 }

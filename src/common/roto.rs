@@ -74,8 +74,10 @@ impl<'a, 'de: 'a> Deserialize<'de> for FilterName {
     where
         D: serde::Deserializer<'de>,
     {
-        let s = <&'a str>::deserialize(deserializer)?;
-        let filter_name = FilterName(ShortString::from(s));
+        // This has to be a String, even though we pass a &str to ShortString::from(), because of the way that newer
+        // versions of the toml crate work. See: https://github.com/toml-rs/toml/issues/597
+        let s: String = Deserialize::deserialize(deserializer)?;
+        let filter_name = FilterName(ShortString::from(s.as_str()));
         Ok(manager::load_filter_name(filter_name))
     }
 }
@@ -103,7 +105,43 @@ pub type ThreadLocalVM = RefCell<Option<StatefulVM>>;
 //------------ RotoError ----------------------------------------------------------------------------------------------
 
 #[derive(Debug)]
+pub enum LoadErrorKind {
+    ReadDirError,
+    ReadDirEntryError,
+    ReadFileError,
+}
+
+impl std::fmt::Display for LoadErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LoadErrorKind::ReadDirError => f.write_str("read directory"),
+            LoadErrorKind::ReadDirEntryError => f.write_str("read directory entry"),
+            LoadErrorKind::ReadFileError => f.write_str("read file"),
+        }
+    }
+}
+
+impl LoadErrorKind {
+    pub fn read_dir_err<T: Into<PathBuf>>(path: T, err: std::io::Error) -> RotoError {
+        RotoError::load_err(path, LoadErrorKind::ReadDirError, err)
+    }
+
+    pub fn read_dir_entry_err<T: Into<PathBuf>>(path: T, err: std::io::Error) -> RotoError {
+        RotoError::load_err(path, LoadErrorKind::ReadDirEntryError, err)
+    }
+
+    pub fn read_file_err<T: Into<PathBuf>>(path: T, err: std::io::Error) -> RotoError {
+        RotoError::load_err(path, LoadErrorKind::ReadFileError, err)
+    }
+}
+
+#[derive(Debug)]
 pub enum RotoError {
+    LoadError {
+        kind: LoadErrorKind,
+        path: PathBuf,
+        err: std::io::Error,
+    },
     CompileError {
         origin: RotoScriptOrigin,
         err: CompileError,
@@ -129,6 +167,9 @@ impl Display for RotoError {
     #[rustfmt::skip]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            RotoError::LoadError { kind, path, err } => {
+                f.write_fmt(format_args!("{kind} error for path {}: {err}", path.display()))
+            }
             RotoError::CompileError { origin, err } => {
                 f.write_fmt(format_args!("Compilation error for Roto script {origin}: {err}. Note: run with `ROTONDA_ROTO_LOG=1` environment variable to enable trace level Roto logging."))
             }
@@ -156,7 +197,7 @@ impl RotoError {
         }
     }
 
-    fn build_err(filter_name: &FilterName, err: VmError) -> RotoError {
+    pub fn build_err(filter_name: &FilterName, err: VmError) -> RotoError {
         Self::BuildError {
             filter_name: filter_name.clone(),
             err,
@@ -169,15 +210,34 @@ impl RotoError {
         }
     }
 
-    fn exec_err(filter_name: &FilterName, err: VmError) -> RotoError {
+    pub fn exec_err(filter_name: &FilterName, err: VmError) -> RotoError {
         Self::ExecError {
             filter_name: filter_name.clone(),
             err,
         }
     }
-    fn post_exec_err(filter_name: &FilterName, err: &'static str) -> RotoError {
+
+    pub fn post_exec_err(filter_name: &FilterName, err: &'static str) -> RotoError {
         Self::PostExecError {
             filter_name: filter_name.clone(),
+            err,
+        }
+    }
+
+    pub fn load_err<T: Into<PathBuf>>(
+        path: T,
+        kind: LoadErrorKind,
+        err: std::io::Error,
+    ) -> RotoError {
+        let mut path: PathBuf = path.into();
+        if path.is_relative() {
+            if let Ok(cwd) = std::env::current_dir() {
+                path = cwd.join(path);
+            }
+        }
+        Self::LoadError {
+            kind,
+            path: path.into(),
             err,
         }
     }

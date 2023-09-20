@@ -15,7 +15,7 @@ rust-version = "1.65"
 [dependencies]
 arc-swap           = "^1.5"
 chrono             = "^0.4"
-clap               = { version = "^3.1", features = ["cargo"] }
+clap               = { version = "^4.4", features = ["cargo"] }
 crossbeam-utils    = "^0.8"
 fern               = "^0.6"
 futures            = "^0.3"
@@ -32,7 +32,7 @@ serde              = { version = "^1.0", features = ["derive", "rc"] }
 serde_json         = { version = "^1.0", features = ["preserve_order"] }
 slab               = "^0.4"
 tokio              = { version = "^1.23", features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "test-util", "time", "tracing"] }
-toml               = "^0.5"
+toml               = "^0.8"
 url                = { version = "^2.2", features = ["serde"] }
 
 # Dependencies specifically used by the BGP/BMP related modifications to the original RTRTR base

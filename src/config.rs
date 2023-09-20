@@ -6,11 +6,11 @@
 //! file referred to in command line options.
 
 use crate::http;
-use crate::log::{ExitError, Failed, LogConfig};
+use crate::log::{LogConfig, Terminate};
 use crate::manager::{Manager, TargetSet, UnitSet};
 use crate::mvp::MvpConfig;
 use clap::{Arg, ArgMatches, Command};
-use log::{error, trace};
+use log::{error, info, trace};
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -59,7 +59,7 @@ impl Config {
     /// Initialises everything.
     ///
     /// This function should be called first thing.
-    pub fn init() -> Result<(), ExitError> {
+    pub fn init() -> Result<(), Terminate> {
         LogConfig::init_logging()
     }
 
@@ -71,21 +71,21 @@ impl Config {
         if let Some(ref base_dir) = base_dir {
             ConfigPath::set_base_path(base_dir.as_ref().into())
         }
-        let res = toml::de::from_slice(slice);
+        let config_str = String::from_utf8_lossy(slice);
+        let res = toml::from_str(&config_str);
         ConfigPath::clear_base_path();
         res
     }
 
     /// Configures a clap app with the arguments to load the configuration.
     pub fn config_args(app: Command) -> Command {
-        let app = app.arg(
+        let app = app.next_line_help(true).arg(
             Arg::new("config")
                 .short('c')
                 .long("config")
                 .required(false)
-                .takes_value(true)
                 .value_name("PATH")
-                .help("Read base configuration from this file"),
+                .help("Config file to use [default: embedded]"),
         );
         let app = LogConfig::config_args(app);
         MvpConfig::config_args(app)
@@ -105,8 +105,8 @@ impl Config {
         args: &ArgMatches,
         cur_dir: &Path,
         manager: &mut Manager,
-    ) -> Result<(Source, Self), Failed> {
-        let config_file = match args.value_of("config") {
+    ) -> Result<(Source, Self), Terminate> {
+        let config_file = match args.get_one::<String>("config") {
             Some(conf_path_arg) => {
                 // --config command line argument supplied, load and use the config file
                 let config_path = cur_dir.join(conf_path_arg);
@@ -118,7 +118,7 @@ impl Config {
                         config_path.display(),
                         err
                     );
-                    Failed
+                    Terminate::error()
                 })?
             }
 
@@ -144,7 +144,7 @@ impl Config {
     pub fn from_config_file(
         config_file: ConfigFile,
         manager: &mut Manager,
-    ) -> Result<(Source, Self), Failed> {
+    ) -> Result<(Source, Self), Terminate> {
         manager.load(&config_file)?.finalise(config_file, manager)
     }
 
@@ -152,14 +152,16 @@ impl Config {
         self,
         config_file: ConfigFile,
         manager: &mut Manager,
-    ) -> Result<(Source, Self), Failed> {
+    ) -> Result<(Source, Self), Terminate> {
         self.log.switch_logging(true)?;
 
-        if log::log_enabled!(log::Level::Trace) {
-            trace!(
-                "Post-processed config TOML:\n{}",
-                String::from_utf8_lossy(&config_file.bytes)
-            );
+        if self.mvp_overrides.print_config_and_exit {
+            info!("The --print-config-and-exit command line argument was used. After processing the config file looks like this:");
+            info!("{}", config_file.to_string());
+            return Err(Terminate::normal());
+        } else if log::log_enabled!(log::Level::Trace) {
+            trace!("After processing the config file looks like this:");
+            trace!("{}", config_file.to_string());
         }
 
         manager.prepare(&self, &config_file)?;
@@ -289,7 +291,7 @@ impl<T> From<T> for Marked<T> {
 impl<T> From<Spanned<T>> for Marked<T> {
     fn from(src: Spanned<T>) -> Marked<T> {
         Marked {
-            index: src.start(),
+            index: src.span().start,
             value: src.into_inner(),
             source: None,
             pos: None,
@@ -371,7 +373,8 @@ impl ConfigFile {
         // compile time, it will just cease to work as expected at runtime. The "integration test" in main.rs exercises
         // this expansion capability to give at least some verification that it is not obviously broken, but it's not
         // enough.
-        let mut toml: Value = toml::de::from_slice(&bytes).unwrap();
+        let config_str = String::from_utf8_lossy(&bytes);
+        let mut toml: Value = toml::de::from_str(&config_str).unwrap();
         let mut source_remappings = None;
 
         if let Some(Value::Table(units)) = toml.get_mut("units") {
@@ -425,17 +428,18 @@ impl ConfigFile {
             }
         }
 
-        let bytes = toml::to_vec(&toml).unwrap();
+        let config_str = toml::to_string(&toml).unwrap();
 
         ConfigFile {
             source,
-            line_starts: bytes
-                .split(|ch| *ch == b'\n')
-                .fold(vec![0], |mut starts, slice| {
+            line_starts: config_str.as_bytes().split(|ch| *ch == b'\n').fold(
+                vec![0],
+                |mut starts, slice| {
                     starts.push(starts.last().unwrap() + slice.len());
                     starts
-                }),
-            bytes,
+                },
+            ),
+            bytes: config_str.as_bytes().to_vec(),
         }
     }
 
@@ -451,6 +455,10 @@ impl ConfigFile {
         &self.bytes
     }
 
+    pub fn to_string(&self) -> borrow::Cow<'_, str> {
+        String::from_utf8_lossy(&self.bytes)
+    }
+
     fn resolve_pos(&self, pos: usize) -> LineCol {
         let line = self
             .line_starts
@@ -463,9 +471,7 @@ impl ConfigFile {
         LineCol { line, col }
     }
 
-    fn expand_shorthand_vribs(
-        units: &mut toml::value::Map<String, Value>,
-    ) -> HashMap<String, String> {
+    fn expand_shorthand_vribs(units: &mut toml::Table) -> HashMap<String, String> {
         let mut extra_units = HashMap::<String, Value>::new();
         let mut source_remappings = HashMap::<String, String>::new();
 
@@ -573,10 +579,7 @@ impl ConfigFile {
         source_remappings
     }
 
-    fn remap_sources(
-        units: &mut toml::value::Map<String, toml::Value>,
-        source_remappings: &HashMap<String, String>,
-    ) {
+    fn remap_sources(units: &mut toml::Table, source_remappings: &HashMap<String, String>) {
         for (_unit_name, unit_table_value) in units.iter_mut() {
             if let Value::Table(unit_table) = unit_table_value {
                 if let Some(source) = unit_table.get_mut("source") {
@@ -637,10 +640,7 @@ impl ConfigError {
                 value: (),
                 index: 0,
                 source: Some(file.source.clone()),
-                pos: err.line_col().map(|(line, col)| LineCol {
-                    line: line + 1,
-                    col: col + 1,
-                }),
+                pos: err.span().map(|span| file.resolve_pos(span.start)),
             },
             err,
         }

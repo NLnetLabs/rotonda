@@ -533,7 +533,7 @@ mod tests {
     }
 
     fn mk_config_from_toml(toml: &str) -> Result<Config, toml::de::Error> {
-        toml::de::from_slice::<Config>(toml.as_bytes())
+        toml::from_str::<Config>(toml)
     }
 
     fn mk_raw_bmp_payload(bmp_bytes: Bytes) -> Payload {

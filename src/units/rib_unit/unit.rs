@@ -210,7 +210,7 @@ pub struct RibUnitRunner {
     pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
     rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
     status_reporter: Arc<RibUnitStatusReporter>,
-    process_metrics: Arc<TokioTaskMetrics>,
+    _process_metrics: Arc<TokioTaskMetrics>,
 }
 
 #[async_trait]
@@ -262,8 +262,8 @@ impl RibUnitRunner {
         let pending_vrib_query_results = Arc::new(FrimMap::default());
 
         // Setup metrics
-        let process_metrics = Arc::new(TokioTaskMetrics::new());
-        component.register_metrics(process_metrics.clone());
+        let _process_metrics = Arc::new(TokioTaskMetrics::new());
+        component.register_metrics(_process_metrics.clone());
 
         let metrics = Arc::new(RibUnitMetrics::new(&gate, rib_merge_update_stats.clone()));
         component.register_metrics(metrics.clone());
@@ -311,7 +311,7 @@ impl RibUnitRunner {
             status_reporter,
             filter_name,
             pending_vrib_query_results,
-            process_metrics,
+            _process_metrics,
             rib_merge_update_stats,
         }
     }
@@ -334,7 +334,7 @@ impl RibUnitRunner {
         let status_reporter = RibUnitStatusReporter::default().into();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
         let filter_name = Arc::new(ArcSwap::from_pointee(FilterName::default()));
-        let process_metrics = Arc::new(TokioTaskMetrics::new());
+        let _process_metrics = Arc::new(TokioTaskMetrics::new());
         let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> = Default::default();
         let http_processor = Arc::new(PrefixesApi::new(
             rib.clone(),
@@ -355,7 +355,7 @@ impl RibUnitRunner {
             status_reporter,
             filter_name,
             pending_vrib_query_results,
-            process_metrics,
+            _process_metrics,
             rib_merge_update_stats,
         }
     }

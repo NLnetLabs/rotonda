@@ -258,6 +258,10 @@ impl LogConfig {
 
     /// Creates and returns a fern logger.
     fn fern_logger(&self, timestamp_and_level: bool) -> fern::Dispatch {
+        // TODO: These env var controls are not changeable by the operator at runtime which may make them less useful.
+        // They also require you to already be logging at trace level which means that you also see lots of other trace
+        // logging but if you enable one of these env vars you clearly actually want to see the logging that you are
+        // enabling, not a bunch of other logging as well. So I think this needs some more thought.
         let mqtt_log_level = match std::env::var("ROTONDA_MQTT_LOG") {
             Ok(_) => self.log_level.0.min(LevelFilter::Trace),
             Err(_) => self.log_level.0.min(LevelFilter::Warn),

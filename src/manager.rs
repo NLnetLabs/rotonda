@@ -383,7 +383,7 @@ impl Display for TargetCommand {
 /// A manager for components and auxiliary services.
 ///
 /// Requires a running Tokio reactor that has been "entered" (see Tokio `Handle::enter()`).
-pub struct Manager<T: FileIo> {
+pub struct Manager {
     /// The currently active units represented by agents to their gates.
     running_units: HashMap<String, (Discriminant<Unit>, GateAgent)>,
 
@@ -410,16 +410,16 @@ pub struct Manager<T: FileIo> {
 
     graph_svg_data: Arc<ArcSwap<(Instant, LinkReport)>>,
 
-    file_io: T,
+    file_io: TheFileIo,
 }
 
-impl<T: FileIo> Default for Manager<T> {
+impl Default for Manager {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: FileIo> Manager<T> {
+impl Manager {
     /// Creates a new manager.
     pub fn new() -> Self {
         let graph_svg_data = Arc::new(ArcSwap::from_pointee((Instant::now(), LinkReport::new())));
@@ -427,7 +427,7 @@ impl<T: FileIo> Manager<T> {
         #[cfg(feature = "config-graph")]
         let graph_svg_processor = Self::mk_svg_http_processor(graph_svg_data.clone());
 
-        #[allow(clippy::let_and_return)]
+        #[allow(clippy::let_and_return, clippy::default_constructed_unit_structs)]
         let manager = Manager {
             running_units: Default::default(),
             running_targets: Default::default(),
@@ -439,7 +439,7 @@ impl<T: FileIo> Manager<T> {
             #[cfg(feature = "config-graph")]
             graph_svg_processor,
             graph_svg_data,
-            file_io: T::default(),
+            file_io: TheFileIo::default(),
         };
 
         // Register the /status/graph endpoint.
@@ -452,7 +452,7 @@ impl<T: FileIo> Manager<T> {
     }
 
     #[cfg(test)]
-    pub fn set_file_io(&mut self, file_io: T) {
+    pub fn set_file_io(&mut self, file_io: TheFileIo) {
         self.file_io = file_io;
     }
 
@@ -2212,7 +2212,7 @@ mod tests {
         SPAWN_LOG.with(|log| log.borrow_mut().push(SpawnLogItem::new(name, action, cfg)));
     }
 
-    fn spawn(manager: &mut Manager<TheFileIo>, mut config: Config) {
+    fn spawn(manager: &mut Manager, mut config: Config) {
         clear_spawn_action_log();
         manager.spawn_internal(
             &mut config,
@@ -2225,7 +2225,7 @@ mod tests {
         );
     }
 
-    fn init_manager() -> Manager<TheFileIo> {
+    fn init_manager() -> Manager {
         GATES.with(|gates| gates.replace(Some(Default::default())));
         ROTO_FILTER_NAMES.with(|filter_names| filter_names.replace(Some(Default::default())));
         Manager::new()

@@ -4,12 +4,9 @@ use futures::{
     pin_mut,
 };
 use log::{error, info, warn};
+use rotonda::config::{Config, ConfigFile};
 use rotonda::log::ExitError;
 use rotonda::manager::Manager;
-use rotonda::{
-    common::file_io::TheFileIo,
-    config::{Config, ConfigFile},
-};
 use std::process::exit;
 use std::{env::current_dir, path::PathBuf};
 use tokio::{
@@ -45,10 +42,7 @@ fn run_with_cmdline_args() -> Result<(), ExitError> {
     runtime.block_on(handle_signals(config_path, manager))
 }
 
-async fn handle_signals(
-    conf_path: Option<PathBuf>,
-    mut manager: Manager<TheFileIo>,
-) -> Result<(), ExitError> {
+async fn handle_signals(conf_path: Option<PathBuf>, mut manager: Manager) -> Result<(), ExitError> {
     let mut hup_signals = signal(SignalKind::hangup()).map_err(|err| {
         error!("Fatal: cannot listen for HUP signals ({}). Aborting.", err);
         ExitError
@@ -113,10 +107,7 @@ async fn handle_signals(
     }
 }
 
-fn run_with_config(
-    manager: &mut Manager<TheFileIo>,
-    mut config: Config,
-) -> Result<Runtime, ExitError> {
+fn run_with_config(manager: &mut Manager, mut config: Config) -> Result<Runtime, ExitError> {
     let runtime = runtime::Builder::new_multi_thread()
         .enable_all()
         .build()

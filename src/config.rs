@@ -5,7 +5,6 @@
 //! this module. This struct also provides the facilities to load the config
 //! file referred to in command line options.
 
-use crate::common::file_io::TheFileIo;
 use crate::http;
 use crate::log::{ExitError, Failed, LogConfig};
 use crate::manager::{Manager, TargetSet, UnitSet};
@@ -105,7 +104,7 @@ impl Config {
     pub fn from_arg_matches(
         matches: &ArgMatches,
         cur_dir: &Path,
-        manager: &mut Manager<TheFileIo>,
+        manager: &mut Manager,
     ) -> Result<(Option<PathBuf>, Self), Failed> {
         let (conf_file, conf_path) = if let Some(conf_path) = matches.value_of("config") {
             let conf_path = cur_dir.join(conf_path);
@@ -140,7 +139,7 @@ impl Config {
         Ok((conf_path, conf))
     }
 
-    pub fn from_config_file(conf_file: ConfigFile, manager: &mut Manager<TheFileIo>) -> Result<Self, Failed> {
+    pub fn from_config_file(conf_file: ConfigFile, manager: &mut Manager) -> Result<Self, Failed> {
         let res = manager.load(&conf_file)?;
         res.log.switch_logging(true)?;
         Ok(res)

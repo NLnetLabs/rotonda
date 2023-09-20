@@ -194,7 +194,7 @@ mod tests {
         [units.filter]
         type = "filter"
         sources = ["bmp-tcp-in"]
-        filter_name = "my-asn-filter"
+        filter_name = "bmp-asn-filter"
 
         [units.routers]
         type = "bmp-in"

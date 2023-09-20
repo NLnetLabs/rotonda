@@ -1,4 +1,4 @@
-filter my-asn-filter {
+filter bmp-asn-filter {
     define {
         rx msg: BmpMessage;
 

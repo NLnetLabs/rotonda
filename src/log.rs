@@ -475,7 +475,7 @@ impl TryFrom<String> for LogFilter {
 
 #[derive(Clone, Copy, Debug)]
 pub enum TerminateReason {
-    Failed,
+    Failed(i32),
     Normal,
 }
 
@@ -490,12 +490,17 @@ pub enum TerminateReason {
 pub struct Terminate(TerminateReason);
 
 impl Terminate {
-    pub fn error() -> Self {
-        Self(TerminateReason::Failed)
-    }
-
     pub fn normal() -> Self {
         Self(TerminateReason::Normal)
+    }
+
+    pub fn error() -> Self {
+        Self(TerminateReason::Failed(1))
+    }
+    
+    pub fn other(exit_code: i32) -> Self {
+        assert_ne!(exit_code, 0);
+        Self(TerminateReason::Failed(exit_code))
     }
 
     pub fn reason(&self) -> TerminateReason {
@@ -504,7 +509,7 @@ impl Terminate {
 
     pub fn exit_code(&self) -> i32 {
         match self.reason() {
-            TerminateReason::Failed => 1,
+            TerminateReason::Failed(n) => n,
             TerminateReason::Normal => 0,
         }
     }
@@ -519,7 +524,7 @@ pub struct ExitError;
 impl From<Terminate> for ExitError {
     fn from(terminate: Terminate) -> ExitError {
         match terminate.reason() {
-            TerminateReason::Failed => ExitError,
+            TerminateReason::Failed(_) => ExitError,
             TerminateReason::Normal => unreachable!(),
         }
     }

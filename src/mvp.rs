@@ -152,8 +152,10 @@ mod tests {
     #[test]
     fn mvp_config_without_args_should_be_correct() {
         let app = Command::new("test");
-        let arg_vec = vec!["my_prog"];
-        let matches = Config::config_args(app).get_matches_from(arg_vec);
+        let arg_vec = vec!["rotonda"];
+        let matches = Config::config_args(app)
+            .try_get_matches_from(arg_vec)
+            .unwrap();
         let cur_dir = Path::new("");
         let mut manager = Manager::default();
 
@@ -197,13 +199,90 @@ mod tests {
         assert_eq!(conf.http.listen(), &["127.0.0.1:8080".parse().unwrap()]);
 
         let units = conf.units.units();
-        assert_eq!(units.len(), 6); // bgp-in, bmp-tcp-in, bmp-asn-filter, bmp-in, rib-in-pre, rib-in-post
-                                    // TODO: check the exact units
+        assert_eq!(units.len(), 6);
+        assert!(units.contains_key("bgp-in"));
+        assert!(units.contains_key("bmp-tcp-in"));
+        assert!(units.contains_key("bmp-asn-filter"));
+        assert!(units.contains_key("bmp-in"));
+        assert!(units.contains_key("rib-in-pre"));
+        assert!(units.contains_key("rib-in-post"));
 
         let targets = conf.targets.targets();
-        assert_eq!(targets.len(), 1); // null, no MQTT or proxy without specific cmd line args
-                                      // TODO: check the exact targets
+        assert_eq!(targets.len(), 1);
+        assert!(targets.contains_key("null"));
     }
 
-    // TODO: check that the MVP command line args have the desired effect
+    #[test]
+    fn mvp_config_with_missing_roto_scripts_should_still_work() {
+        let app = Command::new("test");
+        let arg_vec = vec!["rotonda"];
+        let matches = Config::config_args(app)
+            .try_get_matches_from(arg_vec)
+            .unwrap();
+        let cur_dir = Path::new("");
+        let mut manager = Manager::default();
+
+        // when loaded into the manager
+        let (config_source, conf) =
+            Config::from_arg_matches(&matches, cur_dir, &mut manager).unwrap();
+
+        // then there should be no config file path
+        assert!(!config_source.is_path());
+
+        // and the configuration should be correct
+        assert_eq!(conf.roto_scripts_path, Some("etc/".into()));
+        assert_eq!(conf.log.log_target, LogTarget::Stderr);
+        assert_eq!(
+            conf.log.log_level,
+            LogFilter::try_from("info".to_string()).unwrap()
+        );
+
+        assert_eq!(conf.http.listen(), &["127.0.0.1:8080".parse().unwrap()]);
+
+        let units = conf.units.units();
+        assert_eq!(units.len(), 6);
+        assert!(units.contains_key("bgp-in"));
+        assert!(units.contains_key("bmp-tcp-in"));
+        assert!(units.contains_key("bmp-asn-filter"));
+        assert!(units.contains_key("bmp-in"));
+        assert!(units.contains_key("rib-in-pre"));
+        assert!(units.contains_key("rib-in-post"));
+
+        let targets = conf.targets.targets();
+        assert_eq!(targets.len(), 1);
+        assert!(targets.contains_key("null"));
+    }
+
+    #[test]
+    fn mvp_config_with_both_mvp_specific_cmd_line_arg_and_config_file_arg_should_fail() {
+        let app = Command::new("test");
+        let arg_vec = vec![
+            "rotonda",
+            "--config",
+            "some/config/file/path",
+            "--proxy-destination",
+            "127.0.0.1:12345",
+        ];
+        let res = Config::config_args(app).try_get_matches_from(arg_vec);
+        assert!(matches!(res, Err(err) if err.kind() == clap::error::ErrorKind::ArgumentConflict));
+    }
+
+    #[test]
+    fn mvp_config_with_proxy_destination_cmd_line_arg_should_have_proxy_target() {
+        let app = Command::new("test");
+        let arg_vec = vec!["rotonda", "--proxy-destination", "127.0.0.1:12345"];
+        let matches = Config::config_args(app)
+            .try_get_matches_from(arg_vec)
+            .unwrap();
+        let cur_dir = Path::new("");
+        let mut manager = Manager::default();
+
+        // when loaded into the manager
+        let (_, conf) = Config::from_arg_matches(&matches, cur_dir, &mut manager).unwrap();
+
+        let targets = conf.targets.targets();
+        assert_eq!(targets.len(), 2);
+        assert!(targets.contains_key("null"));
+        assert!(targets.contains_key("proxy"));
+    }
 }

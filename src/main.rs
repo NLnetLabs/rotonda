@@ -26,7 +26,10 @@ fn run_with_cmdline_args() -> Result<(), Terminate> {
         .next_line_help(false);
 
     let config_args = Config::config_args(app);
-    let matches = config_args.get_matches();
+    let matches = config_args.try_get_matches().map_err(|err| {
+        let _ = err.print();
+        Terminate::other(2)
+    })?;
 
     let cur_dir = current_dir().map_err(|err| {
         error!("Fatal: cannot get current directory ({}). Aborting.", err);

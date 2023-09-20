@@ -578,8 +578,7 @@ impl RibUnitRunner {
             + 'static,
     {
         for payload in &payloads {
-            self.process_metrics
-                .instrument(self.insert_payload(&payload, insert_fn));
+            self.insert_payload(payload, insert_fn);
         }
 
         match payloads.len() {

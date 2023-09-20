@@ -4,11 +4,11 @@ use futures::{
     pin_mut,
 };
 use log::{error, info, warn};
-use rotonda::config::{Config, ConfigFile};
+use rotonda::config::{Config, ConfigFile, Source};
 use rotonda::log::ExitError;
 use rotonda::manager::Manager;
+use std::env::current_dir;
 use std::process::exit;
-use std::{env::current_dir, path::PathBuf};
 use tokio::{
     runtime::{self, Runtime},
     signal::{self, unix::signal, unix::SignalKind},
@@ -37,12 +37,12 @@ fn run_with_cmdline_args() -> Result<(), ExitError> {
     //   - https://github.com/NLnetLabs/routinator/blob/main/src/process.rs#L363
 
     let mut manager = Manager::new();
-    let (config_path, config) = Config::from_arg_matches(&matches, &cur_dir, &mut manager)?;
+    let (config_source, config) = Config::from_arg_matches(&matches, &cur_dir, &mut manager)?;
     let runtime = run_with_config(&mut manager, config)?;
-    runtime.block_on(handle_signals(config_path, manager))
+    runtime.block_on(handle_signals(config_source, manager))
 }
 
-async fn handle_signals(conf_path: Option<PathBuf>, mut manager: Manager) -> Result<(), ExitError> {
+async fn handle_signals(config_source: Source, mut manager: Manager) -> Result<(), ExitError> {
     let mut hup_signals = signal(SignalKind::hangup()).map_err(|err| {
         error!("Fatal: cannot listen for HUP signals ({}). Aborting.", err);
         ExitError
@@ -63,15 +63,15 @@ async fn handle_signals(conf_path: Option<PathBuf>, mut manager: Manager) -> Res
             }
             Either::Left((Some(_), _)) => {
                 // HUP signal received
-                if let Some(conf_path) = &conf_path {
+                if let Some(config_path) = config_source.path() {
                     info!(
                         "SIGHUP signal received, re-reading configuration file '{}'",
-                        conf_path.display()
+                        config_path.display()
                     );
-                    match ConfigFile::load(&conf_path) {
-                        Ok(conf_file) => match manager.load(&conf_file) {
+                    match ConfigFile::load(&config_path) {
+                        Ok(config_file) => match manager.load(&config_file) {
                             Err(_) => {
-                                error!("Failed to re-read config file '{}'", conf_path.display());
+                                error!("Failed to re-read config file '{}'", config_path.display());
                             }
                             Ok(mut config) => {
                                 config.log.switch_logging(true)?;
@@ -82,7 +82,7 @@ async fn handle_signals(conf_path: Option<PathBuf>, mut manager: Manager) -> Res
                         Err(err) => {
                             error!(
                                 "Failed to re-read config file '{}': {}",
-                                conf_path.display(),
+                                config_path.display(),
                                 err
                             );
                         }
@@ -235,7 +235,7 @@ mod tests {
         let config_file = ConfigFile::new(config_bytes, Source::default(), Default::default());
 
         let mut manager = Manager::new();
-        let config = Config::from_config_file(config_file, &mut manager)
+        let (_conf_source, config) = Config::from_config_file(config_file, &mut manager)
             .expect("The supplied config is invalid");
         let runtime =
             run_with_config(&mut manager, config).expect("The application failed to start");
@@ -401,8 +401,8 @@ mod tests {
             eprintln!("Reconfiguring...");
             let mut config_bytes = base_config_toml.as_bytes().to_vec();
             config_bytes.extend_from_slice(mqtt_target_toml.as_bytes());
-            let conf_file = ConfigFile::new(config_bytes, Source::default(), Default::default());
-            let mut config = manager.load(&conf_file).unwrap();
+            let config_file = ConfigFile::new(config_bytes, Source::default(), Default::default());
+            let mut config = manager.load(&config_file).unwrap();
             manager.spawn(&mut config);
 
             // verify that there is now an MQTT connection

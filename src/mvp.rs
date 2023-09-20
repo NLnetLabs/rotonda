@@ -31,6 +31,10 @@ pub struct MvpConfig {
     /// Alternate BMP listen address
     #[serde(default)]
     pub bmp_listen_addr: Option<SocketAddr>,
+
+    /// Ignore missing Roto filters
+    #[serde(default)]
+    pub ignore_missing_filters: bool,
 }
 
 impl MvpConfig {
@@ -87,6 +91,13 @@ impl MvpConfig {
         self.http_listen_addr = Self::from_str_value_of(matches, "http-listen")?;
         self.bgp_listen_addr = Self::from_str_value_of(matches, "bgp-listen")?;
         self.bmp_listen_addr = Self::from_str_value_of(matches, "bmp-listen")?;
+
+        // If a config file is specified it should be valid, but if not specified then we are using an embedded MVP
+        // config file that references Roto filters that the user may not have the required .roto files for, e.g.
+        // if they installed Rotonda using `cargo install`. In the MVP case we therefore want to warn about missing
+        // filters rather than it be a hard failure.
+        self.ignore_missing_filters = !matches.contains_id("config");
+
         Ok(())
     }
 
@@ -159,11 +170,11 @@ mod tests {
         manager.set_file_io(mock_io);
 
         // when loaded into the manager
-        let (config_path, conf) =
+        let (config_source, conf) =
             Config::from_arg_matches(&matches, cur_dir, &mut manager).unwrap();
 
         // then there should be no config file path
-        assert!(config_path.is_none());
+        assert!(!config_source.is_path());
 
         // and the configuration should be correct
         assert_eq!(conf.roto_scripts_path, Some("etc/".into()));
@@ -177,11 +188,11 @@ mod tests {
 
         let units = conf.units.units();
         assert_eq!(units.len(), 6); // bgp-in, bmp-tcp-in, bmp-asn-filter, bmp-in, rib-in-pre, rib-in-post
-        // TODO: check the exact units
+                                    // TODO: check the exact units
 
         let targets = conf.targets.targets();
         assert_eq!(targets.len(), 1); // null, no MQTT or proxy without specific cmd line args
-        // TODO: check the exact targets
+                                      // TODO: check the exact targets
     }
 
     // TODO: check that the MVP command line args have the desired effect

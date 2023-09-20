@@ -579,20 +579,13 @@ impl Manager {
         //           TxUpdate Sender which it can use to send data updates to
         //           to the RxUpdate Receiver which is now held by the Link
         //           (stored in a LinkConnection object).
-        let config = match Config::from_bytes(file.bytes(), file.dir()) {
-            Ok(config) => config,
-            Err(err) => {
-                match file.path() {
-                    Some(path) => error!("{}: {}", path.display(), err),
-                    None => error!("{}", err),
-                }
-                return Err(Failed);
+        Config::from_bytes(file.bytes(), file.dir()).map_err(|err| {
+            match file.path() {
+                Some(path) => error!("{}: {}", path.display(), err),
+                None => error!("{}", err),
             }
-        };
-
-        self.prepare(&config, file)?;
-
-        Ok(config)
+            Failed
+        })
     }
 
     /// Prepare for spawning.
@@ -605,13 +598,14 @@ impl Manager {
     /// Primarily intended for testing purposes, allowing the prepare phase of
     /// the load -> prepare -> spawn pipeline to be tested independently of the
     /// other phases.
-    fn prepare(&mut self, config: &Config, file: &ConfigFile) -> Result<(), Failed> {
-        let mut errs = Vec::new();
+    pub fn prepare(&mut self, config: &Config, file: &ConfigFile) -> Result<(), Failed> {
+        let mut res = Ok(());
 
         // Load any .roto script files that exist (and unload any that no longer exist)
-        if let Err(err) = self.load_roto_scripts(config) {
-            errs.push(err);
-        }
+        self.load_roto_scripts(config).map_err(|err| {
+            error!("Unable to load Roto scripts: {err}");
+            Failed
+        })?;
 
         // Drain the singleton static ROTO_FILTER_NAMEES contents to a local variable.
         let config_filter_names = ROTO_FILTER_NAMES
@@ -620,9 +614,36 @@ impl Manager {
 
         // Check if all filter names exist in the loaded filter set
         let loaded_filter_names = self.roto_scripts.get_filter_names();
-        let unknown_filter_names = config_filter_names.difference(&loaded_filter_names);
-        for filter_name in unknown_filter_names {
-            errs.push(format!("Roto filter name '{filter_name}' does not exist"));
+        let unknown_filter_names = config_filter_names
+            .difference(&loaded_filter_names)
+            .map(|fname| format!("'{}'", fname))
+            .collect::<Vec<_>>();
+        if !unknown_filter_names.is_empty() {
+            let unknown_filter_names = unknown_filter_names.join(", ");
+            let loaded_roto_scripts = self.roto_scripts.get_script_origins();
+            let reason: String = if loaded_roto_scripts.is_empty() {
+                if let Some(path) = &config.roto_scripts_path {
+                    format!("no .roto scripts could be loaded from the configured `roto_scripts_path` directory '{}'.", path.display())
+                } else {
+                    "the `roto_scripts_path` setting is not specified so no filters were loaded."
+                        .to_string()
+                }
+            } else {
+                let scripts = loaded_roto_scripts
+                    .iter()
+                    .map(|v| format!("'{v}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("none of the loaded .roto scripts ({scripts}) contains them")
+            };
+            let msg = format!("Roto filters {unknown_filter_names} are referenced by your configuration but do not exist because {reason}");
+
+            if config.mvp_overrides.ignore_missing_filters {
+                warn!("{msg} These filters will be ignored.");
+            } else {
+                error!("{msg} Note: Use command line argument --ignore-missing-filters to run without these filters.");
+                res = Err(Failed);
+            }
         }
 
         // Drain the singleton static GATES contents to a local variable.
@@ -642,21 +663,15 @@ impl Manager {
                 if !config.units.units.contains_key(&name) {
                     for mut link in load.links {
                         link.resolve_config(file);
-                        errs.push(
+                        error!(
+                            "{}",
                             link.mark(format!("unresolved link to unit '{}'", name))
-                                .to_string(),
-                        )
+                        );
                     }
                 } else {
                     self.pending_gates.insert(name.clone(), (gate, load.agent));
                 }
             }
-        }
-        if !errs.is_empty() {
-            for err in errs {
-                error!("{}", err);
-            }
-            return Err(Failed);
         }
 
         // At this point self.pending contains the newly created but
@@ -665,7 +680,7 @@ impl Manager {
         // started Units and Targets. The caller should invoke spawn() to run
         // each Unit and Target and assign Gates to Units by name.
 
-        Ok(())
+        res
     }
 
     // TODO: Use Marked for returned error so that the location in the config file in question can be reported to the
@@ -678,10 +693,18 @@ impl Manager {
 
         if let Some(roto_scripts_path) = &config.roto_scripts_path {
             let entries = self.file_io.read_dir(roto_scripts_path).map_err(|err| {
-                format!(
-                    "Failed to read from directory '{}': {err}",
-                    roto_scripts_path.display()
-                )
+                if roto_scripts_path.is_absolute() {
+                    format!(
+                        "Failed to read from configured `roto_scripts_path` directory '{}': {err}",
+                        roto_scripts_path.display(),
+                    )
+                } else {
+                    let cwd = std::env::current_dir().map(|p| p.display().to_string()).unwrap_or("unknown".to_string());
+                    format!(
+                        "Failed to read from configured `roto_scripts_path` directory '{}' relative to current directory '{}': {err}",
+                        roto_scripts_path.display(), cwd,
+                    )
+                }
             })?;
 
             for entry in entries {

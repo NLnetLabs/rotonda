@@ -10,7 +10,7 @@ use crate::log::{ExitError, Failed, LogConfig};
 use crate::manager::{Manager, TargetSet, UnitSet};
 use crate::mvp::MvpConfig;
 use clap::{Arg, ArgMatches, Command};
-use log::trace;
+use log::{error, trace};
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -102,47 +102,71 @@ impl Config {
     /// paths. The manager is necessary to resolve links given in the
     /// configuration.
     pub fn from_arg_matches(
-        matches: &ArgMatches,
+        args: &ArgMatches,
         cur_dir: &Path,
         manager: &mut Manager,
-    ) -> Result<(Option<PathBuf>, Self), Failed> {
-        let (conf_file, conf_path) = if let Some(conf_path) = matches.value_of("config") {
-            let conf_path = cur_dir.join(conf_path);
-            let conf = ConfigFile::load(&conf_path).map_err(|err| {
-                eprintln!(
-                    "Failed to read config file '{}': {}",
-                    conf_path.display(),
-                    err
-                );
-                Failed
-            })?;
-            (conf, Some(conf_path))
-        } else {
-            let bytes = include_bytes!("../etc/rotonda.conf").to_vec();
-            let mut mvp_overrides = MvpConfig::default();
-            mvp_overrides.update_with_arg_matches(matches)?;
-            let conf = ConfigFile::new(bytes, Source::default(), Some(mvp_overrides));
-            (conf, None)
+    ) -> Result<(Source, Self), Failed> {
+        let config_file = match args.value_of("config") {
+            Some(conf_path_arg) => {
+                // --config command line argument supplied, load and use the config file
+                let config_path = cur_dir.join(conf_path_arg);
+
+                // Load the config file from the given path and parse it as-is.
+                ConfigFile::load(&config_path).map_err(|err| {
+                    error!(
+                        "Failed to read config file '{}': {}",
+                        config_path.display(),
+                        err
+                    );
+                    Failed
+                })?
+            }
+
+            None => {
+                // No --config command line argument specified, use the embedded MVP config
+                let bytes = include_bytes!("../etc/rotonda.conf").to_vec();
+
+                // Detect command line arguments designed to override and alter the embedded MVP config file.
+                let mut mvp_overrides = MvpConfig::default();
+                mvp_overrides.update_with_arg_matches(args)?;
+
+                // Parse the given config bytes using MVP overrides to adjust the config as desired.
+                ConfigFile::new(bytes, Source::default(), Some(mvp_overrides))
+            }
         };
-        let mut conf = manager.load(&conf_file)?;
-        conf.log.update_with_arg_matches(matches, cur_dir)?;
-        conf.mvp_overrides.update_with_arg_matches(matches)?;
-        conf.log.switch_logging(true)?;
+
+        let mut config = manager.load(&config_file)?;
+        config.mvp_overrides.update_with_arg_matches(args)?;
+        config.log.update_with_arg_matches(args, cur_dir)?;
+        config.finalise(config_file, manager)
+    }
+
+    pub fn from_config_file(
+        config_file: ConfigFile,
+        manager: &mut Manager,
+    ) -> Result<(Source, Self), Failed> {
+        manager.load(&config_file)?.finalise(config_file, manager)
+    }
+
+    fn finalise(
+        self,
+        config_file: ConfigFile,
+        manager: &mut Manager,
+    ) -> Result<(Source, Self), Failed> {
+        self.log.switch_logging(true)?;
 
         if log::log_enabled!(log::Level::Trace) {
             trace!(
                 "Post-processed config TOML:\n{}",
-                String::from_utf8_lossy(&conf_file.bytes)
+                String::from_utf8_lossy(&config_file.bytes)
             );
         }
 
-        Ok((conf_path, conf))
-    }
+        manager.prepare(&self, &config_file)?;
 
-    pub fn from_config_file(conf_file: ConfigFile, manager: &mut Manager) -> Result<Self, Failed> {
-        let res = manager.load(&conf_file)?;
-        res.log.switch_logging(true)?;
-        Ok(res)
+        // Pass the config file path, as well as the processed config, back to the caller so that they can monitor it
+        // for changes while the application is running.
+        Ok((config_file.source, self))
     }
 }
 
@@ -161,6 +185,16 @@ pub struct Source {
     ///
     /// If this in `None`, the source is an interactive session.
     path: Option<Arc<Path>>,
+}
+
+impl Source {
+    pub fn is_path(&self) -> bool {
+        self.path.is_some()
+    }
+
+    pub fn path(&self) -> &Option<Arc<Path>> {
+        &self.path
+    }
 }
 
 impl<'a, T: AsRef<Path>> From<&'a T> for Source {

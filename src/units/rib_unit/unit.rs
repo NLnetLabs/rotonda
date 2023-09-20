@@ -427,6 +427,7 @@ impl RibUnitRunner {
                                 }),
                         } => {
                             // TODO: Handle changed RibUnit::vrib_upstream value.
+                            // TODO: Handle changed Roto script filter.
                             arc_self.status_reporter.reconfigured();
 
                             arc_self.query_limits.store(Arc::new(new_query_limits));

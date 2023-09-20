@@ -1500,7 +1500,6 @@ pub fn load_filter_name(filter_name: FilterName) -> FilterName {
     ROTO_FILTER_NAMES.with(|filter_names| {
         let mut filter_names = filter_names.borrow_mut();
         let filter_names = filter_names.as_mut().unwrap();
-        let filter_name = FilterName::from(filter_name);
         filter_names.insert(filter_name.clone());
         filter_name
     })
@@ -1536,6 +1535,22 @@ mod tests {
         assert!(manager.running_units.is_empty());
         assert!(manager.running_targets.is_empty());
         assert!(manager.pending_gates.is_empty());
+    }
+
+    #[test]
+    fn config_without_target_should_fail() {
+        // given a config without any targets
+        let toml = r#"
+        http_listen = []
+        "#;
+        let config_file = mk_config_from_toml(toml);
+
+        // when loaded into the manager
+        let mut manager = init_manager();
+        let res = manager.load(&config_file);
+
+        // then it should fail
+        assert!(res.is_err());
     }
 
     #[test]
@@ -1898,7 +1913,7 @@ mod tests {
         let coordinator = Coordinator::new(0);
         let mut alarm_fired = false;
         coordinator.wait(|_, _| alarm_fired = true).await;
-        assert_eq!(alarm_fired, false);
+        assert!(!alarm_fired);
     }
 
     #[tokio::test]
@@ -1929,10 +1944,10 @@ mod tests {
         let mut alarm_fired = false;
         let wait_point = coordinator.clone().track(SOME_COMPONENT.to_string());
         let join_handle = tokio::task::spawn(wait_point.running());
-        assert_eq!(join_handle.is_finished(), false);
+        assert!(!join_handle.is_finished());
         coordinator.wait(|_, _| alarm_fired = true).await;
         join_handle.await.unwrap();
-        assert_eq!(alarm_fired, false);
+        assert!(!alarm_fired);
     }
 
     #[tokio::test(start_paused = true)]
@@ -1943,12 +1958,12 @@ mod tests {
         let wait_point2 = coordinator.clone().track(OTHER_COMPONENT.to_string());
         let join_handle1 = tokio::task::spawn(wait_point1.running());
         let join_handle2 = tokio::task::spawn(wait_point2.running());
-        assert_eq!(join_handle1.is_finished(), false);
-        assert_eq!(join_handle2.is_finished(), false);
+        assert!(!join_handle1.is_finished());
+        assert!(!join_handle2.is_finished());
         coordinator.wait(|_, _| alarm_fired = true).await;
         join_handle1.await.unwrap();
         join_handle2.await.unwrap();
-        assert_eq!(alarm_fired, false);
+        assert!(!alarm_fired);
     }
 
     #[tokio::test(start_paused = true)]

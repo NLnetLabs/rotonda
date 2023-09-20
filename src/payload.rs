@@ -51,7 +51,7 @@ impl SourceId {
     pub fn name(&self) -> Option<&str> {
         match self {
             SourceId::SocketAddr(_) => None,
-            SourceId::Named(name) => Some(&name),
+            SourceId::Named(name) => Some(name),
         }
     }
 }

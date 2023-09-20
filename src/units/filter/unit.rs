@@ -172,54 +172,36 @@ impl RotoFilterRunner {
                 self.gate.update_data(update).await;
             }
 
-            Update::Single(payload) => {
-                if let Some(filtered_update) = Self::VM
-                    .with(|vm| {
-                        payload
-                            .filter(|value| {
-                                self.roto_scripts.exec(vm, &self.filter_name.load(), value)
-                            })
-                            .and_then(|mut filtered_payloads| match filtered_payloads.len() {
-                                0 => Ok(None),
-                                1 => Ok(Some(Update::Single(filtered_payloads.pop().unwrap()))),
-                                _ => Ok(Some(Update::Bulk(filtered_payloads))),
-                            })
-                    })
-                    .or_else(|err| {
-                        self.status_reporter.message_filtering_failure(&err);
-                        Err(err)
-                    })?
-                {
-                    self.gate.update_data(filtered_update).await;
-                }
-            }
+            Update::Single(payload) => self.filter_payload(payload).await?,
 
-            Update::Bulk(payloads) => {
-                if let Some(filtered_update) = Self::VM
-                    .with(|vm| {
-                        payloads
-                            .filter(|value| {
-                                self.roto_scripts.exec(vm, &self.filter_name.load(), value)
-                            })
-                            .and_then(|mut filtered_payloads| match filtered_payloads.len() {
-                                0 => Ok(None),
-                                1 => Ok(Some(Update::Single(filtered_payloads.pop().unwrap()))),
-                                _ => Ok(Some(Update::Bulk(filtered_payloads))),
-                            })
-                    })
-                    .or_else(|err| {
-                        self.status_reporter.message_filtering_failure(&err);
-                        Err(err)
-                    })?
-                {
-                    self.gate.update_data(filtered_update).await;
-                }
-            }
+            Update::Bulk(payloads) => self.filter_payload(payloads).await?,
 
             _ => {
                 self.status_reporter
                     .input_mismatch("Update::Single(_)", update);
             }
+        }
+
+        Ok(())
+    }
+
+    async fn filter_payload<T: Filterable>(&self, payload: T) -> Result<(), FilterError> {
+        if let Some(filtered_update) = Self::VM
+            .with(|vm| {
+                payload
+                    .filter(|value| self.roto_scripts.exec(vm, &self.filter_name.load(), value))
+                    .map(|mut filtered_payloads| match filtered_payloads.len() {
+                        0 => None,
+                        1 => Some(Update::Single(filtered_payloads.pop().unwrap())),
+                        _ => Some(Update::Bulk(filtered_payloads)),
+                    })
+            })
+            .map_err(|err| {
+                self.status_reporter.message_filtering_failure(&err);
+                err
+            })?
+        {
+            self.gate.update_data(filtered_update).await;
         }
 
         Ok(())
@@ -391,10 +373,10 @@ mod tests {
         enable_logging("trace");
         let roto_source = MSG_TYPE_MATCHING_ROTO;
 
-        assert!(!is_filtered(mk_filter_payload(mk_route_monitoring_msg()), &roto_source).await);
-        assert!(is_filtered(mk_filter_payload(mk_peer_down_notification_msg()), &roto_source).await);
-        assert!(is_filtered(mk_filter_payload(mk_peer_up_notification_msg()), &roto_source).await);
-        assert!(!is_filtered(mk_filter_payload(mk_statistics_report_msg()), &roto_source).await);
+        assert!(!is_filtered(mk_filter_payload(mk_route_monitoring_msg()), roto_source).await);
+        assert!(is_filtered(mk_filter_payload(mk_peer_down_notification_msg()), roto_source).await);
+        assert!(is_filtered(mk_filter_payload(mk_peer_up_notification_msg()), roto_source).await);
+        assert!(!is_filtered(mk_filter_payload(mk_statistics_report_msg()), roto_source).await);
     }
 
     fn interpolate_source(source: &'static str, asn_to_ignore: Asn) -> String {

@@ -244,6 +244,7 @@ impl RibUnitRunner {
         static VM: ThreadLocalVM = RefCell::new(None);
     );
 
+    #[allow(clippy::too_many_arguments)]
     fn new(
         gate: Gate,
         mut component: Component,
@@ -494,51 +495,9 @@ impl RibUnitRunner {
                 self.gate.update_data(update).await;
             }
 
-            Update::Bulk(payloads) => {
-                if let Some(filtered_update) = Self::VM
-                    .with(|vm| {
-                        payloads
-                            .filter(|value| {
-                                self.roto_scripts.exec(vm, &self.filter_name.load(), value)
-                            })
-                            .and_then(|filtered_payloads| {
-                                Ok(self.insert_payloads(filtered_payloads, insert_fn))
-                            })
-                    })
-                    .or_else(|err| {
-                        self.status_reporter.message_filtering_failure(&err);
-                        Err(err)
-                    })?
-                {
-                    self.gate.update_data(filtered_update).await;
-                }
+            Update::Bulk(payloads) => self.filter_payload(payloads, insert_fn).await?,
 
-                if let Some(rib) = self.rib.load().as_ref() {
-                    self.status_reporter
-                        .unique_prefix_count_updated(rib.prefixes_count());
-                }
-            }
-
-            Update::Single(payload) => {
-                // TODO: update status reporter/metrics as is done in the bulk case
-                if let Some(filtered_update) = Self::VM
-                    .with(|vm| {
-                        payload
-                            .filter(|value| {
-                                self.roto_scripts.exec(vm, &self.filter_name.load(), value)
-                            })
-                            .and_then(|filtered_payloads| {
-                                Ok(self.insert_payloads(filtered_payloads, insert_fn))
-                            })
-                    })
-                    .or_else(|err| {
-                        self.status_reporter.message_filtering_failure(&err);
-                        Err(err)
-                    })?
-                {
-                    self.gate.update_data(filtered_update).await;
-                }
-            }
+            Update::Single(payload) => self.filter_payload(payload, insert_fn).await?,
 
             Update::QueryResult(uuid, upstream_query_result) => {
                 trace!("Re-processing received query {uuid} result");
@@ -561,6 +520,42 @@ impl RibUnitRunner {
                         .await;
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    async fn filter_payload<T, F>(&self, payload: T, insert_fn: F) -> Result<(), FilterError>
+    where
+        T: Filterable,
+        F: Fn(
+                &Prefix,
+                TypeValue,
+                &PhysicalRib,
+            )
+                -> Result<(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32), PrefixStoreError>
+            + Copy
+            + Clone
+            + Send
+            + 'static,
+    {
+        if let Some(filtered_update) = Self::VM
+            .with(|vm| {
+                payload
+                    .filter(|value| self.roto_scripts.exec(vm, &self.filter_name.load(), value))
+                    .map(|filtered_payloads| (self.insert_payloads(filtered_payloads, insert_fn)))
+            })
+            .map_err(|err| {
+                self.status_reporter.message_filtering_failure(&err);
+                err
+            })?
+        {
+            self.gate.update_data(filtered_update).await;
+        }
+
+        if let Some(rib) = self.rib.load().as_ref() {
+            self.status_reporter
+                .unique_prefix_count_updated(rib.prefixes_count());
         }
 
         Ok(())

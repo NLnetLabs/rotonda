@@ -624,7 +624,7 @@ mod tests {
         let duration = Duration::from_secs(MAX_TIME_TO_WAIT_SECS);
         let result = Arc::new(AtomicMetricLookupResult::default());
 
-        #[allow(clippy::expect_fun_call)]
+        #[allow(clippy::collapsible_if)]
         if tokio::time::timeout(
             duration,
             wait_for_metric(&metrics, metric_name, label, wanted_v, result.clone()),
@@ -655,7 +655,7 @@ mod tests {
         let duration = Duration::from_secs(MAX_TIME_TO_WAIT_SECS);
         let result = Arc::new(AtomicMetricLookupResult::default());
 
-        #[allow(clippy::expect_fun_call)]
+        #[allow(clippy::collapsible_if)]
         if tokio::time::timeout(
             duration,
             wait_for_metric(&metrics, metric_name, label, wanted_v, result.clone()),
@@ -699,9 +699,7 @@ mod tests {
     fn get_metrics(metrics: &metrics::Collection) -> prometheus_parse::Scrape {
         let prom_txt = metrics.assemble(OutputFormat::Prometheus);
         let lines: Vec<_> = prom_txt.lines().map(|s| Ok(s.to_owned())).collect();
-        let metrics = prometheus_parse::Scrape::parse(lines.into_iter())
-            .expect("Error while querying metrics");
-        metrics
+        prometheus_parse::Scrape::parse(lines.into_iter()).expect("Error while querying metrics")
     }
 
     async fn wait_for_bmp_connect() -> TcpStream {

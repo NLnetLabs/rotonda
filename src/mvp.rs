@@ -160,7 +160,7 @@ mod tests {
 
         // when loaded into the manager
         let (config_path, conf) =
-            Config::from_arg_matches(&matches, &cur_dir, &mut manager).unwrap();
+            Config::from_arg_matches(&matches, cur_dir, &mut manager).unwrap();
 
         // then there should be no config file path
         assert!(config_path.is_none());

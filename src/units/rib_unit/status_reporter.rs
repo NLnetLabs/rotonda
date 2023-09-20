@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use log::{debug, error, warn};
+use log::{debug, error};
 
 use crate::{
     common::status_reporter::{sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter},

@@ -694,8 +694,6 @@ impl Manager {
 
     // TODO: Use Marked for returned error so that the location in the config file in question can be reported to the
     // user.
-    // TODO: Make FilterName an actual type that on deserialization validates that the referenced filter actually
-    // exists in the set loaded into Manager.roto_scripts.
     // TODO: Don't load .roto script files that are not referenced by any units or targets?
     fn load_roto_scripts(&mut self, config: &Config) -> Result<(), RotoError> {
         let mut new_origins = HashSet::<RotoScriptOrigin>::new();

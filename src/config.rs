@@ -87,7 +87,7 @@ impl Config {
 
     /// Configures a clap app with the arguments to load the configuration.
     pub fn config_args(app: Command) -> Command {
-        let app = app.next_line_help(true).arg(
+        let app = app.arg(
             Arg::new(ARG_CONFIG)
                 .short('c')
                 .long(ARG_CONFIG)

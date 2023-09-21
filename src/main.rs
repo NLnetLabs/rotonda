@@ -23,7 +23,7 @@ fn run_with_cmdline_args() -> Result<(), Terminate> {
     let app = Command::new("rotonda")
         .version(crate_version!())
         .author(crate_authors!())
-        .next_line_help(false);
+        .next_line_help(true);
 
     let config_args = Config::config_args(app);
     let matches = config_args.try_get_matches().map_err(|err| {

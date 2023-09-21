@@ -17,7 +17,7 @@ use async_trait::async_trait;
 
 use chrono::Utc;
 use hash_hasher::{HashBuildHasher, HashedSet};
-use log::{error, log_enabled, trace};
+use log::{error, info, log_enabled, trace};
 use non_empty_vec::NonEmpty;
 use roto::types::{
     builtin::{BuiltinTypeValue, RouteToken},
@@ -422,19 +422,36 @@ impl RibUnitRunner {
                                 Unit::RibUnit(RibUnit {
                                     sources: new_sources,
                                     query_limits: new_query_limits,
+                                    filter_name: new_filter_name,
                                     ..
-                                    // http_api_path
                                 }),
                         } => {
                             // TODO: Handle changed RibUnit::vrib_upstream value.
-                            // TODO: Handle changed Roto script filter.
                             arc_self.status_reporter.reconfigured();
+
+                            // Replace the roto script with the new one
+                            match new_filter_name {
+                                Some(new_filter_name) => {
+                                    if **arc_self.filter_name.load() != new_filter_name {
+                                        info!("Using new roto filter '{new_filter_name}'");
+                                        arc_self.filter_name.store(new_filter_name.into());
+                                    }
+                                }
+                                None => {
+                                    if **arc_self.filter_name.load() != FilterName::default() {
+                                        info!("Disabling roto filter");
+                                        arc_self.filter_name.store(FilterName::default().into());
+                                    }
+                                }
+                            }
 
                             arc_self.query_limits.store(Arc::new(new_query_limits));
 
                             // Register as a direct update receiver with the new
                             // set of linked gates.
-                            arc_self.status_reporter.upstream_sources_changed(sources.len(), new_sources.len());
+                            arc_self
+                                .status_reporter
+                                .upstream_sources_changed(sources.len(), new_sources.len());
                             sources = new_sources;
                             for link in sources.iter_mut() {
                                 link.connect(arc_self.clone(), false).await.unwrap();
@@ -446,7 +463,9 @@ impl RibUnitRunner {
                             report.set_graph_status(arc_self.gate.metrics());
                         }
 
-                        GateStatus::Triggered { data: TriggerData::MatchPrefix( uuid, prefix, match_options ) } => {
+                        GateStatus::Triggered {
+                            data: TriggerData::MatchPrefix(uuid, prefix, match_options),
+                        } => {
                             assert!(matches!(arc_self.rib_type, RibType::Physical));
                             let res = {
                                 if let Some(rib) = arc_self.rib.load().as_ref() {
@@ -458,7 +477,10 @@ impl RibUnitRunner {
                                 }
                             };
                             trace!("Sending query {uuid} results downstream");
-                            arc_self.gate.update_data(Update::QueryResult(uuid, res)).await;
+                            arc_self
+                                .gate
+                                .update_data(Update::QueryResult(uuid, res))
+                                .await;
                         }
 
                         _ => { /* Nothing to do */ }

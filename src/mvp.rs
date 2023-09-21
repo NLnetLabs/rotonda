@@ -12,8 +12,7 @@ use std::str::FromStr;
 
 use crate::log::Terminate;
 
-#[cfg(feature = "mqtt")]
-use crate::targets::mqtt::target::DEF_MQTT_PORT;
+use crate::targets::DEF_MQTT_PORT;
 
 //------------ Constant ------------------------------------------------------
 
@@ -124,7 +123,9 @@ impl MvpConfig {
                     .required(false)
                     .value_name("IP or IP:PORT")
                     .conflicts_with(ARG_CONFIG)
-                    .help(formatcp!("Publish MQTT messages to this address [default port: {DEF_MQTT_PORT}]")),
+                    .help(formatcp!(
+                        "Publish MQTT messages to this address [default port: {DEF_MQTT_PORT}]"
+                    )),
             )
     }
 

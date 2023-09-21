@@ -181,7 +181,6 @@ mod tests {
     const METRIC_PREFIX: &str = "rotonda_";
 
     // NOTE: this test is currently flakey, sometimes it fails at the end receiving more MQTT messages than expected.
-    #[cfg(feature = "mqtt")]
     #[test]
     fn integration_test() {
         use rotonda::tests::util::assert_json_eq;
@@ -419,7 +418,8 @@ mod tests {
             let mut config_bytes = base_config_toml.as_bytes().to_vec();
             config_bytes.extend_from_slice(mqtt_target_toml.as_bytes());
             let config_file = ConfigFile::new(config_bytes, Source::default(), Default::default());
-            let (_source, mut config) = Config::from_config_file(config_file, &mut manager).unwrap();
+            let (_source, mut config) =
+                Config::from_config_file(config_file, &mut manager).unwrap();
             manager.spawn(&mut config);
 
             // verify that there is now an MQTT connection

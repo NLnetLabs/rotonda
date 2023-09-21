@@ -1,0 +1,18 @@
+filter bgp-in-post-filter {
+    define {
+        rx msg: BgpUpdateMessage;
+    }
+
+    term dummy {
+        match {
+            1 == 1;
+        }
+    }
+
+    apply {
+        filter match dummy matching {
+             return accept;
+        };
+        accept;
+    }
+}

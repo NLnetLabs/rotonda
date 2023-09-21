@@ -497,7 +497,7 @@ impl Terminate {
     pub fn error() -> Self {
         Self(TerminateReason::Failed(1))
     }
-    
+
     pub fn other(exit_code: i32) -> Self {
         assert_ne!(exit_code, 0);
         Self(TerminateReason::Failed(exit_code))

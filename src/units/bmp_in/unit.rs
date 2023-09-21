@@ -110,7 +110,6 @@ struct BmpInRunner {
 
 impl BmpInRunner {
     thread_local!(
-        #[allow(clippy::type_complexity)]
         static VM: ThreadLocalVM = RefCell::new(None);
     );
 

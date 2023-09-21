@@ -240,7 +240,6 @@ pub type PendingVirtualRibQueryResults = FrimMap<QueryId, Arc<QueryOperationResu
 
 impl RibUnitRunner {
     thread_local!(
-        #[allow(clippy::type_complexity)]
         static VM: ThreadLocalVM = RefCell::new(None);
     );
 

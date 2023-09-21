@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::{Arc, Mutex};
 
+use arc_swap::ArcSwap;
 use futures::future::select;
 use futures::pin_mut;
 use log::debug;
@@ -11,6 +12,7 @@ use serde::Deserialize;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
+use crate::common::roto::FilterName;
 use crate::common::status_reporter::{Chainable, UnitStatusReporter};
 use crate::common::unit::UnitActivity;
 use crate::comms::{GateStatus, Terminated};
@@ -69,6 +71,7 @@ pub struct BgpTcpIn {
     pub my_bgp_id: [u8; 4],
     #[serde(rename = "peers", default)]
     pub peer_configs: PeerConfigs,
+    filter_name: FilterName,
 }
 
 impl PartialEq for BgpTcpIn {
@@ -134,6 +137,9 @@ impl BgpTcpInRunner {
 
         // Setup status reporting
         let status_reporter = Arc::new(BgpTcpInStatusReporter::new(&unit_name, metrics.clone()));
+
+        let roto_scripts = component.roto_scripts().clone();
+        let filter_name = Arc::new(ArcSwap::from_pointee(self.bgp.filter_name.clone()));
 
         // Wait for other components to be, and signal to other components
         // that we are, ready to start. All units and targets start together,
@@ -238,6 +244,8 @@ impl BgpTcpInRunner {
                         crate::tokio::spawn(
                             &child_name,
                             handle_connection(
+                                roto_scripts.clone(),
+                                filter_name.clone(),
                                 gate.clone(),
                                 self.bgp.clone(),
                                 tcp_stream,

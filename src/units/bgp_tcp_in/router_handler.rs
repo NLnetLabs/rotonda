@@ -1,6 +1,9 @@
+use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
 
+use arc_swap::ArcSwap;
 use bytes::Bytes;
 use log::{debug, error};
 use roto::types::builtin::{
@@ -27,6 +30,7 @@ use rotonda_fsm::bgp::session::{
     Session as BgpSession,
 };
 
+use crate::common::roto::{ThreadLocalVM, RotoScripts, FilterName};
 use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
 use crate::comms::{Gate, GateStatus, Terminated};
 use crate::payload::{Payload, SourceId, Update};
@@ -37,29 +41,38 @@ use super::peer_config::{CombinedConfig, ConfigExt};
 use super::unit::BgpTcpIn;
 
 struct Processor {
+    roto_scripts: RotoScripts,
     gate: Gate,
     unit_cfg: BgpTcpIn,
     bgp_ltime: u64, // XXX or should this be on Unit level?
     tx: mpsc::Sender<Command>,
     status_reporter: Arc<BgpTcpInStatusReporter>,
-
+    filter_name: Arc<ArcSwap<FilterName>>,
     observed_prefixes: BTreeSet<Prefix>,
 }
 
 impl Processor {
+    thread_local!(
+        static VM: ThreadLocalVM = RefCell::new(None);
+    );
+
     fn new(
+        roto_scripts: RotoScripts,
         gate: Gate,
         unit_cfg: BgpTcpIn,
         //rx: mpsc::Receiver<Message>,
         tx: mpsc::Sender<Command>,
         status_reporter: Arc<BgpTcpInStatusReporter>,
+        filter_name: Arc<ArcSwap<FilterName>>,
     ) -> Self {
         Processor {
+            roto_scripts,
             gate,
             unit_cfg,
             bgp_ltime: 0,
             tx,
             status_reporter,
+            filter_name,
             observed_prefixes: BTreeSet::new(),
         }
     }
@@ -181,11 +194,42 @@ impl Processor {
                             // established session, so not having a
                             // NegotiatedConfig should never happen.
                             if let Some(_negotiated) = session.negotiated() {
-                                self.process_update(
-                                    pdu,
-                                    //negotiated.remote_addr(),
-                                    //negotiated.remote_asn()
-                                ).await;
+                                if let Ok(res) = Self::VM.with(|vm| {
+                                    let delta_id = (RotondaId(0), 0); // TODO
+                                    let roto_update_msg = roto::types::builtin::UpdateMessage(pdu);
+                                    let msg = BgpUpdateMessage::new(delta_id, roto_update_msg);
+                                    let msg = Arc::new(msg);
+                                    let value: TypeValue = TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(msg));
+                                    self.roto_scripts.exec(vm, &self.filter_name.load(), value)
+                                }) {
+                                    if let ControlFlow::Continue(filter_output) = res {
+                                        if !filter_output.south.is_empty() {
+                                            let source_id = SourceId::from("TODO");
+                                            let mut output_stream_payloads: SmallVec<[Payload; 8]> = filter_output
+                                                .south
+                                                .into_iter()
+                                                .map(|osm| Payload::new(source_id.clone(), osm))
+                                                .collect();
+                                            if let Some(update) = match output_stream_payloads.len() {
+                                                0 => None,
+                                                1 => Some(Update::Single(output_stream_payloads.pop().unwrap())),
+                                                _ => Some(Update::Bulk(output_stream_payloads)),
+                                            } {
+                                                self.gate.update_data(update).await;
+                                            }
+                                        }
+                                        if let TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(pdu)) = filter_output.east {
+                                            if let Some(pdu) = Arc::into_inner(pdu) {
+                                                let pdu = pdu.raw_message().0.clone(); // Bytes is cheap to clone
+                                                self.process_update(
+                                                    pdu,
+                                                    //negotiated.remote_addr(),
+                                                    //negotiated.remote_asn()
+                                                ).await;
+                                            }
+                                        }
+                                    }
+                                }
                             } else {
                                 error!("unexpected state: no NegotiatedConfig for session");
                             }
@@ -299,6 +343,8 @@ impl Processor {
     ) {
         //Self::print_pcap(pdu.as_ref());
 
+
+
         // When sending both v4 and v6 nlri using exabgp, exa sends a v4
         // NextHop in a v6 MP_REACH_NLRI, which is invalid.
         // However, routecore logs that the nexthop looks bogus but continues
@@ -390,6 +436,8 @@ impl Processor {
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_connection(
+    roto_scripts: RotoScripts,
+    filter_name: Arc<ArcSwap<FilterName>>,
     gate: Gate,
     unit_config: BgpTcpIn,
     tcp_stream: TcpStream,
@@ -437,6 +485,6 @@ pub async fn handle_connection(
     session.manual_start().await;
     session.connection_established().await;
 
-    let mut p = Processor::new(gate, unit_config, cmds_tx, status_reporter);
+    let mut p = Processor::new(roto_scripts, gate, unit_config, cmds_tx, status_reporter, filter_name);
     p.process(session, sess_rx, live_sessions).await;
 }

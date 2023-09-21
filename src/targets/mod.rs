@@ -18,7 +18,7 @@
 mod bmp_fs_out;
 mod bmp_tcp_out;
 #[cfg(feature = "mqtt")]
-mod mqtt;
+pub(crate) mod mqtt;
 mod null;
 
 use tokio::sync::mpsc;

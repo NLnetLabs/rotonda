@@ -39,7 +39,7 @@ impl Display for MqttError {
     }
 }
 
-const DEF_MQTT_PORT: u16 = 1883;
+pub const DEF_MQTT_PORT: u16 = 1883;
 
 #[derive(Debug, Deserialize)]
 pub struct Mqtt {

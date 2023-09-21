@@ -3,6 +3,7 @@
 //! This module provides facilities to override the embedded MVP configuration
 //! via [`MvpConfig`].
 use clap::{Arg, ArgAction, ArgMatches, Command};
+use const_format::formatcp;
 use log::error;
 use serde::Deserialize;
 use std::fmt;
@@ -10,6 +11,9 @@ use std::net::SocketAddr;
 use std::str::FromStr;
 
 use crate::log::Terminate;
+
+#[cfg(feature = "mqtt")]
+use crate::targets::mqtt::target::DEF_MQTT_PORT;
 
 //------------ Constant ------------------------------------------------------
 
@@ -118,9 +122,9 @@ impl MvpConfig {
                 Arg::new(ARG_MQTT_DESTINATION)
                     .long(ARG_MQTT_DESTINATION)
                     .required(false)
-                    .value_name("IP:PORT")
+                    .value_name("IP or IP:PORT")
                     .conflicts_with(ARG_CONFIG)
-                    .help("Publish MQTT messages to this address"),
+                    .help(formatcp!("Publish MQTT messages to this address [default port: {DEF_MQTT_PORT}]")),
             )
     }
 

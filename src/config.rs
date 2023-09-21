@@ -8,7 +8,10 @@
 use crate::http;
 use crate::log::{LogConfig, Terminate};
 use crate::manager::{Manager, TargetSet, UnitSet};
-use crate::mvp::MvpConfig;
+use crate::mvp::{
+    MvpConfig, ARG_CONFIG, CFG_TARGET_BMP_PROXY, CFG_TARGET_MQTT, CFG_UNIT_BGP_IN,
+    CFG_UNIT_BMP_TCP_IN,
+};
 use clap::{Arg, ArgMatches, Command};
 use log::{error, info, trace};
 use serde::Deserialize;
@@ -18,6 +21,11 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{borrow, error, fmt, fs, io, ops};
 use toml::{Spanned, Value};
+
+//------------ Constants -----------------------------------------------------
+
+const CFG_UNITS: &str = "units";
+const CFG_TARGETS: &str = "targets";
 
 //------------ Config --------------------------------------------------------
 
@@ -80,9 +88,9 @@ impl Config {
     /// Configures a clap app with the arguments to load the configuration.
     pub fn config_args(app: Command) -> Command {
         let app = app.next_line_help(true).arg(
-            Arg::new("config")
+            Arg::new(ARG_CONFIG)
                 .short('c')
-                .long("config")
+                .long(ARG_CONFIG)
                 .required(false)
                 .value_name("PATH")
                 .help("Config file to use [default: embedded]"),
@@ -106,7 +114,7 @@ impl Config {
         cur_dir: &Path,
         manager: &mut Manager,
     ) -> Result<(Source, Self), Terminate> {
-        let config_file = match args.get_one::<String>("config") {
+        let config_file = match args.get_one::<String>(ARG_CONFIG) {
             Some(conf_path_arg) => {
                 // --config command line argument supplied, load and use the config file
                 let config_path = cur_dir.join(conf_path_arg);
@@ -377,34 +385,54 @@ impl ConfigFile {
         let mut toml: Value = toml::de::from_str(&config_str).unwrap();
         let mut source_remappings = None;
 
-        if let Some(Value::Table(units)) = toml.get_mut("units") {
+        if let Some(Value::Table(units)) = toml.get_mut(CFG_UNITS) {
             source_remappings = Some(Self::expand_shorthand_vribs(units))
         }
 
         if let Some(source_remappings) = source_remappings {
-            if let Some(Value::Table(targets)) = toml.get_mut("targets") {
+            if let Some(Value::Table(targets)) = toml.get_mut(CFG_TARGETS) {
                 Self::remap_sources(targets, &source_remappings);
             }
         }
 
         if let Some(mvp_overrides) = mvp_overrides {
-            // Handle the special MVP case of allowing a user to complete or remove the proxy configuration based on the
-            // command line arguments supplied.
             let Value::Table(ref mut root) = toml else { unreachable!() };
 
-            match mvp_overrides.proxy_destination_addr {
+            // Handle the special MVP case of allowing a user to complete or remove the BMP proxy target config based
+            // on the command line arguments supplied.
+            match mvp_overrides.bmp_proxy_destination_addr {
                 Some(addr) => {
-                    // Recofigure the dummy proxy definition to use the destination
-                    let Value::Table(ref mut targets) = root.get_mut("targets").unwrap() else { unreachable!() };
-                    let Value::Table(ref mut proxy) = targets.get_mut("proxy").unwrap() else { unreachable!() };
-                    let Value::String(ref mut destination) = proxy.get_mut("destination").unwrap() else { unreachable!() };
+                    // Recofigure the dummy proxy definition to use the destination.
+                    let Value::Table(ref mut targets) = root.get_mut(CFG_TARGETS).unwrap() else { unreachable!() };
+                    let Value::Table(ref mut bmp_proxy) = targets.get_mut(CFG_TARGET_BMP_PROXY).unwrap() else { unreachable!() };
+                    let Value::String(ref mut destination) = bmp_proxy.get_mut("destination").unwrap() else { unreachable!() };
                     *destination = addr.to_string();
                 }
 
                 None => {
-                    // Remove the dummy proxy definition as the MVP user did not supply a destination to proxy to
-                    let Value::Table(ref mut targets) = root.get_mut("targets").unwrap() else { unreachable!() };
-                    targets.remove("proxy");
+                    // Remove the dummy proxy target definition as the MVP user did not supply a destination to proxy
+                    // to.
+                    let Value::Table(ref mut targets) = root.get_mut(CFG_TARGETS).unwrap() else { unreachable!() };
+                    targets.remove(CFG_TARGET_BMP_PROXY);
+                }
+            }
+
+            // Handle the special MVP case of allowing a user to complete or remove the MQTT target config based on the
+            // command line arguments supplied.
+            match mvp_overrides.mqtt_destination_addr {
+                Some(addr) => {
+                    // Recofigure the dummy mqtt target definition to use the destination.
+                    let Value::Table(ref mut targets) = root.get_mut(CFG_TARGETS).unwrap() else { unreachable!() };
+                    let Value::Table(ref mut mqtt) = targets.get_mut(CFG_TARGET_MQTT).unwrap() else { unreachable!() };
+                    let Value::String(ref mut destination) = mqtt.get_mut("destination").unwrap() else { unreachable!() };
+                    *destination = addr.to_string();
+                }
+
+                None => {
+                    // Remove the dummy mqtt target definition as the MVP user did not supply a destination to publish
+                    // to.
+                    let Value::Table(ref mut targets) = root.get_mut(CFG_TARGETS).unwrap() else { unreachable!() };
+                    targets.remove(CFG_TARGET_MQTT);
                 }
             }
 
@@ -415,14 +443,14 @@ impl ConfigFile {
                 *listen = addr.to_string();
             }
             if let Some(addr) = mvp_overrides.bgp_listen_addr {
-                let Value::Table(ref mut units) = root.get_mut("units").unwrap() else { unreachable!() };
-                let Value::Table(ref mut bgp_in) = units.get_mut("bgp-in").unwrap() else { unreachable!() };
+                let Value::Table(ref mut units) = root.get_mut(CFG_UNITS).unwrap() else { unreachable!() };
+                let Value::Table(ref mut bgp_in) = units.get_mut(CFG_UNIT_BGP_IN).unwrap() else { unreachable!() };
                 let Value::String(ref mut listen) = bgp_in.get_mut("listen").unwrap() else { unreachable!() };
                 *listen = addr.to_string();
             }
             if let Some(addr) = mvp_overrides.bmp_listen_addr {
-                let Value::Table(ref mut units) = root.get_mut("units").unwrap() else { unreachable!() };
-                let Value::Table(ref mut bmp_tcp_in) = units.get_mut("bmp-tcp-in").unwrap() else { unreachable!() };
+                let Value::Table(ref mut units) = root.get_mut(CFG_UNITS).unwrap() else { unreachable!() };
+                let Value::Table(ref mut bmp_tcp_in) = units.get_mut(CFG_UNIT_BMP_TCP_IN).unwrap() else { unreachable!() };
                 let Value::String(ref mut listen) = bmp_tcp_in.get_mut("listen").unwrap() else { unreachable!() };
                 *listen = addr.to_string();
             }

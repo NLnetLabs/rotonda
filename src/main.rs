@@ -238,8 +238,7 @@ mod tests {
         [targets.local-broker]
         type = "mqtt-out"
         qos = 2
-        server_host = "127.0.0.1"
-        server_port = 1883
+        destination = "127.0.0.1"
         client_id = "rotonda"
         communities = ["BLACKHOLE"]
         sources = ["global-rib"]

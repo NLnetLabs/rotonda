@@ -39,6 +39,8 @@ impl Display for MqttError {
     }
 }
 
+const DEF_MQTT_PORT: u16 = 1883;
+
 #[derive(Debug, Deserialize)]
 pub struct Mqtt {
     /// The set of units to receive messages from.
@@ -48,12 +50,41 @@ pub struct Mqtt {
     config: Config,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(try_from = "String")]
+struct Destination {
+    /// MQTT server host name or IP address
+    host: String,
+
+    /// MQTT server TCP port number
+    port: u16,
+}
+
+impl TryFrom<String> for Destination {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let (host, port) = match value.split_once(':') {
+            Some((host, port)) => (
+                host.to_string(),
+                port.parse::<u16>().map_err(|err| err.to_string())?,
+            ),
+            None => (value, DEF_MQTT_PORT),
+        };
+
+        if host.is_empty() {
+            Err("Host port of MQTT server address must not be empty".to_string())
+        } else {
+            Ok(Self { host, port })
+        }
+    }
+}
+
 #[serde_as]
 #[derive(Debug, Default, Deserialize)]
 struct Config {
-    server_host: String,
-
-    server_port: u16,
+    /// MQTT server host[:port] to publish to
+    destination: Destination,
 
     #[serde(default = "Config::default_qos")]
     qos: i32,
@@ -174,8 +205,8 @@ impl MqttRunner {
 
         let mut create_opts = MqttOptions::new(
             arc_self.config.client_id.clone(),
-            arc_self.config.server_host.clone(),
-            arc_self.config.server_port,
+            arc_self.config.destination.host.clone(),
+            arc_self.config.destination.port,
         );
         create_opts.set_request_channel_capacity(arc_self.config.queue_size.into());
         create_opts.set_clean_session(false);
@@ -186,7 +217,7 @@ impl MqttRunner {
         // Create a client & connect
         arc_self.status_reporter.connecting(&format!(
             "{}:{}",
-            &arc_self.config.server_host, arc_self.config.server_port
+            &arc_self.config.destination.host, arc_self.config.destination.port
         ));
         let cap = arc_self.config.queue_size.into();
         let (client, connection) = AsyncClient::new(create_opts, cap);
@@ -254,7 +285,7 @@ impl MqttRunner {
         if let Some(mut connection) = connection {
             let status_reporter = status_reporter.clone();
             let connect_retry_secs = config.connect_retry_secs;
-            let server_uri = format!("{}:{}", config.server_host, config.server_port);
+            let server_uri = format!("{}:{}", config.destination.host, config.destination.port);
 
             crate::tokio::spawn("MQTT connection", async move {
                 let mut interval = interval(connect_retry_secs);
@@ -482,19 +513,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn server_host_and_port_and_communities_config_settings_must_be_provided() {
+    fn server_host_config_setting_must_be_provided() {
         let empty = r#""#;
-        let empty_server_host_only = r#"server_host = """#;
-        let empty_server_port_only = r#"server_port = 0"#;
-        let empty_server_host_and_port_only = r#"
-        server_host = ""
-        server_port = 0
-        "#;
+        let empty_destination = r#"destination = """#;
+        let destination_with_host_only = r#"destination = "some_host_name""#;
+        let destination_with_host_and_invalid_port = r#"destination = "some_host_name:invalid_port""#;
+        let destination_with_host_and_port = r#"destination = "some_host_name:12345""#;
 
         assert!(mk_config_from_toml(empty).is_err());
-        assert!(mk_config_from_toml(empty_server_host_only).is_err());
-        assert!(mk_config_from_toml(empty_server_port_only).is_err());
-        assert!(mk_config_from_toml(empty_server_host_and_port_only).is_ok());
+        assert!(mk_config_from_toml(empty_destination).is_err());
+        assert!(mk_config_from_toml(destination_with_host_only).is_ok());
+        assert!(mk_config_from_toml(destination_with_host_and_invalid_port).is_err());
+        assert!(mk_config_from_toml(destination_with_host_and_port).is_ok());
     }
 
     #[test]

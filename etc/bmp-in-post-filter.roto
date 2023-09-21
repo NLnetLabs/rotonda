@@ -1,6 +1,6 @@
 filter bmp-in-post-filter {
     define {
-        rx msg: BmpMessage;
+        rx msg: Route;
     }
 
     term dummy {

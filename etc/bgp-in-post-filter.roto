@@ -1,6 +1,6 @@
 filter bgp-in-post-filter {
     define {
-        rx msg: BgpUpdateMessage;
+        rx msg: Route;
     }
 
     term dummy {

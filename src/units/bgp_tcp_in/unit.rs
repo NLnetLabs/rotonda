@@ -67,10 +67,15 @@ impl TcpListener for StandardTcpListener {
 pub struct BgpTcpIn {
     /// Address:port to listen on incoming BGP connections over TCP.
     listen: String,
+
     pub my_asn: Asn, // TODO make getters, or impl Into<-fsm::bgp::Config>
+
     pub my_bgp_id: [u8; 4],
+
     #[serde(rename = "peers", default)]
     pub peer_configs: PeerConfigs,
+
+    #[serde(default)]
     filter_name: FilterName,
 }
 

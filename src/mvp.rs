@@ -14,7 +14,7 @@ use crate::log::Terminate;
 
 use crate::targets::DEF_MQTT_PORT;
 
-//------------ Constant ------------------------------------------------------
+//------------ Constants -----------------------------------------------------
 
 // NOTE: Unit and target names MUST match the names used in `rotonda.conf`!
 
@@ -211,10 +211,14 @@ mod tests {
         let mut manager = Manager::default();
 
         // when the expected roto scripts exist in the mock filesystem
-        let readable_paths: [(PathBuf, String); 4] = [
+        let readable_paths: [(PathBuf, String); 5] = [
             (
                 "etc/filter.roto".into(),
                 include_str!("../etc/filter.roto").into(),
+            ),
+            (
+                "etc/bgp-in-filter.roto".into(),
+                include_str!("../etc/bgp-in-filter.roto").into(),
             ),
             (
                 "etc/bmp-asn-filter.roto".into(),

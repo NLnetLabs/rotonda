@@ -30,7 +30,7 @@ use rotonda_fsm::bgp::session::{
     Session as BgpSession,
 };
 
-use crate::common::roto::{ThreadLocalVM, RotoScripts, FilterName};
+use crate::common::roto::{FilterName, FilterOutput, RotoScripts, ThreadLocalVM};
 use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
 use crate::comms::{Gate, GateStatus, Terminated};
 use crate::payload::{Payload, SourceId, Update};
@@ -194,7 +194,7 @@ impl Processor {
                             // established session, so not having a
                             // NegotiatedConfig should never happen.
                             if let Some(_negotiated) = session.negotiated() {
-                                if let Ok(res) = Self::VM.with(|vm| {
+                                if let Ok(ControlFlow::Continue(FilterOutput { south, east })) = Self::VM.with(|vm| {
                                     let delta_id = (RotondaId(0), 0); // TODO
                                     let roto_update_msg = roto::types::builtin::UpdateMessage(pdu);
                                     let msg = BgpUpdateMessage::new(delta_id, roto_update_msg);
@@ -202,31 +202,20 @@ impl Processor {
                                     let value: TypeValue = TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(msg));
                                     self.roto_scripts.exec(vm, &self.filter_name.load(), value)
                                 }) {
-                                    if let ControlFlow::Continue(filter_output) = res {
-                                        if !filter_output.south.is_empty() {
-                                            let source_id = SourceId::from("TODO");
-                                            let mut output_stream_payloads: SmallVec<[Payload; 8]> = filter_output
-                                                .south
-                                                .into_iter()
-                                                .map(|osm| Payload::new(source_id.clone(), osm))
-                                                .collect();
-                                            if let Some(update) = match output_stream_payloads.len() {
-                                                0 => None,
-                                                1 => Some(Update::Single(output_stream_payloads.pop().unwrap())),
-                                                _ => Some(Update::Bulk(output_stream_payloads)),
-                                            } {
-                                                self.gate.update_data(update).await;
-                                            }
-                                        }
-                                        if let TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(pdu)) = filter_output.east {
-                                            if let Some(pdu) = Arc::into_inner(pdu) {
-                                                let pdu = pdu.raw_message().0.clone(); // Bytes is cheap to clone
-                                                self.process_update(
-                                                    pdu,
-                                                    //negotiated.remote_addr(),
-                                                    //negotiated.remote_asn()
-                                                ).await;
-                                            }
+                                    if !south.is_empty() {
+                                        let source_id = SourceId::from("TODO");
+                                        let update = Payload::from_output_stream_queue(source_id, south).into();
+                                        self.gate.update_data(update).await;
+                                    }
+                                    if let TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(pdu)) = east {
+                                        if let Some(pdu) = Arc::into_inner(pdu) {
+                                            let pdu = pdu.raw_message().0.clone(); // Bytes is cheap to clone
+                                            let update = self.process_update(
+                                                pdu,
+                                                //negotiated.remote_addr(),
+                                                //negotiated.remote_asn()
+                                            ).await;
+                                            self.gate.update_data(update).await;
                                         }
                                     }
                                 }
@@ -340,10 +329,22 @@ impl Processor {
         pdu: UpdatePdu<Bytes>,
         //peer_ip: IpAddr,
         //peer_asn: Asn
-    ) {
-        //Self::print_pcap(pdu.as_ref());
-
-
+    ) -> Update {
+        fn mk_payload(
+            prefix: Prefix,
+            msg: &Arc<BgpUpdateMessage>,
+            source_id: &SourceId,
+            route_status: RouteStatus,
+        ) -> Payload {
+            let rrwd = RawRouteWithDeltas::new_with_message_ref(
+                msg.message_id(),
+                RotoPrefix::new(prefix),
+                msg,
+                route_status,
+            );
+            let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
+            Payload::new(source_id.clone(), typval)
+        }
 
         // When sending both v4 and v6 nlri using exabgp, exa sends a v4
         // NextHop in a v6 MP_REACH_NLRI, which is invalid.
@@ -372,6 +373,7 @@ impl Processor {
         // rib. Perhaps this can serve when further developing the part
         // where such an invalid PDU results in a specific NOTIFICATION that
         // needs to go out. Also, check whether 7606 comes into play here.
+        let mut payloads = SmallVec::new();
 
         let source_id: SourceId = "unknown".into(); // TODO
         let rot_id = RotondaId(0_usize);
@@ -380,57 +382,40 @@ impl Processor {
             (rot_id, ltime),
             UpdateMessage(pdu.clone()),
         ));
-        for chunk in pdu.nlris().iter().collect::<Vec<_>>().chunks(8) {
-            let mut bulk = SmallVec::new();
-            for nlri in chunk {
-                let prefix = if let Nlri::Unicast(b) = nlri {
-                    b.prefix()
-                } else {
-                    debug!("non unicast NLRI, skipping");
-                    continue;
-                };
 
-                self.observed_prefixes.insert(prefix);
+        payloads.extend(
+            pdu.nlris()
+                .iter()
+                .filter_map(|nlri| match nlri {
+                    Nlri::Unicast(v) => Some(v.prefix()),
+                    _ => {
+                        debug!("non-unicast NLRI, skipping");
+                        None
+                    }
+                })
+                .inspect(|prefix| {
+                    self.observed_prefixes.insert(*prefix);
+                })
+                .map(|prefix| mk_payload(prefix, &msg, &source_id, RouteStatus::InConvergence)),
+        );
 
-                let rrwd = RawRouteWithDeltas::new_with_message_ref(
-                    (rot_id, ltime),
-                    RotoPrefix::new(prefix),
-                    &msg,
-                    RouteStatus::InConvergence,
-                );
-                let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
-                let payload = Payload::new(source_id.clone(), typval);
-                //self.gate.update_data(Update::Single(payload)).await;
-                bulk.push(payload);
-            }
-            self.gate.update_data(Update::Bulk(bulk)).await;
-        }
+        payloads.extend(
+            pdu.nlris()
+                .iter()
+                .filter_map(|nlri| match nlri {
+                    Nlri::Unicast(v) => Some(v.prefix()),
+                    _ => {
+                        debug!("non-unicast withdrawal, skipping");
+                        None
+                    }
+                })
+                .inspect(|prefix| {
+                    self.observed_prefixes.remove(prefix);
+                })
+                .map(|prefix| mk_payload(prefix, &msg, &source_id, RouteStatus::Withdrawn)),
+        );
 
-        for chunk in pdu.withdrawals().iter().collect::<Vec<_>>().chunks(8) {
-            let mut bulk = SmallVec::new();
-            for withdrawal in chunk {
-                let prefix = if let Nlri::Unicast(b) = withdrawal {
-                    b.prefix()
-                } else {
-                    debug!("non unicast Withdrawal, skipping");
-                    continue;
-                };
-
-                self.observed_prefixes.remove(&prefix);
-
-                let rrwd = RawRouteWithDeltas::new_with_message_ref(
-                    (rot_id, ltime),
-                    RotoPrefix::new(prefix),
-                    &msg,
-                    RouteStatus::Withdrawn,
-                );
-                let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
-                let payload = Payload::new(source_id.clone(), typval);
-                //self.gate.update_data(Update::Single(payload)).await;
-                bulk.push(payload);
-            }
-            self.gate.update_data(Update::Bulk(bulk)).await;
-        }
+        payloads.into()
     }
 }
 

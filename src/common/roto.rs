@@ -7,7 +7,7 @@ use log::debug;
 use roto::{
     ast::{AcceptReject, ShortString},
     blocks::Scope,
-    compile::{CompileError, Compiler, MirBlock},
+    compile::{CompileError, Compiler, MirBlock, OwnedPack, RotoPackArc},
     types::typevalue::TypeValue,
     vm::{
         ExtDataSource, LinearMemory, OutputStreamQueue, VirtualMachine, VmBuilder, VmError,
@@ -276,12 +276,12 @@ pub struct RotoScript {
     origin: RotoScriptOrigin,
     source_code: String,
     loaded_when: Instant,
+    packs: Vec<OwnedPack>
 }
 
 #[derive(Clone, Debug)]
 pub struct ScopedRotoScript {
     roto_script: Arc<RotoScript>,
-    scope: Scope,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -306,10 +306,12 @@ impl RotoScripts {
             }
         }
 
-        // Try and compile it immediately to verify if there are any problems with it. We'll still need to compile it
-        // again later for each thread that wants to run a Roto VM that uses this script, but at least this way we don't
-        // have to wait until then to find out if there is a problem.
-        let rotolo =
+        // Try and compile it to verify if there are any problems with it.
+        // If there are, we are going to stop here. If there are none, we
+        // will store the resulting MIR, plus the required arguments (a
+        // RotoPack) in the RotoScript struct. This we only have to compile
+        // once.
+        let mut rotolo =
             Compiler::build(roto_script).map_err(|err| RotoError::compile_err(&origin, err))?;
 
         if !rotolo.is_success() {
@@ -328,9 +330,9 @@ impl RotoScripts {
         }
 
         // Check if any of the compiled filters have the same name as one that we've already seen
-        let new_filters = rotolo.inspect_all_arguments();
+        let new_filter_scopes = rotolo.get_scopes();
 
-        for filter_scope in new_filters.keys() {
+        for filter_scope in new_filter_scopes.as_slice() {
             let filter_name = match filter_scope {
                 Scope::Global => continue,
                 Scope::FilterMap(filter_name) => filter_name,
@@ -350,12 +352,13 @@ impl RotoScripts {
             origin: origin.clone(),
             source_code: roto_script.to_string(),
             loaded_when: Instant::now(),
+            packs: rotolo.packs_to_owned()
         });
 
         self.scripts_by_origin.insert(origin, new_script.clone());
 
         // Update the view of filter names to compiled scripts
-        for (scope, _args) in rotolo.inspect_all_arguments() {
+        for scope in new_filter_scopes.as_slice() {
             let filter_name = match scope.clone() {
                 Scope::Global => continue,
                 Scope::FilterMap(filter_name) => filter_name,
@@ -364,7 +367,6 @@ impl RotoScripts {
 
             let scoped_script = Arc::new(ScopedRotoScript {
                 roto_script: new_script.clone(),
-                scope,
             });
 
             self.scripts_by_filter
@@ -511,12 +513,7 @@ impl RotoScripts {
             .get(filter_name)
             .ok_or_else(|| RotoError::not_found(filter_name))?;
 
-        let rotolo = Compiler::build(&scoped_script.roto_script.source_code).unwrap(); // SAFETY: we test compilation in add_or_update_script()
-
-        let pack = rotolo
-            .retrieve_public_as_arcs(scoped_script.scope.clone()) // TODO: Remove .clone() when retrieve_public_as_arcs() takes &Scope instead of Scope
-            .map_err(|err| RotoError::compile_err(&scoped_script.roto_script.origin, err))?;
-
+        let pack: RotoPackArc = (&scoped_script.roto_script.packs[0]).into();
         VmBuilder::new()
             .with_mir_code(pack.mir)
             .with_data_sources(pack.data_sources)

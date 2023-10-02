@@ -100,6 +100,9 @@ async fn handle_signals(config_source: Source, mut manager: Manager) -> Result<(
                             );
                         }
                     }
+                } else {
+                    info!("SIGHUP signal receivd, nothing to do. No \
+                    configuration file specified to re-read (default used).");
                 }
             }
             Either::Right((Err(err), _)) => {

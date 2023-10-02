@@ -42,6 +42,7 @@ impl RotoFilterMetrics {
 }
 
 impl RotoFilterMetrics {
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_FILTERED_MESSAGES_METRIC: Metric = Metric::new(
         "roto_filter_num_filtered_messages",
         "the number of messages filtered out by this unit",

@@ -94,12 +94,14 @@ impl std::fmt::Display for RibMergeUpdateStatistics {
 }
 
 impl RibMergeUpdateStatistics {
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const RIB_MERGE_UPDATE_WITHDRAW_DURATION_MICROSECONDS: Metric = Metric::new(
         "rib_merge_update_withdraw_duration",
         "a histogram of seconds per prefix hashset size for RIB merge update operations on withdraw inserts",
         MetricType::Histogram,
         MetricUnit::Microsecond,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const RIB_MERGE_UPDATE_OTHER_DURATION_MICROSECONDS: Metric = Metric::new(
         "rib_merge_update_other_duration",
         "a histogram of seconds per prefix hashset size for RIB merge update operations on normal inserts",

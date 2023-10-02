@@ -881,54 +881,63 @@ impl GateMetrics {
 }
 
 impl GateMetrics {
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const STATUS_METRIC: Metric = Metric::new(
         "unit_status",
         "the operational status of the unit",
         MetricType::Text,
         MetricUnit::Info,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_UPDATES_METRIC: Metric = Metric::new(
         "num_updates",
         "the number of updates sent through the gate",
         MetricType::Counter,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_DROPPED_UPDATES_METRIC: Metric = Metric::new(
         "num_dropped_updates",
         "the number of updates that could not be sent through the gate",
         MetricType::Counter,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const UPDATE_SET_SIZE_METRIC: Metric = Metric::new(
         "update_set_size",
         "the number of set items in the last update",
         MetricType::Gauge,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const UPDATE_WHEN_METRIC: Metric = Metric::new(
         "last_update",
         "the date and time of the last update",
         MetricType::Text,
         MetricUnit::Info,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const UPDATE_AGO_METRIC: Metric = Metric::new(
         "since_last_update",
         "the number of seconds since the last update",
         MetricType::Gauge,
         MetricUnit::Second,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const LINK_CAPACITY_METRIC: Metric = Metric::new(
         "link_capacity",
         "the number of items that can be queued for sending downstream",
         MetricType::Gauge,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_QUEUE_SENDERS_METRIC: Metric = Metric::new(
         "num_queue_senders",
         "the number of downstreams that receive data via queue",
         MetricType::Gauge,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_DIRECT_SENDERS_METRIC: Metric = Metric::new(
         "num_direct_senders",
         "the number of downstreams that receive data directly",

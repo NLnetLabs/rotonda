@@ -23,12 +23,14 @@ pub struct RouterMetrics {
 }
 
 impl BmpInMetrics {
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const CONNECTION_COUNT_METRIC: Metric = Metric::new(
         "bmp_in_connection_count",
         "the number times the BMP initiation message has been seen per router",
         MetricType::Gauge,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_INVALID_BMP_MESSAGES_METRIC: Metric = Metric::new(
         "bmp_in_num_invalid_bmp_messages",
         "the number of received BMP messages that were invalid (e.g. not RFC compliant, could not be parsed, etc)",

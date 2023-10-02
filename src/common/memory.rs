@@ -90,6 +90,7 @@ unsafe impl<T: Allocator> Allocator for TrackingAllocator<T> {
 // ---
 
 impl<T: Allocator> TrackingAllocator<T> {
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_BYTES_ALLOCATED_METRIC: Metric = Metric::new(
         "tracking_allocator_num_bytes_allocated",
         "the amount of memory currently allocated",

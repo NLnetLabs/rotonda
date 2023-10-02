@@ -219,6 +219,7 @@ type = "bgp-tcp-in"
 listen = "10.1.0.254:11179"
 my_asn = 65001
 my_bgp_id = [1, 2, 3, 4]
+filter_name = ""
 
 [peers."0.0.0.0/0"]
 name = "Bgpsink"

@@ -267,7 +267,7 @@ impl Display for RotoScriptOrigin {
 //------------ RotoScript ---------------------------------------------------
 
 // A RotoScript is a script from one single origin (i.e. a file, a &str), but
-// can contain multiple compiled Filter(Map)s. Filter(Maps) cannot live in
+// can contain multiple compiled Filter(Map)s. Filter(Map)s cannot live in
 // the Global namespace, therefore they always have a NamedScope attached,
 // which is the same as the filter name. Each NamedScope, and thus the filter
 // name, needs to be unique across all roto scripts loaded by a Rotonda
@@ -343,7 +343,7 @@ impl RotoScripts {
             });
         }
 
-        // extract all the packs that are Filter(Maps). Filter(Maps) can't
+        // extract all the packs that are Filter(Map)s. Filter(Map)s can't
         // live in the Global scope, so these all have filter names.
         let new_filter_maps = rotolo.clean_packs_to_owned();
 

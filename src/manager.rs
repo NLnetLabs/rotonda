@@ -106,13 +106,13 @@ impl Component {
         }
     }
 
-    /// Register an HTTP resources.
+    /// Register an HTTP resource.
     pub fn register_http_resource(&mut self, process: Arc<dyn http::ProcessRequest>) {
         self.http_resources
             .register(Arc::downgrade(&process), false)
     }
 
-    /// Register a sub HTTP resources.
+    /// Register a sub HTTP resource.
     pub fn register_sub_http_resource(&mut self, process: Arc<dyn http::ProcessRequest>) {
         self.http_resources.register(Arc::downgrade(&process), true)
     }
@@ -396,7 +396,7 @@ pub struct Manager {
     /// An HTTP client.
     http_client: HttpClient,
 
-    /// The metrics collection maintained by this managers.
+    /// The metrics collection maintained by this manager.
     metrics: metrics::Collection,
 
     /// The HTTP resources collection maintained by this manager.
@@ -616,7 +616,7 @@ impl Manager {
             }
         })?;
 
-        // Drain the singleton static ROTO_FILTER_NAMEES contents to a local variable.
+        // Drain the singleton static ROTO_FILTER_NAMES contents to a local variable.
         let config_filter_names = ROTO_FILTER_NAMES
             .with(|filter_names| filter_names.replace(Some(Default::default())))
             .unwrap();
@@ -785,7 +785,7 @@ impl Manager {
     /// ```text
     ///     unit                                    target
     ///     ┌───┐                                   ┌───┐
-    ///     │ a │gate◀─────────────────────────link│ c │
+    ///     │ a │gate◀───────────────────────── link│ c │
     ///     └───┘                                   └───┘
     /// ```
     /// After:
@@ -795,14 +795,14 @@ impl Manager {
     ///     --------
     ///     unit                                    target
     ///     ┌───┐                                   ┌───┐
-    ///     │ a │gate◀─────────────────────────link│ c │
+    ///     │ a │gate◀───────────────────────── link│ c │
     ///     └───┘                                   └───┘
     ///
     ///     pending:
     ///     --------
     ///     unit                unit                target
     ///     ┌───┐               ┌───┐               ┌───┐
-    ///     │ a'│gate'◀───link'│ b'│gate'◀───link'│ c'│
+    ///     │ a'│gate'◀─── link'│ b'│gate'◀─── link'│ c'│
     ///     └───┘               └───┘               └───┘
     /// ```
     /// In this example unit a and target c still exist in the config file,
@@ -819,12 +819,12 @@ impl Manager {
     ///     --------
     ///     unit                                    target
     ///     ┌───┐                                   ┌───┐
-    ///     │ a │gate◀─────────────────────────link│ c │
+    ///     │ a │gate◀───────────────────────── link│ c │
     ///     └───┘                                   └───┘
     ///
     ///     unit                 unit               target
     ///     ┌───┐               ┌───┐               ┌───┐
-    ///     │ a'│gate◀╴╴╴╴link'│ b'│gate'◀╴╴╴link'│ c'│
+    ///     │ a'│gate◀──── link'│ b'│gate'◀─── link'│ c'│
     ///     └───┘               └───┘               └───┘
     /// ```
     /// Versus:
@@ -834,7 +834,7 @@ impl Manager {
     ///     --------
     ///     unit                unit                target
     ///     ┌───┐               ┌───┐               ┌───┐
-    ///     │ a │gate◀────link'│ b'│gate'◀───link'│ c │
+    ///     │ a │gate◀──── link'│ b'│gate'◀─── link'│ c │
     ///     └───┘               └───┘               └───┘
     /// ```
     /// If we blindly replace unit a with a' and target c with c' we risk
@@ -1502,7 +1502,7 @@ thread_local!(
 ///
 /// # Panics
 ///
-/// This funtion panics if it is called outside of a run of
+/// This function panics if it is called outside of a run of
 /// [`Manager::load`].
 pub fn load_filter_name(filter_name: FilterName) -> FilterName {
     ROTO_FILTER_NAMES.with(|filter_names| {

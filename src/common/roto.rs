@@ -297,7 +297,7 @@ pub struct ScopedRotoScript {
 
 #[derive(Clone, Debug, Default)]
 pub struct RotoScripts {
-    // RotoScripts keyes on their origin
+    // RotoScripts keyed on their origin
     scripts_by_origin: Arc<FrimMap<RotoScriptOrigin, Arc<RotoScript>>>,
     // Scoped scripts keyed on their scope name
     scripts_by_filter: Arc<FrimMap<FilterName, ScopedRotoScript>>,

@@ -61,6 +61,7 @@ MVP
 NEXT RELEASES
 
 - 🦀 Simple passive data sources use cases
+- 💤 create namespaces / modules system
 - 💤 create user-configurable graph DSL for units
 - 💤 create user-configurable query DSL
 - 💤 create dev documentation
@@ -116,6 +117,7 @@ NEXT RELEASES
 
 - 💤 user-configurable RIBs experimental implementation
 - 💤 virtual RIB experimental implementation
+- 💤 namespaces / modules support
 - 💤 create experimental global registry
 - 💤 Kafka connector
 - 💤 split-off EventSource, OutputConnector units

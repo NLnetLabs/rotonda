@@ -20,7 +20,7 @@ MVP
 - ✅ client-specific runtime application with BMP ingress and RIBs
 - 🦀 `roto` filtering language
 - 🦀 BGP passive speaker
-- 🦀 BGP limited active speaker
+- 🦀 ~~BGP limited active speaker~~ POSTPONED
 - 🦀 Documentation
 - 💤 Packaging
 
@@ -52,15 +52,15 @@ MVP
 - ✅ create experimental parser
 - ✅ create experimental compiler
 - ✅ create experimental virtual machine
-- 🦀 implement all methods on `roto` types
-- 🦀 Integrate into `rotonda-runtime`
-- 🦀 Simple passive data sources use cases
+- ✅ implement all methods on `roto` types
+- 🦀 Integrate into `rotonda`
 - 💤 create user-friendly error messaging
 - 🦀 extensive stress testing
-- 💤 create high-level overview documentation
+- 🦀 create high-level overview documentation
 
 NEXT RELEASES
 
+- 🦀 Simple passive data sources use cases
 - 💤 create user-configurable graph DSL for units
 - 💤 create user-configurable query DSL
 - 💤 create dev documentation
@@ -88,8 +88,8 @@ MVP
 - ✅ prefix types
 - ✅ route record example types
 - ✅ BGP/BMP types for parsing
-- 🦀 create minimal BGP packet builder: Withdrawal for one prefix
-- 🦀 create minimal BGP packet modifier: Add Community
+- 🦀 ~~create minimal BGP packet builder: Withdrawal for one prefix~~
+- 🦀 ~~create minimal BGP packet modifier: Add Community~~
 
 NEXT RELEASES
 
@@ -97,7 +97,7 @@ NEXT RELEASES
 - 💤 BGPsec parser
 
 
-## `Rotonda-runtime/Rotonda-units`
+## `Rotonda`
 
 MVP
 

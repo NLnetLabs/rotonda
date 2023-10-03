@@ -1,13 +1,9 @@
-use std::{
-    cell::RefCell,
-    sync::{Arc, Weak},
-};
+use std::sync::{Arc, Weak};
 
 use super::state_machine::processing::ProcessingResult;
 use crate::{
     common::{
         frim::FrimMap,
-        roto::ThreadLocalVM,
         status_reporter::{AnyStatusReporter, Chainable, UnitStatusReporter},
     },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate},
@@ -109,11 +105,6 @@ struct BmpInRunner {
 }
 
 impl BmpInRunner {
-    thread_local!(
-        #[allow(clippy::type_complexity)]
-        static VM: ThreadLocalVM = RefCell::new(None);
-    );
-
     fn new(
         mut component: Component,
         gate: Gate,

@@ -53,8 +53,10 @@ layout-rs          = { version = "^0.1", optional = true }
 mqtt               = { version = "0.18.0", package = "rumqttc", default-features = false }
 non-empty-vec      = { version = "^0.2", features = ["serde"]}
 percent-encoding   = "^2.2"
-roto               = { version = "0.1.0", git = "https://github.com/NLnetLabs/roto.git", branch = "compose-messages-nlri-v2" }
+roto               = { version = "0.1.0", git = "https://github.com/NLnetLabs/roto.git", branch = "main" }
 rotonda-store      = { version = "0.3.0-pre.3", git = "https://github.com/NLnetLabs/rotonda-store.git", branch = "compose-messages-nlri-v2" }
+# roto               = { version = "0.1.0", path = "../roto" }
+# rotonda-store      = { version = "0.3.0-pre.3", path = "../rotonda-store" }
 serde_with         = "^3"
 smallvec           = { version = "^1.10", features = ["const_generics", "const_new", "union"] }
 tokio-metrics      = "^0.2"

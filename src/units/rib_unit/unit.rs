@@ -564,7 +564,11 @@ impl RibUnitRunner {
         if let Some(filtered_update) = Self::VM
             .with(|vm| {
                 payload
-                    .filter(|value| self.roto_scripts.exec(vm, &self.filter_name.load(), value))
+                    .filter(
+                        |value| self.roto_scripts.exec(vm, &self.filter_name.load(), value),
+                        |_source_id| { /* TODO: self.status_reporter.message_filtered(source_id) */
+                        },
+                    )
                     .map(|filtered_payloads| (self.insert_payloads(filtered_payloads, insert_fn)))
             })
             .map_err(|err| {
@@ -761,7 +765,10 @@ impl RibUnitRunner {
             trace!("Reprocessing route");
 
             if let Ok(filtered_payloads) = Self::VM.with(|vm| {
-                payload.filter(|value| self.roto_scripts.exec(vm, &self.filter_name.load(), value))
+                payload.filter(
+                    |value| self.roto_scripts.exec(vm, &self.filter_name.load(), value),
+                    |_source_id| { /* TODO: self.status_reporter.message_filtered(source_id) */ },
+                )
             }) {
                 for filtered_payload in filtered_payloads {
                     // Add this processed query result route into the new query result

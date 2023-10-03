@@ -188,7 +188,10 @@ impl RotoFilterRunner {
         if let Some(filtered_update) = Self::VM
             .with(|vm| {
                 payload
-                    .filter(|value| self.roto_scripts.exec(vm, &self.filter_name.load(), value))
+                    .filter(
+                        |value| self.roto_scripts.exec(vm, &self.filter_name.load(), value),
+                        |source_id| self.status_reporter.message_filtered(source_id),
+                    )
                     .map(|mut filtered_payloads| match filtered_payloads.len() {
                         0 => None,
                         1 => Some(Update::Single(filtered_payloads.pop().unwrap())),

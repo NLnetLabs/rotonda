@@ -120,7 +120,11 @@ impl BmpProxyStatusReporter {
 
 impl TargetStatusReporter for BmpProxyStatusReporter {}
 
-impl AnyStatusReporter for BmpProxyStatusReporter {}
+impl AnyStatusReporter for BmpProxyStatusReporter {
+    fn metrics(&self) -> Option<Arc<dyn crate::metrics::Source>> {
+        Some(self.metrics.clone())
+    }
+}
 
 impl Chainable for BmpProxyStatusReporter {
     fn add_child<T: Display>(&self, child_name: T) -> Self {

@@ -54,7 +54,11 @@ impl RotoFilterStatusReporter {
 
 impl UnitStatusReporter for RotoFilterStatusReporter {}
 
-impl AnyStatusReporter for RotoFilterStatusReporter {}
+impl AnyStatusReporter for RotoFilterStatusReporter {
+    fn metrics(&self) -> Option<Arc<dyn crate::metrics::Source>> {
+        Some(self.metrics.clone())
+    }
+}
 
 impl Chainable for RotoFilterStatusReporter {
     fn add_child<T: Display>(&self, child_name: T) -> Self {

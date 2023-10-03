@@ -536,7 +536,7 @@ impl RotoScripts {
             .get(filter_name)
             .ok_or_else(|| RotoError::not_found(filter_name))?;
 
-        let pack: RotoPackArc = (&*scoped_script.pack).into();
+        let pack = RotoPackArc::from(scoped_script.pack.as_ref());
         VmBuilder::new()
             .with_mir_code(pack.mir)
             .with_data_sources(pack.data_sources)

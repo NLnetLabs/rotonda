@@ -284,6 +284,11 @@ pub struct RotoScript {
     packs: Vec<Arc<RotoPack>>
 }
 
+impl RotoScript {
+    pub fn contains(&self, search_pack: &Arc<RotoPack>) -> bool {
+        self.packs.iter().any(|pack| Arc::ptr_eq(pack, search_pack))
+    }
+}
 
 // A ScopedRotoScript is a single compiled Filter(Map) in its own scope. It
 // is always part of a RotoScript.
@@ -403,14 +408,7 @@ impl RotoScripts {
     pub fn remove_script(&self, origin: &RotoScriptOrigin) {
         if let Some(roto_script) = self.scripts_by_origin.remove(origin) {
             self.scripts_by_filter
-                .retain(|_filter_name, scoped_script| {
-                    for pack in &roto_script.packs {
-                        if Arc::ptr_eq(pack, &scoped_script.pack) { 
-                            return true;
-                        }
-                    }
-                    false
-                });
+                .retain(|_, scoped_script| !roto_script.contains(&scoped_script.pack));
         }
     }
 

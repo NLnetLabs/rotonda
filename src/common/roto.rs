@@ -450,7 +450,7 @@ impl RotoScripts {
         let stateful_vm = &mut vm_ref.borrow_mut();
         let stateful_vm = stateful_vm.as_mut().unwrap();
 
-        if !was_initialized {
+        if was_initialized {
             // Update the VM if the script containing the named filter has changed since last use.
             let found_filter = self
                 .scripts_by_filter

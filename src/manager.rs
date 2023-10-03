@@ -785,7 +785,7 @@ impl Manager {
     /// ```text
     ///     unit                                    target
     ///     ┌───┐                                   ┌───┐
-    ///     │ a │gate◀───────────────────────── link│ c │
+    ///     │ a │gate◀─────────────────────────link│ c │
     ///     └───┘                                   └───┘
     /// ```
     /// After:
@@ -795,14 +795,14 @@ impl Manager {
     ///     --------
     ///     unit                                    target
     ///     ┌───┐                                   ┌───┐
-    ///     │ a │gate◀───────────────────────── link│ c │
+    ///     │ a │gate◀─────────────────────────link│ c │
     ///     └───┘                                   └───┘
     ///
     ///     pending:
     ///     --------
     ///     unit                unit                target
     ///     ┌───┐               ┌───┐               ┌───┐
-    ///     │ a'│gate'◀─── link'│ b'│gate'◀─── link'│ c'│
+    ///     │ a'│gate'◀───link'│ b'│gate'◀───link'│ c'│
     ///     └───┘               └───┘               └───┘
     /// ```
     /// In this example unit a and target c still exist in the config file,
@@ -819,12 +819,12 @@ impl Manager {
     ///     --------
     ///     unit                                    target
     ///     ┌───┐                                   ┌───┐
-    ///     │ a │gate◀───────────────────────── link│ c │
+    ///     │ a │gate◀─────────────────────────link│ c │
     ///     └───┘                                   └───┘
     ///
     ///     unit                 unit               target
     ///     ┌───┐               ┌───┐               ┌───┐
-    ///     │ a'│gate◀──── link'│ b'│gate'◀─── link'│ c'│
+    ///     │ a'│gate◀╴╴╴╴link'│ b'│gate'◀╴╴╴link'│ c'│
     ///     └───┘               └───┘               └───┘
     /// ```
     /// Versus:
@@ -834,7 +834,7 @@ impl Manager {
     ///     --------
     ///     unit                unit                target
     ///     ┌───┐               ┌───┐               ┌───┐
-    ///     │ a │gate◀──── link'│ b'│gate'◀─── link'│ c │
+    ///     │ a │gate◀────link'│ b'│gate'◀───link'│ c │
     ///     └───┘               └───┘               └───┘
     /// ```
     /// If we blindly replace unit a with a' and target c with c' we risk

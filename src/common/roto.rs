@@ -103,6 +103,7 @@ pub type ThreadLocalVM = RefCell<Option<StatefulVM>>;
 
 //------------ RotoError ----------------------------------------------------------------------------------------------
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug)]
 pub enum LoadErrorKind {
     ReadDirError,
@@ -234,11 +235,7 @@ impl RotoError {
                 path = cwd.join(path);
             }
         }
-        Self::LoadError {
-            kind,
-            path: path.into(),
-            err,
-        }
+        Self::LoadError { kind, path, err }
     }
 }
 

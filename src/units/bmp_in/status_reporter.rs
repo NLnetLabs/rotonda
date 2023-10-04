@@ -3,14 +3,14 @@ use std::{
     sync::{atomic::Ordering, Arc},
 };
 
-use log::{error, debug};
+use log::{debug, error};
 
 use crate::{
     common::status_reporter::{sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter},
     payload::RouterId,
 };
 
-use super::metrics::{BmpInMetrics, RouterMetrics};
+use super::metrics::BmpInMetrics;
 
 #[derive(Debug, Default)]
 pub struct BmpInStatusReporter {
@@ -27,7 +27,7 @@ impl BmpInStatusReporter {
     }
 
     #[cfg(feature = "router-list")]
-    pub fn metrics(&self) -> Arc<BmpInMetrics> {
+    pub fn typed_metrics(&self) -> Arc<BmpInMetrics> {
         self.metrics.clone()
     }
 
@@ -40,7 +40,6 @@ impl BmpInStatusReporter {
     pub fn router_id_changed(&self, old_router_id: Arc<RouterId>, new_router_id: Arc<RouterId>) {
         self.metrics.init_metrics_for_router(new_router_id.clone());
         sr_log!(debug: self, "Router id changed from '{}' to '{}'", old_router_id, new_router_id);
-
     }
 
     pub fn invalid_bmp_message_received(&self, router_id: Arc<RouterId>) {

@@ -23,8 +23,8 @@
 use arc_swap::ArcSwap;
 use chrono::Utc;
 use clap::{crate_name, crate_version};
-use std::fmt;
 use std::fmt::Write;
+use std::fmt::{self, Debug};
 use std::sync::{Arc, Mutex, Weak};
 
 #[cfg(test)]
@@ -151,7 +151,33 @@ impl<T: Source> Source for Arc<T> {
 // Raw metrics are a metric output format only used for internal unit testing,
 // via OutputFormat::Test.
 #[cfg(test)]
-pub type RawMetricValue = String;
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawMetricValue(String);
+
+#[cfg(test)]
+impl RawMetricValue {
+    pub fn raw(self) -> String {
+        self.0
+    }
+
+    pub fn parse<T>(self) -> T
+    where
+        T: std::str::FromStr,
+        <T as std::str::FromStr>::Err: Debug,
+    {
+        str::parse(self.0.as_str()).unwrap()
+    }
+}
+
+#[cfg(test)]
+impl<T> From<T> for RawMetricValue
+where
+    T: std::fmt::Display,
+{
+    fn from(value: T) -> Self {
+        Self(format!("{value}"))
+    }
+}
 
 #[cfg(test)]
 #[derive(Clone, Debug, Hash, PartialEq, Eq)]
@@ -211,7 +237,7 @@ impl TryFrom<String> for RawMetricKey {
                     3 => Ok(RawMetricKey::named(name, unit, suffix)),
                     4 => {
                         let label = {
-                            let (lhs, rhs) = value.split_once('=').ok_or(format!("Expected label to be of the form k=v in '{value}'"))?;
+                            let (lhs, rhs) = parts[3].split_once('=').ok_or(format!("Expected label to be of the form k=v in '{value}'"))?;
                             (lhs.to_string(), rhs.to_string())
                         };
                         Ok(RawMetricKey::labelled(name, unit, suffix, label))
@@ -269,48 +295,37 @@ impl Target {
     }
 
     #[cfg(test)]
-    pub fn get_named_metric_string_value(&self, name: &str) -> Option<&RawMetricValue> {
+    pub fn with_name<T>(&self, name: &str) -> T
+    where
+        T: std::str::FromStr,
+        <T as std::str::FromStr>::Err: Debug,
+    {
         self.raw
             .iter()
             .find(|(k, _v)| k.name == name && k.label.is_none())
-            .map(|(_k, v)| v)
+            .map(|(_k, v)| v.clone())
+            .unwrap()
+            .parse()
     }
 
     #[cfg(test)]
-    pub fn get_named_metric_usize_value(&self, name: &str) -> Option<usize> {
-        self.get_named_metric_string_value(name)
-            .map(|v| str::parse(v).unwrap())
-    }
-
-    #[cfg(test)]
-    pub fn get_labelled_metric_string_value(
-        &self,
-        name: &str,
-        label: (&str, &str),
-    ) -> Option<&RawMetricValue> {
+    pub fn with_label<T>(&self, name: &str, label: (&str, &str)) -> T
+    where
+        T: std::str::FromStr,
+        <T as std::str::FromStr>::Err: Debug,
+    {
         self.raw
             .iter()
             .find(|(k, _v)| {
-                if k.name == name {
-                    k.label
+                k.name == name
+                    && k.label
                         .as_ref()
                         .filter(|(lk, lv)| (lk.as_str(), lv.as_str()) == label)
                         .is_some()
-                } else {
-                    false
-                }
             })
-            .map(|(_k, v)| v)
-    }
-
-    #[cfg(test)]
-    pub fn get_labelled_metric_usize_value(
-        &self,
-        name: &str,
-        label: (&str, &str),
-    ) -> Option<usize> {
-        self.get_labelled_metric_string_value(name, label)
-            .map(|v| str::parse(v).unwrap())
+            .map(|(_k, v)| v.clone())
+            .unwrap()
+            .parse()
     }
 
     /// Converts the target into a string with the assembled output.
@@ -460,7 +475,7 @@ impl<'b, 'a: 'b> Records<'a> {
                 );
                 self.target
                     .raw
-                    .insert(key.try_into().unwrap(), format!("{value}"));
+                    .insert(key.try_into().unwrap(), value.into());
             }
         }
     }
@@ -470,14 +485,14 @@ impl<'b, 'a: 'b> Records<'a> {
     /// The labels are a slice of pairs of strings with the first element the
     /// name of the label and the second the label value. The metrics value
     /// is simply printed via the `Display` trait.
-    pub fn label_value(&mut self, labels: &[(&str, &str)], value: impl fmt::Display) {
+    pub fn label_value(&mut self, labels: &[(&str, &str)], value: impl fmt::Display + Clone) {
         self.suffixed_label_value(labels, value, None)
     }
 
     pub fn suffixed_label_value(
         &mut self,
         labels: &[(&str, &str)],
-        value: impl fmt::Display,
+        value: impl fmt::Display + Clone,
         suffix: Option<&str>,
     ) {
         match self.target.format {
@@ -510,18 +525,18 @@ impl<'b, 'a: 'b> Records<'a> {
             }
             #[cfg(test)]
             OutputFormat::Test => {
-                for (name, value) in labels {
+                for (label_name, label_value) in labels {
                     let key = format!(
                         "{}|{}|{}|{}={}",
                         self.metric.name,
                         self.metric.unit,
                         suffix.unwrap_or("None"),
-                        name,
-                        value
+                        label_name,
+                        label_value
                     );
                     self.target
                         .raw
-                        .insert(key.try_into().unwrap(), value.to_string());
+                        .insert(key.try_into().unwrap(), value.clone().into());
                 }
             }
         }
@@ -712,7 +727,7 @@ pub mod util {
 
     use super::{Metric, Target};
 
-    pub fn append_per_router_metric<K: AsRef<str>, V: Display>(
+    pub fn append_per_router_metric<K: AsRef<str>, V: Display + Clone>(
         unit_name: &str,
         target: &mut Target,
         router_id: K,

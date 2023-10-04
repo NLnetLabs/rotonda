@@ -1,6 +1,10 @@
 #[cfg(test)]
 pub(crate) mod internal {
+    use std::sync::Arc;
+
     use env_logger::Env;
+
+    use crate::metrics::{self, OutputFormat, Target};
 
     /// Tries to enable logging. Intended for use in tests.
     ///
@@ -10,6 +14,12 @@ pub(crate) mod internal {
         let _ = env_logger::Builder::from_env(Env::default().default_filter_or(log_level))
             .is_test(true)
             .try_init();
+    }
+
+    pub(crate) fn mk_testable_metrics(metrics: &Arc<impl metrics::Source + ?Sized>) -> Target {
+        let mut target = Target::new(OutputFormat::Test);
+        metrics.append("testunit", &mut target);
+        target
     }
 }
 

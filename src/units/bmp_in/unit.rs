@@ -181,6 +181,22 @@ impl BmpInRunner {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn mock() -> Self {
+        Self {
+            gate: Gate::default().into(),
+            component: Default::default(),
+            router_id_template: BmpIn::default_router_id_template().into(),
+            router_states: Default::default(),
+            router_info: Default::default(),
+            router_metrics: Default::default(),
+            status_reporter: Default::default(),
+            http_api_path: BmpIn::default_http_api_path().into(),
+            _api_processor: Arc::new(|_: &hyper::Request<hyper::Body>| None),
+            state_machine_metrics: Default::default(),
+        }
+    }
+
     pub async fn run(
         self,
         mut sources: NonEmpty<DirectLink>,
@@ -408,7 +424,7 @@ impl BmpInRunner {
                 let processor = RouterInfoApi::new(
                     self.http_api_path.clone(),
                     source_id.clone(),
-                    self.status_reporter.metrics(),
+                    self.status_reporter.typed_metrics(),
                     self.router_metrics.clone(),
                     this_router_info.connected_at,
                     this_router_info.last_msg_at.clone(),
@@ -553,7 +569,15 @@ impl std::fmt::Debug for BmpInRunner {
 
 #[cfg(test)]
 mod tests {
+    use roto::types::{collections::BytesRecord, lazyrecord_types::BmpMessage};
+
+    use crate::{bgp::encode::mk_initiation_msg, tests::util::internal::mk_testable_metrics};
+
     use super::*;
+
+    const SYS_NAME: &str = "some sys name";
+    const SYS_DESCR: &str = "some sys descr";
+    const OTHER_SYS_NAME: &str = "other sys name";
 
     #[test]
     fn sources_are_required() {
@@ -578,9 +602,74 @@ mod tests {
         mk_config_from_toml(toml).unwrap();
     }
 
+    // Note: The tests below assume that the default router id template
+    // includes the BMP sysName.
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn counters_should_be_initialized_for_new_router_id() {
+        let runner = BmpInRunner::mock();
+        let update = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
+
+        runner.process_update(update).await;
+
+        let metrics = mk_testable_metrics(&runner.status_reporter.metrics().unwrap());
+        assert_eq!(
+            metrics.with_label::<usize>("bmp_in_num_invalid_bmp_messages", ("router", SYS_NAME)),
+            0,
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[should_panic]
+    async fn counters_for_other_sys_name_should_not_exist() {
+        let runner = BmpInRunner::mock();
+        let update = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
+
+        runner.process_update(update).await;
+
+        let metrics = mk_testable_metrics(&runner.status_reporter.metrics().unwrap());
+        assert_eq!(
+            metrics.with_label::<usize>(
+                "bmp_in_num_invalid_bmp_messages",
+                ("router", OTHER_SYS_NAME)
+            ),
+            0,
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn new_counters_should_be_started_if_the_router_id_changes() {
+        let runner = BmpInRunner::mock();
+        let update = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
+        let update2 = mk_update(mk_initiation_msg(OTHER_SYS_NAME, SYS_DESCR));
+
+        runner.process_update(update).await;
+        runner.process_update(update2).await;
+
+        let metrics = mk_testable_metrics(&runner.status_reporter.metrics().unwrap());
+        assert_eq!(
+            metrics.with_label::<usize>("bmp_in_num_invalid_bmp_messages", ("router", SYS_NAME)),
+            0,
+        );
+        assert_eq!(
+            metrics.with_label::<usize>(
+                "bmp_in_num_invalid_bmp_messages",
+                ("router", OTHER_SYS_NAME)
+            ),
+            0,
+        );
+    }
+
     // --- Test helpers ------------------------------------------------------
 
     fn mk_config_from_toml(toml: &str) -> Result<BmpIn, toml::de::Error> {
         toml::from_str::<BmpIn>(toml)
+    }
+
+    fn mk_update(msg_buf: Bytes) -> Update {
+        let source_id = SourceId::SocketAddr("127.0.0.1:8080".parse().unwrap());
+        let bmp_msg = Arc::new(BytesRecord(BmpMessage::from_octets(msg_buf).unwrap()));
+        let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
+        Update::Single(Payload::new(source_id, value))
     }
 }

@@ -101,7 +101,7 @@ pub trait AnyDirectUpdate: Any + Debug + Send + Sync + DirectUpdate {}
 //------------ Configuration -------------------------------------------------
 
 /// The queue length of an update channel.
-pub const UPDATE_QUEUE_LEN: usize = 8;
+pub const DEF_UPDATE_QUEUE_LEN: usize = 8;
 
 /// The queue length of a command channel.
 const COMMAND_QUEUE_LEN: usize = 16;
@@ -195,6 +195,12 @@ impl Drop for Gate {
                 self.blocking_detach();
             }
         }
+    }
+}
+
+impl Default for Gate {
+    fn default() -> Self {
+        Self::new(DEF_UPDATE_QUEUE_LEN).0
     }
 }
 

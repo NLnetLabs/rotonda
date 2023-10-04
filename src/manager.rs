@@ -2,7 +2,7 @@
 
 use crate::common::file_io::{FileIo, TheFileIo};
 use crate::common::roto::{FilterName, LoadErrorKind, RotoError, RotoScriptOrigin, RotoScripts};
-use crate::comms::{DirectLink, Gate, GateAgent, GraphStatus, Link, UPDATE_QUEUE_LEN};
+use crate::comms::{DirectLink, Gate, GateAgent, GraphStatus, Link, DEF_UPDATE_QUEUE_LEN};
 use crate::config::{Config, ConfigFile, Marked};
 use crate::log::Terminate;
 use crate::targets::Target;
@@ -1480,13 +1480,13 @@ fn get_queue_size_for_link(link_id: String) -> (String, usize) {
         let queue_len = options.parse::<usize>().unwrap_or_else(|err| {
             warn!(
                 "Invalid queue length '{}' for '{}', falling back to the default ({}): {}",
-                options, name, UPDATE_QUEUE_LEN, err
+                options, name, DEF_UPDATE_QUEUE_LEN, err
             );
-            UPDATE_QUEUE_LEN
+            DEF_UPDATE_QUEUE_LEN
         });
         (name.to_string(), queue_len)
     } else {
-        (link_id, UPDATE_QUEUE_LEN)
+        (link_id, DEF_UPDATE_QUEUE_LEN)
     };
     (name, queue_size)
 }

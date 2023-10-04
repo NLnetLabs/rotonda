@@ -238,9 +238,8 @@ mod tests {
 
     use crate::{
         bgp::encode::{Announcements, Prefixes},
-        metrics::{OutputFormat, Target},
         payload::{Payload, SourceId},
-        tests::util::internal::enable_logging,
+        tests::util::internal::{enable_logging, mk_testable_metrics},
     };
 
     use super::*;
@@ -341,10 +340,10 @@ mod tests {
         assert!(!is_filtered(&filter, mk_filter_payload(mk_initiation_msg())).await);
         assert!(!is_filtered(&filter, mk_filter_payload(mk_termination_msg())).await);
 
-        let metrics = mk_testable_metrics(&filter.status_reporter);
+        let metrics = mk_testable_metrics(&filter.status_reporter.metrics().unwrap());
         assert_eq!(
-            metrics.get_named_metric_usize_value("roto_filter_num_filtered_messages"),
-            Some(0)
+            metrics.with_name::<usize>("roto_filter_num_filtered_messages"),
+            0,
         );
     }
 
@@ -362,8 +361,8 @@ mod tests {
         assert!(is_filtered(&filter, mk_filter_payload(mk_statistics_report_msg())).await);
         assert!(!is_filtered(&filter, mk_filter_payload(mk_termination_msg())).await);
 
-        let metrics = mk_testable_metrics(&filter.status_reporter);
-        assert_eq!(metrics.get_named_metric_usize_value("roto_filter_num_filtered_messages"), Some(4));
+        let metrics = mk_testable_metrics(&filter.status_reporter.metrics().unwrap());
+        assert_eq!(metrics.with_name::<usize>("roto_filter_num_filtered_messages"), 4);
     }
 
     #[rustfmt::skip]
@@ -380,8 +379,8 @@ mod tests {
         assert!(!is_filtered(&filter, mk_filter_payload(mk_statistics_report_msg())).await);
         assert!(!is_filtered(&filter, mk_filter_payload(mk_termination_msg())).await);
 
-        let metrics = mk_testable_metrics(&filter.status_reporter);
-        assert_eq!(metrics.get_named_metric_usize_value("roto_filter_num_filtered_messages"), Some(0));
+        let metrics = mk_testable_metrics(&filter.status_reporter.metrics().unwrap());
+        assert_eq!(metrics.with_name::<usize>("roto_filter_num_filtered_messages"), 0);
     }
 
     #[rustfmt::skip]
@@ -397,8 +396,8 @@ mod tests {
         assert!(is_filtered(&filter, mk_filter_payload(mk_peer_up_notification_msg())).await);
         assert!(!is_filtered(&filter, mk_filter_payload(mk_statistics_report_msg())).await);
 
-        let metrics = mk_testable_metrics(&filter.status_reporter);
-        assert_eq!(metrics.get_named_metric_usize_value("roto_filter_num_filtered_messages"), Some(2));
+        let metrics = mk_testable_metrics(&filter.status_reporter.metrics().unwrap());
+        assert_eq!(metrics.with_name::<usize>("roto_filter_num_filtered_messages"), 2);
     }
 
     //-------- Test helpers --------------------------------------------------
@@ -485,12 +484,5 @@ mod tests {
 
     fn mk_filter(roto_source_code: &str) -> RotoFilterRunner {
         RotoFilterRunner::mock(roto_source_code, "my-module")
-    }
-
-    fn mk_testable_metrics(status_reporter: &Arc<impl AnyStatusReporter>) -> Target {
-        let metrics = status_reporter.metrics().unwrap();
-        let mut target = Target::new(OutputFormat::Test);
-        metrics.append("testunit", &mut target);
-        target
     }
 }

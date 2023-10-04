@@ -330,18 +330,7 @@ impl BmpInRunner {
                 // a sysName Information TLV string. Use the captured value to
                 // make the router ID more meaningful, instead of the
                 // "unknown" sysName value we used until now.
-                if let BmpState::Dumping(next_state) = &mut res.next_state {
-                    next_state.router_id = Arc::new(format_source_id(
-                        self.router_id_template.clone(),
-                        &next_state.details.sys_name,
-                        source_id,
-                    ));
-
-                    // Ensure that on first use the metrics for this
-                    // new router ID are correctly initialised.
-                    self.status_reporter
-                        .router_id_changed(next_state.router_id.clone());
-                }
+                self.check_update_router_id(&mut res.next_state, source_id);
             }
 
             MessageType::RoutingUpdate { update } => {
@@ -350,7 +339,11 @@ impl BmpInRunner {
                 self.gate.update_data(update).await;
             }
 
-            MessageType::Other => {} // Nothing to do
+            MessageType::Other => {
+                // A BMP initiation message received after the initiation
+                // phase will result in this type of message.
+                self.check_update_router_id(&mut res.next_state, source_id);
+            }
 
             MessageType::Aborted => {
                 // Something went fatally wrong, the issue should already have
@@ -359,6 +352,37 @@ impl BmpInRunner {
         }
 
         res.next_state
+    }
+
+    fn check_update_router_id(&self, next_state: &mut BmpState, source_id: &SourceId) {
+        let new_sys_name = match next_state {
+            BmpState::Dumping(v) => &v.details.sys_name,
+            BmpState::Updating(v) => &v.details.sys_name,
+            _ => {
+                // Other states don't carry the sys name
+                return;
+            }
+        };
+
+        let new_router_id = Arc::new(format_source_id(
+            self.router_id_template.clone(),
+            new_sys_name,
+            source_id,
+        ));
+
+        let old_router_id = next_state.router_id();
+        if new_router_id != old_router_id {
+            // Ensure that on first use the metrics for this
+            // new router ID are correctly initialised.
+            self.status_reporter
+                .router_id_changed(old_router_id, new_router_id.clone());
+
+            match next_state {
+                BmpState::Dumping(v) => v.router_id = new_router_id.clone(),
+                BmpState::Updating(v) => v.router_id = new_router_id.clone(),
+                _ => unreachable!(),
+            }
+        }
     }
 
     // TODO: Should we tear these individual API endpoints down when the

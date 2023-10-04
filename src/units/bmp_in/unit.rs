@@ -3,7 +3,7 @@ use std::sync::{Arc, Weak};
 use super::state_machine::processing::ProcessingResult;
 use crate::{
     common::{
-        frim::FrimMap,
+        frim::{Entry, FrimMap},
         status_reporter::{AnyStatusReporter, Chainable, UnitStatusReporter},
     },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate},
@@ -29,7 +29,7 @@ use non_empty_vec::NonEmpty;
 use roto::types::{builtin::BuiltinTypeValue, typevalue::TypeValue};
 use routecore::bmp::message::Message as BmpMsg;
 use serde::Deserialize;
-use tokio::{runtime::Handle, sync::Mutex};
+use tokio::sync::Mutex;
 
 #[cfg(feature = "router-list")]
 use {
@@ -460,20 +460,25 @@ impl BmpInRunner {
 
                 // Process the message through the BMP state machine.
                 // Initialize the state machine if not already done for this router.
-                let entry = entry.or_insert_with(|| {
-                    let new_entry = Arc::new(tokio::sync::Mutex::new(Some(
-                        self.router_connected(&source_id),
-                    )));
+                // Process the message through the BMP state machine.
+                // Initialize the state machine if not already done for this router.
+                let entry = match entry {
+                    Entry::Occupied(existing_entry) => existing_entry,
 
-                    let weak_ref = Arc::downgrade(&new_entry);
-                    tokio::task::block_in_place(|| {
-                        Handle::current().block_on(
-                            self.setup_router_specific_api_endpoint(weak_ref, &source_id),
-                        );
-                    });
+                    Entry::Vacant(map, key) => {
+                        // Entry doesn't yet exist, create and insert it.
+                        let new_entry =
+                            Arc::new(Mutex::new(Some(self.router_connected(&source_id))));
 
-                    new_entry
-                });
+                        let weak_ref = Arc::downgrade(&new_entry);
+                        self.setup_router_specific_api_endpoint(weak_ref, &source_id)
+                            .await;
+
+                        map.insert(key, new_entry.clone());
+
+                        new_entry
+                    }
+                };
 
                 let mut locked = entry.lock().await;
                 let this_state = locked.take().unwrap();

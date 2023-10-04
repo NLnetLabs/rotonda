@@ -49,6 +49,12 @@ use {
 use super::state_machine::metrics::BmpMetrics;
 use super::util::format_source_id;
 
+//-------- Constants ---------------------------------------------------------
+
+pub const UNKNOWN_ROUTER_SYSNAME: &str = "unknown";
+
+//-------- BmpIn -------------------------------------------------------------
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct BmpIn {
     /// The set of units to receive updates from.
@@ -90,6 +96,8 @@ impl BmpIn {
         Arc::new("{sys_name}".to_string())
     }
 }
+
+//-------- BmpInRunner -------------------------------------------------------
 
 struct BmpInRunner {
     gate: Arc<Gate>,
@@ -261,7 +269,7 @@ impl BmpInRunner {
     fn router_connected(&self, source_id: &SourceId) -> BmpState {
         let router_id = Arc::new(format_source_id(
             self.router_id_template.clone(),
-            "unknown",
+            UNKNOWN_ROUTER_SYSNAME,
             source_id,
         ));
 
@@ -345,7 +353,7 @@ impl BmpInRunner {
                 // just processed an Initiation message and MUST have captured
                 // a sysName Information TLV string. Use the captured value to
                 // make the router ID more meaningful, instead of the
-                // "unknown" sysName value we used until now.
+                // UNKNOWN_ROUTER_SYSNAME sysName value we used until now.
                 self.check_update_router_id(&mut res.next_state, source_id);
             }
 
@@ -571,7 +579,13 @@ impl std::fmt::Debug for BmpInRunner {
 mod tests {
     use roto::types::{collections::BytesRecord, lazyrecord_types::BmpMessage};
 
-    use crate::{bgp::encode::mk_initiation_msg, tests::util::internal::mk_testable_metrics};
+    use crate::{
+        bgp::encode::{
+            mk_initiation_msg, mk_invalid_initiation_message_that_lacks_information_tlvs,
+            mk_peer_down_notification_msg, mk_per_peer_header,
+        },
+        tests::util::internal::mk_testable_metrics,
+    };
 
     use super::*;
 
@@ -657,6 +671,31 @@ mod tests {
                 ("router", OTHER_SYS_NAME)
             ),
             0,
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn num_invalid_bmp_messages_counter_should_increase() {
+        let runner = BmpInRunner::mock();
+
+        // A BMP Initiation message that lacks required fields
+        let update = mk_update(mk_invalid_initiation_message_that_lacks_information_tlvs());
+
+        // A BMP Peer Down Notification message without a corresponding Peer
+        // Up Notification message.
+        let pph = mk_per_peer_header("10.0.0.1", 12345);
+        let update2 = mk_update(mk_peer_down_notification_msg(&pph));
+
+        runner.process_update(update).await;
+        runner.process_update(update2).await;
+
+        let metrics = mk_testable_metrics(&runner.status_reporter.metrics().unwrap());
+        assert_eq!(
+            metrics.with_label::<usize>(
+                "bmp_in_num_invalid_bmp_messages",
+                ("router", UNKNOWN_ROUTER_SYSNAME)
+            ),
+            2,
         );
     }
 

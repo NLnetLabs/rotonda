@@ -41,7 +41,8 @@ impl RouterInfoApi {
         connected_at: &DateTime<Utc>,
         last_message_at: &Arc<RwLock<DateTime<Utc>>>,
     ) -> Response<Body> {
-        if let Some(router_conn_metrics) = conn_metrics.router_metrics(router_id.clone()) {
+        if conn_metrics.contains(&router_id) {
+            let router_conn_metrics = conn_metrics.router_metrics(router_id.clone());
             let mut response_body = Self::build_response_header();
 
             response_body.push_str(&Self::build_response_body(

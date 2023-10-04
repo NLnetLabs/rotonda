@@ -43,10 +43,6 @@ async fn read_from_router<T: AsyncRead + Unpin>(
     let gate_worker = gate.clone();
     let mut stream = BmpStream::new(rx, gate);
 
-    // Ensure that on first use the metrics for the "unknown" router are
-    // correctly initialised.
-    status_reporter.router_id_changed(router_addr);
-
     loop {
         // Read the incoming TCP stream, extracting BMP messages.
         match stream.next().await {

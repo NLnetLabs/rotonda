@@ -39,16 +39,17 @@ impl BmpInMetrics {
         }
     }
 
-    pub fn init_metrics_for_router(&self, router_id: Arc<RouterId>) -> Arc<RouterMetrics> {
+    pub fn contains(&self, router_id: &Arc<RouterId>) -> bool {
+        self.routers.contains_key(&router_id)
+    }
+
+    /// Warning: This fn will create a metric set for the given router id if
+    /// it doesn't already exist. Use `contains()` to test if metrics exist
+    /// for a given router id.
+    pub fn router_metrics(&self, router_id: Arc<RouterId>) -> Arc<RouterMetrics> {
         self.routers
             .entry(router_id)
             .or_insert_with(Default::default)
-    }
-
-    /// Assumes that the metrics for the router exist, i.e. that
-    /// init_metrics_for_router() was already called for this router id.
-    pub fn router_metrics(&self, router_id: Arc<RouterId>) -> Option<Arc<RouterMetrics>> {
-        self.routers.get(&router_id)
     }
 }
 

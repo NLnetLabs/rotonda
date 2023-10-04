@@ -31,23 +31,15 @@ impl BmpInStatusReporter {
         self.metrics.clone()
     }
 
-    /// Ensure only when necessary that metric counters for a new (or changed)
-    /// router ID are initialised.
-    ///
-    /// This must be called prior to calling any other member function that
-    /// takes a [RouterId] as input otherwise metrics will not be properly
-    /// counted.
     pub fn router_id_changed(&self, old_router_id: Arc<RouterId>, new_router_id: Arc<RouterId>) {
-        self.metrics.init_metrics_for_router(new_router_id.clone());
         sr_log!(debug: self, "Router id changed from '{}' to '{}'", old_router_id, new_router_id);
     }
 
     pub fn invalid_bmp_message_received(&self, router_id: Arc<RouterId>) {
-        if let Some(router_metrics) = self.metrics.router_metrics(router_id) {
-            router_metrics
-                .num_invalid_bmp_messages
-                .fetch_add(1, Ordering::SeqCst);
-        }
+        self.metrics
+            .router_metrics(router_id)
+            .num_invalid_bmp_messages
+            .fetch_add(1, Ordering::SeqCst);
     }
 
     pub fn internal_error<T: Display>(&self, err: T) {

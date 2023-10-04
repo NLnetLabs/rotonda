@@ -121,7 +121,6 @@ impl RouterInfoApi {
             .bmp_state_machine_state
             .load(Ordering::SeqCst);
 
-        let num_connects: usize = router_conn_metrics.connection_count.load(Ordering::SeqCst);
         let num_msg_issues: usize = router_conn_metrics
             .num_invalid_bmp_messages
             .load(Ordering::SeqCst);
@@ -261,7 +260,6 @@ impl RouterInfoApi {
                 Connected at : {connected_at}
                 Last message : {last_message_at}
             Counters:
-                Connects     : {num_connects}
                 Problem Msgs : {num_msg_issues} issues (e.g. RFC violation, parsing retried/failed, etc)
                 BGP UPDATEs:
                     Soft Fail: {num_retried_bgp_updates_known_peer}/{num_retried_bgp_updates_unknown_peer} (known/unknown peer)

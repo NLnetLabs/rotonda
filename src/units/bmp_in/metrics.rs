@@ -22,7 +22,7 @@ pub struct RouterMetrics {
 }
 
 impl BmpInMetrics {
-    // TEST STATUS: [/] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_INVALID_BMP_MESSAGES_METRIC: Metric = Metric::new(
         "bmp_in_num_invalid_bmp_messages",
         "the number of received BMP messages that were invalid (e.g. not RFC compliant, could not be parsed, etc)",

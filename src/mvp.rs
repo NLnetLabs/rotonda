@@ -21,7 +21,7 @@ use crate::targets::DEF_MQTT_PORT;
 pub const CFG_UNIT_BGP_IN: &str = "bgp-in";
 pub const CFG_UNIT_BGP_IN_POST_FILTER: &str = "bgp-in-post-filter";
 pub const CFG_UNIT_BMP_TCP_IN: &str = "bmp-tcp-in";
-pub const CFG_UNIT_BMP_ASN_FILTER: &str = "bmp-asn-filter";
+pub const CFG_UNIT_BMP_ASN_FILTER: &str = "bmp-in-filter";
 pub const CFG_UNIT_BMP_IN: &str = "bmp-in";
 pub const CFG_UNIT_BMP_IN_POST_FILTER: &str = "bmp-in-post-filter";
 pub const CFG_UNIT_RIB_IN_PRE: &str = "rib-in-pre";
@@ -220,7 +220,7 @@ mod tests {
                 include_str!("../etc/filter.roto").into(),
             ),
             (
-                "etc/bmp-asn-filter.roto".into(),
+                "etc/bmp-in-filter.roto".into(),
                 include_str!("../etc/bmp-in-filter.roto").into(),
             ),
             (

@@ -28,7 +28,7 @@ use std::fmt::{self, Debug};
 use std::sync::{Arc, Mutex, Weak};
 
 #[cfg(test)]
-use std::collections::HashMap;
+use std::{cmp::Ordering, collections::BTreeMap};
 
 //------------ Module Configuration ------------------------------------------
 
@@ -214,6 +214,28 @@ impl RawMetricKey {
     }
 }
 
+#[cfg(test)]
+impl PartialOrd for RawMetricKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[cfg(test)]
+impl Ord for RawMetricKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.name.cmp(&other.name) {
+            Ordering::Equal => {},
+            ord => return ord,
+        }
+        match self.suffix.cmp(&other.suffix) {
+            Ordering::Equal => {},
+            ord => return ord,
+        }
+        self.label.cmp(&other.label)
+    }
+}
+
 /// Support creation of RawMetricKey from a '|' separated string of metric
 /// identification components. Currently supports two source formats:
 ///   - |name|unit type|suffix|
@@ -268,7 +290,7 @@ pub struct Target {
     target: String,
 
     #[cfg(test)]
-    raw: HashMap<RawMetricKey, RawMetricValue>,
+    raw: BTreeMap<RawMetricKey, RawMetricValue>,
 }
 
 impl Target {

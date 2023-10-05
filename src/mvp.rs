@@ -221,7 +221,7 @@ mod tests {
             ),
             (
                 "etc/bmp-asn-filter.roto".into(),
-                include_str!("../etc/bmp-asn-filter.roto").into(),
+                include_str!("../etc/bmp-in-filter.roto").into(),
             ),
             (
                 "etc/rib-in-pre.roto".into(),

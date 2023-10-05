@@ -75,23 +75,26 @@ impl RotoFilterRunner {
     }
 
     #[cfg(test)]
-    fn mock(roto_script: &str, filter_name: &str) -> Self {
+    fn mock(roto_script: &str, filter_name: &str) -> (Self, crate::comms::GateAgent) {
         use crate::common::roto::RotoScriptOrigin;
 
         let roto_scripts = RotoScripts::default();
         roto_scripts
             .add_or_update_script(RotoScriptOrigin::Named("mock".to_string()), roto_script)
             .unwrap();
-        let (gate, _) = Gate::new(0);
+        let (gate, gate_agent) = Gate::new(0);
         let gate = gate.into();
         let status_reporter = RotoFilterStatusReporter::default().into();
         let filter_name = Arc::new(ArcSwap::from_pointee(FilterName::from(filter_name)));
-        Self {
+
+        let runner = Self {
             roto_scripts,
             gate,
             status_reporter,
             filter_name,
-        }
+        };
+
+        (runner, gate_agent)
     }
 
     pub async fn run(
@@ -483,6 +486,7 @@ mod tests {
     }
 
     fn mk_filter(roto_source_code: &str) -> RotoFilterRunner {
-        RotoFilterRunner::mock(roto_source_code, "my-module")
+        let (runner, _) = RotoFilterRunner::mock(roto_source_code, "my-module");
+        runner
     }
 }

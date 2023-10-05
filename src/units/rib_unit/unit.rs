@@ -316,7 +316,7 @@ impl RibUnitRunner {
     }
 
     #[cfg(test)]
-    pub(crate) fn mock(roto_script: &str, rib_type: RibType) -> Self {
+    pub(crate) fn mock(roto_script: &str, rib_type: RibType) -> (Self, crate::comms::GateAgent) {
         use crate::common::roto::RotoScriptOrigin;
 
         let roto_scripts = RotoScripts::default();
@@ -325,7 +325,7 @@ impl RibUnitRunner {
                 .add_or_update_script(RotoScriptOrigin::Named("mock".to_string()), roto_script)
                 .unwrap();
         }
-        let (gate, _) = Gate::new(0);
+        let (gate, gate_agent) = Gate::new(0);
         let gate = gate.into();
         let query_limits = Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
         let rib_keys = RibUnit::default_rib_keys();
@@ -344,7 +344,7 @@ impl RibUnitRunner {
             pending_vrib_query_results.clone(),
         ));
 
-        Self {
+        let runner = Self {
             roto_scripts,
             gate,
             http_processor,
@@ -356,7 +356,9 @@ impl RibUnitRunner {
             pending_vrib_query_results,
             _process_metrics,
             rib_merge_update_stats,
-        }
+        };
+
+        (runner, gate_agent)
     }
 
     fn mk_rib(rib_type: RibType, rib_keys: &[RouteToken]) -> Arc<ArcSwapOption<PhysicalRib>> {

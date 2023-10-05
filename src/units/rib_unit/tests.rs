@@ -19,7 +19,7 @@ use std::{str::FromStr, sync::Arc};
 
 #[tokio::test]
 async fn process_non_route_update() {
-    let runner = RibUnitRunner::mock("", RibType::Physical);
+    let (runner, _) = RibUnitRunner::mock("", RibType::Physical);
 
     // Given an update that is not a route
     let update = Update::from(Payload::from(TypeValue::Unknown));
@@ -33,7 +33,7 @@ async fn process_non_route_update() {
 
 #[tokio::test]
 async fn process_update_single_route() {
-    let runner = RibUnitRunner::mock("", RibType::Physical);
+    let (runner, _) = RibUnitRunner::mock("", RibType::Physical);
 
     // Given a BGP update containing a single route announcement
     let delta_id = (RotondaId(0), 0);
@@ -65,7 +65,7 @@ async fn process_update_single_route() {
 
 #[tokio::test]
 async fn process_update_same_route_twice() {
-    let runner = RibUnitRunner::mock("", RibType::Physical);
+    let (runner, _) = RibUnitRunner::mock("", RibType::Physical);
 
     // Given a BGP update containing a single route announcement
     let delta_id = (RotondaId(0), 0);
@@ -105,7 +105,7 @@ async fn process_update_same_route_twice() {
 async fn process_update_two_routes_to_the_same_prefix() {
     #[rustfmt::skip]
     let (_match_result, match_result2) = {
-        let runner = RibUnitRunner::mock("", RibType::Physical);
+        let (runner, _) = RibUnitRunner::mock("", RibType::Physical);
 
         // Given BGP updates for two different routes to the same prefix
         let delta_id = (RotondaId(0), 0);
@@ -208,7 +208,7 @@ async fn process_update_two_routes_to_the_same_prefix() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn process_update_two_routes_to_different_prefixes() {
-    let runner = RibUnitRunner::mock("", RibType::Physical);
+    let (runner, _) = RibUnitRunner::mock("", RibType::Physical);
 
     // Given BGP updates for two different routes to two different prefixes
     let delta_id = (RotondaId(0), 0);

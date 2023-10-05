@@ -190,9 +190,11 @@ impl BmpInRunner {
     }
 
     #[cfg(test)]
-    pub(crate) fn mock() -> Self {
-        Self {
-            gate: Gate::default().into(),
+    pub(crate) fn mock() -> (Self, crate::comms::GateAgent) {
+        let (gate, gate_agent) = Gate::new(0);
+
+        let runner = Self {
+            gate: gate.into(),
             component: Default::default(),
             router_id_template: BmpIn::default_router_id_template().into(),
             router_states: Default::default(),
@@ -202,7 +204,9 @@ impl BmpInRunner {
             http_api_path: BmpIn::default_http_api_path().into(),
             _api_processor: Arc::new(|_: &hyper::Request<hyper::Body>| None),
             state_machine_metrics: Default::default(),
-        }
+        };
+
+        (runner, gate_agent)
     }
 
     pub async fn run(
@@ -621,7 +625,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn counters_should_be_initialized_for_new_router_id() {
-        let runner = BmpInRunner::mock();
+        let (runner, _) = BmpInRunner::mock();
         let update = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
 
         runner.process_update(update).await;
@@ -636,7 +640,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[should_panic]
     async fn counters_for_other_sys_name_should_not_exist() {
-        let runner = BmpInRunner::mock();
+        let (runner, _) = BmpInRunner::mock();
         let update = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
 
         runner.process_update(update).await;
@@ -653,7 +657,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn new_counters_should_be_started_if_the_router_id_changes() {
-        let runner = BmpInRunner::mock();
+        let (runner, _) = BmpInRunner::mock();
         let update = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
         let update2 = mk_update(mk_initiation_msg(OTHER_SYS_NAME, SYS_DESCR));
 
@@ -676,7 +680,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn num_invalid_bmp_messages_counter_should_increase() {
-        let runner = BmpInRunner::mock();
+        let (runner, _) = BmpInRunner::mock();
 
         // A BMP Initiation message that lacks required fields
         let update = mk_update(mk_invalid_initiation_message_that_lacks_information_tlvs());

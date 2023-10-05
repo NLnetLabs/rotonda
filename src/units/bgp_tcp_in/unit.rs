@@ -47,7 +47,7 @@ trait TcpStreamWrapper {
     fn into_inner(self) -> std::io::Result<TcpStream>;
 }
 
-/// A think wrapper around the real Tokio TcpListener.
+/// A thin wrapper around the real Tokio TcpListener.
 struct StandardTcpListenerFactory;
 
 #[async_trait::async_trait]
@@ -60,7 +60,7 @@ impl TcpListenerFactory<StandardTcpListener> for StandardTcpListenerFactory {
 
 struct StandardTcpListener(::tokio::net::TcpListener);
 
-/// A think wrapper around the real Tokio TcpListener bind call.
+/// A thin wrapper around the real Tokio TcpListener bind call.
 #[async_trait::async_trait]
 impl TcpListener<StandardTcpStream> for StandardTcpListener {
     async fn accept(&self) -> std::io::Result<(StandardTcpStream, SocketAddr)> {

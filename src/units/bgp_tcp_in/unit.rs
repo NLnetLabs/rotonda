@@ -105,6 +105,17 @@ impl PartialEq for BgpTcpIn {
 }
 
 impl BgpTcpIn {
+    #[cfg(test)]
+    pub fn mock(listen: &str, my_asn: Asn) -> Self {
+        Self {
+            listen: listen.to_string(),
+            my_asn,
+            my_bgp_id: Default::default(),
+            peer_configs: Default::default(),
+            filter_name: Default::default(),
+        }
+    }
+
     pub async fn run(
         self,
         component: Component,
@@ -516,13 +527,7 @@ mod tests {
     {
         let mock_listener_factory = MockTcpListenerFactory::new(mock_listener_factory_cb);
 
-        let unit_settings = BgpTcpIn {
-            listen: "dummy-listen-address".to_string(),
-            my_asn: Asn::from_u32(12345),
-            my_bgp_id: Default::default(),
-            peer_configs: Default::default(),
-            filter_name: Default::default(),
-        };
+        let unit_settings = BgpTcpIn::mock("dummy-listen-address", Asn::from_u32(12345));
 
         let (runner, gate_agent) = BgpTcpInRunner::mock(unit_settings);
 

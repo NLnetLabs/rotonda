@@ -57,14 +57,14 @@ impl BgpTcpInMetrics {
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [/] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const CONNECTION_LOST_COUNT_METRIC: Metric = Metric::new(
         "bgp_tcp_in_connection_lost_count",
         "the number of times the connection to a peer was lost",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [/] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const DISCONNECT_COUNT_METRIC: Metric = Metric::new(
         "bgp_tcp_in_disconnect_count",
         "the number of times the connection to a peer was actively disconnected",

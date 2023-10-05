@@ -10,6 +10,7 @@ use crate::common::status_reporter::{
 
 use super::metrics::BgpTcpInMetrics;
 
+#[derive(Debug, Default)]
 pub struct BgpTcpInStatusReporter {
     name: String,
     metrics: Arc<BgpTcpInMetrics>,

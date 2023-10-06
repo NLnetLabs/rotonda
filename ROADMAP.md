@@ -20,7 +20,6 @@ MVP
 - ✅ client-specific runtime application with BMP ingress and RIBs
 - 🦀 `roto` filtering language
 - 🦀 BGP passive speaker
-- 🦀 ~~BGP limited active speaker~~ POSTPONED
 - 🦀 Documentation
 - 💤 Packaging
 
@@ -28,20 +27,18 @@ NEXT RELEASES
 
 Each item may constitute a new release
 
+- 🦀 BGP active speaker
 - 🦀 ingress connectors (e.g. Kafka, MQTT)
 - 🦀 egress connectors (e.g. Kafka, MQTT)
-- 💤 create plugin system.
-- 💤 `mrt` file connector from RIBs.
+- 💤 part-persistence for RIBs.
 - 💤 egress connector to parquet.
-- 🦀 query engine REST API
-- 💤 query engine CLI
-- 🦀 historical records storage + snapshotting ("3 weeks of data")
+- 💤 CLI with query capabilities
+- 💤 create plugin system.
 - 🦀 Distributed `rotonda`-`rotonda` setup with `rotoro` (experimental)
 
 
 Development per Component
 =========================
-
 
 ## `Roto language`
 
@@ -53,7 +50,8 @@ MVP
 - ✅ create experimental compiler
 - ✅ create experimental virtual machine
 - ✅ implement all methods on `roto` types
-- 🦀 Integrate into `rotonda`
+- ✅ Integrate into `rotonda`
+- 💤 `Roto` query
 - 💤 create user-friendly error messaging
 - 🦀 extensive stress testing
 - 🦀 create high-level overview documentation
@@ -93,7 +91,7 @@ MVP
 
 NEXT RELEASES
 
-- 💤 create BGP packet builder
+- 🦀 create BGP packet builder
 - 💤 BGPsec parser
 
 
@@ -106,14 +104,15 @@ MVP
 - ✅ REST API setup
 - ✅ MQTT OutputConnector
 - ✅ BMP proxy
-- 🦀 integrate BGP passive listener (BGP EventSource)
-- 🦀 integrate BGP limited speaker (BGP EventEmitter)
+- ✅ integrate BGP passive listener (BGP EventSource)
+- ✅ integrate BGP limited speaker (BGP EventEmitter)
 - 🦀 installation and usage documentation 
 - 🦀 limited packaging
 - 🦀 file OutputConnector
 
 NEXT RELEASES
 
+- 💤 pipeline packet tracing
 - 💤 user-configurable RIBs experimental implementation
 - 💤 virtual RIB experimental implementation
 - 💤 create experimental global registry
@@ -124,7 +123,6 @@ NEXT RELEASES
 - 💤 keep history window (serials)
 - 💤 snapshot/restore functionality
 - 💤 `systemd` integration
-- 💤 implement tracing
 - 💤 split `rotonda-runtime` into units
 - 💤 create experimental distributed units
 

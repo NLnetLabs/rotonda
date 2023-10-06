@@ -1,128 +1,79 @@
-`ROTONDA`
-=========
+# Rotonda
 
-Modular programmable BGP routing services
+<img align="right" src="images/rotonda-illustrative-icon.png" height="150">
 
-Components & Libraries
-======================
+Roll your own BGP service application with Rotonda. 
 
-![descriptors](images/rotonda-components.png)
+BGP services that you can build with Rotonda include, but are not
+limited to, a route monitor|collector|server|reflector, all this without
+modifying a single line in the source code of Rotonda. Rotonda is and always
+will be free, open-source software.
 
-`Rotonda` consists of a set of types of components that can be mixed and matched to build a BGP routing service. You can build one big stand-alone application, or you can build a set of distributed runtimes that are communicating through the `rotoro` ("`Rotonda to Rotonda`") protocol.
+>### ROTONDA IS CURRENTLY IN ALPHA, DO NOT USE IN PRODUCTION
+>
+> Rotonda is being actively worked on and this repository and all the packages
+> we supply are still in ALPHA stage. Use it to experiment freely (we value your
+> feedback!), but do not use it with data and data-streams you cannot afford
+> to lose.
+>
+> You should also be aware that all the APIs, configuration and the `roto`
+> syntax and grammar are still (highly) unstable.
+>
+> For more information see the [ROADMAP](ROADMAP.md)
 
-| Component | Description |
-|----------|-------------|
-| `Rotonda-runtimes`       | Stand-alone daemons, that wrap the `rotonda-stores` in APIs, inbound/outbound connections |
-| `Rotonda-transformers`   | Stateful plug-ins that transform the internal `rotoro` protocol into other protocols/formats and vice versa |
+### Modular
 
-| Library | Description |
-|---------|-------------|
-| `Rotonda-store`         | RIB-like in-memory storage data-structures, keyed by prefix |
-| `Routecore`             | BGP/BMP parsers |
-| `rotoro`                | `rotoro` protocol types |
+Rotonda applications are built by combining units into a pipeline through
+which BGP data will flow. You can filter, modify and store the BGP data along
+the way, and create signals based on it to send to other applications. Units
+can be added and removed in a *running* Rotonda application.
 
+Rotonda offers units to create BGP and BMP sessions, filters, Routing
+Information Bases (RIBs), and more.
 
-Key:
+### Flexible
 
-    ✅ -- phase complete
-    🦀 -- phase in progress
-    💤 -- phase not started yet
+The behavior of the units can be modeled by using a small, fun programming
+language called `Roto`, that we created to combine flexibility and
+ease-of-use. `Roto` lets you configure a Rotonda application, program units
+and create queries. `Roto` scripts can be created by your favorite text
+editor, but they can also be composed from the command line that's included
+in Rotonda.
 
+### High Performance
 
-`Rotonda-store`
-===============
+All data structures come with a trade-off between space and time, and Rotonda
+is no exception. Rotonda therefore offers units that perform the same task,
+but with different performance characteristics, so that users can optimize
+for their needs, be it a high-volume, low latency installation or a small
+installation in a constraint environment. None of this requires patching the
+Rotonda source, it's all configurable with a nimble `Roto` script.
 
-| Stage | State | Artifacts |
-|:----:|:----:|:--------:|
-| Proposal | ✅ | this document |
-| Experimental | ✅ | [blog post repo](https://github.com/NLnetLabs/try-tries-and-trees) |
-| Development | ✅ | [repo](https://github.com/NLnetLabs/rotonda-store) |
-| Feature complete | 🦀 | [repo](https://github.com/NLnetLabs/rotonda-store) |
-| Stabilized | 💤 |  |
+Although Rotonda is still in alpha, these performance-critical parts have 
+been battle-tested by, and are indeed being used in, large production
+environments.
 
-`Rotonda-store` is a library that hosts data-structures that stores prefixes and attached meta-data, while establishing the hierarchy of the prefixes. It can be queried for exactly and longest-matching prefixes, as well as less-specific and more specific prefixes.
+### Observability
 
-Currently there are two main data-structures, a store thats meant to be used in single-threaded contexts and a store that is useful for multi-threaded contexts. The API for both data-structures is the same. The API is based on the `Prefix` type from the `Routecore` crate. It abstracts over IPv4 and IPv6 prefixes, although internally they are kept in two different data-structures (`treebitmap`s).
+All Rotonda units have their own finely-grained logging capabilities, and
+some have built-in queryable JSON API interfaces to give information about
+their current state and content through Rotonda's built-in HTTPS server.
+Signals that can be sent to other applications can be configured from the
+relevant units. Moreover, Rotonda offers true observability by allowing
+the user to trace BMP/BGP packets start-to-end through the whole pipeline.
 
-The single-threaded store is backed by two global `vec`s that host the nodes in the tree and the bitmap. The multi-threaded store is either backed by a concurrently writable hash-table or a concurrent-hash-map (from the `dashmap` crate).
+### Storage Persistence
 
-`Routecore`
-===========
+Routing Information Base units (RIB units) are the primary way of collecting
+data in a Rotonda application and by default they are in-memory data
+structures. RIBS, or parts of RIBS, can be persisted in different locations,
+such as files, or a on-disk database. Whether you put RIBs to files or in a
+database,  you can still query it transparently with `Roto`.
 
-| Stage | State | Artifacts |
-|:----:|:----:|:--------:|
-| Proposal | ✅ | this document |
-| Experimental | ✅ | |
-| Development | ✅ |  |
-| Feature complete | 🦀 | |
-| Stabilized | 💤 |  [repo](https://github.com/NLnetLabs/routecore) |
+### Open-source with professional support services
 
-`Routecore` is a library that holds types that are shared between `rotonda`, `routinator`, `krill`, that are related to routing.
-
-
-`Rotoro`
-========
-
-| Stage | State | Artifacts |
-|:----:|:----:|:--------:|
-| Proposal | ✅ | this document |
-| Experimental | 💤 | |
-| Development | 💤 |  |
-| Feature complete | 💤 | |
-| Stabilized | 💤 | |
-
-`Rotoro` is the protocol that connects `Rotonda-runtime`s, inspired by the RTR-protocol. `Rotoro` allows for receiving/sending full state (snapshots) or diffs from runtime to runtime. A `rotoro` channel sends/receives of one single type, but it can be merged with another into a third type with the aid of a channel operator runtime.
-
-`Roto`
-======
-
-| Stage | State | Artifacts |
-|:----:|:----:|:--------:|
-| Proposal | ✅ | this document |
-| Experimental | ✅ | |
-| Development | 💤 |  |
-| Feature complete | 💤 | |
-| Stabilized | 💤 | |
-
-`roto` is the dynamic, interpreted language for data modeling (programmable RIBs), querying and filtering routes, used by Rotonda.
-
-`Rotonda-runtime`
-==================
-
-| Stage | State | Artifacts |
-|:----:|:----:|:--------:|
-| Proposal | ✅ | this document |
-| Experimental | 💤 | [`roto-ris-live`](https://github.com/NLnetLabs/roto-ris-live), [`rotonda-runtime`](https://github.com/NLnetLabs/rotonda-runtime) |
-| Development | 💤  | |
-| Feature complete | 💤 | |
-| Stabilized | 💤 |  |
-
-The `Rotonda` runtimes are stand-alone binaries that can be run as separate applications that communicate over a dedicated channel with the aid of the internal `rotoro` protocol, a RTR-like protocol. The fall into two categories: storage runtimes and channel operators.
-
-Storage runtimes are applications that wrap a `rotonda-store` data-structure in a few (JSON-over-HTTP) APIs, that are used for querying and storing prefixes, configuration, metrics, downloading/uploading snapshots, etc. Next to that they feature inbound and outbound connections. The Storage runtimes only speak the `rotoro` internal protocol. Furthermore a single-input runtime can only feature one inbound connection and one outbound connection. A multi-input runtime can have multiple inbound connections and multiple outbound connections. In both cases the connections can only handle one payload type for inbound and outbound connections.
-
-Storage runtimes have a Shell API that can be used to query and store prefixes, configure the runtime, upload snapshots or other file formats and download snapshots, export (parts of the) content of the store. The metrics API is an endpoint for Prometheus monitoring. Additionally a storage runtime features an inter-active shell that acts as a REPL to all of the shell API.
-
-The channel operators are applications that create pub/sub channels that either merge two `rotoro` channels into one, or conversely broadcast one `rotoro` channel to multiple outputs.
-When merging two or more channels the input channels can be of different types. The output type will be another type that can be the union of all input types, or they can have specialized merge-functions to go from several input types to one output type. The channel operators can also only speak the `rotoro` internal protocol.
-
-Several Rotonda runtimes can be combined into one runtime, in that case the `rotoro` serialization and sending/receiving of messages is superfluous.
-
-Transformers
-============
-
-| Stage | State | Artifacts |
-|:----:|:----:|:--------:|
-| Proposal | ✅ | this document |
-| Experimental | 💤 | |
-| Development | 💤 | |
-| Feature complete | 💤 | |
-| Stabilized | 💤 |  |
-
-Transformers transform the `rotoro` internal protocol into other protocols/formats and vice versa. They can hold state about the protocol, e.g. BGP connection state. The get plugged into any of the `rotonda-runtime`s.
-
-- `connector`: stateful transport+protocol. TCP+BGP, TCP+BMP, Kafka+BGP-over-JSON. rust-native.
-- `filter_map`: per-message stateless programmable filters, can be FFI-like + send to user-defined RIB, or send out. A query is basically a filter_map with send to stdout.
-
-![descriptors](images/rotonda-examples.png)
-
+NLnet Labs offers [professional support and consultancy
+services](https://www.nlnetlabs.nl/services/contracts/) with a service-level
+agreement. Rotonda is liberally licensed under the
+[Mozilla Public License 2.0]
+(https://github.com/NLnetLabs/rotonda/blob/main/LICENSE).

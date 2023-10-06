@@ -44,8 +44,8 @@ in Rotonda.
 
 All data structures come with a trade-off between space and time, and Rotonda
 is no exception. Rotonda therefore offers units that perform the same task,
-but with different performance characteristics, so that users can optimize
-for their needs, be it a high-volume, low latency installation or a small
+but with different performance characteristics, so that you can optimize
+for your needs, be it a high-volume, low latency installation or a small
 installation in a constraint environment. None of this requires patching the
 Rotonda source, it's all configurable with a nimble `Roto` script.
 
@@ -53,23 +53,29 @@ Although Rotonda is still in alpha, these performance-critical parts have
 been battle-tested by, and are indeed being used in, large production
 environments.
 
-### Observability
+### Observable
 
 All Rotonda units have their own finely-grained logging capabilities, and
 some have built-in queryable JSON API interfaces to give information about
 their current state and content through Rotonda's built-in HTTPS server.
-Signals that can be sent to other applications can be configured from the
-relevant units. Moreover, Rotonda offers true observability by allowing
-the user to trace BMP/BGP packets start-to-end through the whole pipeline.
+Signals can be sent to other applications. Moreover, Rotonda offers true
+observability by allowing the user to trace BMP/BGP packets start-to-end
+through the whole pipeline.
 
 ### Storage Persistence
 
-Routing Information Base units (RIB units) are the primary way of collecting
-data in a Rotonda application and by default they are in-memory data
-structures. RIBS, or parts of RIBS, can be persisted in different locations,
-such as files, or a on-disk database. Whether you put RIBs to files or in a
-database,  you can still query it transparently with `Roto`.
+By default a Rotonda application stores all the data that you want to collect
+in memory. It can be configured to persist parts to another
+storage location, such as files or a database. Whether you put RIBs to
+files or in a database, you can still query it transparently with `Roto`.
 
+### Distributed
+
+Multiple Rotonda instances can synchronize or shard data via our AVRO-based
+`rotoro` protocol, to create robust redundancy and/or scalability. Again you
+can still query all the distributed instances with `Roto`.
+
+### External Data Sources
 ### Open-source with professional support services
 
 NLnet Labs offers [professional support and consultancy

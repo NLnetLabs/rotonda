@@ -24,10 +24,6 @@ FilterExpr ::= Define |
      Term+ | 
      Action+ |
 
-FilterExpr ::= Define |
-     Term+ | 
-     Action+ |
-
 Define ::= 'define' ForStatement  WithStatement '{' DefineBody '}'
 DefineBody ::= ( ( 'use' Identifier ';' )? ( Identifier '=' ComputeExpr ';' )+ )+
 

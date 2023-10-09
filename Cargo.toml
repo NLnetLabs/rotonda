@@ -1,7 +1,7 @@
 [package]
 name = "rotonda"
 version = "0.0.1"
-authors = ["The NLnet Labs Routing Team <routing@nlnetlabs.nl>"]
+authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]
 description = "A modular analytical BGP Engine"
 documentation = "https://docs.rs/rotonda/"
 homepage = "https://nlnetlabs.nl/projects/routing/rotonda/"

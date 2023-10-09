@@ -17,7 +17,7 @@ use async_trait::async_trait;
 
 use chrono::Utc;
 use hash_hasher::{HashBuildHasher, HashedSet};
-use log::{error, info, log_enabled, trace};
+use log::{error, log_enabled, trace, warn};
 use non_empty_vec::NonEmpty;
 use roto::types::{
     builtin::{BuiltinTypeValue, RouteToken},
@@ -276,13 +276,8 @@ impl RibUnitRunner {
 
         // Setup REST API endpoint. vRIBs listen at the vRIB HTTP prefix + /n/ where n is the index assigned to the vRIB
         // during configuration post-processing.
-        let http_api_path = http_api_path.trim_end_matches('/').to_string();
-        let (http_api_path, is_sub_resource) = match rib_type {
-            RibType::Physical | RibType::Virtual => (Arc::new(format!("{http_api_path}/")), false),
-            RibType::GeneratedVirtual(index) => {
-                (Arc::new(format!("{http_api_path}/{index}/")), true)
-            }
-        };
+        let (http_api_path, is_sub_resource) =
+            Self::http_api_path_for_rib_type(&http_api_path, rib_type);
         let query_limits = Arc::new(ArcSwap::from_pointee(query_limits));
         let http_processor = PrefixesApi::new(
             rib.clone(),
@@ -360,6 +355,17 @@ impl RibUnitRunner {
         }
     }
 
+    fn http_api_path_for_rib_type(http_api_path: &str, rib_type: RibType) -> (Arc<String>, bool) {
+        let http_api_path = http_api_path.trim_end_matches('/').to_string();
+        let (http_api_path, is_sub_resource) = match rib_type {
+            RibType::Physical | RibType::Virtual => (Arc::new(format!("{http_api_path}/")), false),
+            RibType::GeneratedVirtual(index) => {
+                (Arc::new(format!("{http_api_path}/{index}/")), true)
+            }
+        };
+        (http_api_path, is_sub_resource)
+    }
+
     fn mk_rib(rib_type: RibType, rib_keys: &[RouteToken]) -> Arc<ArcSwap<HashedRib>> {
         //
         // --- TODO: Create the Rib based on the Roto script Rib 'contains' type
@@ -419,23 +425,59 @@ impl RibUnitRunner {
                                     sources: new_sources,
                                     query_limits: new_query_limits,
                                     filter_name: new_filter_name,
-                                    ..
+                                    http_api_path: new_http_api_path,
+                                    rib_keys: new_rib_keys,
+                                    rib_type: new_rib_type,
+                                    vrib_upstream: new_vrib_upstream,
                                 }),
                         } => {
-                            // TODO: Handle changed RibUnit::vrib_upstream value.
                             arc_self.status_reporter.reconfigured();
 
+                            let old_http_api_path = arc_self.http_processor.http_api_path();
+                            let (new_http_api_path, _is_sub_resource) =
+                                Self::http_api_path_for_rib_type(&new_http_api_path, new_rib_type);
+                            if new_http_api_path.as_str() != old_http_api_path {
+                                warn!(
+                                    "Ignoring changed http_api_path: {} -> {}",
+                                    old_http_api_path, new_http_api_path
+                                );
+                            }
+
+                            let old_rib_keys = arc_self.rib.load().key_fields();
+                            if new_rib_keys.as_slice() != old_rib_keys {
+                                warn!(
+                                    "Ignoring changed rib_keys: {:?} -> {:?}",
+                                    old_rib_keys, new_rib_keys
+                                );
+                            }
+
+                            if new_rib_type != arc_self.rib_type {
+                                warn!(
+                                    "Ignoring changed rib_type: {:?} -> {:?}",
+                                    arc_self.rib_type, new_rib_type
+                                );
+                            }
+
+                            // Replace the vRIB upstream link with the new one
+                            arc_self.http_processor.set_vrib_upstream(new_vrib_upstream);
+
                             // Replace the roto script with the new one
+                            let old_filter_name = &*arc_self.filter_name.load();
                             match new_filter_name {
                                 Some(new_filter_name) => {
-                                    if **arc_self.filter_name.load() != new_filter_name {
-                                        info!("Using new roto filter '{new_filter_name}'");
+                                    if old_filter_name.as_ref() != &new_filter_name {
+                                        arc_self.status_reporter.filter_name_changed(
+                                            &old_filter_name,
+                                            Some(&new_filter_name),
+                                        );
                                         arc_self.filter_name.store(new_filter_name.into());
                                     }
                                 }
                                 None => {
-                                    if **arc_self.filter_name.load() != FilterName::default() {
-                                        info!("Disabling roto filter");
+                                    if old_filter_name.as_ref() != &FilterName::default() {
+                                        arc_self
+                                            .status_reporter
+                                            .filter_name_changed(&old_filter_name, None);
                                         arc_self.filter_name.store(FilterName::default().into());
                                     }
                                 }

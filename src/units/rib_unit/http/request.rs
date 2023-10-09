@@ -1,6 +1,6 @@
 use std::{ops::Deref, str::FromStr, sync::Arc};
 
-use arc_swap::ArcSwap;
+use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
 use hyper::{Body, Method, Request, Response};
 use log::trace;
@@ -32,7 +32,7 @@ pub struct PrefixesApi {
     http_api_path: Arc<String>,
     query_limits: Arc<ArcSwap<QueryLimits>>,
     rib_type: RibType,
-    prib_upstream: Option<Link>,
+    vrib_upstream: Arc<ArcSwapOption<Link>>,
     pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
 }
 
@@ -42,7 +42,7 @@ impl PrefixesApi {
         http_api_path: Arc<String>,
         query_limits: Arc<ArcSwap<QueryLimits>>,
         rib_type: RibType,
-        prib_upstream: Option<Link>,
+        vrib_upstream: Option<Link>,
         pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
     ) -> Self {
         Self {
@@ -50,9 +50,17 @@ impl PrefixesApi {
             http_api_path,
             query_limits,
             rib_type,
-            prib_upstream,
+            vrib_upstream: Arc::new(ArcSwapOption::from_pointee(vrib_upstream)),
             pending_vrib_query_results,
         }
+    }
+
+    pub fn http_api_path(&self) -> &String {
+        self.http_api_path.as_ref()
+    }
+
+    pub fn set_vrib_upstream(&self, vrib_upstream: Option<Link>) {
+        self.vrib_upstream.store(vrib_upstream.map(Arc::new));
     }
 }
 
@@ -162,8 +170,8 @@ impl PrefixesApi {
                 // Send a command asynchronously to the upstream physical RIB unit to perform the desired query on its
                 // store and to send the result back to us through the pipeline (being operated on as necessary by any
                 // intermediate virtual RIB roto scripts). This command includes the query ID that we generated.
-                trace!("Triggering upstream physical RIB to do the actual query");
-                self.prib_upstream.as_ref().unwrap().trigger(data).await;
+                trace!("Triggering upstream physical RIB {} to do the actual query", self.vrib_upstream.load().as_ref().unwrap().id());
+                self.vrib_upstream.load().as_ref().unwrap().trigger(data).await;
 
                 // Wait for the main unit which operates the Gate to receive a Query Result that matches the query ID
                 // we just generated, and to pick the oneshot channel by query ID and use it to pass the results to us.

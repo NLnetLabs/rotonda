@@ -121,6 +121,13 @@ impl HashedRib {
         let rib_value = PreHashedTypeValue::new(ty_val, hash_code).into();
         store.insert(prefix, rib_value)
     }
+
+    pub fn key_fields(&self) -> Vec<RouteToken> {
+        let TypeDef::Rib((_td, Some(field_indices))) = &self.type_def_rib else {
+            unreachable!();
+        };
+        field_indices.iter().map(|idx| RouteToken::from(idx[0])).collect()
+    }
 }
 
 // -------- RibValue --------------------------------------------------------------------------------------------------

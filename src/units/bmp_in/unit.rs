@@ -264,7 +264,7 @@ impl BmpInRunner {
 
     fn router_disconnected(&self, source_id: &SourceId) {
         self.router_states.remove(source_id);
-        // TODO: also remove from self.router_info ?
+        self.router_info.remove(source_id);
     }
 
     async fn process_msg(

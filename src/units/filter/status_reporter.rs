@@ -3,7 +3,7 @@ use std::{
     sync::{atomic::Ordering, Arc},
 };
 
-use log::error;
+use log::{error, warn};
 
 use crate::{
     common::status_reporter::{sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter},

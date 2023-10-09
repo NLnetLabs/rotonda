@@ -124,8 +124,8 @@ impl PrefixesApi {
                     let mut last_res = Ordering::Equal;
 
                     for json_pointer in &json_pointers {
-                        let lhs = a.pointer(&json_pointer);
-                        let rhs = b.pointer(&json_pointer);
+                        let lhs = a.pointer(json_pointer);
+                        let rhs = b.pointer(json_pointer);
                         last_res = match (lhs, rhs) {
                             (None, None) => Ordering::Equal,
                             (None, Some(_)) => Ordering::Less,
@@ -155,7 +155,7 @@ impl PrefixesApi {
     // Cmp for serde_json::Value for sorting. Not implemented for object types.
     fn cmp_json_values(lhs: &Value, rhs: &Value) -> Ordering {
         if lhs == rhs {
-            return Ordering::Equal;
+            Ordering::Equal
         } else {
             // When comparing we expect to compare values of the same type as we are selecting the same field from
             // multiple results in the data and sorting by them.

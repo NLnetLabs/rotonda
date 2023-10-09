@@ -1,4 +1,4 @@
-filter my-module {
+filter rib-in-post-filter {
     define {
         rx msg: Route;
     }

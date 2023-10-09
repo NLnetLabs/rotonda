@@ -4,24 +4,32 @@ use futures::{
     pin_mut,
 };
 use log::{error, info, warn};
-use rotonda::config::{Config, ConfigFile};
 use rotonda::log::ExitError;
 use rotonda::manager::Manager;
+use rotonda::{
+    config::{Config, ConfigFile, Source},
+    log::Terminate,
+};
+use std::env::current_dir;
 use std::process::exit;
-use std::{env::current_dir, path::PathBuf};
 use tokio::{
     runtime::{self, Runtime},
     signal::{self, unix::signal, unix::SignalKind},
 };
 
-fn run_with_cmdline_args() -> Result<(), ExitError> {
+fn run_with_cmdline_args() -> Result<(), Terminate> {
     Config::init()?;
 
     let app = Command::new("rotonda")
         .version(crate_version!())
-        .author(crate_authors!());
+        .author(crate_authors!())
+        .next_line_help(true);
 
-    let matches = Config::config_args(app).get_matches();
+    let config_args = Config::config_args(app);
+    let matches = config_args.try_get_matches().map_err(|err| {
+        let _ = err.print();
+        Terminate::other(2)
+    })?;
 
     let cur_dir = current_dir().map_err(|err| {
         error!("Fatal: cannot get current directory ({}). Aborting.", err);
@@ -37,12 +45,13 @@ fn run_with_cmdline_args() -> Result<(), ExitError> {
     //   - https://github.com/NLnetLabs/routinator/blob/main/src/process.rs#L363
 
     let mut manager = Manager::new();
-    let (config_path, config) = Config::from_arg_matches(&matches, &cur_dir, &mut manager)?;
+    let (config_source, config) = Config::from_arg_matches(&matches, &cur_dir, &mut manager)?;
     let runtime = run_with_config(&mut manager, config)?;
-    runtime.block_on(handle_signals(config_path, manager))
+    runtime.block_on(handle_signals(config_source, manager))?;
+    Ok(())
 }
 
-async fn handle_signals(conf_path: PathBuf, mut manager: Manager) -> Result<(), ExitError> {
+async fn handle_signals(config_source: Source, mut manager: Manager) -> Result<(), ExitError> {
     let mut hup_signals = signal(SignalKind::hangup()).map_err(|err| {
         error!("Fatal: cannot listen for HUP signals ({}). Aborting.", err);
         ExitError
@@ -63,28 +72,37 @@ async fn handle_signals(conf_path: PathBuf, mut manager: Manager) -> Result<(), 
             }
             Either::Left((Some(_), _)) => {
                 // HUP signal received
-                info!(
-                    "SIGHUP signal received, re-reading configuration file '{}'",
-                    conf_path.display()
-                );
-                match ConfigFile::load(&conf_path) {
-                    Ok(config_file) => match manager.load(config_file) {
-                        Err(_) => {
-                            error!("Failed to re-read config file '{}'", conf_path.display());
+                if let Some(config_path) = config_source.path() {
+                    info!(
+                        "SIGHUP signal received, re-reading configuration file '{}'",
+                        config_path.display()
+                    );
+                    match ConfigFile::load(&config_path) {
+                        Ok(config_file) => {
+                            match Config::from_config_file(config_file, &mut manager) {
+                                Err(_) => {
+                                    error!(
+                                        "Failed to re-read config file '{}'",
+                                        config_path.display()
+                                    );
+                                }
+                                Ok((_source, mut config)) => {
+                                    manager.spawn(&mut config);
+                                    info!("Configuration changes applied");
+                                }
+                            }
                         }
-                        Ok(mut config) => {
-                            config.log.switch_logging(true)?;
-                            manager.spawn(&mut config);
-                            info!("Configuration changes applied");
+                        Err(err) => {
+                            error!(
+                                "Failed to re-read config file '{}': {}",
+                                config_path.display(),
+                                err
+                            );
                         }
-                    },
-                    Err(err) => {
-                        error!(
-                            "Failed to re-read config file '{}': {}",
-                            conf_path.display(),
-                            err
-                        );
                     }
+                } else {
+                    info!("SIGHUP signal received, nothing to do. No \
+                    configuration file specified to re-read (default used).");
                 }
             }
             Either::Right((Err(err), _)) => {
@@ -123,10 +141,15 @@ fn run_with_config(manager: &mut Manager, mut config: Config) -> Result<Runtime,
 }
 
 fn main() {
-    match run_with_cmdline_args() {
-        Ok(_) => exit(0),
-        Err(ExitError) => exit(1),
+    let exit_code = match run_with_cmdline_args() {
+        Ok(_) => Terminate::normal(),
+        Err(terminate) => terminate,
     }
+    .exit_code();
+
+    info!("Exiting with exit code {exit_code}");
+
+    exit(exit_code);
 }
 
 // --- Tests ----------------------------------------------------------------------------------------------------------
@@ -160,7 +183,7 @@ mod tests {
     const MAX_TIME_TO_WAIT_SECS: u64 = 3;
     const METRIC_PREFIX: &str = "rotonda_";
 
-    #[cfg(feature = "mqtt")]
+    // NOTE: this test is currently flakey, sometimes it fails at the end receiving more MQTT messages than expected.
     #[test]
     fn integration_test() {
         use rotonda::tests::util::assert_json_eq;
@@ -171,6 +194,8 @@ mod tests {
         Config::init().unwrap();
 
         let base_config_toml = r#"
+        roto_scripts_path = "etc/"
+
         http_listen = "127.0.0.1:8080"
         log_target = "stderr"
         log_level = "trace"
@@ -189,7 +214,7 @@ mod tests {
         [units.filter]
         type = "filter"
         sources = ["bmp-tcp-in"]
-        roto_path = "etc/bmp_asn_filter.roto"
+        filter_name = "bmp-in-filter"
 
         [units.routers]
         type = "bmp-in"
@@ -198,7 +223,7 @@ mod tests {
         [units.global-rib]
         type = "rib"
         sources = ["routers"]
-        roto_path = ["etc/filter.roto", "etc/filter.roto", "etc/filter.roto"]
+        filter_names = ["my-module", "my-module", "my-module"]
 
         [targets.dummy-null]
         type = "null-out"
@@ -215,8 +240,7 @@ mod tests {
         [targets.local-broker]
         type = "mqtt-out"
         qos = 2
-        server_host = "127.0.0.1"
-        server_port = 1883
+        destination = "127.0.0.1"
         client_id = "rotonda"
         communities = ["BLACKHOLE"]
         sources = ["global-rib"]
@@ -227,10 +251,10 @@ mod tests {
         let test_prefix2 = Prefix::from_str("127.0.0.2/32").unwrap();
         let mut config_bytes = base_config_toml.as_bytes().to_vec();
         config_bytes.extend_from_slice(null_target_toml.as_bytes());
-        let config_file = ConfigFile::new(config_bytes, Source::default());
+        let config_file = ConfigFile::new(config_bytes, Source::default(), Default::default());
 
         let mut manager = Manager::new();
-        let config = Config::from_config_file(config_file, &mut manager)
+        let (_conf_source, config) = Config::from_config_file(config_file, &mut manager)
             .expect("The supplied config is invalid");
         let runtime =
             run_with_config(&mut manager, config).expect("The application failed to start");
@@ -396,8 +420,9 @@ mod tests {
             eprintln!("Reconfiguring...");
             let mut config_bytes = base_config_toml.as_bytes().to_vec();
             config_bytes.extend_from_slice(mqtt_target_toml.as_bytes());
-            let config_file = ConfigFile::new(config_bytes, Source::default());
-            let mut config = manager.load(config_file).unwrap();
+            let config_file = ConfigFile::new(config_bytes, Source::default(), Default::default());
+            let (_source, mut config) =
+                Config::from_config_file(config_file, &mut manager).unwrap();
             manager.spawn(&mut config);
 
             // verify that there is now an MQTT connection
@@ -553,7 +578,7 @@ mod tests {
 
             // Three additional MQTT messages are published, one for every time the etc/filter.roto script was
             // executed due to this line in the the application config file defined above:
-            //     roto_path = ["etc/filter.roto", "etc/filter.roto", "etc/filter.roto"]
+            //     filter_names = ["etc/filter.roto", "etc/filter.roto", "etc/filter.roto"]
             // This line created a physical RIB and two eastward virtual RIBs, each configured to use the same Roto
             // script. The physical RIB receives the route from our test BMP client and on success passes the route
             // down the pipeline to the first vRIB, which does the same and passes it to the next vRIB. At each stage
@@ -610,7 +635,7 @@ mod tests {
         let duration = Duration::from_secs(MAX_TIME_TO_WAIT_SECS);
         let result = Arc::new(AtomicMetricLookupResult::default());
 
-        #[allow(clippy::expect_fun_call)]
+        #[allow(clippy::collapsible_if)]
         if tokio::time::timeout(
             duration,
             wait_for_metric(&metrics, metric_name, label, wanted_v, result.clone()),
@@ -641,7 +666,7 @@ mod tests {
         let duration = Duration::from_secs(MAX_TIME_TO_WAIT_SECS);
         let result = Arc::new(AtomicMetricLookupResult::default());
 
-        #[allow(clippy::expect_fun_call)]
+        #[allow(clippy::collapsible_if)]
         if tokio::time::timeout(
             duration,
             wait_for_metric(&metrics, metric_name, label, wanted_v, result.clone()),
@@ -685,9 +710,7 @@ mod tests {
     fn get_metrics(metrics: &metrics::Collection) -> prometheus_parse::Scrape {
         let prom_txt = metrics.assemble(OutputFormat::Prometheus);
         let lines: Vec<_> = prom_txt.lines().map(|s| Ok(s.to_owned())).collect();
-        let metrics = prometheus_parse::Scrape::parse(lines.into_iter())
-            .expect("Error while querying metrics");
-        metrics
+        prometheus_parse::Scrape::parse(lines.into_iter()).expect("Error while querying metrics")
     }
 
     async fn wait_for_bmp_connect() -> TcpStream {

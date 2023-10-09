@@ -357,7 +357,7 @@ impl Processor {
                 //self.gate.update_data(Update::Single(payload)).await;
                 bulk.push(payload);
             }
-            self.gate.update_data(Update::Bulk(bulk.into())).await;
+            self.gate.update_data(Update::Bulk(bulk)).await;
         }
 
         for chunk in pdu.withdrawals().iter().collect::<Vec<_>>().chunks(8) {
@@ -383,11 +383,12 @@ impl Processor {
                 //self.gate.update_data(Update::Single(payload)).await;
                 bulk.push(payload);
             }
-            self.gate.update_data(Update::Bulk(bulk.into())).await;
+            self.gate.update_data(Update::Bulk(bulk)).await;
         }
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_connection(
     gate: Gate,
     unit_config: BgpTcpIn,

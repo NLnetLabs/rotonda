@@ -81,25 +81,24 @@ impl OneOrManyAsns {
 }
 
 /// Ordered collection of `PeerConfig`s, keyed on `PrefixOrExact`.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct PeerConfigs(BTreeMap<PrefixOrExact, PeerConfig>);
 
 impl PeerConfigs {
     /// Returns the PrefixOrExact and PeerConfig for `key`, if any.
     pub fn get(&self, key: IpAddr) -> Option<(PrefixOrExact, &PeerConfig)> {
-        if let Some(hit) = self.0.iter().find(|&(k, _cfg)| match k {
-            PrefixOrExact::Exact(e) => *e == key,
-            PrefixOrExact::Prefix(p) => p.contains(key),
-        }) {
-            Some((*hit.0, hit.1))
-        } else {
-            None
-        }
+        self.0
+            .iter()
+            .find(|&(k, _cfg)| match k {
+                PrefixOrExact::Exact(e) => *e == key,
+                PrefixOrExact::Prefix(p) => p.contains(key),
+            })
+            .map(|hit| (*hit.0, hit.1))
     }
 
     /// Returns the PeerConfig for `key`, if any.
     pub fn get_exact(&self, key: &PrefixOrExact) -> Option<&PeerConfig> {
-        self.0.get(&key)
+        self.0.get(key)
     }
 }
 

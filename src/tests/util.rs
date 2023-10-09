@@ -744,16 +744,16 @@ pub mod bgp {
 
                         let mut flags = 0u8;
                         if optional {
-                            flags = flags | 0b1000_0000;
+                            flags |= 0b1000_0000;
                         }
                         if transitive {
-                            flags = flags | 0b0100_0000;
+                            flags |= 0b0100_0000;
                         }
                         if complete {
-                            flags = flags | 0b0010_0000;
+                            flags |= 0b0010_0000;
                         }
                         if len > 255 {
-                            flags = flags | 0b0001_0000;
+                            flags |= 0b0001_0000;
                         }
 
                         out_bytes.put_u8(flags); // attr. flags
@@ -1138,7 +1138,7 @@ pub mod bgp {
             let epoch_micros = now.timestamp_subsec_micros();
 
             buf.put_u8(u8::from(*pph.peer_type));
-            buf.put_u8(pph.peer_flags.into());
+            buf.put_u8(pph.peer_flags);
             buf.extend_from_slice(&pph.peer_distinguisher);
 
             // "Peer Address: The remote IP address associated with the TCP session

@@ -51,7 +51,7 @@ impl SourceId {
     pub fn name(&self) -> Option<&str> {
         match self {
             SourceId::SocketAddr(_) => None,
-            SourceId::Named(name) => Some(&name),
+            SourceId::Named(name) => Some(name),
         }
     }
 }
@@ -191,26 +191,21 @@ impl Filterable for SmallVec<[Payload; 8]> {
 impl Payload {
     pub fn from_filter_output(
         source_id: SourceId,
-        filter_output: FilterOutput<TypeValue>,
+        filter_output: FilterOutput,
     ) -> SmallVec<[Payload; 8]> {
         let mut out_payloads = smallvec![];
 
-        let out_value = match (filter_output.rx, filter_output.tx) {
-            (rx, None) => rx,
-            (_, Some(tx)) => tx,
-        };
-
         // Make a payload out of it
-        let new_payload = Payload::new(source_id.clone(), out_value);
+        let new_payload = Payload::new(source_id.clone(), filter_output.east);
 
         // Add the payload to the result
         out_payloads.push(new_payload);
 
         // Add output stream messages to the result
-        if !filter_output.output_stream_queue.is_empty() {
+        if !filter_output.south.is_empty() {
             out_payloads.extend(
                 filter_output
-                    .output_stream_queue
+                    .south
                     .into_iter()
                     .map(|osm| Payload::new(source_id.clone(), osm)),
             );

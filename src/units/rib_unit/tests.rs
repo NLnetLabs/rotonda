@@ -186,8 +186,8 @@ async fn process_update_two_routes_to_the_same_prefix() {
         assert_eq!(Arc::strong_count(rib_value.test_inner()), 3);
         assert_eq!(Arc::weak_count(rib_value.test_inner()), 0);
         for item in rib_value.iter() {
-            assert_eq!(Arc::strong_count(&item), 1);
-            assert_eq!(Arc::weak_count(&item), 0);
+            assert_eq!(Arc::strong_count(item), 1);
+            assert_eq!(Arc::weak_count(item), 0);
         }
 
         (match_result, match_result2)
@@ -201,8 +201,8 @@ async fn process_update_two_routes_to_the_same_prefix() {
     // assert_eq!(Arc::strong_count(&rib_value.per_prefix_items), 2); // TODO: MultiThreadedStore doesn't cleanup on drop...
     assert_eq!(Arc::weak_count(rib_value.test_inner()), 0);
     for item in rib_value.iter() {
-        assert_eq!(Arc::strong_count(&item), 1);
-        assert_eq!(Arc::weak_count(&item), 0);
+        assert_eq!(Arc::strong_count(item), 1);
+        assert_eq!(Arc::weak_count(item), 0);
     }
 }
 

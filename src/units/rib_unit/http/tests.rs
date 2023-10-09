@@ -783,7 +783,7 @@ fn insert_routes(rib: Arc<ArcSwapOption<PhysicalRib>>, n: u8, announcements: Ann
             .with_peer_asn(Asn::from_u32(1000 + (n as u32)))
             .with_router_id(Arc::new(format!("router{n}")));
 
-            rib.insert(&prefix, raw_route).unwrap();
+            rib.insert(prefix, raw_route).unwrap();
         }
     }
 }

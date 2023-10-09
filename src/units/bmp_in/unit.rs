@@ -440,12 +440,12 @@ impl BmpInRunner {
             Update::UpstreamStatusChange(UpstreamStatus::EndOfStream { ref source_id }) => {
                 // The connection to the router has been lost so drop the connection state machine we have for it, if
                 // any.
-                if let Some(entry) = self.router_states.get(&source_id) {
+                if let Some(entry) = self.router_states.get(source_id) {
                     let mut locked = entry.lock().await;
                     let this_state = locked.take().unwrap();
                     let res = this_state.terminate().await;
-                    let _ = self.process_result(res, &source_id).await;
-                    self.router_disconnected(&source_id);
+                    let _ = self.process_result(res, source_id).await;
+                    self.router_disconnected(source_id);
                 }
 
                 // Pass it on
@@ -554,6 +554,6 @@ mod tests {
     // --- Test helpers ------------------------------------------------------
 
     fn mk_config_from_toml(toml: &str) -> Result<BmpIn, toml::de::Error> {
-        toml::de::from_slice::<BmpIn>(toml.as_bytes())
+        toml::from_str::<BmpIn>(toml)
     }
 }

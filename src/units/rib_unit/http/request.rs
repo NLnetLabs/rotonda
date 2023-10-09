@@ -149,7 +149,7 @@ impl PrefixesApi {
                     return Ok(res);
                 }
             }
-            RibType::Virtual(_) => {
+            RibType::GeneratedVirtual(_)|RibType::Virtual => {
                 trace!("Handling virtual RIB query");
                 // Generate a unique query ID to tie the request and later response together.
                 let uuid = Uuid::new_v4();

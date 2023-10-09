@@ -35,7 +35,7 @@ struct Config {
     /// A colon separated IP address and port number to proxy incoming BMP
     /// over TCP connections to.
     /// On change: should we terminate current proxy tasks?
-    pub target: Arc<String>,
+    pub destination: Arc<String>,
 
     /// Router IPs to proxy BMP messages for. If set then ONLY these router
     /// IPs will be proxied for, otherwise all non-excluded router IPs will
@@ -159,7 +159,7 @@ impl BmpTcpOutRunner {
 
         if accepted && !rejected {
             BmpProxy::new(
-                Some(self.config.target.clone()),
+                Some(self.config.destination.clone()),
                 proxy_status_reporter,
                 router_addr,
             )

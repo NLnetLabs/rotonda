@@ -1,54 +1,165 @@
 use std::{
-    cell::RefCell,
-    collections::hash_map::DefaultHasher,
-    fmt::Display,
-    hash::{Hash, Hasher},
-    ops::{ControlFlow, Deref},
-    path::PathBuf,
-    sync::Arc,
+    cell::RefCell, collections::HashSet, fmt::Display, ops::ControlFlow, path::PathBuf, sync::Arc,
     time::Instant,
 };
 
-use arc_swap::ArcSwapOption;
 use log::debug;
 use roto::{
-    ast::AcceptReject,
-    compile::{CompileError, Compiler, MirBlock},
-    traits::RotoType,
+    ast::{AcceptReject, ShortString},
+    compile::{CompileError, Compiler, MirBlock, RotoPack, RotoPackArc},
     types::typevalue::TypeValue,
     vm::{
         ExtDataSource, LinearMemory, OutputStreamQueue, VirtualMachine, VmBuilder, VmError,
         VmResult,
     },
 };
+use serde::Deserialize;
+
+use crate::manager;
 
 use super::frim::FrimMap;
 
+//------------ FilterName ---------------------------------------------------------------------------------------------
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct FilterName(ShortString);
+
+impl std::ops::Deref for FilterName {
+    type Target = ShortString;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl std::ops::DerefMut for FilterName {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl std::fmt::Display for FilterName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl Default for FilterName {
+    fn default() -> Self {
+        FilterName(ShortString::from(""))
+    }
+}
+
+impl From<&str> for FilterName {
+    fn from(value: &str) -> Self {
+        ShortString::from(value).into()
+    }
+}
+
+impl From<&ShortString> for FilterName {
+    fn from(value: &ShortString) -> Self {
+        FilterName(value.clone())
+    }
+}
+
+impl From<ShortString> for FilterName {
+    fn from(value: ShortString) -> Self {
+        FilterName(value)
+    }
+}
+
+impl<'a, 'de: 'a> Deserialize<'de> for FilterName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // This has to be a String, even though we pass a &str to ShortString::from(), because of the way that newer
+        // versions of the toml crate work. See: https://github.com/toml-rs/toml/issues/597
+        let s: String = Deserialize::deserialize(deserializer)?;
+        let filter_name = FilterName(ShortString::from(s.as_str()));
+        Ok(manager::load_filter_name(filter_name))
+    }
+}
+
+//------------ VM -----------------------------------------------------------------------------------------------------
+
 pub type VM = VirtualMachine<Arc<[MirBlock]>, Arc<[ExtDataSource]>>;
-pub type ThreadLocalVM = RefCell<Option<(Instant, VM, LinearMemory)>>;
+
+pub struct StatefulVM {
+    /// The name of the filter this VM instance was compiled for
+    pub filter_name: FilterName,
+
+    /// When the VM was built to run the specified filter
+    pub built_when: Instant,
+
+    /// Working memory for a single invocation of the VM to use
+    pub mem: LinearMemory,
+
+    /// The VM itself
+    pub vm: VM,
+}
+
+pub type ThreadLocalVM = RefCell<Option<StatefulVM>>;
 
 //------------ RotoError ----------------------------------------------------------------------------------------------
 
+#[allow(clippy::enum_variant_names)]
+#[derive(Debug)]
+pub enum LoadErrorKind {
+    ReadDirError,
+    ReadDirEntryError,
+    ReadFileError,
+}
+
+impl std::fmt::Display for LoadErrorKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LoadErrorKind::ReadDirError => f.write_str("read directory"),
+            LoadErrorKind::ReadDirEntryError => f.write_str("read directory entry"),
+            LoadErrorKind::ReadFileError => f.write_str("read file"),
+        }
+    }
+}
+
+impl LoadErrorKind {
+    pub fn read_dir_err<T: Into<PathBuf>>(path: T, err: std::io::Error) -> RotoError {
+        RotoError::load_err(path, LoadErrorKind::ReadDirError, err)
+    }
+
+    pub fn read_dir_entry_err<T: Into<PathBuf>>(path: T, err: std::io::Error) -> RotoError {
+        RotoError::load_err(path, LoadErrorKind::ReadDirEntryError, err)
+    }
+
+    pub fn read_file_err<T: Into<PathBuf>>(path: T, err: std::io::Error) -> RotoError {
+        RotoError::load_err(path, LoadErrorKind::ReadFileError, err)
+    }
+}
+
 #[derive(Debug)]
 pub enum RotoError {
+    LoadError {
+        kind: LoadErrorKind,
+        path: PathBuf,
+        err: std::io::Error,
+    },
     CompileError {
         origin: RotoScriptOrigin,
         err: CompileError,
     },
     BuildError {
-        origin: RotoScriptOrigin,
+        filter_name: FilterName,
         err: VmError,
     },
     ExecError {
-        origin: RotoScriptOrigin,
+        filter_name: FilterName,
         err: VmError,
     },
-    PostExecError {
-        origin: RotoScriptOrigin,
-        err: String,
+    FilterNotFound {
+        filter_name: FilterName,
     },
-    Unusable {
-        origin: RotoScriptOrigin,
+    PostExecError {
+        filter_name: FilterName,
+        err: &'static str,
     },
 }
 
@@ -56,155 +167,142 @@ impl Display for RotoError {
     #[rustfmt::skip]
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RotoError::CompileError{ origin, err } => {
-                f.write_fmt(format_args!("Compilation error for Roto script {origin}: {err}"))
+            RotoError::LoadError { kind, path, err } => {
+                f.write_fmt(format_args!("{kind} error for path {}: {err}", path.display()))
             }
-            RotoError::BuildError{ origin, err } => {
-                f.write_fmt(format_args!("VM build error for Roto script {origin}: {err}"))
+            RotoError::CompileError { origin, err } => {
+                f.write_fmt(format_args!("Compilation error for Roto script {origin}: {err}. Note: run with `ROTONDA_ROTO_LOG=1` environment variable to enable trace level Roto logging."))
             }
-            RotoError::ExecError{ origin, err } => {
-                f.write_fmt(format_args!("VM exec error for Roto script {origin}: {err}"))
+            RotoError::BuildError { filter_name, err } => {
+                f.write_fmt(format_args!("VM build error for Roto filter {filter_name}: {err}"))
             }
-            RotoError::PostExecError{ origin, err } => {
-                f.write_fmt(format_args!("Post execution error with Roto script {origin}: {err}"))
+            RotoError::ExecError { filter_name, err } => {
+                f.write_fmt(format_args!("VM exec error for Roto filter {filter_name}: {err}"))
             }
-            RotoError::Unusable{ origin } => {
-                f.write_fmt(format_args!("Roto script {origin} was previously determined to be unusable"))
+            RotoError::FilterNotFound { filter_name } => {
+                f.write_fmt(format_args!("Unknown Roto filter {filter_name}"))
+            }
+            RotoError::PostExecError { filter_name, err } => {
+                f.write_fmt(format_args!("Post-execution error with Roto filter {filter_name}: {err}"))
             }
         }
     }
 }
 
-//----------- RotoScripts ---------------------------------------------------------------------------------------------
+impl RotoError {
+    pub fn compile_err(origin: &RotoScriptOrigin, err: CompileError) -> RotoError {
+        Self::CompileError {
+            origin: origin.clone(),
+            err,
+        }
+    }
 
-#[derive(Clone, Debug)]
+    pub fn build_err(filter_name: &FilterName, err: VmError) -> RotoError {
+        Self::BuildError {
+            filter_name: filter_name.clone(),
+            err,
+        }
+    }
+
+    pub fn not_found(filter_name: &FilterName) -> RotoError {
+        Self::FilterNotFound {
+            filter_name: filter_name.clone(),
+        }
+    }
+
+    pub fn exec_err(filter_name: &FilterName, err: VmError) -> RotoError {
+        Self::ExecError {
+            filter_name: filter_name.clone(),
+            err,
+        }
+    }
+
+    pub fn post_exec_err(filter_name: &FilterName, err: &'static str) -> RotoError {
+        Self::PostExecError {
+            filter_name: filter_name.clone(),
+            err,
+        }
+    }
+
+    pub fn load_err<T: Into<PathBuf>>(
+        path: T,
+        kind: LoadErrorKind,
+        err: std::io::Error,
+    ) -> RotoError {
+        let mut path: PathBuf = path.into();
+        if path.is_relative() {
+            if let Ok(cwd) = std::env::current_dir() {
+                path = cwd.join(path);
+            }
+        }
+        Self::LoadError { kind, path, err }
+    }
+}
+
+//----------- RotoScripts ---------------------------------------------------
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RotoScriptOrigin {
-    Unknown,
+    /// A script with no known origin, e.g. from a unit test, but still
+    /// distinct (by name) from other scripts.
+    Named(String),
+
+    /// A script that originated from a file at the specified filesystem
+    /// path.
     Path(PathBuf),
 }
 
 impl Display for RotoScriptOrigin {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RotoScriptOrigin::Unknown => f.write_str("Unknown"),
+            RotoScriptOrigin::Named(name) => f.write_str(name),
             RotoScriptOrigin::Path(path) => f.write_fmt(format_args!("{}", path.display())),
         }
     }
 }
 
-#[derive(Debug)]
-struct RotoScriptInner {
-    source_code: String,
-    origin: RotoScriptOrigin,
-    when: Instant,
-}
+//------------ RotoScript ---------------------------------------------------
 
-#[derive(Clone, Debug, Default)]
+// A RotoScript is a script from one single origin (i.e. a file, a &str), but
+// can contain multiple compiled Filter(Map)s. Filter(Map)s cannot live in
+// the Global namespace, therefore they always have a NamedScope attached,
+// which is the same as the filter name. Each NamedScope, and thus the filter
+// name, needs to be unique across all roto scripts loaded by a Rotonda
+// instance. Within one roto script this is enforced by the Roto compiler,
+// but across the whole instance (so over potentially over multiple roto
+// script sources), this is enforced by this RotoScript struct (in
+// `add_or_update_script`). The scope and the compiled MIR code live together
+// in one RotoPack.
+#[derive(Clone, Debug)]
 pub struct RotoScript {
-    inner: Arc<ArcSwapOption<RotoScriptInner>>,
-    manager: RotoScripts,
+    origin: RotoScriptOrigin,
+    source_code: String,
+    loaded_when: Instant,
+    packs: Vec<Arc<RotoPack>>
 }
 
 impl RotoScript {
-    pub fn new<T: Into<String>>(
-        source_code: T,
-        manager: RotoScripts,
-        origin: RotoScriptOrigin,
-    ) -> Self {
-        let inner = RotoScriptInner {
-            source_code: source_code.into(),
-            origin,
-            when: Instant::now(),
-        };
-
-        let inner = if inner.source_code.is_empty() {
-            None
-        } else {
-            Some(inner)
-        };
-
-        Self {
-            inner: Arc::new(ArcSwapOption::from_pointee(inner)),
-            manager,
-        }
-    }
-
-    pub fn origin(&self) -> RotoScriptOrigin {
-        match self.inner.load().deref() {
-            Some(inner) => inner.origin.clone(),
-            None => RotoScriptOrigin::Unknown,
-        }
-    }
-
-    pub fn update(&self, source_code: String, origin: RotoScriptOrigin) {
-        let new_script = RotoScriptInner {
-            source_code,
-            origin,
-            when: Instant::now(),
-        };
-        let new_script = if new_script.source_code.is_empty() {
-            None
-        } else {
-            Some(Arc::new(new_script))
-        };
-        self.inner.store(new_script);
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.inner.load().is_none()
-    }
-
-    pub fn exec(&self, vm: &ThreadLocalVM, rx: TypeValue) -> Result<VmResult, RotoError> {
-        // Let the payload through if it is actually an output stream message as we don't filter those, we just forward them
-        // down the pipeline to a target where they can be handled, or if no roto script exists.
-        if matches!(rx, TypeValue::OutputStreamMessage(_)) || self.is_empty() {
-            return Ok(VmResult {
-                accept_reject: AcceptReject::Accept,
-                rx,
-                tx: None,
-                output_stream_queue: OutputStreamQueue::new(),
-            });
-        }
-
-        let guard = self.inner.load();
-        let script = guard.as_ref().unwrap(); // SAFETY: checked above
-
-        // Initialize the Roto script VM on first use.
-        let prev_vm = &mut vm.borrow_mut();
-        if prev_vm.is_none() {
-            let when = Instant::now();
-            let vm = self.manager.build_vm(&script.source_code, &script.origin)?;
-            let mem = LinearMemory::uninit();
-            prev_vm.replace((when, vm, mem));
-        }
-
-        // Reinitialize the Roto script VM if the Roto script has changed since it was last initialized,
-        // otherwise reset its state so that it is ready to process the given rx value.
-        let (when, vm, mem) = prev_vm.as_mut().unwrap();
-        if script.when > *when {
-            debug!("Updating roto VM");
-            *vm = self.manager.build_vm(&script.source_code, &script.origin)?;
-        } else {
-            vm.reset();
-        }
-
-        // Run the Roto script on the given rx value.
-        vm.exec(rx, None::<TypeValue>, None, mem)
-            .map_err(|err| RotoError::ExecError {
-                origin: script.origin.clone(),
-                err,
-            })
+    pub fn contains(&self, search_pack: &Arc<RotoPack>) -> bool {
+        self.packs.iter().any(|pack| Arc::ptr_eq(pack, search_pack))
     }
 }
 
-#[derive(Debug, Default)]
-struct RotoScriptsInner {
-    unusable_scripts: FrimMap<u64, ()>,
+// A ScopedRotoScript is a single compiled Filter(Map) in its own scope. It
+// is always part of a RotoScript.
+#[derive(Clone, Debug)]
+pub struct ScopedRotoScript {
+    // The script this scoped Filter(Map) is part of.
+    parent_script: Arc<RotoScript>,
+    // The reference to the pack in the RotoPack vec of its parent.
+    pack: Arc<RotoPack>
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct RotoScripts {
-    inner: Arc<RotoScriptsInner>,
+    // RotoScripts keyed on their origin
+    scripts_by_origin: Arc<FrimMap<RotoScriptOrigin, Arc<RotoScript>>>,
+    // Scoped scripts keyed on their scope name
+    scripts_by_filter: Arc<FrimMap<FilterName, ScopedRotoScript>>,
 }
 
 impl RotoScripts {
@@ -212,132 +310,259 @@ impl RotoScripts {
         Default::default()
     }
 
-    pub fn build_vm(&self, roto_script: &str, origin: &RotoScriptOrigin) -> Result<VM, RotoError> {
-        if !self.known_bad(roto_script) {
-            self.build_vm_internal(roto_script, origin).or_else(|err| {
-                self.mark_script_unusable(roto_script);
-                Err(err)
-            })
-        } else {
-            Err(RotoError::Unusable {
-                origin: origin.clone(),
-            })
+    pub fn add_or_update_script(
+        &self,
+        origin: RotoScriptOrigin,
+        roto_script: &str,
+    ) -> Result<(), RotoError> {
+        if let Some(script) = self.scripts_by_origin.get(&origin) {
+            if script.source_code == roto_script {
+                return Ok(());
+            }
+        }
+
+        // Try and compile it to verify if there are any problems with it.
+        // If there are, we are going to stop here. If there are none, we
+        // will store the resulting MIR, plus the required arguments (a
+        // RotoPack) in the RotoScript struct. This we only have to compile
+        // once.
+        let rotolo =
+            Compiler::build(roto_script)
+            .map_err(|err| RotoError::compile_err(&origin, err))?;
+
+        if !rotolo.is_success() {
+            let report = rotolo.get_mis_compilations().iter().fold(
+                String::new(),
+                |mut acc, (scope, err)| {
+                    acc.push_str(&format!("Scope: {scope}, Error: {err}; "));
+                    acc
+                },
+            );
+            let report = report.trim_end_matches("; ");
+            return Err(RotoError::CompileError {
+                origin,
+                err: report.into(),
+            });
+        }
+
+        // Extract all the packs that are Filter(Map)s. Filter(Map)s can't
+        // live in the Global scope, so these all have filter names.
+        let new_filter_maps = rotolo.clean_packs_to_owned();
+
+        // Check if any of the compiled filters have the same name as one that
+        // we've already seen. If so, abort, as each Filter(Map) name must be
+        // unique across all loaded roto scripts so that they can referenced
+        // unambiguously by their name.
+        for filter_map in &new_filter_maps {
+            let filter_name = filter_map.get_filter_map_name();
+
+            if let Some(found) = 
+                self.scripts_by_filter.get(&filter_name.clone().into()) {
+                    let err = CompileError::from(format!(
+                        "Filter {filter_name} in {origin} is already defined \
+                        in {}",
+                        found.parent_script.origin
+                    ));
+                    return Err(RotoError::CompileError { origin, err });
+                }
+        }
+
+        // Create the new RotoScript for these packs.
+        let new_script = Arc::new(RotoScript {
+            origin: origin.clone(),
+            source_code: roto_script.to_string(),
+            loaded_when: Instant::now(),
+            packs: new_filter_maps
+                .into_iter()
+                .map(Arc::new)
+                .collect::<Vec<_>>()
+        });
+
+        self.scripts_by_origin.insert(origin, new_script.clone());
+
+        // Update the view of all Filter(Map)s keyed by name with the newly
+        // loaded Filter(Map)s.
+        for scope in &new_script.packs {
+            let filter_name = scope.get_filter_map_name();
+
+            self.scripts_by_filter
+                .insert(
+                    filter_name.into(), 
+                    ScopedRotoScript { 
+                        parent_script: Arc::clone(&new_script), 
+                        pack: Arc::clone(scope) 
+                    }
+                );
+        }
+
+        if log::log_enabled!(log::Level::Trace) {
+            dbg!(&self);
+        }
+
+        Ok(())
+    }
+
+    pub fn remove_script(&self, origin: &RotoScriptOrigin) {
+        if let Some(roto_script) = self.scripts_by_origin.remove(origin) {
+            self.scripts_by_filter
+                .retain(|_, scoped_script| !roto_script.contains(&scoped_script.pack));
         }
     }
 
-    fn build_vm_internal(
+    pub fn get_script_origins(&self) -> HashSet<RotoScriptOrigin> {
+        self.scripts_by_origin
+            .guard()
+            .iter()
+            .map(|(origin, _script)| origin)
+            .cloned()
+            .collect::<HashSet<_>>()
+    }
+
+    pub fn get_filter_names(&self) -> HashSet<FilterName> {
+        self.scripts_by_filter
+            .guard()
+            .iter()
+            .map(|(filter_name, _script)| filter_name)
+            .cloned()
+            .collect::<HashSet<_>>()
+    }
+
+    pub fn contains_filter(&self, filter_name: &FilterName) -> bool {
+        self.scripts_by_filter.contains_key(filter_name)
+    }
+
+    // TODO: run VM execution in a dedicated thread pool to avoid blocking Tokio
+    pub fn exec(
         &self,
-        roto_script: &str,
-        origin: &RotoScriptOrigin,
-    ) -> Result<VM, RotoError> {
-        let rotolo = Compiler::build(roto_script).map_err(|err| RotoError::CompileError {
-            origin: origin.clone(),
-            err,
-        })?;
-        let pack =
-            rotolo
-                .retrieve_first_public_as_arcs()
-                .map_err(|err| RotoError::CompileError {
-                    origin: origin.clone(),
-                    err,
-                })?;
+        vm_ref: &ThreadLocalVM,
+        filter_name: &FilterName,
+        rx: TypeValue,
+    ) -> FilterResult<RotoError> {
+        // Let the payload through if it is actually an output stream message as we don't filter those, we just forward them
+        // down the pipeline to a target where they can be handled, or if no roto script exists.
+        if matches!(rx, TypeValue::OutputStreamMessage(_)) || filter_name.is_empty() {
+            return Ok(ControlFlow::Continue(FilterOutput::from(rx)));
+        }
+
+        // Initialize the VM if needed.
+        let was_initialized = self.init_vm(vm_ref, filter_name)?;
+
+        let stateful_vm = &mut vm_ref.borrow_mut();
+        let stateful_vm = stateful_vm.as_mut().unwrap();
+
+        if !was_initialized {
+            // Update the VM if the script containing the named filter has changed since last use.
+            let found_filter = self
+                .scripts_by_filter
+                .get(filter_name)
+                .ok_or_else(|| RotoError::not_found(filter_name))?;
+            if found_filter.parent_script.loaded_when > stateful_vm.built_when {
+                debug!("Updating roto VM");
+                stateful_vm.vm = self.build_vm(filter_name)?;
+                stateful_vm.built_when = found_filter.parent_script.loaded_when;
+            } else {
+                stateful_vm.vm.reset();
+            }
+        }
+
+        // Run the Roto script on the given rx value.
+        let res = stateful_vm
+            .vm
+            .exec(rx, None::<TypeValue>, None, &mut stateful_vm.mem)
+            .map_err(|err| RotoError::exec_err(&stateful_vm.filter_name, err))?;
+
+        match res {
+            VmResult {
+                accept_reject: AcceptReject::Reject,
+                ..
+            } => Ok(ControlFlow::Break(())),
+
+            VmResult {
+                accept_reject: AcceptReject::Accept,
+                rx,
+                tx: None,
+                output_stream_queue,
+            } => Ok(ControlFlow::Continue(FilterOutput::from((
+                rx,
+                output_stream_queue,
+            )))),
+
+            VmResult {
+                accept_reject: AcceptReject::Accept,
+                tx: Some(tx),
+                output_stream_queue,
+                ..
+            } => Ok(ControlFlow::Continue(FilterOutput::from((
+                tx,
+                output_stream_queue,
+            )))),
+
+            VmResult {
+                accept_reject: AcceptReject::NoReturn,
+                ..
+            } => Err(RotoError::post_exec_err(
+                filter_name,
+                "Roto filter NoReturn result is unexpected",
+            )),
+        }
+    }
+
+    fn init_vm(&self, vm_ref: &ThreadLocalVM, filter_name: &FilterName) -> Result<bool, RotoError> {
+        let vm_ref = &mut vm_ref.borrow_mut();
+        if vm_ref.is_none() {
+            let filter_name = filter_name.clone();
+            let built_when = Instant::now();
+            let vm = self.build_vm(&filter_name)?;
+            let mem = LinearMemory::uninit();
+            vm_ref.replace(StatefulVM {
+                filter_name,
+                built_when,
+                mem,
+                vm,
+            });
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    fn build_vm(&self, filter_name: &FilterName) -> Result<VM, RotoError> {
+        // Find the script that contains the named filter
+        let scoped_script = self
+            .scripts_by_filter
+            .get(filter_name)
+            .ok_or_else(|| RotoError::not_found(filter_name))?;
+
+        let pack = RotoPackArc::from(scoped_script.pack.as_ref());
         VmBuilder::new()
             .with_mir_code(pack.mir)
             .with_data_sources(pack.data_sources)
             .build()
-            .map_err(|err| RotoError::BuildError {
-                origin: origin.clone(),
-                err,
-            })
-    }
-
-    fn known_bad(&self, roto_script: &str) -> bool {
-        let roto_script_hash = Self::hash_script(roto_script);
-        self.inner.unusable_scripts.contains_key(&roto_script_hash)
-    }
-
-    fn mark_script_unusable(&self, roto_script: &str) {
-        let roto_script_hash = Self::hash_script(roto_script);
-        self.inner.unusable_scripts.insert(roto_script_hash, ());
-    }
-
-    fn hash_script(roto_script: &str) -> u64 {
-        let mut hasher = DefaultHasher::new();
-        roto_script.hash(&mut hasher);
-        let roto_script_hash = hasher.finish();
-        roto_script_hash
+            .map_err(|err| RotoError::build_err(filter_name, err))
     }
 }
 
 //----------- Roto Filtering ------------------------------------------------------------------------------------------
 
-pub type FilterResult<E> = Result<ControlFlow<(), FilterOutput<TypeValue>>, E>;
+pub type FilterResult<E> = Result<ControlFlow<(), FilterOutput>, E>;
 
-pub struct FilterOutput<T: RotoType> {
-    pub rx: T,
-    pub tx: Option<TypeValue>,
-    pub output_stream_queue: OutputStreamQueue,
+pub struct FilterOutput {
+    pub east: TypeValue,
+    pub south: OutputStreamQueue,
 }
 
-impl<T> From<T> for FilterOutput<T>
-where
-    T: RotoType,
-{
-    fn from(rx: T) -> Self {
+impl From<TypeValue> for FilterOutput {
+    fn from(east: TypeValue) -> Self {
         Self {
-            rx,
-            tx: None,
-            output_stream_queue: Default::default(),
+            east,
+            south: Default::default(),
         }
     }
 }
 
-pub fn roto_filter(
-    vm: &ThreadLocalVM,
-    roto_script: RotoScript,
-    rx: TypeValue,
-) -> FilterResult<RotoError> {
-    // Let the payload through if it is actually an output stream message as we don't filter those, we just forward them
-    // down the pipeline to a target where they can be handled, or if no roto script exists.
-    if matches!(rx, TypeValue::OutputStreamMessage(_)) || roto_script.is_empty() {
-        return Ok(ControlFlow::Continue(FilterOutput::from(rx)));
-    }
-
-    // Run the Roto script on the given rx value.
-    let res = roto_script.exec(vm, rx)?;
-
-    match res {
-        VmResult {
-            accept_reject: AcceptReject::Reject,
-            ..
-        } => {
-            // The roto filter script said this BGP UPDATE message should be rejected.
-            Ok(ControlFlow::Break(()))
-        }
-
-        VmResult {
-            accept_reject: AcceptReject::Accept,
-            rx,
-            tx,
-            output_stream_queue,
-        } => {
-            // The roto filter script has given us a, possibly modified, rx_tx output value to continue with. It may be
-            // the same value that it was given to check, or it may be a modified version of that value, or a
-            // completely new value maybe even a different TypeValue variant.
-            Ok(ControlFlow::Continue(FilterOutput {
-                rx,
-                tx,
-                output_stream_queue,
-            }))
-        }
-
-        VmResult {
-            accept_reject: AcceptReject::NoReturn,
-            ..
-        } => Err(RotoError::PostExecError {
-            origin: roto_script.origin(),
-            err: "Roto filter NoReturn result is unexpected".to_string(),
-        }),
+impl From<(TypeValue, OutputStreamQueue)> for FilterOutput {
+    fn from((east, south): (TypeValue, OutputStreamQueue)) -> Self {
+        Self { east, south }
     }
 }
 
@@ -376,9 +601,8 @@ mod tests {
         let out_payloads = in_payload
             .filter(move |payload| {
                 Result::<_, FilterError>::Ok(ControlFlow::Continue(FilterOutput {
-                    rx: payload,
-                    tx: None,
-                    output_stream_queue: output_stream_queue.clone(),
+                    east: payload,
+                    south: output_stream_queue.clone(),
                 }))
             })
             .unwrap();
@@ -426,9 +650,8 @@ mod tests {
         let out_payloads = in_payload
             .filter(move |payload| {
                 Result::<_, FilterError>::Ok(ControlFlow::Continue(FilterOutput {
-                    rx: payload,
-                    tx: None,
-                    output_stream_queue: output_stream_queue.clone(),
+                    east: payload,
+                    south: output_stream_queue.clone(),
                 }))
             })
             .unwrap();

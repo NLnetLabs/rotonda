@@ -1,8 +1,7 @@
 use atomic_enum::atomic_enum;
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::Bytes;
 use futures::FutureExt;
-use log::error;
-use roto::types::builtin::{BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus};
+use roto::types::builtin::RouteStatus;
 
 /// RFC 7854 BMP processing.
 ///
@@ -35,7 +34,7 @@ use routecore::{
             update::{AddPath, FourOctetAsn},
             SessionConfig, UpdateMessage,
         },
-        types::{PathAttributeType, AFI, SAFI},
+        types::{AFI, SAFI},
     },
     bmp::message::{
         InformationTlvType, InitiationMessage, Message as BmpMsg, PeerDownNotification,
@@ -46,13 +45,18 @@ use smallvec::SmallVec;
 
 use std::{
     collections::{hash_map::Keys, HashMap, HashSet},
-    net::IpAddr,
     ops::ControlFlow,
     sync::Arc,
 };
 
 use crate::{
-    common::{routecore_extra::generate_alternate_config, status_reporter::AnyStatusReporter},
+    common::{
+        routecore_extra::{
+            generate_alternate_config, mk_route_for_prefix,
+            mk_withdrawals_for_peers_announced_prefixes,
+        },
+        status_reporter::AnyStatusReporter,
+    },
     payload::{Payload, RouterId, SourceId, Update},
 };
 
@@ -362,16 +366,16 @@ pub trait PeerAware {
 
     fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState>;
 
+    /// Remove all details about a peer.
+    ///
+    /// Returns true if the peer details (config, pending EoRs, announced routes, etc) were removed, false if the peer
+    /// is not known.
+    fn remove_peer(&mut self, pph: &PerPeerHeader<Bytes>) -> bool;
+
     fn update_peer_config(&mut self, pph: &PerPeerHeader<Bytes>, config: SessionConfig) -> bool;
 
     /// Get a reference to a previously inserted configuration.
     fn get_peer_config(&self, pph: &PerPeerHeader<Bytes>) -> Option<&SessionConfig>;
-
-    /// Remove previously recorded peer configuration.
-    ///
-    /// Returns true if the configuration was removed, false if configuration
-    /// for the peer does not exist.
-    fn remove_peer_config(&mut self, pph: &PerPeerHeader<Bytes>) -> bool;
 
     fn num_peer_configs(&self) -> usize;
 
@@ -444,9 +448,14 @@ where
         // packet captures so it seems that it is indeed sent.
         let pph = msg.per_peer_header();
 
-        let routes = self.do_peer_down(&pph);
+        let eor_capable = self.details.is_peer_eor_capable(&pph);
 
-        if !self.details.remove_peer_config(&pph) {
+        self.status_reporter
+            .peer_down(self.router_id.clone(), eor_capable);
+
+        let withdrawals = self.mk_withdrawals_for_peers_routes(&pph);
+
+        if !self.details.remove_peer(&pph) {
             // This is unexpected, we should have had configuration
             // stored for this peer but apparently don't. Did we
             // receive a Peer Down Notification without a
@@ -458,16 +467,17 @@ where
                 // TODO: Silly to_copy the bytes, but PDN won't give us the octets back..
                 Some(Bytes::copy_from_slice(msg.as_ref())),
             );
-        } else if routes.is_empty() {
+        } else if withdrawals.is_empty() {
             self.mk_other_result()
         } else {
-            self.mk_routing_update_result(Update::Bulk(routes))
+            self.mk_routing_update_result(Update::Bulk(withdrawals))
         }
     }
 
-    pub fn do_peer_down(&mut self, pph: &PerPeerHeader<Bytes>) -> SmallVec<[Payload; 8]> {
-        let eor_capable = self.details.is_peer_eor_capable(pph);
-
+    pub fn mk_withdrawals_for_peers_routes(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> SmallVec<[Payload; 8]> {
         // From https://datatracker.ietf.org/doc/html/rfc7854#section-4.9
         //
         //   "4.9.  Peer Down Notification
@@ -482,50 +492,19 @@ where
         // So, we must act as if we had received route withdrawals for
         // all of the routes previously received for this peer.
 
-        self.status_reporter
-            .peer_down(self.router_id.clone(), eor_capable);
-
-        let mut payloads = SmallVec::new();
-        if let Some(prefixes_to_withdraw) = self.details.get_announced_prefixes(pph) {
-            if prefixes_to_withdraw.clone().peekable().next().is_some() {
-                match mk_bgp_update(prefixes_to_withdraw.clone()) {
-                    Ok(bgp_update) => {
-                        match UpdateMessage::from_octets(
-                            bgp_update.clone(),
-                            SessionConfig::modern(),
-                        ) {
-                            Ok(update) => {
-                                for prefix in prefixes_to_withdraw {
-                                    let route = Self::mk_route_for_prefix(
-                                        self.router_id.clone(),
-                                        update.clone(),
-                                        &pph,
-                                        *prefix,
-                                        RouteStatus::Withdrawn,
-                                    );
-                                    let payload = Payload::new(self.source_id.clone(), route);
-                                    payloads.push(payload);
-                                }
-                            }
-
-                            Err(err) => {
-                                let mut pcap_text = "000000 ".to_string();
-                                for b in bgp_update.as_ref() {
-                                    pcap_text.push_str(&format!("{:02x} ", b));
-                                }
-                                error!("Internal error: Failed to issue internal BGP UPDATE to withdraw routes for a down peer. Reason: BGP UPDATE encoding error: {err}. PCAP TEXT: {pcap_text}");
-                            }
-                        }
-                    }
-
-                    Err(err) => {
-                        error!("Internal error: Failed to issue internal BGP UPDATE to withdraw routes for a down peer. Reason: BGP UPDATE construction error: {err}");
-                    }
-                }
-            }
+        // Loop over announced prefixes constructing BGP UPDATE PDUs with as many prefixes as can fit in one PDU at a
+        // time until withdrawals have been generated for all announced prefixes.
+        if let Some(prefixes) = self.details.get_announced_prefixes(pph) {
+            mk_withdrawals_for_peers_announced_prefixes(
+                prefixes,
+                self.router_id.clone(),
+                pph.address(),
+                pph.asn(),
+                self.source_id.clone(),
+            )
+        } else {
+            SmallVec::new()
         }
-
-        payloads
     }
 
     /// `filter` should return `None` if the BGP message should be ignored, i.e. be filtered out, otherwise `Some(msg)`
@@ -662,10 +641,11 @@ where
                 }
 
                 // clone is cheap due to use of Bytes
-                let route = Self::mk_route_for_prefix(
+                let route = mk_route_for_prefix(
                     self.router_id.clone(),
                     update.clone(),
-                    &pph,
+                    pph.address(),
+                    pph.asn(),
                     prefix,
                     route_status,
                 );
@@ -694,10 +674,11 @@ where
                     }
                 }) {
                     // clone is cheap due to use of Bytes
-                    let route = Self::mk_route_for_prefix(
+                    let route = mk_route_for_prefix(
                         self.router_id.clone(),
                         update.clone(),
-                        &pph,
+                        pph.address(),
+                        pph.asn(),
                         prefix,
                         RouteStatus::Withdrawn,
                     );
@@ -717,22 +698,6 @@ where
             num_announcements,
             num_withdrawals,
         )
-    }
-
-    fn mk_route_for_prefix(
-        router_id: Arc<String>,
-        update: UpdateMessage<Bytes>,
-        pph: &PerPeerHeader<Bytes>,
-        prefix: Prefix,
-        route_status: RouteStatus,
-    ) -> RawRouteWithDeltas {
-        let delta_id = (RotondaId(0), 0); // TODO
-        let roto_update_msg = roto::types::builtin::UpdateMessage(update);
-        let raw_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
-        RawRouteWithDeltas::new_with_message_ref(delta_id, prefix.into(), &raw_msg, route_status)
-            .with_peer_ip(pph.address())
-            .with_peer_asn(pph.asn())
-            .with_router_id(router_id)
     }
 }
 
@@ -1046,7 +1011,7 @@ impl PeerAware for PeerStates {
         self.0.get(pph).map(|peer_state| &peer_state.session_config)
     }
 
-    fn remove_peer_config(&mut self, pph: &PerPeerHeader<Bytes>) -> bool {
+    fn remove_peer(&mut self, pph: &PerPeerHeader<Bytes>) -> bool {
         self.0.remove(pph).is_some()
     }
 
@@ -1109,183 +1074,3 @@ impl PeerAware for PeerStates {
             .map(|peer_state| peer_state.announced_prefixes.iter())
     }
 }
-
-// --------- BEGIN TEMPORARY CODE TO BE REPLACED BY ROUTECORE WHEN READY ----------------------------------------------
-
-// based on code in tests/util.rs:
-#[allow(clippy::vec_init_then_push)]
-fn mk_bgp_update<'a, W>(withdrawals: W) -> Result<Bytes, String>
-where
-    W: IntoIterator<Item = &'a Prefix>,
-{
-    // Based on `div_ceil()` from Rust nightly.
-    const fn div_ceil(lhs: u8, rhs: u8) -> u8 {
-        let d = lhs / rhs;
-        let r = lhs % rhs;
-        if r > 0 && rhs > 0 {
-            d + 1
-        } else {
-            d
-        }
-    }
-
-    fn finalize_bgp_msg_len(buf: &mut BytesMut) -> Result<(), &'static str> {
-        if buf.len() < 19 {
-            Err("Cannot finalize BGP message: message would be too short")
-        } else if buf.len() > 65535 {
-            // TOOD: If we can support RFC 8654 we can increase this to 65,535
-            Err("Cannot finalize BGP message: message would be too long")
-        } else {
-            let len_bytes: [u8; 2] = (buf.len() as u16).to_be_bytes();
-            buf[16] = len_bytes[0];
-            buf[17] = len_bytes[1];
-            Ok(())
-        }
-    }
-
-    // 4.3. UPDATE Message Format
-    //
-    // "The UPDATE message always includes the fixed-size BGP
-    //  header, and also includes the other fields, as shown below (note,
-    //  some of the shown fields may not be present in every UPDATE message):"
-    //
-    //      +-----------------------------------------------------+
-    //      |   Withdrawn Routes Length (2 octets)                |
-    //      +-----------------------------------------------------+
-    //      |   Withdrawn Routes (variable)                       |
-    //      +-----------------------------------------------------+
-    //      |   Total Path Attribute Length (2 octets)            |
-    //      +-----------------------------------------------------+
-    //      |   Path Attributes (variable)                        |
-    //      +-----------------------------------------------------+
-    //      |   Network Layer Reachability Information (variable) |
-    //      +-----------------------------------------------------+
-    //
-    // From: https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
-
-    let mut buf = BytesMut::new();
-
-    // Fixed size BGP header
-    buf.resize(buf.len() + 16, 0xFFu8);
-    // marker
-    buf.resize(buf.len() + 2, 0);
-    // placeholder length, to be replaced later
-    buf.extend_from_slice(&2u8.to_be_bytes());
-    // 2 - UPDATE
-
-    // Other fields
-    // Route withdrawals
-    // "Withdrawn Routes Length:
-    //
-    //  This 2-octets unsigned integer indicates the total length of
-    //  the Withdrawn Routes field in octets.  Its value allows the
-    //  length of the Network Layer Reachability Information field to
-    //  be determined, as specified below.
-    //
-    //  A value of 0 indicates that no routes are being withdrawn from
-    //  service, and that the WITHDRAWN ROUTES field is not present in
-    //  this UPDATE message.
-    //
-    //  Withdrawn Routes:
-    //
-    //  This is a variable-length field that contains a list of IP
-    //  address prefixes for the routes that are being withdrawn from
-    //  service.  Each IP address prefix is encoded as a 2-tuple of the
-    //  form <length, prefix>, whose fields are described below:
-    //
-    //           +---------------------------+
-    //           |   Length (1 octet)        |
-    //           +---------------------------+
-    //           |   Prefix (variable)       |
-    //           +---------------------------+
-    //
-    //  The use and the meaning of these fields are as follows:
-    //
-    //  a) Length:
-    //
-    //     The Length field indicates the length in bits of the IP
-    //     address prefix.  A length of zero indicates a prefix that
-    //     matches all IP addresses (with prefix, itself, of zero
-    //     octets).
-    //
-    //  b) Prefix:
-    //
-    //     The Prefix field contains an IP address prefix, followed by
-    //     the minimum number of trailing bits needed to make the end
-    //     of the field fall on an octet boundary.  Note that the value
-    //     of trailing bits is irrelevant."
-    //
-    // From: https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
-    let mut withdrawn_routes = BytesMut::new();
-    let mut mp_unreach_nlri = BytesMut::new();
-
-    for prefix in withdrawals.into_iter() {
-        let (addr, len) = prefix.addr_and_len();
-        match addr {
-            IpAddr::V4(addr) => {
-                withdrawn_routes.extend_from_slice(&[len]);
-                if len > 0 {
-                    let min_bytes = div_ceil(len, 8) as usize;
-                    withdrawn_routes.extend_from_slice(&addr.octets()[..min_bytes]);
-                }
-            }
-            IpAddr::V6(addr) => {
-                // https://datatracker.ietf.org/doc/html/rfc4760#section-4
-                if mp_unreach_nlri.is_empty() {
-                    mp_unreach_nlri.put_u16(AFI::Ipv6.into());
-                    mp_unreach_nlri.put_u8(u8::from(SAFI::Unicast));
-                }
-                mp_unreach_nlri.extend_from_slice(&[len]);
-                if len > 0 {
-                    let min_bytes = div_ceil(len, 8) as usize;
-                    mp_unreach_nlri.extend_from_slice(&addr.octets()[..min_bytes]);
-                }
-            }
-        }
-    }
-
-    let num_withdrawn_route_bytes =
-        u16::try_from(withdrawn_routes.len()).map_err(|err| format!("{err}"))?;
-    buf.extend_from_slice(&num_withdrawn_route_bytes.to_be_bytes());
-    // N withdrawn route bytes
-    if num_withdrawn_route_bytes > 0 {
-        buf.extend(&withdrawn_routes); // the withdrawn routes
-    }
-
-    if mp_unreach_nlri.is_empty() {
-        buf.put_u16(0u16); // no path attributes
-    } else {
-        if mp_unreach_nlri.len() > u8::MAX.into() {
-            buf.put_u16(
-                4u16 + u16::try_from(mp_unreach_nlri.len()).map_err(|err| format!("{err}"))?,
-            ); // num path attribute bytes
-            buf.put_u8(0b1001_0000); // optional (1), non-transitive (0), complete (0), extended (1)
-            buf.put_u8(u8::from(PathAttributeType::MpUnreachNlri)); // attr. type
-            buf.put_u16(
-                mp_unreach_nlri
-                    .len()
-                    .try_into()
-                    .map_err(|err| format!("{err}"))?,
-            );
-        } else {
-            buf.put_u16(
-                3u16 + u16::try_from(mp_unreach_nlri.len()).map_err(|err| format!("{err}"))?,
-            ); // num path attribute bytes
-            buf.put_u8(0b1000_0000); // optional (1), non-transitive (0), complete (0), non-extended (0)
-            buf.put_u8(15); // MP_UNREACH_NLRI attribute type code per RFC 4760
-            buf.put_u8(
-                mp_unreach_nlri
-                    .len()
-                    .try_into()
-                    .map_err(|err| format!("{err}"))?,
-            );
-        }
-        buf.extend(&mp_unreach_nlri); // the withdrawn routes
-    }
-
-    // Finalize BGP message
-    finalize_bgp_msg_len(&mut buf)?;
-    Ok(buf.freeze())
-}
-
-// --------- END TEMPORARY CODE TO BE REPLACED BY ROUTECORE WHEN READY ------------------------------------------------

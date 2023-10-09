@@ -1,4 +1,4 @@
-filter rib-in-pre-filter {
+filter bgp-in-post-filter {
     define {
         rx msg: Route;
     }

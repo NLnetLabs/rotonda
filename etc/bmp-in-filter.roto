@@ -1,4 +1,4 @@
-filter my-module {
+filter bmp-in-filter {
     define {
         rx msg: BmpMessage;
 

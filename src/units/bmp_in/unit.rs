@@ -1,13 +1,9 @@
-use std::{
-    cell::RefCell,
-    sync::{Arc, Weak},
-};
+use std::sync::{Arc, Weak};
 
 use super::state_machine::processing::ProcessingResult;
 use crate::{
     common::{
-        frim::FrimMap,
-        roto::ThreadLocalVM,
+        frim::{Entry, FrimMap},
         status_reporter::{AnyStatusReporter, Chainable, UnitStatusReporter},
     },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate},
@@ -33,7 +29,7 @@ use non_empty_vec::NonEmpty;
 use roto::types::{builtin::BuiltinTypeValue, typevalue::TypeValue};
 use routecore::bmp::message::Message as BmpMsg;
 use serde::Deserialize;
-use tokio::{runtime::Handle, sync::Mutex};
+use tokio::sync::Mutex;
 
 #[cfg(feature = "router-list")]
 use {
@@ -109,11 +105,6 @@ struct BmpInRunner {
 }
 
 impl BmpInRunner {
-    thread_local!(
-        #[allow(clippy::type_complexity)]
-        static VM: ThreadLocalVM = RefCell::new(None);
-    );
-
     fn new(
         mut component: Component,
         gate: Gate,
@@ -450,12 +441,12 @@ impl BmpInRunner {
             Update::UpstreamStatusChange(UpstreamStatus::EndOfStream { ref source_id }) => {
                 // The connection to the router has been lost so drop the connection state machine we have for it, if
                 // any.
-                if let Some(entry) = self.router_states.get(&source_id) {
+                if let Some(entry) = self.router_states.get(source_id) {
                     let mut locked = entry.lock().await;
                     let this_state = locked.take().unwrap();
                     let res = this_state.terminate().await;
-                    let _ = self.process_result(res, &source_id).await;
-                    self.router_disconnected(&source_id);
+                    let _ = self.process_result(res, source_id).await;
+                    self.router_disconnected(source_id);
                 }
 
                 // Pass it on
@@ -470,20 +461,25 @@ impl BmpInRunner {
 
                 // Process the message through the BMP state machine.
                 // Initialize the state machine if not already done for this router.
-                let entry = entry.or_insert_with(|| {
-                    let new_entry = Arc::new(tokio::sync::Mutex::new(Some(
-                        self.router_connected(&source_id),
-                    )));
+                // Process the message through the BMP state machine.
+                // Initialize the state machine if not already done for this router.
+                let entry = match entry {
+                    Entry::Occupied(existing_entry) => existing_entry,
 
-                    let weak_ref = Arc::downgrade(&new_entry);
-                    tokio::task::block_in_place(|| {
-                        Handle::current().block_on(
-                            self.setup_router_specific_api_endpoint(weak_ref, &source_id),
-                        );
-                    });
+                    Entry::Vacant(map, key) => {
+                        // Entry doesn't yet exist, create and insert it.
+                        let new_entry =
+                            Arc::new(Mutex::new(Some(self.router_connected(&source_id))));
 
-                    new_entry
-                });
+                        let weak_ref = Arc::downgrade(&new_entry);
+                        self.setup_router_specific_api_endpoint(weak_ref, &source_id)
+                            .await;
+
+                        map.insert(key, new_entry.clone());
+
+                        new_entry
+                    }
+                };
 
                 let mut locked = entry.lock().await;
                 let this_state = locked.take().unwrap();
@@ -559,6 +555,6 @@ mod tests {
     // --- Test helpers ------------------------------------------------------
 
     fn mk_config_from_toml(toml: &str) -> Result<BmpIn, toml::de::Error> {
-        toml::de::from_slice::<BmpIn>(toml.as_bytes())
+        toml::from_str::<BmpIn>(toml)
     }
 }

@@ -190,7 +190,7 @@ impl RouterInfoApi {
             for pph in peer_states.get_peers() {
                 let peer_key = format!("{}", pph);
                 let num_prefixes = peer_states
-                    .get_announced_prefixes(&pph)
+                    .get_announced_prefixes(pph)
                     .map_or(0, |iter| iter.count());
                 let prefixes_link = if num_prefixes > 0 {
                     format!(
@@ -235,7 +235,7 @@ impl RouterInfoApi {
                     #[rustfmt::skip]
                     Focus::Prefixes(focus_key) => {
                         if peer_key.as_str() == focus_key {
-                            if let Some(prefixes) = peer_states.get_announced_prefixes(&pph) {
+                            if let Some(prefixes) = peer_states.get_announced_prefixes(pph) {
                                 writeln!(peer_report, "<tr><td colspan=6><pre>").unwrap();
                                 writeln!(peer_report, "    Announced prefixes: [<a href=\"{}\">close</a>]", base_http_path).unwrap();
                                 for prefix in prefixes {

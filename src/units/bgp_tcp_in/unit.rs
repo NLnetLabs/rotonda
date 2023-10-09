@@ -156,6 +156,7 @@ impl BgpTcpInRunner {
                 .await
                 .unwrap_or_else(|err| {
                     status_reporter.listener_io_error(&err);
+                    // TODO: don't panic, instead retry with backoff.
                     panic!(
                         "Listening for connections on {} failed: {}",
                         self.bgp.listen, err

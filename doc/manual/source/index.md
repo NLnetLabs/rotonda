@@ -2,7 +2,7 @@
 
 <img align="right" src="images/rotonda-illustrative-icon.png" height="150">
 
-Roll your own BGP service application with Rotonda. 
+Roll your own BGP service with Rotonda. 
 
 BGP services that you can build with Rotonda include, but are not
 limited to, a route monitor|collector|server|reflector, all this without

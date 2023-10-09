@@ -123,7 +123,6 @@ NEXT RELEASES
 - 💤 keep history window (serials)
 - 💤 snapshot/restore functionality
 - 💤 `systemd` integration
-- 💤 split `rotonda-runtime` into units
 - 💤 create experimental distributed units
 
 

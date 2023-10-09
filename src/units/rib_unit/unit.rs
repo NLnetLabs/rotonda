@@ -802,15 +802,18 @@ impl RibUnitRunner {
             if let Ok(filtered_payloads) = Self::VM.with(|vm| {
                 payload.filter(|value| self.roto_scripts.exec(vm, &self.filter_name.load(), value))
             }) {
-                for filtered_payload in filtered_payloads {
-                    // Add this processed query result route into the new query result
-                    let hash = self
-                        .rib
-                        .load()
-                        .precompute_hash_code(&filtered_payload.value);
-                    let hashed_value = PreHashedTypeValue::new(filtered_payload.value, hash);
-                    new_values.insert(hashed_value.into());
-                }
+                new_values.extend(
+                    filtered_payloads
+                        .into_iter()
+                        .filter(|payload| {
+                            !matches!(payload.value, TypeValue::OutputStreamMessage(_))
+                        })
+                        .map(|payload| {
+                            // Add this processed query result route into the new query result
+                            let hash = self.rib.load().precompute_hash_code(&payload.value);
+                            PreHashedTypeValue::new(payload.value, hash).into()
+                        }),
+                );
             }
         }
 

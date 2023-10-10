@@ -212,7 +212,6 @@ impl MqttRunner {
         create_opts.set_clean_session(false);
         create_opts.set_inflight(1000);
         create_opts.set_keep_alive(Duration::from_secs(20));
-        create_opts.set_connection_timeout(arc_self.config.connect_retry_secs.as_secs());
 
         // Create a client & connect
         arc_self.status_reporter.connecting(&format!(

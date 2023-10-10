@@ -13,7 +13,7 @@ edition = "2021"
 rust-version = "1.65"
 
 [dependencies]
-arc-swap           = "^1.5"
+arc-swap           = "^1.6"
 chrono             = "^0.4"
 clap               = { version = "^4.4", features = ["cargo"] }
 crossbeam-utils    = "^0.8"
@@ -25,15 +25,15 @@ log-reroute        = "^0.1"
 pin-project-lite   = "^0.2"
 rand               = "^0.8"
 reqwest            = { version = "^0.11", default-features = false }
-routecore          = { version = "0.4.0-dev", features = ["bgp", "bmp", "serde"], git = "https://github.com/NLnetLabs/routecore.git", branch = "compose-messages-nlri-v2" }
-rotonda-fsm        = { version = "0.1.0-dev", git = "https://github.com/NLnetLabs/rotonda-fsm.git" }
+routecore          = { version = "^0.4.0-dev", features = ["bgp", "bmp", "serde"], git = "https://github.com/NLnetLabs/routecore.git", branch = "compose-messages-nlri-v2" }
+rotonda-fsm        = { version = "^0.1.0-dev", git = "https://github.com/NLnetLabs/rotonda-fsm.git" }
 sanitise-file-name = "^1.0"
 serde              = { version = "^1.0", features = ["derive", "rc"] }
 serde_json         = { version = "^1.0", features = ["preserve_order"] }
 slab               = "^0.4"
-tokio              = { version = "^1.23", features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "test-util", "time", "tracing"] }
+tokio              = { version = "^1.33", features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "test-util", "time", "tracing"] }
 toml               = "^0.8"
-url                = { version = "^2.2", features = ["serde"] }
+url                = { version = "^2.4", features = ["serde"] }
 
 # Dependencies specifically used by the BGP/BMP related modifications to the original RTRTR base
 allocator-api2     = "^0.2"
@@ -42,35 +42,33 @@ async-trait        = "^0.1"
 atomic_enum        = "^0.2.0"
 flate2             = { version = "^1.0", optional = true }
 anyhow             = "^1.0"
-bytes              = { version = "1.1.0" }
+bytes              = { version = "1.5.0" }
 const_format       = "^0.2"
 hex-slice          = "^0.1"
 hash_hasher        = "^2.0"
 hashbrown          = "^0.14"
 html-escape        = { version = "^0.2", optional = true }
-indoc              = "^1.0"
+indoc              = "^2.0"
 layout-rs          = { version = "^0.1", optional = true }
-mqtt               = { version = "0.18.0", package = "rumqttc", default-features = false }
+mqtt               = { version = "^0.23.0", package = "rumqttc", default-features = false }
 non-empty-vec      = { version = "^0.2", features = ["serde"]}
-percent-encoding   = "^2.2"
-roto               = { version = "0.1.0", git = "https://github.com/NLnetLabs/roto.git", branch = "main" }
-rotonda-store      = { version = "0.3.0-pre.3", git = "https://github.com/NLnetLabs/rotonda-store.git", branch = "compose-messages-nlri-v2" }
-# roto               = { version = "0.1.0", path = "../roto" }
-# rotonda-store      = { version = "0.3.0-pre.3", path = "../rotonda-store" }
+percent-encoding   = "^2.3"
+roto               = { version = "^0.1.0", git = "https://github.com/NLnetLabs/roto.git", branch = "main" }
+rotonda-store      = { version = "^0.3.0-pre.3", git = "https://github.com/NLnetLabs/rotonda-store.git", branch = "compose-messages-nlri-v2" }
 serde_with         = "^3"
-smallvec           = { version = "^1.10", features = ["const_generics", "const_new", "union"] }
-tokio-metrics      = "^0.2"
-uuid               = { version = "^1.1", features = ["v4", "fast-rng"] }
+smallvec           = { version = "^1.11", features = ["const_generics", "const_new", "union"] }
+tokio-metrics      = { version = "^0.3", default-features = false }
+uuid               = { version = "^1.4", features = ["v4", "fast-rng"] }
 
 [target.'cfg(unix)'.dependencies]
-syslog             = "^6.0"
+syslog             = "^6.1"
 
 [dev-dependencies]
 hex                = "^0.4"
 env_logger         = "^0.10"
 prometheus-parse   = "^0.2"
 reqwest            = { version = "^0.11", default-features = false, features = ["json"] }
-rumqttd            = { version = "^0.17.0", default-features = false }
+rumqttd            = { version = "^0.18.0", default-features = false }
 serde_json         = "^1.0"
 
 [profile.release]

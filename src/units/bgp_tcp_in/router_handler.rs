@@ -3,7 +3,6 @@ use std::collections::BTreeSet;
 use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
 
-use arc_swap::ArcSwap;
 use bytes::Bytes;
 use log::{debug, error};
 use roto::types::builtin::{
@@ -30,7 +29,7 @@ use rotonda_fsm::bgp::session::{
     Session as BgpSession,
 };
 
-use crate::common::roto::{FilterName, FilterOutput, RotoScripts, ThreadLocalVM};
+use crate::common::roto::{FilterOutput, RotoScripts, ThreadLocalVM};
 use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
 use crate::comms::{Gate, GateStatus, Terminated};
 use crate::payload::{Payload, SourceId, Update};
@@ -47,7 +46,6 @@ struct Processor {
     bgp_ltime: u64, // XXX or should this be on Unit level?
     tx: mpsc::Sender<Command>,
     status_reporter: Arc<BgpTcpInStatusReporter>,
-    filter_name: Arc<ArcSwap<FilterName>>,
     observed_prefixes: BTreeSet<Prefix>,
 }
 
@@ -63,7 +61,6 @@ impl Processor {
         //rx: mpsc::Receiver<Message>,
         tx: mpsc::Sender<Command>,
         status_reporter: Arc<BgpTcpInStatusReporter>,
-        filter_name: Arc<ArcSwap<FilterName>>,
     ) -> Self {
         Processor {
             roto_scripts,
@@ -72,7 +69,6 @@ impl Processor {
             bgp_ltime: 0,
             tx,
             status_reporter,
-            filter_name,
             observed_prefixes: BTreeSet::new(),
         }
     }
@@ -200,7 +196,7 @@ impl Processor {
                                     let msg = BgpUpdateMessage::new(delta_id, roto_update_msg);
                                     let msg = Arc::new(msg);
                                     let value: TypeValue = TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(msg));
-                                    self.roto_scripts.exec(vm, &self.filter_name.load(), value)
+                                    self.roto_scripts.exec(vm, &self.unit_cfg.filter_name, value)
                                 }) {
                                     if !south.is_empty() {
                                         let source_id = SourceId::from("TODO");
@@ -422,7 +418,6 @@ impl Processor {
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_connection(
     roto_scripts: RotoScripts,
-    filter_name: Arc<ArcSwap<FilterName>>,
     gate: Gate,
     unit_config: BgpTcpIn,
     tcp_stream: TcpStream,
@@ -470,6 +465,6 @@ pub async fn handle_connection(
     session.manual_start().await;
     session.connection_established().await;
 
-    let mut p = Processor::new(roto_scripts, gate, unit_config, cmds_tx, status_reporter, filter_name);
+    let mut p = Processor::new(roto_scripts, gate, unit_config, cmds_tx, status_reporter);
     p.process(session, sess_rx, live_sessions).await;
 }

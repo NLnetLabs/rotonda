@@ -285,7 +285,7 @@ impl RibUnitRunner {
         let query_limits = Arc::new(ArcSwap::from_pointee(query_limits));
         let http_processor = PrefixesApi::new(
             rib.clone(),
-            http_api_path,
+            http_api_path.clone(),
             query_limits.clone(),
             rib_type,
             vrib_upstream,
@@ -293,9 +293,9 @@ impl RibUnitRunner {
         );
         let http_processor = Arc::new(http_processor);
         if is_sub_resource {
-            component.register_sub_http_resource(http_processor.clone());
+            component.register_sub_http_resource(http_processor.clone(), &http_api_path);
         } else {
-            component.register_http_resource(http_processor.clone());
+            component.register_http_resource(http_processor.clone(), &http_api_path);
         }
 
         let roto_scripts = component.roto_scripts().clone();

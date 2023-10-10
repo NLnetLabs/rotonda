@@ -1,13 +1,9 @@
-use std::{
-    cell::RefCell,
-    sync::{Arc, Weak},
-};
+use std::sync::{Arc, Weak};
 
 use super::state_machine::processing::ProcessingResult;
 use crate::{
     common::{
-        frim::FrimMap,
-        roto::ThreadLocalVM,
+        frim::{Entry, FrimMap},
         status_reporter::{AnyStatusReporter, Chainable, UnitStatusReporter},
     },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate},
@@ -33,7 +29,7 @@ use non_empty_vec::NonEmpty;
 use roto::types::{builtin::BuiltinTypeValue, typevalue::TypeValue};
 use routecore::bmp::message::Message as BmpMsg;
 use serde::Deserialize;
-use tokio::{runtime::Handle, sync::Mutex};
+use tokio::sync::Mutex;
 
 #[cfg(feature = "router-list")]
 use {
@@ -109,10 +105,6 @@ struct BmpInRunner {
 }
 
 impl BmpInRunner {
-    thread_local!(
-        static VM: ThreadLocalVM = RefCell::new(None);
-    );
-
     fn new(
         mut component: Component,
         gate: Gate,
@@ -155,7 +147,7 @@ impl BmpInRunner {
                 router_states.clone(),
             ));
 
-            component.register_http_resource(processor.clone());
+            component.register_http_resource(processor.clone(), &http_api_path);
 
             (processor, router_info)
         };
@@ -272,7 +264,7 @@ impl BmpInRunner {
 
     fn router_disconnected(&self, source_id: &SourceId) {
         self.router_states.remove(source_id);
-        // TODO: also remove from self.router_info ?
+        self.router_info.remove(source_id);
     }
 
     async fn process_msg(
@@ -382,6 +374,7 @@ impl BmpInRunner {
                 // Setup a REST API endpoint for querying information
                 // about this particular monitored router.
                 let processor = RouterInfoApi::new(
+                    self.component.read().await.http_resources().clone(),
                     self.http_api_path.clone(),
                     source_id.clone(),
                     self.status_reporter.metrics(),
@@ -396,7 +389,7 @@ impl BmpInRunner {
                 self.component
                     .write()
                     .await
-                    .register_http_resource(processor.clone());
+                    .register_sub_http_resource(processor.clone(), &self.http_api_path);
 
                 let updatable_router_info = Arc::make_mut(&mut this_router_info);
                 updatable_router_info.api_processor = Some(processor);
@@ -468,20 +461,25 @@ impl BmpInRunner {
 
                 // Process the message through the BMP state machine.
                 // Initialize the state machine if not already done for this router.
-                let entry = entry.or_insert_with(|| {
-                    let new_entry = Arc::new(tokio::sync::Mutex::new(Some(
-                        self.router_connected(&source_id),
-                    )));
+                // Process the message through the BMP state machine.
+                // Initialize the state machine if not already done for this router.
+                let entry = match entry {
+                    Entry::Occupied(existing_entry) => existing_entry,
 
-                    let weak_ref = Arc::downgrade(&new_entry);
-                    tokio::task::block_in_place(|| {
-                        Handle::current().block_on(
-                            self.setup_router_specific_api_endpoint(weak_ref, &source_id),
-                        );
-                    });
+                    Entry::Vacant(map, key) => {
+                        // Entry doesn't yet exist, create and insert it.
+                        let new_entry =
+                            Arc::new(Mutex::new(Some(self.router_connected(&source_id))));
 
-                    new_entry
-                });
+                        let weak_ref = Arc::downgrade(&new_entry);
+                        self.setup_router_specific_api_endpoint(weak_ref, &source_id)
+                            .await;
+
+                        map.insert(key, new_entry.clone());
+
+                        new_entry
+                    }
+                };
 
                 let mut locked = entry.lock().await;
                 let this_state = locked.take().unwrap();

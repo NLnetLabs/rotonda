@@ -63,4 +63,13 @@ impl Target {
             Target::Null(target) => target.run(component, cmd, waitpoint).await,
         }
     }
+
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Target::BmpFsOut(_) => "bmp-fs-out",
+            Target::BmpTcpOut(_) => "bmp-tcp-out",
+            Target::Mqtt(_) => "mqtt-out",
+            Target::Null(_) => "null-out",
+        }
+    }
 }

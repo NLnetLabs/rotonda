@@ -19,6 +19,7 @@ use log::{error, info, trace};
 use percent_encoding::percent_decode;
 use serde::Deserialize;
 use serde_with::{serde_as, OneOrMany};
+use smallvec::{smallvec, SmallVec};
 use std::borrow::Cow;
 use std::convert::Infallible;
 use std::fmt::Display;
@@ -311,17 +312,28 @@ impl Resources {
     ///
     /// The processor is given as a weak pointer so that it gets dropped
     /// when the owning component terminates.
-    pub fn register(&self, process: Weak<dyn ProcessRequest>, is_sub_resource: bool) {
+    pub fn register(
+        &self,
+        process: Weak<dyn ProcessRequest>,
+        component_type: &'static str,
+        rel_base_url: &str,
+        is_sub_resource: bool,
+    ) {
         let lock = self.register.lock().unwrap();
         let old_sources = self.sources.load();
         let mut new_sources = Vec::new();
         for item in old_sources.iter() {
-            if item.process.strong_count() > 0 {
+            if item.processor.strong_count() > 0 {
                 new_sources.push(item.clone())
             }
         }
 
-        let new_source = RegisteredResource { process };
+        let new_source = RegisteredResource {
+            processor: process,
+            component_type,
+            rel_base_url: Arc::new(rel_base_url.to_string()),
+            is_sub_resource,
+        };
         if is_sub_resource {
             new_sources.insert(0, new_source);
         } else {
@@ -339,13 +351,35 @@ impl Resources {
     pub async fn process_request(&self, request: &Request<Body>) -> Option<Response<Body>> {
         let sources = self.sources.load();
         for item in sources.iter() {
-            if let Some(process) = item.process.upgrade() {
+            if let Some(process) = item.processor.upgrade() {
                 if let Some(response) = process.process_request(request).await {
                     return Some(response);
                 }
             }
         }
         None
+    }
+
+    pub fn rel_base_urls<'a>(&'a self) -> SmallVec<[Arc<String>; 8]> {
+        self.sources
+            .load()
+            .iter()
+            .filter(|item| !item.is_sub_resource)
+            .map(|item| item.rel_base_url.clone())
+            .collect()
+    }
+
+    pub fn rel_base_urls_for_component_type(
+        &self,
+        component_type: &'static str,
+    ) -> SmallVec<[Arc<String>; 8]> {
+        let mut rel_base_urls = smallvec![];
+        for item in self.sources.load().iter() {
+            if !item.is_sub_resource && item.component_type == component_type {
+                rel_base_urls.push(item.rel_base_url.clone());
+            }
+        }
+        rel_base_urls
     }
 }
 
@@ -362,7 +396,16 @@ impl fmt::Debug for Resources {
 #[derive(Clone)]
 struct RegisteredResource {
     /// A weak pointer to the resource’s processor.
-    process: Weak<dyn ProcessRequest>,
+    processor: Weak<dyn ProcessRequest>,
+
+    /// The type of unit that registered the processor.
+    component_type: &'static str,
+
+    /// The base URL or main entrypoint of the API offered by the processor.
+    rel_base_url: Arc<String>,
+
+    /// Does this processor handle URL space below another processor?
+    is_sub_resource: bool,
 }
 
 //------------ ProcessRequest ------------------------------------------------

@@ -185,6 +185,9 @@ impl Display for RotoError {
             RotoError::PostExecError { filter_name, err } => {
                 f.write_fmt(format_args!("Post-execution error with Roto filter {filter_name}: {err}"))
             }
+            RotoError::PostExecError { filter_name, err } => {
+                f.write_fmt(format_args!("Post-execution error with Roto filter {filter_name}: {err}"))
+            }
         }
     }
 }

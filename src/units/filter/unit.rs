@@ -49,7 +49,6 @@ struct RotoFilterRunner {
 
 impl RotoFilterRunner {
     thread_local!(
-        #[allow(clippy::type_complexity)]
         static VM: ThreadLocalVM = RefCell::new(None);
     );
 

@@ -1,4 +1,4 @@
-use roto::types::typevalue::TypeValue;
+use roto::{types::typevalue::TypeValue, vm::OutputStreamQueue};
 use rotonda_store::QueryResult;
 
 use smallvec::{smallvec, SmallVec};
@@ -212,6 +212,15 @@ impl Payload {
         }
 
         out_payloads
+    }
+
+    pub fn from_output_stream_queue(
+        source_id: SourceId,
+        osq: OutputStreamQueue,
+    ) -> SmallVec<[Payload; 8]> {
+        osq.into_iter()
+            .map(|osm| Payload::new(source_id.clone(), osm))
+            .collect()
     }
 }
 

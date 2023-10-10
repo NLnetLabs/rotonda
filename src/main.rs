@@ -394,6 +394,9 @@ mod tests {
             let res = query_prefix(test_prefix).await;
             assert_eq!(res.get("data").unwrap().as_array().unwrap().len(), 1);
 
+            let res = query_vrib_prefix(test_prefix).await;
+            assert_eq!(res.get("data").unwrap().as_array().unwrap().len(), 1);
+
             // verify that there is no MQTT connection yet
             assert_metric_ne(
                 manager.metrics(),
@@ -494,6 +497,9 @@ mod tests {
             // query the route to make sure it was stored
             eprintln!("Querying prefix store...");
             let res = query_prefix(test_prefix2).await;
+            assert_eq!(res.get("data").unwrap().as_array().unwrap().len(), 1);
+
+            let res = query_vrib_prefix(test_prefix2).await;
             assert_eq!(res.get("data").unwrap().as_array().unwrap().len(), 1);
 
             // wait for the manager to update the link report so that it will be included in the trace log output
@@ -617,6 +623,18 @@ mod tests {
     async fn query_prefix(test_prefix: Prefix) -> serde_json::Value {
         reqwest::get(&format!(
             "http://localhost:8080/prefixes/{}?details=communities",
+            test_prefix
+        ))
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
+    }
+
+    async fn query_vrib_prefix(test_prefix: Prefix) -> serde_json::Value {
+        reqwest::get(&format!(
+            "http://localhost:8080/prefixes/0/{}?details=communities",
             test_prefix
         ))
         .await

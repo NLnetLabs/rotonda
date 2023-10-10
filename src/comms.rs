@@ -1126,6 +1126,14 @@ pub struct Link {
     direct_update_target: Option<Weak<dyn AnyDirectUpdate>>,
 }
 
+impl PartialEq for Link {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+    }
+}
+
+impl Eq for Link {}
+
 impl std::fmt::Debug for Link {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Link")

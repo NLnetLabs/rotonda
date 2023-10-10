@@ -512,7 +512,7 @@ impl ConfigFile {
                     if Option::is_none(&rib_type)
                         || rib_type == Some(&Value::String("Physical".to_string()))
                     {
-                        if let Some(Value::Array(filter_names)) = unit_table.get("filter_names") {
+                        if let Some(Value::Array(filter_names)) = unit_table.remove("filter_names") {
                             if filter_names.len() > 1 {
                                 // This is a shorthand definition of a physical RIB with one or more virtual RIBs.
                                 // Split them out, e.g.:

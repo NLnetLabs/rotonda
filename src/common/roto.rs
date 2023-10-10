@@ -3,7 +3,7 @@ use std::{
     time::Instant,
 };
 
-use log::debug;
+use log::{debug, trace, info};
 use roto::{
     ast::{AcceptReject, ShortString},
     compile::{CompileError, Compiler, MirBlock, RotoPack, RotoPackArc},
@@ -317,8 +317,13 @@ impl RotoScripts {
     ) -> Result<(), RotoError> {
         if let Some(script) = self.scripts_by_origin.get(&origin) {
             if script.source_code == roto_script {
+                trace!("Roto script {origin} is already loaded");
                 return Ok(());
+            } else {
+                info!("Re-loading modified Roto script {origin}");
             }
+        } else {
+            info!("Loading new Roto script {origin}");
         }
 
         // Try and compile it to verify if there are any problems with it.
@@ -396,7 +401,18 @@ impl RotoScripts {
         }
 
         if log::log_enabled!(log::Level::Trace) {
-            dbg!(&self);
+            trace!("Dumping loaded roto scripts:");
+            trace!("  By origin:");
+            for (i, (origin, script)) in self.scripts_by_origin.guard().iter().enumerate() {
+                for (j, pack) in script.packs.iter().enumerate() {
+                    trace!("    [origin {i}, pack {j}]: {origin} -> {}", pack.get_filter_map_name());
+                }
+            }
+
+            trace!("  By filter name:");
+            for (i, (filter_name, script)) in self.scripts_by_filter.guard().iter().enumerate() {
+                trace!("    [filter name {i}]: {filter_name} -> {}", script.parent_script.origin);
+            }
         }
 
         Ok(())

@@ -14,6 +14,7 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 
+use crate::common::roto::{FilterName, RotoScripts};
 use crate::common::status_reporter::{Chainable, UnitStatusReporter};
 use crate::common::unit::UnitActivity;
 use crate::comms::{GateStatus, Terminated};
@@ -67,11 +68,17 @@ impl TcpListener for StandardTcpListener {
 #[derive(Clone, Debug, Deserialize)]
 pub struct BgpTcpIn {
     /// Address:port to listen on incoming BGP connections over TCP.
-    listen: String,
+    pub listen: String,
+
     pub my_asn: Asn, // TODO make getters, or impl Into<-fsm::bgp::Config>
+
     pub my_bgp_id: [u8; 4],
+
     #[serde(rename = "peers", default)]
     pub peer_configs: PeerConfigs,
+
+    #[serde(default)]
+    pub filter_name: FilterName,
 }
 
 impl PartialEq for BgpTcpIn {
@@ -98,6 +105,8 @@ impl BgpTcpIn {
         // Setup status reporting
         let status_reporter = Arc::new(BgpTcpInStatusReporter::new(&unit_name, metrics.clone()));
 
+        let roto_scripts = component.roto_scripts().clone();
+
         // Wait for other components to be, and signal to other components
         // that we are, ready to start. All units and targets start together,
         // otherwise data passed from one component to another may be lost if
@@ -110,7 +119,7 @@ impl BgpTcpIn {
         // them.
         waitpoint.running().await;
 
-        BgpTcpInRunner::new(self, gate, metrics, status_reporter)
+        BgpTcpInRunner::new(self, gate, metrics, status_reporter, roto_scripts)
             .run(Arc::new(StandardTcpListenerFactory))
             .await
     }
@@ -128,6 +137,8 @@ struct BgpTcpInRunner {
 
     status_reporter: Arc<BgpTcpInStatusReporter>,
 
+    roto_scripts: RotoScripts,
+
     // To send commands to a Session based on peer IP + ASN.
     live_sessions: Arc<Mutex<LiveSessions>>,
 }
@@ -138,12 +149,14 @@ impl BgpTcpInRunner {
         gate: Gate,
         metrics: Arc<BgpTcpInMetrics>,
         status_reporter: Arc<BgpTcpInStatusReporter>,
+        roto_scripts: RotoScripts,
     ) -> Self {
         BgpTcpInRunner {
             bgp,
             gate,
             metrics,
             status_reporter,
+            roto_scripts,
             live_sessions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -206,6 +219,7 @@ impl BgpTcpInRunner {
                             crate::tokio::spawn(
                                 &child_name,
                                 handle_connection(
+                                    self.roto_scripts.clone(),
                                     self.gate.clone(),
                                     self.bgp.clone(),
                                     tcp_stream,

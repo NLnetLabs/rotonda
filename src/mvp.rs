@@ -14,16 +14,14 @@ use crate::log::Terminate;
 
 use crate::targets::DEF_MQTT_PORT;
 
-//------------ Constant ------------------------------------------------------
+//------------ Constants -----------------------------------------------------
 
 // NOTE: Unit and target names MUST match the names used in `rotonda.conf`!
 
 pub const CFG_UNIT_BGP_IN: &str = "bgp-in";
-pub const CFG_UNIT_BGP_IN_POST_FILTER: &str = "bgp-in-post-filter";
 pub const CFG_UNIT_BMP_TCP_IN: &str = "bmp-tcp-in";
-pub const CFG_UNIT_BMP_ASN_FILTER: &str = "bmp-in-filter";
+pub const CFG_UNIT_BMP_IN_FILTER: &str = "bmp-in-filter";
 pub const CFG_UNIT_BMP_IN: &str = "bmp-in";
-pub const CFG_UNIT_BMP_IN_POST_FILTER: &str = "bmp-in-post-filter";
 pub const CFG_UNIT_RIB_IN_PRE: &str = "rib-in-pre";
 pub const CFG_UNIT_RIB_IN_POST: &str = "rib-in-post";
 
@@ -196,8 +194,7 @@ mod tests {
         manager::Manager,
         mvp::{
             CFG_TARGET_BMP_PROXY, CFG_TARGET_MQTT, CFG_TARGET_NULL, CFG_UNIT_BGP_IN,
-            CFG_UNIT_BGP_IN_POST_FILTER, CFG_UNIT_BMP_ASN_FILTER, CFG_UNIT_BMP_IN,
-            CFG_UNIT_BMP_IN_POST_FILTER, CFG_UNIT_BMP_TCP_IN, CFG_UNIT_RIB_IN_POST,
+            CFG_UNIT_BMP_IN, CFG_UNIT_BMP_IN_FILTER, CFG_UNIT_BMP_TCP_IN, CFG_UNIT_RIB_IN_POST,
             CFG_UNIT_RIB_IN_PRE,
         },
         tests::util::internal::enable_logging,
@@ -214,10 +211,14 @@ mod tests {
         let mut manager = Manager::default();
 
         // when the expected roto scripts exist in the mock filesystem
-        let readable_paths: [(PathBuf, String); 6] = [
+        let readable_paths: [(PathBuf, String); 5] = [
             (
                 "etc/filter.roto".into(),
                 include_str!("../etc/filter.roto").into(),
+            ),
+            (
+                "etc/bgp-in-filter.roto".into(),
+                include_str!("../etc/bgp-in-filter.roto").into(),
             ),
             (
                 "etc/bmp-in-filter.roto".into(),
@@ -230,14 +231,6 @@ mod tests {
             (
                 "etc/rib-in-post.roto".into(),
                 include_str!("../etc/rib-in-post.roto").into(),
-            ),
-            (
-                "etc/rib-in-pre.roto".into(),
-                include_str!("../etc/bgp-in-post-filter.roto").into(),
-            ),
-            (
-                "etc/rib-in-post.roto".into(),
-                include_str!("../etc/bmp-in-post-filter.roto").into(),
             ),
         ];
         let mock_io = TheFileIo::new(readable_paths);
@@ -261,13 +254,11 @@ mod tests {
         assert_eq!(conf.http.listen(), &["127.0.0.1:8080".parse().unwrap()]);
 
         let units = conf.units.units();
-        assert_eq!(units.len(), 8);
+        assert_eq!(units.len(), 6);
         assert!(units.contains_key(CFG_UNIT_BGP_IN));
-        assert!(units.contains_key(CFG_UNIT_BGP_IN_POST_FILTER));
         assert!(units.contains_key(CFG_UNIT_BMP_TCP_IN));
-        assert!(units.contains_key(CFG_UNIT_BMP_ASN_FILTER));
+        assert!(units.contains_key(CFG_UNIT_BMP_IN_FILTER));
         assert!(units.contains_key(CFG_UNIT_BMP_IN));
-        assert!(units.contains_key(CFG_UNIT_BMP_IN_POST_FILTER));
         assert!(units.contains_key(CFG_UNIT_RIB_IN_PRE));
         assert!(units.contains_key(CFG_UNIT_RIB_IN_POST));
 
@@ -304,13 +295,11 @@ mod tests {
         assert_eq!(conf.http.listen(), &["127.0.0.1:8080".parse().unwrap()]);
 
         let units = conf.units.units();
-        assert_eq!(units.len(), 8);
+        assert_eq!(units.len(), 6);
         assert!(units.contains_key(CFG_UNIT_BGP_IN));
-        assert!(units.contains_key(CFG_UNIT_BGP_IN_POST_FILTER));
         assert!(units.contains_key(CFG_UNIT_BMP_TCP_IN));
-        assert!(units.contains_key(CFG_UNIT_BMP_ASN_FILTER));
+        assert!(units.contains_key(CFG_UNIT_BMP_IN_FILTER));
         assert!(units.contains_key(CFG_UNIT_BMP_IN));
-        assert!(units.contains_key(CFG_UNIT_BMP_IN_POST_FILTER));
         assert!(units.contains_key(CFG_UNIT_RIB_IN_PRE));
         assert!(units.contains_key(CFG_UNIT_RIB_IN_POST));
 

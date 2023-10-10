@@ -1,4 +1,6 @@
+use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
@@ -27,6 +29,7 @@ use rotonda_fsm::bgp::session::{
     Session as BgpSession,
 };
 
+use crate::common::roto::{FilterOutput, RotoScripts, ThreadLocalVM};
 use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
 use crate::comms::{Gate, GateStatus, Terminated};
 use crate::payload::{Payload, SourceId, Update};
@@ -37,17 +40,22 @@ use super::peer_config::{CombinedConfig, ConfigExt};
 use super::unit::BgpTcpIn;
 
 struct Processor {
+    roto_scripts: RotoScripts,
     gate: Gate,
     unit_cfg: BgpTcpIn,
     bgp_ltime: u64, // XXX or should this be on Unit level?
     tx: mpsc::Sender<Command>,
     status_reporter: Arc<BgpTcpInStatusReporter>,
-
     observed_prefixes: BTreeSet<Prefix>,
 }
 
 impl Processor {
+    thread_local!(
+        static VM: ThreadLocalVM = RefCell::new(None);
+    );
+
     fn new(
+        roto_scripts: RotoScripts,
         gate: Gate,
         unit_cfg: BgpTcpIn,
         //rx: mpsc::Receiver<Message>,
@@ -55,6 +63,7 @@ impl Processor {
         status_reporter: Arc<BgpTcpInStatusReporter>,
     ) -> Self {
         Processor {
+            roto_scripts,
             gate,
             unit_cfg,
             bgp_ltime: 0,
@@ -181,11 +190,31 @@ impl Processor {
                             // established session, so not having a
                             // NegotiatedConfig should never happen.
                             if let Some(_negotiated) = session.negotiated() {
-                                self.process_update(
-                                    pdu,
-                                    //negotiated.remote_addr(),
-                                    //negotiated.remote_asn()
-                                ).await;
+                                if let Ok(ControlFlow::Continue(FilterOutput { south, east })) = Self::VM.with(|vm| {
+                                    let delta_id = (RotondaId(0), 0); // TODO
+                                    let roto_update_msg = roto::types::builtin::UpdateMessage(pdu);
+                                    let msg = BgpUpdateMessage::new(delta_id, roto_update_msg);
+                                    let msg = Arc::new(msg);
+                                    let value: TypeValue = TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(msg));
+                                    self.roto_scripts.exec(vm, &self.unit_cfg.filter_name, value)
+                                }) {
+                                    if !south.is_empty() {
+                                        let source_id = SourceId::from("TODO");
+                                        let update = Payload::from_output_stream_queue(source_id, south).into();
+                                        self.gate.update_data(update).await;
+                                    }
+                                    if let TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(pdu)) = east {
+                                        if let Some(pdu) = Arc::into_inner(pdu) {
+                                            let pdu = pdu.raw_message().0.clone(); // Bytes is cheap to clone
+                                            let update = self.process_update(
+                                                pdu,
+                                                //negotiated.remote_addr(),
+                                                //negotiated.remote_asn()
+                                            ).await;
+                                            self.gate.update_data(update).await;
+                                        }
+                                    }
+                                }
                             } else {
                                 error!("unexpected state: no NegotiatedConfig for session");
                             }
@@ -296,8 +325,22 @@ impl Processor {
         pdu: UpdatePdu<Bytes>,
         //peer_ip: IpAddr,
         //peer_asn: Asn
-    ) {
-        //Self::print_pcap(pdu.as_ref());
+    ) -> Update {
+        fn mk_payload(
+            prefix: Prefix,
+            msg: &Arc<BgpUpdateMessage>,
+            source_id: &SourceId,
+            route_status: RouteStatus,
+        ) -> Payload {
+            let rrwd = RawRouteWithDeltas::new_with_message_ref(
+                msg.message_id(),
+                RotoPrefix::new(prefix),
+                msg,
+                route_status,
+            );
+            let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
+            Payload::new(source_id.clone(), typval)
+        }
 
         // When sending both v4 and v6 nlri using exabgp, exa sends a v4
         // NextHop in a v6 MP_REACH_NLRI, which is invalid.
@@ -326,6 +369,7 @@ impl Processor {
         // rib. Perhaps this can serve when further developing the part
         // where such an invalid PDU results in a specific NOTIFICATION that
         // needs to go out. Also, check whether 7606 comes into play here.
+        let mut payloads = SmallVec::new();
 
         let source_id: SourceId = "unknown".into(); // TODO
         let rot_id = RotondaId(0_usize);
@@ -334,62 +378,46 @@ impl Processor {
             (rot_id, ltime),
             UpdateMessage(pdu.clone()),
         ));
-        for chunk in pdu.nlris().iter().collect::<Vec<_>>().chunks(8) {
-            let mut bulk = SmallVec::new();
-            for nlri in chunk {
-                let prefix = if let Nlri::Unicast(b) = nlri {
-                    b.prefix()
-                } else {
-                    debug!("non unicast NLRI, skipping");
-                    continue;
-                };
 
-                self.observed_prefixes.insert(prefix);
+        payloads.extend(
+            pdu.nlris()
+                .iter()
+                .filter_map(|nlri| match nlri {
+                    Nlri::Unicast(v) => Some(v.prefix()),
+                    _ => {
+                        debug!("non-unicast NLRI, skipping");
+                        None
+                    }
+                })
+                .inspect(|prefix| {
+                    self.observed_prefixes.insert(*prefix);
+                })
+                .map(|prefix| mk_payload(prefix, &msg, &source_id, RouteStatus::InConvergence)),
+        );
 
-                let rrwd = RawRouteWithDeltas::new_with_message_ref(
-                    (rot_id, ltime),
-                    RotoPrefix::new(prefix),
-                    &msg,
-                    RouteStatus::InConvergence,
-                );
-                let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
-                let payload = Payload::new(source_id.clone(), typval);
-                //self.gate.update_data(Update::Single(payload)).await;
-                bulk.push(payload);
-            }
-            self.gate.update_data(Update::Bulk(bulk)).await;
-        }
+        payloads.extend(
+            pdu.nlris()
+                .iter()
+                .filter_map(|nlri| match nlri {
+                    Nlri::Unicast(v) => Some(v.prefix()),
+                    _ => {
+                        debug!("non-unicast withdrawal, skipping");
+                        None
+                    }
+                })
+                .inspect(|prefix| {
+                    self.observed_prefixes.remove(prefix);
+                })
+                .map(|prefix| mk_payload(prefix, &msg, &source_id, RouteStatus::Withdrawn)),
+        );
 
-        for chunk in pdu.withdrawals().iter().collect::<Vec<_>>().chunks(8) {
-            let mut bulk = SmallVec::new();
-            for withdrawal in chunk {
-                let prefix = if let Nlri::Unicast(b) = withdrawal {
-                    b.prefix()
-                } else {
-                    debug!("non unicast Withdrawal, skipping");
-                    continue;
-                };
-
-                self.observed_prefixes.remove(&prefix);
-
-                let rrwd = RawRouteWithDeltas::new_with_message_ref(
-                    (rot_id, ltime),
-                    RotoPrefix::new(prefix),
-                    &msg,
-                    RouteStatus::Withdrawn,
-                );
-                let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
-                let payload = Payload::new(source_id.clone(), typval);
-                //self.gate.update_data(Update::Single(payload)).await;
-                bulk.push(payload);
-            }
-            self.gate.update_data(Update::Bulk(bulk)).await;
-        }
+        payloads.into()
     }
 }
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_connection(
+    roto_scripts: RotoScripts,
     gate: Gate,
     unit_config: BgpTcpIn,
     tcp_stream: TcpStream,
@@ -437,6 +465,6 @@ pub async fn handle_connection(
     session.manual_start().await;
     session.connection_established().await;
 
-    let mut p = Processor::new(gate, unit_config, cmds_tx, status_reporter);
+    let mut p = Processor::new(roto_scripts, gate, unit_config, cmds_tx, status_reporter);
     p.process(session, sess_rx, live_sessions).await;
 }

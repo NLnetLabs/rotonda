@@ -1,6 +1,12 @@
 name: ci
 
 on:
+  push:
+    branches:
+      main
+
+  pull_request:
+
   workflow_dispatch:
 
 env:
@@ -8,9 +14,13 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
     - uses: actions/checkout@v3
+    - name: Ensure correct Rust toolchain version
+      uses: actions-rs/toolchain@v1
+      with:
+        toolchain: stable
     - name: Build
       run: cargo build --verbose
     - name: Run tests

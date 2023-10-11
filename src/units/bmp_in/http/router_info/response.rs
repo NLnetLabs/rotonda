@@ -12,7 +12,7 @@ use crate::{
             machine::{PeerAware, PeerStates},
             metrics::BmpMetrics,
         },
-    },
+    }, http,
 };
 
 use super::RouterInfoApi;
@@ -28,6 +28,7 @@ pub enum Focus {
 impl RouterInfoApi {
     #[allow(clippy::too_many_arguments)]
     pub fn build_response(
+        http_resources: http::Resources,
         base_http_path: String,
         source_id: SourceId,
         router_id: Arc<RouterId>,
@@ -46,6 +47,7 @@ impl RouterInfoApi {
             let mut response_body = Self::build_response_header();
 
             response_body.push_str(&Self::build_response_body(
+                http_resources,
                 base_http_path,
                 source_id,
                 router_id,
@@ -100,6 +102,7 @@ impl RouterInfoApi {
 
     #[allow(clippy::too_many_arguments)]
     pub fn build_response_body(
+        http_resources: http::Resources,
         base_http_path: String,
         source_id: SourceId,
         router_id: Arc<RouterId>,
@@ -236,8 +239,11 @@ impl RouterInfoApi {
                                 writeln!(peer_report, "<tr><td colspan=6><pre>").unwrap();
                                 writeln!(peer_report, "    Announced prefixes: [<a href=\"{}\">close</a>]", base_http_path).unwrap();
                                 for prefix in prefixes {
-                                    // TODO: Don't hard-code the RIB unit HTTP endpoint here as it is configurable!
-                                    writeln!(peer_report, "        <a href=\"/prefixes/{}\">{}</a>", prefix, prefix).unwrap();
+                                    write!(peer_report, "        {}: ", prefix).unwrap();
+                                    for rel_base_url in http_resources.rel_base_urls_for_component_type("rib") {
+                                        write!(peer_report, "<a href=\"{}{}\">view</a> ", rel_base_url, prefix).unwrap();
+                                    }
+                                    writeln!(peer_report, "").unwrap();
                                 }
                                 writeln!(peer_report, "</pre></td></tr>").unwrap();
                             }

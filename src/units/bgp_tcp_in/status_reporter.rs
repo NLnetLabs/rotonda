@@ -24,17 +24,21 @@ impl BgpTcpInStatusReporter {
         }
     }
 
+    pub fn bind_error<T: Display>(&self, listen_addr: &str, err: T) {
+        sr_log!(warn: self, "Error while listening for connections on {}: {}", listen_addr, err);
+    }
+
     pub fn listener_listening(&self, server_uri: &str) {
-        sr_log!(info: self, "Listening for connections on: {}", server_uri);
+        sr_log!(info: self, "Listening for connections on {}", server_uri);
         self.metrics.listener_bound_count.fetch_add(1, Relaxed);
     }
 
     pub fn listener_connection_accepted(&self, router_addr: SocketAddr) {
-        sr_log!(info: self, "Router connected from: {}", router_addr);
+        sr_log!(debug: self, "Router connected from {}", router_addr);
         self.metrics.connection_accepted_count.fetch_add(1, Relaxed);
     }
 
-    pub fn listener_io_error(&self, err: &std::io::Error) {
+    pub fn listener_io_error<T: Display>(&self, err: T) {
         sr_log!(warn: self, "Error while listening for connections: {}", err);
     }
 

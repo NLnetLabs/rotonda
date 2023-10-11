@@ -67,6 +67,69 @@ module example {
 }
 ```
 
+Pattern matching for enums
+
+```
+filter bmp-msg with my_asn: Asn {
+    define {
+        rx msg: BmpMessage;
+    }
+
+    term is-ipv6-rm-and-drop-ibgp {
+        match msg with {
+            RouteMonitoring(pu_msg) -> {
+                pu_msg.per_peer_header.is_ipv6;
+                !pu_msg.route.as-path.starts_with(my_asn);
+            }
+            _ -> false;
+        }
+    }
+
+    action send-up-message with address: IpAddress, asn: Asn {
+        mqtt.send({ 
+            message: String.format("🤭 Peer {}:{} came up", address, asn)
+        });
+    }
+
+    action send-down-message with msg: BmpMsg {
+        mqtt.send({ 
+            message: String.from(msg)
+        });
+    }
+
+    action log-message with bmp_msg: BmpMessage {
+        log.send(bmp_msg);
+    }
+
+    apply {
+        match msg with {
+            PeerUpNotification(pu_msg) -> {
+                send-up-message(pu_msg.per_peer_header.address, pu_msg.per_peer_header.asn);
+                log-message(pu_msg);
+                return reject;
+            }
+            PeerDownNotification(pd_msg) -> {
+                send-down-message(pd_msg.per_peer_header.address, pu_msg.per_peer_header.asn);
+                log-message(pd_msg);
+                return reject;
+            }
+            _ -> {}
+        };
+        
+        filter match is-ipv6-rm-and-drop-ibgp matching {
+            return accept;
+        };
+        reject;
+    }
+}
+
+type BmpMessage =
+    | RouteMonitoring(RouteMonitoringMessage)
+    | PeerUpNotification(PeerUpNotification)
+    | PeerDownNotification(PeerDownNotification)
+    | RouteMirroring(RouteMirroringMessage);
+```
+
 ```
 // A hard-coded ibgp dropper term for AS64496
 module ibg-dropper {
@@ -527,8 +590,8 @@ module imports {
 
 ### Exports
 
-An `export` passes a route on from a RIB in memory to another Rotonda component
-by taking a route and applying the specified filters to it. From the Rotonda
+An `export` passes a route on from a RIB in memory to another `Rotonda` component
+by taking a route and applying the specified filters to it. From the `Rotonda`
 component this will look like just another RIB.
 
 ```

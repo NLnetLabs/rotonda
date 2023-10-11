@@ -12,12 +12,12 @@ use crate::{
     tokio::TokioTaskMetrics,
     units::Unit,
 };
-use arc_swap::{ArcSwap, ArcSwapOption};
+use arc_swap::ArcSwap;
 use async_trait::async_trait;
 
 use chrono::Utc;
 use hash_hasher::{HashBuildHasher, HashedSet};
-use log::{error, info, log_enabled, trace};
+use log::{error, log_enabled, trace, warn};
 use non_empty_vec::NonEmpty;
 use roto::types::{
     builtin::{BuiltinTypeValue, RouteToken},
@@ -41,7 +41,7 @@ use uuid::Uuid;
 use super::{
     http::PrefixesApi,
     metrics::RibUnitMetrics,
-    rib::{PhysicalRib, PreHashedTypeValue, RibValue, RouteExtra},
+    rib::{HashedRib, PreHashedTypeValue, RibValue, RouteExtra},
     status_reporter::RibUnitStatusReporter,
 };
 use super::{rib::StoreInsertionReport, statistics::RibMergeUpdateStatistics};
@@ -204,7 +204,7 @@ pub struct RibUnitRunner {
     // A strong ref needs to be held to http_processor but not used otherwise the HTTP resource manager will discard its registration
     http_processor: Arc<PrefixesApi>,
     query_limits: Arc<ArcSwap<QueryLimits>>,
-    rib: Arc<ArcSwapOption<PhysicalRib>>,
+    rib: Arc<ArcSwap<HashedRib>>,
     rib_type: RibType,
     filter_name: Arc<ArcSwap<FilterName>>,
     pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
@@ -275,17 +275,12 @@ impl RibUnitRunner {
 
         // Setup REST API endpoint. vRIBs listen at the vRIB HTTP prefix + /n/ where n is the index assigned to the vRIB
         // during configuration post-processing.
-        let http_api_path = http_api_path.trim_end_matches('/').to_string();
-        let (http_api_path, is_sub_resource) = match rib_type {
-            RibType::Physical | RibType::Virtual => (Arc::new(format!("{http_api_path}/")), false),
-            RibType::GeneratedVirtual(index) => {
-                (Arc::new(format!("{http_api_path}/{index}/")), true)
-            }
-        };
+        let (http_api_path, is_sub_resource) =
+            Self::http_api_path_for_rib_type(&http_api_path, rib_type);
         let query_limits = Arc::new(ArcSwap::from_pointee(query_limits));
         let http_processor = PrefixesApi::new(
             rib.clone(),
-            http_api_path,
+            http_api_path.clone(),
             query_limits.clone(),
             rib_type,
             vrib_upstream,
@@ -293,9 +288,9 @@ impl RibUnitRunner {
         );
         let http_processor = Arc::new(http_processor);
         if is_sub_resource {
-            component.register_sub_http_resource(http_processor.clone());
+            component.register_sub_http_resource(http_processor.clone(), &http_api_path);
         } else {
-            component.register_http_resource(http_processor.clone());
+            component.register_http_resource(http_processor.clone(), &http_api_path);
         }
 
         let roto_scripts = component.roto_scripts().clone();
@@ -361,25 +356,32 @@ impl RibUnitRunner {
         (runner, gate_agent)
     }
 
-    fn mk_rib(rib_type: RibType, rib_keys: &[RouteToken]) -> Arc<ArcSwapOption<PhysicalRib>> {
-        match rib_type {
-            RibType::Physical => {
-                //
-                // --- TODO: Create the Rib based on the Roto script Rib 'contains' type
-                //
-                // TODO: If the roto script changes we have to be able to detect if the record type changed, and if it
-                // did, recreate the store, dropping the current data, right?
-                //
-                // TOOD: And that also these steps should be done at reconfiguration time as well, not just at
-                // initialisation time (i.e. where we handle GateStatus::Reconfiguring below).
-                //
-                // --- End: Create the Rib based on the Roto script Rib 'contains' type
-                //
-                Arc::new(ArcSwapOption::from_pointee(PhysicalRib::new(rib_keys)))
+    fn http_api_path_for_rib_type(http_api_path: &str, rib_type: RibType) -> (Arc<String>, bool) {
+        let http_api_path = http_api_path.trim_end_matches('/').to_string();
+        let (http_api_path, is_sub_resource) = match rib_type {
+            RibType::Physical | RibType::Virtual => (Arc::new(format!("{http_api_path}/")), false),
+            RibType::GeneratedVirtual(index) => {
+                (Arc::new(format!("{http_api_path}/{index}/")), true)
             }
+        };
+        (http_api_path, is_sub_resource)
+    }
 
-            RibType::Virtual | RibType::GeneratedVirtual(_) => Arc::new(ArcSwapOption::empty()),
-        }
+    fn mk_rib(rib_type: RibType, rib_keys: &[RouteToken]) -> Arc<ArcSwap<HashedRib>> {
+        //
+        // --- TODO: Create the Rib based on the Roto script Rib 'contains' type
+        //
+        // TODO: If the roto script changes we have to be able to detect if the record type changed, and if it
+        // did, recreate the store, dropping the current data, right?
+        //
+        // TOOD: And that also these steps should be done at reconfiguration time as well, not just at
+        // initialisation time (i.e. where we handle GateStatus::Reconfiguring below).
+        //
+        // --- End: Create the Rib based on the Roto script Rib 'contains' type
+        //
+        let physical = matches!(rib_type, RibType::Physical);
+        let rib = HashedRib::new(rib_keys, physical);
+        Arc::new(ArcSwap::from_pointee(rib))
     }
 
     #[cfg(test)]
@@ -388,8 +390,8 @@ impl RibUnitRunner {
     }
 
     #[cfg(test)]
-    pub(super) fn rib(&self) -> Option<Arc<PhysicalRib>> {
-        Option::clone(&self.rib.load())
+    pub(super) fn rib(&self) -> Arc<HashedRib> {
+        self.rib.load().clone()
     }
 
     pub async fn run(
@@ -424,23 +426,59 @@ impl RibUnitRunner {
                                     sources: new_sources,
                                     query_limits: new_query_limits,
                                     filter_name: new_filter_name,
-                                    ..
+                                    http_api_path: new_http_api_path,
+                                    rib_keys: new_rib_keys,
+                                    rib_type: new_rib_type,
+                                    vrib_upstream: new_vrib_upstream,
                                 }),
                         } => {
-                            // TODO: Handle changed RibUnit::vrib_upstream value.
                             arc_self.status_reporter.reconfigured();
 
+                            let old_http_api_path = arc_self.http_processor.http_api_path();
+                            let (new_http_api_path, _is_sub_resource) =
+                                Self::http_api_path_for_rib_type(&new_http_api_path, new_rib_type);
+                            if new_http_api_path.as_str() != old_http_api_path {
+                                warn!(
+                                    "Ignoring changed http_api_path: {} -> {}",
+                                    old_http_api_path, new_http_api_path
+                                );
+                            }
+
+                            let old_rib_keys = arc_self.rib.load().key_fields();
+                            if new_rib_keys.as_slice() != old_rib_keys {
+                                warn!(
+                                    "Ignoring changed rib_keys: {:?} -> {:?}",
+                                    old_rib_keys, new_rib_keys
+                                );
+                            }
+
+                            if new_rib_type != arc_self.rib_type {
+                                warn!(
+                                    "Ignoring changed rib_type: {:?} -> {:?}",
+                                    arc_self.rib_type, new_rib_type
+                                );
+                            }
+
+                            // Replace the vRIB upstream link with the new one
+                            arc_self.http_processor.set_vrib_upstream(new_vrib_upstream);
+
                             // Replace the roto script with the new one
+                            let old_filter_name = &*arc_self.filter_name.load();
                             match new_filter_name {
                                 Some(new_filter_name) => {
-                                    if **arc_self.filter_name.load() != new_filter_name {
-                                        info!("Using new roto filter '{new_filter_name}'");
+                                    if old_filter_name.as_ref() != &new_filter_name {
+                                        arc_self.status_reporter.filter_name_changed(
+                                            &old_filter_name,
+                                            Some(&new_filter_name),
+                                        );
                                         arc_self.filter_name.store(new_filter_name.into());
                                     }
                                 }
                                 None => {
-                                    if **arc_self.filter_name.load() != FilterName::default() {
-                                        info!("Disabling roto filter");
+                                    if old_filter_name.as_ref() != &FilterName::default() {
+                                        arc_self
+                                            .status_reporter
+                                            .filter_name_changed(&old_filter_name, None);
                                         arc_self.filter_name.store(FilterName::default().into());
                                     }
                                 }
@@ -469,10 +507,10 @@ impl RibUnitRunner {
                         } => {
                             assert!(matches!(arc_self.rib_type, RibType::Physical));
                             let res = {
-                                if let Some(rib) = arc_self.rib.load().as_ref() {
+                                if let Ok(store) = arc_self.rib.load().store() {
                                     let guard = &epoch::pin();
                                     trace!("Performing triggered query {uuid}");
-                                    Ok(rib.match_prefix(&prefix, &match_options, guard))
+                                    Ok(store.match_prefix(&prefix, &match_options, guard))
                                 } else {
                                     Err("Cannot query non-existent RIB".to_string())
                                 }
@@ -505,7 +543,7 @@ impl RibUnitRunner {
         F: Fn(
                 &Prefix,
                 TypeValue,
-                &PhysicalRib,
+                &HashedRib,
             )
                 -> Result<(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32), PrefixStoreError>
             + Copy
@@ -555,7 +593,7 @@ impl RibUnitRunner {
         F: Fn(
                 &Prefix,
                 TypeValue,
-                &PhysicalRib,
+                &HashedRib,
             )
                 -> Result<(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32), PrefixStoreError>
             + Copy
@@ -581,7 +619,7 @@ impl RibUnitRunner {
             self.gate.update_data(filtered_update).await;
         }
 
-        if let Some(rib) = self.rib.load().as_ref() {
+        if let Ok(rib) = self.rib.load().store() {
             self.status_reporter
                 .unique_prefix_count_updated(rib.prefixes_count());
         }
@@ -598,7 +636,7 @@ impl RibUnitRunner {
         F: Fn(
                 &Prefix,
                 TypeValue,
-                &PhysicalRib,
+                &HashedRib,
             )
                 -> Result<(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32), PrefixStoreError>
             + Copy
@@ -621,14 +659,14 @@ impl RibUnitRunner {
         F: Fn(
                 &Prefix,
                 TypeValue,
-                &PhysicalRib,
+                &HashedRib,
             )
                 -> Result<(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32), PrefixStoreError>
             + Send
             + 'static,
     {
-        // Only physical RIBs have a store to insert into.
-        if let Some(rib) = self.rib.load().as_ref() {
+        let rib = self.rib.load();
+        if rib.is_physical() {
             let prefix: Option<Prefix> = match &payload.value {
                 TypeValue::Builtin(BuiltinTypeValue::Route(route)) => Some(route.prefix.into()),
 
@@ -646,7 +684,7 @@ impl RibUnitRunner {
                 let is_withdraw = payload.value.is_withdrawn();
 
                 let pre_insert = Utc::now();
-                match insert_fn(&prefix, payload.value.clone(), rib) {
+                match insert_fn(&prefix, payload.value.clone(), &rib) {
                     Ok((upsert, num_retries)) => {
                         let post_insert = Utc::now();
                         let insert_delay = (post_insert - pre_insert)
@@ -764,25 +802,27 @@ impl RibUnitRunner {
             let in_type_value: &TypeValue = route.deref();
             let payload = Payload::from(in_type_value.clone()); // TODO: Do we really want to clone here? Or pass the Arc on?
 
-            trace!("Reprocessing route");
+            trace!("Re-processing route");
 
             if let Ok(filtered_payloads) = Self::VM.with(|vm| {
+
                 payload.filter(
                     |value| self.roto_scripts.exec(vm, &self.filter_name.load(), value),
                     |_source_id| { /* TODO: self.status_reporter.message_filtered(source_id) */ },
                 )
             }) {
-                for filtered_payload in filtered_payloads {
-                    // Add this processed query result route into the new query result
-                    let hash = self
-                        .rib
-                        .load()
-                        .as_ref()
-                        .unwrap()
-                        .precompute_hash_code(&filtered_payload.value);
-                    let hashed_value = PreHashedTypeValue::new(filtered_payload.value, hash);
-                    new_values.insert(hashed_value.into());
-                }
+                new_values.extend(
+                    filtered_payloads
+                        .into_iter()
+                        .filter(|payload| {
+                            !matches!(payload.value, TypeValue::OutputStreamMessage(_))
+                        })
+                        .map(|payload| {
+                            // Add this processed query result route into the new query result
+                            let hash = self.rib.load().precompute_hash_code(&payload.value);
+                            PreHashedTypeValue::new(payload.value, hash).into()
+                        }),
+                );
             }
         }
 

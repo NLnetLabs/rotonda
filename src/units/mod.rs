@@ -64,4 +64,14 @@ impl Unit {
             Unit::RibUnit(unit) => unit.run(component, gate, waitpoint).await,
         };
     }
+
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Unit::BgpTcpIn(_) => "bgp-tcp-in",
+            Unit::BmpTcpIn(_) => "bmp-tcp-in",
+            Unit::Filter(_) => "filter",
+            Unit::BmpIn(_) => "bmp-in",
+            Unit::RibUnit(_) => "rib",
+        }
+    }
 }

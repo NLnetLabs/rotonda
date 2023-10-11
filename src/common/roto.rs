@@ -3,11 +3,10 @@ use std::{
     time::Instant,
 };
 
-use log::debug;
+use log::{debug, trace, info};
 use roto::{
     ast::{AcceptReject, ShortString},
-    blocks::Scope,
-    compile::{CompileError, Compiler, MirBlock},
+    compile::{CompileError, Compiler, MirBlock, RotoPack, RotoPackArc},
     types::typevalue::TypeValue,
     vm::{
         ExtDataSource, LinearMemory, OutputStreamQueue, VirtualMachine, VmBuilder, VmError,
@@ -104,6 +103,7 @@ pub type ThreadLocalVM = RefCell<Option<StatefulVM>>;
 
 //------------ RotoError ----------------------------------------------------------------------------------------------
 
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug)]
 pub enum LoadErrorKind {
     ReadDirError,
@@ -185,6 +185,9 @@ impl Display for RotoError {
             RotoError::PostExecError { filter_name, err } => {
                 f.write_fmt(format_args!("Post-execution error with Roto filter {filter_name}: {err}"))
             }
+            RotoError::PostExecError { filter_name, err } => {
+                f.write_fmt(format_args!("Post-execution error with Roto filter {filter_name}: {err}"))
+            }
         }
     }
 }
@@ -235,22 +238,20 @@ impl RotoError {
                 path = cwd.join(path);
             }
         }
-        Self::LoadError {
-            kind,
-            path: path.into(),
-            err,
-        }
+        Self::LoadError { kind, path, err }
     }
 }
 
-//----------- RotoScripts ---------------------------------------------------------------------------------------------
+//----------- RotoScripts ---------------------------------------------------
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum RotoScriptOrigin {
-    /// A script with no known origin, e.g. from a unit test, but still distinct (by name) from other scripts.
+    /// A script with no known origin, e.g. from a unit test, but still
+    /// distinct (by name) from other scripts.
     Named(String),
 
-    /// A script that originated from a file at the specified filesystem path.
+    /// A script that originated from a file at the specified filesystem
+    /// path.
     Path(PathBuf),
 }
 
@@ -263,31 +264,48 @@ impl Display for RotoScriptOrigin {
     }
 }
 
-// TODO: Store compiled roto scripts instead of just script sources. At the time of writing that isn't possible
-// because the compiled form is Rotolo which internally has an Arc<dyn RotoRib> where the RotoRib trait lacks Send
-// + Sync markers and also lacks Clone causing the Rust compiler to complain about any attempts at using the
-// Rotolo type across threads, and we would want to build the Roto VM from a compiled source in each thread that
-// we can execute Roto scripts in (as the VM is not thread safe so we store one VM instance per filter per thread).
-// We also can't store each of the compiled RotoPack items (one per filter per compiled script) by ref or Arc (via
-// RotoPackRef or RotoPackArc) because we cannot iterate over them because Rotolo::iter_all_filter_maps() is private
-// so we have to know the names of the filters contained in the script in order to fetch their RotoPack out...
+//------------ RotoScript ---------------------------------------------------
+
+// A RotoScript is a script from one single origin (i.e. a file, a &str), but
+// can contain multiple compiled Filter(Map)s. Filter(Map)s cannot live in
+// the Global namespace, therefore they always have a NamedScope attached,
+// which is the same as the filter name. Each NamedScope, and thus the filter
+// name, needs to be unique across all roto scripts loaded by a Rotonda
+// instance. Within one roto script this is enforced by the Roto compiler,
+// but across the whole instance (so over potentially over multiple roto
+// script sources), this is enforced by this RotoScript struct (in
+// `add_or_update_script`). The scope and the compiled MIR code live together
+// in one RotoPack.
 #[derive(Clone, Debug)]
 pub struct RotoScript {
     origin: RotoScriptOrigin,
     source_code: String,
     loaded_when: Instant,
+    packs: Vec<Arc<RotoPack>>
 }
 
+impl RotoScript {
+    pub fn contains(&self, search_pack: &Arc<RotoPack>) -> bool {
+        self.packs.iter().any(|pack| Arc::ptr_eq(pack, search_pack))
+    }
+}
+
+// A ScopedRotoScript is a single compiled Filter(Map) in its own scope. It
+// is always part of a RotoScript.
 #[derive(Clone, Debug)]
 pub struct ScopedRotoScript {
-    roto_script: Arc<RotoScript>,
-    scope: Scope,
+    // The script this scoped Filter(Map) is part of.
+    parent_script: Arc<RotoScript>,
+    // The reference to the pack in the RotoPack vec of its parent.
+    pack: Arc<RotoPack>
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct RotoScripts {
+    // RotoScripts keyed on their origin
     scripts_by_origin: Arc<FrimMap<RotoScriptOrigin, Arc<RotoScript>>>,
-    scripts_by_filter: Arc<FrimMap<FilterName, Arc<ScopedRotoScript>>>,
+    // Scoped scripts keyed on their scope name
+    scripts_by_filter: Arc<FrimMap<FilterName, ScopedRotoScript>>,
 }
 
 impl RotoScripts {
@@ -302,15 +320,23 @@ impl RotoScripts {
     ) -> Result<(), RotoError> {
         if let Some(script) = self.scripts_by_origin.get(&origin) {
             if script.source_code == roto_script {
+                trace!("Roto script {origin} is already loaded");
                 return Ok(());
+            } else {
+                info!("Re-loading modified Roto script {origin}");
             }
+        } else {
+            info!("Loading new Roto script {origin}");
         }
 
-        // Try and compile it immediately to verify if there are any problems with it. We'll still need to compile it
-        // again later for each thread that wants to run a Roto VM that uses this script, but at least this way we don't
-        // have to wait until then to find out if there is a problem.
+        // Try and compile it to verify if there are any problems with it.
+        // If there are, we are going to stop here. If there are none, we
+        // will store the resulting MIR, plus the required arguments (a
+        // RotoPack) in the RotoScript struct. This we only have to compile
+        // once.
         let rotolo =
-            Compiler::build(roto_script).map_err(|err| RotoError::compile_err(&origin, err))?;
+            Compiler::build(roto_script)
+            .map_err(|err| RotoError::compile_err(&origin, err))?;
 
         if !rotolo.is_success() {
             let report = rotolo.get_mis_compilations().iter().fold(
@@ -327,52 +353,69 @@ impl RotoScripts {
             });
         }
 
-        // Check if any of the compiled filters have the same name as one that we've already seen
-        let new_filters = rotolo.inspect_all_arguments();
+        // Extract all the packs that are Filter(Map)s. Filter(Map)s can't
+        // live in the Global scope, so these all have filter names.
+        let new_filter_maps = rotolo.clean_packs_to_owned();
 
-        for filter_scope in new_filters.keys() {
-            let filter_name = match filter_scope {
-                Scope::Global => continue,
-                Scope::FilterMap(filter_name) => filter_name,
-                Scope::Filter(filter_name) => filter_name,
-            };
+        // Check if any of the compiled filters have the same name as one that
+        // we've already seen. If so, abort, as each Filter(Map) name must be
+        // unique across all loaded roto scripts so that they can referenced
+        // unambiguously by their name.
+        for filter_map in &new_filter_maps {
+            let filter_name = filter_map.get_filter_map_name();
 
-            if let Some(found) = self.scripts_by_filter.get(&filter_name.into()) {
-                let err = CompileError::from(format!(
-                    "Filter {filter_name} in {origin} is already defined in {}",
-                    found.roto_script.origin
-                ));
-                return Err(RotoError::CompileError { origin, err });
-            }
+            if let Some(found) = 
+                self.scripts_by_filter.get(&filter_name.clone().into()) {
+                    let err = CompileError::from(format!(
+                        "Filter {filter_name} in {origin} is already defined \
+                        in {}",
+                        found.parent_script.origin
+                    ));
+                    return Err(RotoError::CompileError { origin, err });
+                }
         }
 
+        // Create the new RotoScript for these packs.
         let new_script = Arc::new(RotoScript {
             origin: origin.clone(),
             source_code: roto_script.to_string(),
             loaded_when: Instant::now(),
+            packs: new_filter_maps
+                .into_iter()
+                .map(Arc::new)
+                .collect::<Vec<_>>()
         });
 
         self.scripts_by_origin.insert(origin, new_script.clone());
 
-        // Update the view of filter names to compiled scripts
-        for (scope, _args) in rotolo.inspect_all_arguments() {
-            let filter_name = match scope.clone() {
-                Scope::Global => continue,
-                Scope::FilterMap(filter_name) => filter_name,
-                Scope::Filter(filter_name) => filter_name,
-            };
-
-            let scoped_script = Arc::new(ScopedRotoScript {
-                roto_script: new_script.clone(),
-                scope,
-            });
+        // Update the view of all Filter(Map)s keyed by name with the newly
+        // loaded Filter(Map)s.
+        for scope in &new_script.packs {
+            let filter_name = scope.get_filter_map_name();
 
             self.scripts_by_filter
-                .insert(filter_name.into(), scoped_script);
+                .insert(
+                    filter_name.into(), 
+                    ScopedRotoScript { 
+                        parent_script: Arc::clone(&new_script), 
+                        pack: Arc::clone(scope) 
+                    }
+                );
         }
 
         if log::log_enabled!(log::Level::Trace) {
-            dbg!(&self);
+            trace!("Dumping loaded roto scripts:");
+            trace!("  By origin:");
+            for (i, (origin, script)) in self.scripts_by_origin.guard().iter().enumerate() {
+                for (j, pack) in script.packs.iter().enumerate() {
+                    trace!("    [origin {i}, pack {j}]: {origin} -> {}", pack.get_filter_map_name());
+                }
+            }
+
+            trace!("  By filter name:");
+            for (i, (filter_name, script)) in self.scripts_by_filter.guard().iter().enumerate() {
+                trace!("    [filter name {i}]: {filter_name} -> {}", script.parent_script.origin);
+            }
         }
 
         Ok(())
@@ -381,9 +424,7 @@ impl RotoScripts {
     pub fn remove_script(&self, origin: &RotoScriptOrigin) {
         if let Some(roto_script) = self.scripts_by_origin.remove(origin) {
             self.scripts_by_filter
-                .retain(|_filter_name, scoped_script| {
-                    Arc::ptr_eq(&roto_script, &scoped_script.roto_script)
-                });
+                .retain(|_, scoped_script| !roto_script.contains(&scoped_script.pack));
         }
     }
 
@@ -434,10 +475,10 @@ impl RotoScripts {
                 .scripts_by_filter
                 .get(filter_name)
                 .ok_or_else(|| RotoError::not_found(filter_name))?;
-            if found_filter.roto_script.loaded_when > stateful_vm.built_when {
+            if found_filter.parent_script.loaded_when > stateful_vm.built_when {
                 debug!("Updating roto VM");
                 stateful_vm.vm = self.build_vm(filter_name)?;
-                stateful_vm.built_when = found_filter.roto_script.loaded_when;
+                stateful_vm.built_when = found_filter.parent_script.loaded_when;
             } else {
                 stateful_vm.vm.reset();
             }
@@ -511,12 +552,7 @@ impl RotoScripts {
             .get(filter_name)
             .ok_or_else(|| RotoError::not_found(filter_name))?;
 
-        let rotolo = Compiler::build(&scoped_script.roto_script.source_code).unwrap(); // SAFETY: we test compilation in add_or_update_script()
-
-        let pack = rotolo
-            .retrieve_public_as_arcs(scoped_script.scope.clone()) // TODO: Remove .clone() when retrieve_public_as_arcs() takes &Scope instead of Scope
-            .map_err(|err| RotoError::compile_err(&scoped_script.roto_script.origin, err))?;
-
+        let pack = RotoPackArc::from(scoped_script.pack.as_ref());
         VmBuilder::new()
             .with_mir_code(pack.mir)
             .with_data_sources(pack.data_sources)

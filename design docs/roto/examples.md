@@ -163,3 +163,26 @@ module rib-in-post-policy {
     }
 }
 ```
+
+
+```
+module filter-unicast-v4-v6-only {
+    define {
+        rx_tx bgp_msg: BgpUpdateMessage
+    }
+
+    term afi-safi-unicast {
+        match {
+            bgp_msg.nlris.afi in [AFI_IPV4, AFI_IPV6];
+            bgp_msg.nlris.safi == SAFI_UNICAST;
+        }
+    }
+
+    apply {
+        match matching afi-safi-unicast {
+            return accept;
+        }
+        reject;
+    }
+}
+```

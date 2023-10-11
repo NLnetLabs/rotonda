@@ -1,16 +1,18 @@
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
+use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use arc_swap::{ArcSwap, ArcSwapAny};
 use futures::future::select;
-use futures::pin_mut;
+use futures::{pin_mut, Future};
 use log::debug;
 use rotonda_fsm::bgp::session::Command;
 use routecore::asn::Asn;
 use serde::Deserialize;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
+use tokio::time::sleep;
 
 use crate::common::roto::{FilterName, RotoScripts};
 use crate::common::status_reporter::{Chainable, UnitStatusReporter};
@@ -83,7 +85,7 @@ impl TcpStreamWrapper for StandardTcpStream {
 #[derive(Clone, Debug, Deserialize)]
 pub struct BgpTcpIn {
     /// Address:port to listen on incoming BGP connections over TCP.
-    listen: String,
+    pub listen: String,
 
     pub my_asn: Asn, // TODO make getters, or impl Into<-fsm::bgp::Config>
 
@@ -93,7 +95,7 @@ pub struct BgpTcpIn {
     pub peer_configs: PeerConfigs,
 
     #[serde(default)]
-    filter_name: FilterName,
+    pub filter_name: FilterName,
 }
 
 impl PartialEq for BgpTcpIn {
@@ -118,16 +120,35 @@ impl BgpTcpIn {
 
     pub async fn run(
         self,
-        component: Component,
+        mut component: Component,
         gate: Gate,
-        waitpoint: WaitPoint,
-    ) -> Result<(), Terminated> {
-        let runner = BgpTcpInRunner::new(self, gate, component);
-        runner
-            .run::<_, _, StandardTcpStream, BgpTcpInRunner>(
-                Arc::new(StandardTcpListenerFactory),
-                waitpoint,
-            )
+        mut waitpoint: WaitPoint,
+    ) -> Result<(), crate::comms::Terminated> {
+        let unit_name = component.name().clone();
+
+        // Setup metrics
+        let metrics = Arc::new(BgpTcpInMetrics::new(&gate));
+        component.register_metrics(metrics.clone());
+
+        // Setup status reporting
+        let status_reporter = Arc::new(BgpTcpInStatusReporter::new(&unit_name, metrics.clone()));
+
+        let roto_scripts = component.roto_scripts().clone();
+
+        // Wait for other components to be, and signal to other components
+        // that we are, ready to start. All units and targets start together,
+        // otherwise data passed from one component to another may be lost if
+        // the receiving component is not yet ready to accept it.
+        gate.process_until(waitpoint.ready()).await?;
+
+        // Signal again once we are out of the process_until() so that anyone
+        // waiting to send important gate status updates won't send them while
+        // we are in process_until() which will just eat them without handling
+        // them.
+        waitpoint.running().await;
+
+        BgpTcpInRunner::new(self, gate, metrics, status_reporter, roto_scripts)
+            .run::<_, _, StandardTcpStream, BgpTcpInRunner>(Arc::new(StandardTcpListenerFactory))
             .await
     }
 }
@@ -136,9 +157,8 @@ trait ConfigAcceptor {
     fn accept_config(
         child_name: String,
         roto_scripts: &RotoScripts,
-        filter_name: &Arc<ArcSwapAny<Arc<FilterName>>>,
         gate: &Gate,
-        bgp: BgpTcpIn,
+        bgp: &BgpTcpIn,
         tcp_stream: impl TcpStreamWrapper,
         cfg: &super::peer_config::PeerConfig,
         remote_net: super::peer_config::PrefixOrExact,
@@ -153,36 +173,33 @@ struct BgpTcpInRunner {
     // The configuration from the .conf.
     bgp: BgpTcpIn,
 
-    // To send commands to a Session based on peer IP + ASN.
-    live_sessions: Arc<Mutex<LiveSessions>>,
-
-    component: Arc<Component>,
-
     gate: Gate,
 
     metrics: Arc<BgpTcpInMetrics>,
 
     status_reporter: Arc<BgpTcpInStatusReporter>,
+
+    roto_scripts: RotoScripts,
+
+    // To send commands to a Session based on peer IP + ASN.
+    live_sessions: Arc<Mutex<LiveSessions>>,
 }
 
 impl BgpTcpInRunner {
-    fn new(bgp: BgpTcpIn, gate: Gate, mut component: Component) -> Self {
-        let unit_name = component.name().clone();
-
-        // Setup metrics
-        let metrics = Arc::new(BgpTcpInMetrics::new(&gate));
-        component.register_metrics(metrics.clone());
-
-        // Setup status reporting
-        let status_reporter = Arc::new(BgpTcpInStatusReporter::new(&unit_name, metrics.clone()));
-
+    fn new(
+        bgp: BgpTcpIn,
+        gate: Gate,
+        metrics: Arc<BgpTcpInMetrics>,
+        status_reporter: Arc<BgpTcpInStatusReporter>,
+        roto_scripts: RotoScripts,
+    ) -> Self {
         BgpTcpInRunner {
             bgp,
-            live_sessions: Arc::new(Mutex::new(HashMap::new())),
-            component: Arc::new(component),
             gate,
             metrics,
             status_reporter,
+            roto_scripts,
+            live_sessions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 
@@ -190,56 +207,19 @@ impl BgpTcpInRunner {
     fn mock(bgp: BgpTcpIn) -> (Self, crate::comms::GateAgent) {
         let (gate, gate_agent) = Gate::new(0);
 
-        let metrics = Arc::new(BgpTcpInMetrics::new(&gate));
-
-        let status_reporter = Arc::new(BgpTcpInStatusReporter::new("MOCK", metrics.clone()));
-
         let runner = BgpTcpInRunner {
             bgp,
-            live_sessions: Arc::new(Mutex::new(HashMap::new())),
-            component: Arc::new(Component::default()),
             gate,
             metrics: Default::default(),
-            status_reporter,
+            status_reporter: Default::default(),
+            roto_scripts: Default::default(),
+            live_sessions: Arc::new(Mutex::new(HashMap::new())),
         };
 
         (runner, gate_agent)
     }
 
-    async fn run<T, U, V, F>(
-        self,
-        listener_factory: Arc<T>,
-        mut waitpoint: WaitPoint,
-    ) -> Result<(), Terminated>
-    where
-        T: TcpListenerFactory<U>,
-        U: TcpListener<V>,
-        V: TcpStreamWrapper,
-        F: ConfigAcceptor,
-    {
-        let filter_name = Arc::new(ArcSwap::from_pointee(self.bgp.filter_name.clone()));
-
-        // Wait for other components to be, and signal to other components
-        // that we are, ready to start. All units and targets start together,
-        // otherwise data passed from one component to another may be lost if
-        // the receiving component is not yet ready to accept it.
-        self.gate.process_until(waitpoint.ready()).await?;
-
-        // Signal again once we are out of the process_until() so that anyone
-        // waiting to send important gate status updates won't send them while
-        // we are in process_until() which will just eat them without handling
-        // them.
-        waitpoint.running().await;
-
-        self.accept_connections::<T, U, V, Self>(listener_factory, filter_name)
-            .await
-    }
-
-    async fn accept_connections<T, U, V, F>(
-        mut self,
-        listener_factory: Arc<T>,
-        filter_name: Arc<ArcSwapAny<Arc<FilterName>>>,
-    ) -> Result<(), Terminated>
+    async fn run<T, U, V, F>(mut self, listener_factory: Arc<T>) -> Result<(), Terminated>
     where
         T: TcpListenerFactory<U>,
         U: TcpListener<V>,
@@ -248,107 +228,142 @@ impl BgpTcpInRunner {
     {
         // Loop until terminated, accepting TCP connections from routers and
         // spawning tasks to handle them.
+        let status_reporter = self.status_reporter.clone();
+
         loop {
-            self.status_reporter.listener_listening(&self.bgp.listen);
-            let listener = listener_factory
-                .bind(self.bgp.listen.clone())
-                .await
-                .unwrap_or_else(|err| {
-                    self.status_reporter.listener_io_error(&err);
-                    // TODO: Don't panic here, instead retry with backoff
-                    panic!(
-                        "Listening for connections on {} failed: {}",
-                        self.bgp.listen, err
-                    );
-                });
+            let listen_addr = self.bgp.listen.clone();
 
-            let mut accept_fut = Box::pin(listener.accept());
+            let bind_with_backoff = || async {
+                let mut wait = 1;
+                loop {
+                    match listener_factory.bind(listen_addr.clone()).await {
+                        Err(err) => {
+                            let err = format!("{err}: Will retry in {wait} seconds.");
+                            status_reporter.bind_error(&listen_addr, &err);
+                            sleep(Duration::from_secs(wait)).await;
+                            wait *= 2;
+                        }
+                        res => break res,
+                    }
+                }
+            };
 
-            loop {
-                let res = {
-                    let process_fut = self.gate.process();
-                    pin_mut!(process_fut);
+            let listener = match self.process_until(bind_with_backoff()).await {
+                ControlFlow::Continue(Ok(res)) => res,
+                ControlFlow::Continue(Err(_err)) => continue,
+                ControlFlow::Break(Terminated) => return Err(Terminated),
+            };
 
-                    let res = select(process_fut, accept_fut).await;
-                    match (&self.status_reporter, res).into() {
-                        UnitActivity::GateStatusChanged(status, next_fut) => {
-                            match status {
-                                GateStatus::Reconfiguring {
-                                    new_config: Unit::BgpTcpIn(new_unit),
-                                } => {
-                                    debug!(
-                                        "pre reconfigure, current live sessions: {:?}",
-                                        self.live_sessions
-                                    );
-                                    debug!("new_config: {:?}", new_unit);
-                                    let rebind = self.bgp.listen != new_unit.listen;
-                                    self.bgp = new_unit;
-                                    if rebind {
-                                        break;
-                                    }
-                                }
-                                GateStatus::ReportLinks { report } => {
-                                    report.declare_source();
-                                    report.set_graph_status(self.metrics.clone());
-                                }
-                                _ => { /* when does this happen? */ }
+            status_reporter.listener_listening(&listen_addr);
+
+            'inner: loop {
+                match self.process_until(listener.accept()).await {
+                    ControlFlow::Continue(Ok((tcp_stream, peer_addr))) => {
+                        status_reporter.listener_connection_accepted(peer_addr);
+
+                        // Now:
+                        // check for the peer_addr.ip() in the new PeerConfig
+                        // and spawn a Session for it.
+                        // We might need some new stuff:
+                        // a temporary 'pending' list/map, keyed on only the peer
+                        // IP, from which entries will be removed once the OPENs
+                        // are exchanged and we know the remote ASN.
+
+                        if let Some((remote_net, cfg)) = self.bgp.peer_configs.get(peer_addr.ip()) {
+                            let child_name =
+                                format!("bgp[{}:{}]", peer_addr.ip(), peer_addr.port());
+                            let child_status_reporter =
+                                Arc::new(status_reporter.add_child(&child_name));
+                            debug!("[{}] config matched: {}", peer_addr.ip(), cfg.name());
+                            F::accept_config(
+                                child_name,
+                                &self.roto_scripts,
+                                &self.gate,
+                                &self.bgp,
+                                tcp_stream,
+                                cfg,
+                                remote_net,
+                                child_status_reporter,
+                                self.live_sessions.clone(),
+                            );
+                        } else {
+                            debug!("No config to accept {}", peer_addr.ip());
+                        }
+                    }
+                    ControlFlow::Continue(Err(_err)) => break 'inner,
+                    ControlFlow::Break(Terminated) => return Err(Terminated),
+                }
+            }
+        }
+    }
+
+    async fn process_until<T, U>(
+        &mut self,
+        until_fut: T,
+    ) -> ControlFlow<Terminated, std::io::Result<U>>
+    where
+        T: Future<Output = std::io::Result<U>>,
+    {
+        let mut until_fut = Box::pin(until_fut);
+
+        loop {
+            let process_fut = self.gate.process();
+            pin_mut!(process_fut);
+
+            let res = select(process_fut, until_fut).await;
+
+            match (&self.status_reporter, res).into() {
+                UnitActivity::GateStatusChanged(status, next_fut) => {
+                    match status {
+                        GateStatus::Reconfiguring {
+                            new_config: Unit::BgpTcpIn(new_unit),
+                        } => {
+                            debug!(
+                                "pre reconfigure, current live sessions: {:?}",
+                                self.live_sessions
+                            );
+                            debug!("new_config: {:?}", new_unit);
+                            // Runtime reconfiguration of this unit has
+                            // been requested. New connections will be
+                            // handled using the new configuration,
+                            // existing connections handled by
+                            // router_handler() tasks will receive their
+                            // own copy of this Reconfiguring status
+                            // update and can react to it accordingly.
+                            let rebind = self.bgp.listen != new_unit.listen;
+
+                            self.bgp = new_unit;
+
+                            if rebind {
+                                // Trigger re-binding to the new listen port.
+                                let err = std::io::ErrorKind::Other;
+                                return ControlFlow::Continue(Err(err.into()));
                             }
-                            accept_fut = next_fut;
-                            None
                         }
 
-                        UnitActivity::InputError(err) => {
-                            self.status_reporter.listener_io_error(&err);
-                            break;
+                        GateStatus::ReportLinks { report } => {
+                            report.declare_source();
+                            report.set_graph_status(self.metrics.clone());
                         }
 
-                        UnitActivity::InputReceived((tcp_stream, peer_addr)) => {
-                            self.status_reporter.listener_connection_accepted(peer_addr);
-                            // do we actually need peer_addr as a separate
-                            // thing here?
-                            accept_fut = Box::pin(listener.accept());
-                            Some((tcp_stream, peer_addr))
-                        }
-
-                        UnitActivity::Terminated => {
-                            // XXX not sure whether we need to do anything
-                            // specific here. For connected routers, we handle
-                            // the Terminated case in router_handler.rs
-                            self.status_reporter.terminated();
-                            return Err(Terminated);
-                        }
+                        _ => { /* Nothing to do */ }
                     }
-                };
 
-                if let Some((tcp_stream, peer_addr)) = res {
-                    // Now:
-                    // check for the peer_addr.ip() in the new PeerConfig
-                    // and spawn a Session for it.
-                    // We might need some new stuff:
-                    // a temporary 'pending' list/map, keyed on only the peer
-                    // IP, from which entries will be removed once the OPENs
-                    // are exchanged and we know the remote ASN.
+                    until_fut = next_fut;
+                }
 
-                    if let Some((remote_net, cfg)) = self.bgp.peer_configs.get(peer_addr.ip()) {
-                        let child_name = format!("bgp[{}:{}]", peer_addr.ip(), peer_addr.port());
-                        let child_status_reporter =
-                            Arc::new(self.status_reporter.add_child(&child_name));
-                        debug!("[{}] config matched: {}", peer_addr.ip(), cfg.name());
-                        F::accept_config(
-                            child_name,
-                            &self.component.roto_scripts(),
-                            &filter_name,
-                            &self.gate,
-                            self.bgp.clone(),
-                            tcp_stream,
-                            cfg,
-                            remote_net,
-                            child_status_reporter,
-                            self.live_sessions.clone(),
-                        );
-                    } else {
-                        debug!("No config to accept {}", peer_addr.ip());
-                    }
+                UnitActivity::InputError(err) => {
+                    self.status_reporter.listener_io_error(&err);
+                    return ControlFlow::Continue(Err(err));
+                }
+
+                UnitActivity::InputReceived(v) => {
+                    return ControlFlow::Continue(Ok(v));
+                }
+
+                UnitActivity::Terminated => {
+                    self.status_reporter.terminated();
+                    return ControlFlow::Break(Terminated);
                 }
             }
         }
@@ -359,9 +374,8 @@ impl ConfigAcceptor for BgpTcpInRunner {
     fn accept_config(
         child_name: String,
         roto_scripts: &RotoScripts,
-        filter_name: &Arc<ArcSwapAny<Arc<FilterName>>>,
         gate: &Gate,
-        bgp: BgpTcpIn,
+        bgp: &BgpTcpIn,
         tcp_stream: impl TcpStreamWrapper,
         cfg: &super::peer_config::PeerConfig,
         remote_net: super::peer_config::PrefixOrExact,
@@ -374,12 +388,10 @@ impl ConfigAcceptor for BgpTcpInRunner {
             &child_name,
             handle_connection(
                 roto_scripts.clone(),
-                filter_name.clone(),
                 gate.clone(),
                 bgp.clone(),
                 tcp_stream,
-                //cfg.clone(),
-                CombinedConfig::new(bgp, cfg.clone(), remote_net),
+                CombinedConfig::new(bgp.clone(), cfg.clone(), remote_net),
                 cmds_tx.clone(),
                 cmds_rx,
                 child_status_reporter,
@@ -399,16 +411,12 @@ mod tests {
         },
     };
 
-    use arc_swap::{ArcSwap, ArcSwapAny};
     use futures::Future;
     use routecore::asn::Asn;
     use tokio::net::TcpStream;
 
     use crate::{
-        common::{
-            roto::{FilterName, RotoScripts},
-            status_reporter::AnyStatusReporter,
-        },
+        common::{roto::RotoScripts, status_reporter::AnyStatusReporter},
         comms::{Gate, GateAgent, Terminated},
         tests::util::internal::mk_testable_metrics,
         units::bgp_tcp_in::{
@@ -533,12 +541,7 @@ mod tests {
 
         let status_reporter = runner.status_reporter.clone();
 
-        let filter_name = Arc::new(ArcSwap::from_pointee(FilterName::default()));
-
-        let runner_fut = runner.accept_connections::<_, _, _, NoOpConfigAcceptor>(
-            mock_listener_factory.into(),
-            filter_name,
-        );
+        let runner_fut = runner.run::<_, _, _, NoOpConfigAcceptor>(mock_listener_factory.into());
 
         (runner_fut, gate_agent, status_reporter)
     }
@@ -551,9 +554,8 @@ mod tests {
         fn accept_config(
             _child_name: String,
             _roto_scripts: &RotoScripts,
-            _filter_name: &Arc<ArcSwapAny<Arc<FilterName>>>,
             _gate: &Gate,
-            _bgp: BgpTcpIn,
+            _bgp: &BgpTcpIn,
             _tcp_stream: impl TcpStreamWrapper,
             _cfg: &PeerConfig,
             _remote_net: PrefixOrExact,

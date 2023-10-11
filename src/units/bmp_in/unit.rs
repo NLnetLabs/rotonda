@@ -1,13 +1,9 @@
-use std::{
-    cell::RefCell,
-    sync::{Arc, Weak},
-};
+use std::sync::{Arc, Weak};
 
 use super::state_machine::processing::ProcessingResult;
 use crate::{
     common::{
-        frim::FrimMap,
-        roto::ThreadLocalVM,
+        frim::{Entry, FrimMap},
         status_reporter::{AnyStatusReporter, Chainable, UnitStatusReporter},
     },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate},
@@ -33,7 +29,7 @@ use non_empty_vec::NonEmpty;
 use roto::types::{builtin::BuiltinTypeValue, typevalue::TypeValue};
 use routecore::bmp::message::Message as BmpMsg;
 use serde::Deserialize;
-use tokio::{runtime::Handle, sync::Mutex};
+use tokio::sync::Mutex;
 
 #[cfg(feature = "router-list")]
 use {
@@ -117,10 +113,6 @@ struct BmpInRunner {
 }
 
 impl BmpInRunner {
-    thread_local!(
-        static VM: ThreadLocalVM = RefCell::new(None);
-    );
-
     fn new(
         mut component: Component,
         gate: Gate,
@@ -163,7 +155,7 @@ impl BmpInRunner {
                 router_states.clone(),
             ));
 
-            component.register_http_resource(processor.clone());
+            component.register_http_resource(processor.clone(), &http_api_path);
 
             (processor, router_info)
         };
@@ -300,7 +292,7 @@ impl BmpInRunner {
 
     fn router_disconnected(&self, source_id: &SourceId) {
         self.router_states.remove(source_id);
-        // TODO: also remove from self.router_info ?
+        self.router_info.remove(source_id);
     }
 
     async fn process_msg(
@@ -434,6 +426,7 @@ impl BmpInRunner {
                 // Setup a REST API endpoint for querying information
                 // about this particular monitored router.
                 let processor = RouterInfoApi::new(
+                    self.component.read().await.http_resources().clone(),
                     self.http_api_path.clone(),
                     source_id.clone(),
                     self.status_reporter.typed_metrics(),
@@ -448,7 +441,7 @@ impl BmpInRunner {
                 self.component
                     .write()
                     .await
-                    .register_http_resource(processor.clone());
+                    .register_sub_http_resource(processor.clone(), &self.http_api_path);
 
                 let updatable_router_info = Arc::make_mut(&mut this_router_info);
                 updatable_router_info.api_processor = Some(processor);
@@ -520,20 +513,25 @@ impl BmpInRunner {
 
                 // Process the message through the BMP state machine.
                 // Initialize the state machine if not already done for this router.
-                let entry = entry.or_insert_with(|| {
-                    let new_entry = Arc::new(tokio::sync::Mutex::new(Some(
-                        self.router_connected(&source_id),
-                    )));
+                // Process the message through the BMP state machine.
+                // Initialize the state machine if not already done for this router.
+                let entry = match entry {
+                    Entry::Occupied(existing_entry) => existing_entry,
 
-                    let weak_ref = Arc::downgrade(&new_entry);
-                    tokio::task::block_in_place(|| {
-                        Handle::current().block_on(
-                            self.setup_router_specific_api_endpoint(weak_ref, &source_id),
-                        );
-                    });
+                    Entry::Vacant(map, key) => {
+                        // Entry doesn't yet exist, create and insert it.
+                        let new_entry =
+                            Arc::new(Mutex::new(Some(self.router_connected(&source_id))));
 
-                    new_entry
-                });
+                        let weak_ref = Arc::downgrade(&new_entry);
+                        self.setup_router_specific_api_endpoint(weak_ref, &source_id)
+                            .await;
+
+                        map.insert(key, new_entry.clone());
+
+                        new_entry
+                    }
+                };
 
                 let mut locked = entry.lock().await;
                 let this_state = locked.take().unwrap();
@@ -624,11 +622,12 @@ mod tests {
     // includes the BMP sysName.
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn counters_should_be_initialized_for_new_router_id() {
+    #[should_panic]
+    async fn counters_for_expected_sys_name_should_not_exist() {
         let (runner, _) = BmpInRunner::mock();
-        let update = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
+        let initiation_msg = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
 
-        runner.process_update(update).await;
+        runner.process_update(initiation_msg).await;
 
         let metrics = mk_testable_metrics(&runner.status_reporter.metrics().unwrap());
         assert_eq!(
@@ -641,34 +640,11 @@ mod tests {
     #[should_panic]
     async fn counters_for_other_sys_name_should_not_exist() {
         let (runner, _) = BmpInRunner::mock();
-        let update = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
+        let initiation_msg = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
 
-        runner.process_update(update).await;
-
-        let metrics = mk_testable_metrics(&runner.status_reporter.metrics().unwrap());
-        assert_eq!(
-            metrics.with_label::<usize>(
-                "bmp_in_num_invalid_bmp_messages",
-                ("router", OTHER_SYS_NAME)
-            ),
-            0,
-        );
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn new_counters_should_be_started_if_the_router_id_changes() {
-        let (runner, _) = BmpInRunner::mock();
-        let update = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
-        let update2 = mk_update(mk_initiation_msg(OTHER_SYS_NAME, SYS_DESCR));
-
-        runner.process_update(update).await;
-        runner.process_update(update2).await;
+        runner.process_update(initiation_msg).await;
 
         let metrics = mk_testable_metrics(&runner.status_reporter.metrics().unwrap());
-        assert_eq!(
-            metrics.with_label::<usize>("bmp_in_num_invalid_bmp_messages", ("router", SYS_NAME)),
-            0,
-        );
         assert_eq!(
             metrics.with_label::<usize>(
                 "bmp_in_num_invalid_bmp_messages",
@@ -683,15 +659,16 @@ mod tests {
         let (runner, _) = BmpInRunner::mock();
 
         // A BMP Initiation message that lacks required fields
-        let update = mk_update(mk_invalid_initiation_message_that_lacks_information_tlvs());
+        let bad_initiation_msg =
+            mk_update(mk_invalid_initiation_message_that_lacks_information_tlvs());
 
         // A BMP Peer Down Notification message without a corresponding Peer
         // Up Notification message.
         let pph = mk_per_peer_header("10.0.0.1", 12345);
-        let update2 = mk_update(mk_peer_down_notification_msg(&pph));
+        let bad_peer_down_msg = mk_update(mk_peer_down_notification_msg(&pph));
 
-        runner.process_update(update).await;
-        runner.process_update(update2).await;
+        runner.process_update(bad_initiation_msg).await;
+        runner.process_update(bad_peer_down_msg).await;
 
         let metrics = mk_testable_metrics(&runner.status_reporter.metrics().unwrap());
         assert_eq!(
@@ -700,6 +677,34 @@ mod tests {
                 ("router", UNKNOWN_ROUTER_SYSNAME)
             ),
             2,
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn new_counters_should_be_started_if_the_router_id_changes() {
+        let (runner, _) = BmpInRunner::mock();
+        let initiation_msg = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
+        let pph = mk_per_peer_header("10.0.0.1", 12345);
+        let bad_peer_down_msg = mk_update(mk_peer_down_notification_msg(&pph));
+        let reinitiation_msg = mk_update(mk_initiation_msg(OTHER_SYS_NAME, SYS_DESCR));
+        let another_bad_peer_down_msg = mk_update(mk_peer_down_notification_msg(&pph));
+
+        runner.process_update(initiation_msg).await;
+        runner.process_update(bad_peer_down_msg).await;
+        runner.process_update(reinitiation_msg).await;
+        runner.process_update(another_bad_peer_down_msg).await;
+
+        let metrics = mk_testable_metrics(&runner.status_reporter.metrics().unwrap());
+        assert_eq!(
+            metrics.with_label::<usize>("bmp_in_num_invalid_bmp_messages", ("router", SYS_NAME)),
+            1,
+        );
+        assert_eq!(
+            metrics.with_label::<usize>(
+                "bmp_in_num_invalid_bmp_messages",
+                ("router", OTHER_SYS_NAME)
+            ),
+            1,
         );
     }
 

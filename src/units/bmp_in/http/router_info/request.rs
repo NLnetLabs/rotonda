@@ -107,7 +107,7 @@ impl ProcessRequest for RouterInfoApi {
                 {
                     return Some(Self::build_response(
                         self.http_resources.clone(),
-                        format!("{}/{}", base_path, router),
+                        format!("{}{}", base_path, router),
                         self.source_id.clone(),
                         router_id,
                         sys_name,

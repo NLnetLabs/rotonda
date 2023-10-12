@@ -33,6 +33,8 @@ use super::peer_config::{CombinedConfig, PeerConfigs};
 //
 // These traits enable us to swap out the real TCP listener for a mock when
 // testing.
+//
+// These were the same as in bmp-tcp-in but have since diverged.
 
 #[async_trait::async_trait]
 trait TcpListenerFactory<T> {

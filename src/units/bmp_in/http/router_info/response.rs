@@ -17,12 +17,15 @@ use crate::{
 
 use super::RouterInfoApi;
 
+/// A Display formatted Per Peer Header
+pub type PeerKey = String;
+
 pub enum Focus {
     None,
 
-    Flags(String), // peer key
+    Flags(PeerKey),
 
-    Prefixes(String), // peer key
+    Prefixes(PeerKey),
 }
 
 impl RouterInfoApi {
@@ -240,8 +243,8 @@ impl RouterInfoApi {
                                 writeln!(peer_report, "    Announced prefixes: [<a href=\"{}\">close</a>]", base_http_path).unwrap();
                                 for prefix in prefixes {
                                     write!(peer_report, "        {}: ", prefix).unwrap();
-                                    for rel_base_url in http_resources.rel_base_urls_for_component_type("rib") {
-                                        write!(peer_report, "<a href=\"{}{}\">view</a> ", rel_base_url, prefix).unwrap();
+                                    for resource in http_resources.resources_for_component_type("rib") {
+                                        write!(peer_report, "<a href=\"{}{}\">{}</a> ", resource.rel_base_url, prefix, resource.component_name).unwrap();
                                     }
                                     writeln!(peer_report, "").unwrap();
                                 }

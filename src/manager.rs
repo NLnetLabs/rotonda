@@ -129,6 +129,7 @@ impl Component {
     ) {
         self.http_resources.register(
             Arc::downgrade(&process),
+            self.name.clone(),
             self.type_name,
             rel_base_url,
             false,
@@ -141,8 +142,13 @@ impl Component {
         process: Arc<dyn http::ProcessRequest>,
         rel_base_url: &str,
     ) {
-        self.http_resources
-            .register(Arc::downgrade(&process), self.type_name, rel_base_url, true)
+        self.http_resources.register(
+            Arc::downgrade(&process),
+            self.name.clone(),
+            self.type_name,
+            rel_base_url,
+            true,
+        )
     }
 }
 
@@ -475,6 +481,7 @@ impl Manager {
         #[cfg(feature = "config-graph")]
         manager.http_resources.register(
             Arc::downgrade(&manager.graph_svg_processor),
+            "manager".into(),
             "manager",
             rel_base_url,
             true,

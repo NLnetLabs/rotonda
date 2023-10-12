@@ -19,7 +19,7 @@ use log::{error, info, trace};
 use percent_encoding::percent_decode;
 use serde::Deserialize;
 use serde_with::{serde_as, OneOrMany};
-use smallvec::{smallvec, SmallVec};
+use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::convert::Infallible;
 use std::fmt::Display;
@@ -293,7 +293,7 @@ impl Server {
 #[derive(Clone, Default)]
 pub struct Resources {
     /// The currently registered sources.
-    sources: Arc<ArcSwap<Vec<RegisteredResource>>>,
+    sources: Arc<ArcSwap<Vec<Arc<RegisteredResource>>>>,
 
     /// A mutex to be held during registration of a new source.
     ///
@@ -315,6 +315,7 @@ impl Resources {
     pub fn register(
         &self,
         process: Weak<dyn ProcessRequest>,
+        component_name: Arc<str>,
         component_type: &'static str,
         rel_base_url: &str,
         is_sub_resource: bool,
@@ -328,12 +329,13 @@ impl Resources {
             }
         }
 
-        let new_source = RegisteredResource {
+        let new_source = Arc::new(RegisteredResource {
             processor: process,
+            component_name,
             component_type,
             rel_base_url: Arc::new(rel_base_url.to_string()),
             is_sub_resource,
-        };
+        });
         if is_sub_resource {
             new_sources.insert(0, new_source);
         } else {
@@ -360,26 +362,25 @@ impl Resources {
         None
     }
 
-    pub fn rel_base_urls<'a>(&'a self) -> SmallVec<[Arc<String>; 8]> {
+    pub fn resources(&self) -> SmallVec<[Arc<RegisteredResource>; 8]> {
         self.sources
             .load()
             .iter()
             .filter(|item| !item.is_sub_resource)
-            .map(|item| item.rel_base_url.clone())
+            .cloned()
             .collect()
     }
 
-    pub fn rel_base_urls_for_component_type(
+    pub fn resources_for_component_type(
         &self,
         component_type: &'static str,
-    ) -> SmallVec<[Arc<String>; 8]> {
-        let mut rel_base_urls = smallvec![];
-        for item in self.sources.load().iter() {
-            if !item.is_sub_resource && item.component_type == component_type {
-                rel_base_urls.push(item.rel_base_url.clone());
-            }
-        }
-        rel_base_urls
+    ) -> SmallVec<[Arc<RegisteredResource>; 8]> {
+        self.sources
+            .load()
+            .iter()
+            .filter(|item| !item.is_sub_resource && item.component_type == component_type)
+            .cloned()
+            .collect()
     }
 }
 
@@ -394,18 +395,21 @@ impl fmt::Debug for Resources {
 
 /// All information on a resource registered with a collection.
 #[derive(Clone)]
-struct RegisteredResource {
+pub struct RegisteredResource {
     /// A weak pointer to the resource’s processor.
     processor: Weak<dyn ProcessRequest>,
 
+    /// The name of the unit that registered the processor.
+    pub component_name: Arc<str>,
+
     /// The type of unit that registered the processor.
-    component_type: &'static str,
+    pub component_type: &'static str,
 
     /// The base URL or main entrypoint of the API offered by the processor.
-    rel_base_url: Arc<String>,
+    pub rel_base_url: Arc<String>,
 
     /// Does this processor handle URL space below another processor?
-    is_sub_resource: bool,
+    pub is_sub_resource: bool,
 }
 
 //------------ ProcessRequest ------------------------------------------------

@@ -65,7 +65,7 @@ pub struct RouterMetrics {
 }
 
 impl BmpTcpInMetrics {
-    // TEST STATUS: [/] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const LISTENER_BOUND_COUNT_METRIC: Metric = Metric::new(
         "bmp_tcp_in_listener_bound_count",
         "the number of times the TCP listen port was bound to",

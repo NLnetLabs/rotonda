@@ -9,6 +9,40 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 
 use crate::comms::{Gate, GateStatus, Terminated};
 
+pub trait FatalError {
+    fn is_fatal(&self) -> bool;
+}
+
+impl FatalError for std::io::Error {
+    fn is_fatal(&self) -> bool {
+        match self.kind() {
+            std::io::ErrorKind::TimedOut => false,
+            std::io::ErrorKind::Interrupted => false,
+
+            std::io::ErrorKind::NotFound => true,
+            std::io::ErrorKind::PermissionDenied => true,
+            std::io::ErrorKind::ConnectionRefused => true,
+            std::io::ErrorKind::ConnectionReset => true,
+            std::io::ErrorKind::ConnectionAborted => true,
+            std::io::ErrorKind::NotConnected => true,
+            std::io::ErrorKind::AddrInUse => true,
+            std::io::ErrorKind::AddrNotAvailable => true,
+            std::io::ErrorKind::BrokenPipe => true,
+            std::io::ErrorKind::AlreadyExists => true,
+            std::io::ErrorKind::WouldBlock => true,
+            std::io::ErrorKind::InvalidInput => true,
+            std::io::ErrorKind::InvalidData => true,
+            std::io::ErrorKind::WriteZero => true,
+            std::io::ErrorKind::Unsupported => true,
+            std::io::ErrorKind::UnexpectedEof => true,
+            std::io::ErrorKind::OutOfMemory => true,
+            std::io::ErrorKind::Other => true,
+
+            _ => true,
+        }
+    }
+}
+
 async fn bmp_read<T: AsyncRead + Unpin>(mut rx: T) -> Result<(T, Bytes), (T, std::io::Error)> {
     let mut msg_buf = BytesMut::new();
     msg_buf.resize(5, 0u8);
@@ -83,8 +117,11 @@ impl<T: AsyncRead + Unpin> BmpStream<T> {
 
                         update_fut = next_fut;
                     }
-                    Either::Right((Err((_rx, err)), _)) => {
+                    Either::Right((Err((rx, err)), _)) => {
                         // Error while receiving data.
+                        if !err.is_fatal() {
+                            self.rx = Some(rx);
+                        }
                         return Err(err);
                     }
                     Either::Right((Ok((rx, msg)), _)) => {

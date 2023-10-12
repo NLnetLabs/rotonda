@@ -42,39 +42,31 @@ impl RouterInfoApi {
         connected_at: &DateTime<Utc>,
         last_message_at: &Arc<RwLock<DateTime<Utc>>>,
     ) -> Response<Body> {
-        if conn_metrics.contains(&router_id) {
-            let router_conn_metrics = conn_metrics.router_metrics(router_id.clone());
-            let mut response_body = Self::build_response_header();
+        let router_conn_metrics = conn_metrics.router_metrics(router_id.clone());
+        let mut response_body = Self::build_response_header();
 
-            response_body.push_str(&Self::build_response_body(
-                http_resources,
-                base_http_path,
-                source_id,
-                router_id,
-                router_conn_metrics,
-                sys_name,
-                sys_desc,
-                sys_extra,
-                peer_states,
-                focus,
-                bmp_metrics,
-                connected_at,
-                last_message_at,
-            ));
+        response_body.push_str(&Self::build_response_body(
+            http_resources,
+            base_http_path,
+            source_id,
+            router_id,
+            router_conn_metrics,
+            sys_name,
+            sys_desc,
+            sys_extra,
+            peer_states,
+            focus,
+            bmp_metrics,
+            connected_at,
+            last_message_at,
+        ));
 
-            Self::build_response_footer(&mut response_body);
+        Self::build_response_footer(&mut response_body);
 
-            Response::builder()
-                .header("Content-Type", "text/html")
-                .body(Body::from(response_body))
-                .unwrap()
-        } else {
-            Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .header("Content-Type", "text/html")
-                .body("Not Found".into())
-                .unwrap()
-        }
+        Response::builder()
+            .header("Content-Type", "text/html")
+            .body(Body::from(response_body))
+            .unwrap()
     }
 
     fn build_response_header() -> String {

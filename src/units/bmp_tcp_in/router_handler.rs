@@ -53,10 +53,10 @@ async fn read_from_router<T: AsyncRead + Unpin>(
                 status_reporter.receive_io_error(router_addr, &err);
 
                 if err.is_fatal() {
-                // Break to close our side of the connection and stop
-                // processing this BMP stream.
-                break;
-            }
+                    // Break to close our side of the connection and stop
+                    // processing this BMP stream.
+                    break;
+                }
             }
 
             Ok((None, _)) => {
@@ -129,7 +129,7 @@ mod tests {
 
     use tokio::{io::ReadBuf, time::timeout};
 
-    use crate::units::bmp_tcp_in::metrics::BmpTcpInMetrics;
+    use crate::{tests::util::internal::{get_testable_metrics_snapshot, enable_logging}, common::status_reporter::AnyStatusReporter};
 
     use super::*;
 
@@ -137,8 +137,7 @@ mod tests {
     async fn terminate_on_loss_of_parent_gate() {
         let (gate, _agent) = Gate::new(1);
         let router_addr = "127.0.0.1:8080".parse().unwrap();
-        let metrics = Arc::new(BmpTcpInMetrics::default());
-        let status_reporter = Arc::new(BmpTcpInStatusReporter::new("mock reporter", metrics));
+        let status_reporter = Arc::new(BmpTcpInStatusReporter::default());
 
         struct MockRouterStream;
 
@@ -155,15 +154,71 @@ mod tests {
         let rx = MockRouterStream;
 
         eprintln!("STARTING ROUTER READER");
-        let join_handle = read_from_router(gate.clone(), rx, router_addr, status_reporter);
+        let fut = read_from_router(gate.clone(), rx, router_addr, status_reporter);
 
         // Without this the reader continues forever
         eprintln!("DROPPING PARENT GATE");
         drop(gate);
 
         eprintln!("WAITING FOR ROUTER READER TO EXIT");
-        timeout(Duration::from_secs(5), join_handle).await.unwrap();
+        timeout(Duration::from_secs(5), fut).await.unwrap();
 
         eprintln!("DONE");
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn should_count_io_errors() {
+        enable_logging("trace");
+        let (gate, _agent) = Gate::new(1);
+        let router_addr = "127.0.0.1:8080".parse().unwrap();
+        let status_reporter = Arc::new(BmpTcpInStatusReporter::default());
+
+        struct MockRouterStream {
+            interrupted_already: bool,
+            router_addr: SocketAddr,
+            status_reporter: Arc<BmpTcpInStatusReporter>,
+        }
+
+        impl AsyncRead for MockRouterStream {
+            fn poll_read(
+                self: Pin<&mut Self>,
+                _cx: &mut Context<'_>,
+                _buf: &mut ReadBuf<'_>,
+            ) -> Poll<tokio::io::Result<()>> {
+                // Fail with a non-fatal error so that reading from the router
+                // continues giving us a chance to check the router specific
+                // metrics rather than  returning a fatal error which would
+                // cause the simulated router to be disconnected and its
+                // associated metrics to be removed.
+                if !self.interrupted_already {
+                    self.get_mut().interrupted_already = true;
+                    Poll::Ready(Err(std::io::ErrorKind::Interrupted.into()))
+                } else {
+                    let metrics = get_testable_metrics_snapshot(&self.status_reporter.metrics().unwrap());
+                    let router_addr = self.router_addr.to_string();
+                    let label = ("router", router_addr.as_str());
+                    assert_eq!(metrics.with_label::<usize>("bmp_tcp_in_num_bmp_messages_received", label), 0);
+                    assert_eq!(metrics.with_label::<usize>("bmp_tcp_in_num_receive_io_errors", label), 1);
+
+                    // Fail with a fatal error to stop the reader polling for
+                    // more data.
+                    Poll::Ready(Err(std::io::ErrorKind::Other.into()))
+                }
+            }
+        }
+
+        let rx = MockRouterStream {
+            interrupted_already: false,
+            router_addr,
+            status_reporter: status_reporter.clone(),
+        };
+
+        let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
+        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_connection_lost_count"), 0);
+
+        read_from_router(gate.clone(), rx, router_addr, status_reporter.clone()).await;
+
+        let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
+        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_connection_lost_count"), 1);
     }
 }

@@ -8,7 +8,7 @@ Other parts of `Rotonda` are the lock-free, concurrent read/write prefix store [
 
 ### ROADMAP
 
-Rotonda is under heavy development and should be considered **alpha** software. See the [Roadmap](ROADMAP.md) in this repository for more details.
+Rotonda is under heavy development and should be considered **alpha** software. See the [roadmap](ROADMAP.md) in this repository for more details.
 
 ### DOCUMENTATION
 
@@ -16,7 +16,7 @@ The documentation does not necessarily reflect the reality of Rotonda at this st
 
 Read the PRELIMINARY documentation [here](https://rotonda.docs.nlnetlabs.nl/).
 
-###LICENSE
+### LICENSE
 
 The rotonda crate is distributed under the terms of the MPL-2.0 license. See [LICENSE](https://github.com/NLnetLabs/rotonda/blob/main/LICENSE) for details
 

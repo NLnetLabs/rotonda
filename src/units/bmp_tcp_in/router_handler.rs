@@ -17,6 +17,8 @@ use crate::{
     },
 };
 
+use super::io::FatalError;
+
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_router(
     gate: Gate,
@@ -50,12 +52,11 @@ async fn read_from_router<T: AsyncRead + Unpin>(
                 // There was a problem reading from the BMP stream.
                 status_reporter.receive_io_error(router_addr, &err);
 
-                // TODO: are there kinds of error worth ignoring, e.g. some
-                // sort of network timeout?
-
+                if err.is_fatal() {
                 // Break to close our side of the connection and stop
                 // processing this BMP stream.
                 break;
+            }
             }
 
             Ok((None, _)) => {

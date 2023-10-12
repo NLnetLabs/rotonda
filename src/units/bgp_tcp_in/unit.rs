@@ -418,7 +418,7 @@ mod tests {
     use crate::{
         common::{roto::RotoScripts, status_reporter::AnyStatusReporter},
         comms::{Gate, GateAgent, Terminated},
-        tests::util::internal::mk_testable_metrics,
+        tests::util::internal::get_testable_metrics_snapshot,
         units::bgp_tcp_in::{
             peer_config::{PeerConfig, PrefixOrExact},
             status_reporter::BgpTcpInStatusReporter,
@@ -440,7 +440,7 @@ mod tests {
         let join_handle = crate::tokio::spawn("mock_bgp_tcp_in_runner", runner_fut);
 
         loop {
-            let metrics = mk_testable_metrics(&status_reporter.metrics().unwrap());
+            let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
             let count = metrics.with_name::<usize>("bgp_tcp_in_listener_bound_count");
             if count > 0 {
                 break;
@@ -474,7 +474,7 @@ mod tests {
         let join_handle = crate::tokio::spawn("mock_bgp_tcp_in_runner", runner_fut);
 
         loop {
-            let metrics = mk_testable_metrics(&status_reporter.metrics().unwrap());
+            let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
             let count = metrics.with_name::<usize>("bgp_tcp_in_connection_accepted_count");
             if count > 0 {
                 break;
@@ -510,7 +510,7 @@ mod tests {
 
         let mut count = 0;
         while count != 1 {
-            let metrics = mk_testable_metrics(&status_reporter.metrics().unwrap());
+            let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
             count = metrics.with_name::<usize>("bgp_tcp_in_connection_accepted_count");
         }
 

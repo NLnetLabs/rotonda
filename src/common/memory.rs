@@ -117,7 +117,7 @@ mod tests {
 
     use hashbrown::hash_map::DefaultHashBuilder;
 
-    use crate::tests::util::internal::mk_testable_metrics;
+    use crate::tests::util::internal::get_testable_metrics_snapshot;
 
     use super::TrackingAllocator;
 
@@ -162,7 +162,7 @@ mod tests {
     fn get_num_bytes_allocated_metric_value(
         arc_allocator: &Arc<TrackingAllocator<System>>,
     ) -> usize {
-        let metrics = mk_testable_metrics(arc_allocator);
+        let metrics = get_testable_metrics_snapshot(arc_allocator);
         metrics.with_name::<usize>("tracking_allocator_num_bytes_allocated")
     }
 }

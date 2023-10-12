@@ -586,7 +586,7 @@ mod tests {
             mk_initiation_msg, mk_invalid_initiation_message_that_lacks_information_tlvs,
             mk_peer_down_notification_msg, mk_per_peer_header,
         },
-        tests::util::internal::mk_testable_metrics,
+        tests::util::internal::get_testable_metrics_snapshot,
     };
 
     use super::*;
@@ -629,7 +629,7 @@ mod tests {
 
         runner.process_update(initiation_msg).await;
 
-        let metrics = mk_testable_metrics(&runner.status_reporter.metrics().unwrap());
+        let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
         assert_eq!(
             metrics.with_label::<usize>("bmp_in_num_invalid_bmp_messages", ("router", SYS_NAME)),
             0,
@@ -644,7 +644,7 @@ mod tests {
 
         runner.process_update(initiation_msg).await;
 
-        let metrics = mk_testable_metrics(&runner.status_reporter.metrics().unwrap());
+        let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
         assert_eq!(
             metrics.with_label::<usize>(
                 "bmp_in_num_invalid_bmp_messages",
@@ -670,7 +670,7 @@ mod tests {
         runner.process_update(bad_initiation_msg).await;
         runner.process_update(bad_peer_down_msg).await;
 
-        let metrics = mk_testable_metrics(&runner.status_reporter.metrics().unwrap());
+        let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
         assert_eq!(
             metrics.with_label::<usize>(
                 "bmp_in_num_invalid_bmp_messages",
@@ -694,7 +694,7 @@ mod tests {
         runner.process_update(reinitiation_msg).await;
         runner.process_update(another_bad_peer_down_msg).await;
 
-        let metrics = mk_testable_metrics(&runner.status_reporter.metrics().unwrap());
+        let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
         assert_eq!(
             metrics.with_label::<usize>("bmp_in_num_invalid_bmp_messages", ("router", SYS_NAME)),
             1,

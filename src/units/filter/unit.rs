@@ -242,7 +242,7 @@ mod tests {
     use crate::{
         bgp::encode::{Announcements, Prefixes},
         payload::{Payload, SourceId},
-        tests::util::internal::{enable_logging, mk_testable_metrics},
+        tests::util::internal::{enable_logging, get_testable_metrics_snapshot},
     };
 
     use super::*;
@@ -343,7 +343,7 @@ mod tests {
         assert!(!is_filtered(&filter, mk_filter_payload(mk_initiation_msg())).await);
         assert!(!is_filtered(&filter, mk_filter_payload(mk_termination_msg())).await);
 
-        let metrics = mk_testable_metrics(&filter.status_reporter.metrics().unwrap());
+        let metrics = get_testable_metrics_snapshot(&filter.status_reporter.metrics().unwrap());
         assert_eq!(
             metrics.with_name::<usize>("roto_filter_num_filtered_messages"),
             0,
@@ -364,7 +364,7 @@ mod tests {
         assert!(is_filtered(&filter, mk_filter_payload(mk_statistics_report_msg())).await);
         assert!(!is_filtered(&filter, mk_filter_payload(mk_termination_msg())).await);
 
-        let metrics = mk_testable_metrics(&filter.status_reporter.metrics().unwrap());
+        let metrics = get_testable_metrics_snapshot(&filter.status_reporter.metrics().unwrap());
         assert_eq!(metrics.with_name::<usize>("roto_filter_num_filtered_messages"), 4);
     }
 
@@ -382,7 +382,7 @@ mod tests {
         assert!(!is_filtered(&filter, mk_filter_payload(mk_statistics_report_msg())).await);
         assert!(!is_filtered(&filter, mk_filter_payload(mk_termination_msg())).await);
 
-        let metrics = mk_testable_metrics(&filter.status_reporter.metrics().unwrap());
+        let metrics = get_testable_metrics_snapshot(&filter.status_reporter.metrics().unwrap());
         assert_eq!(metrics.with_name::<usize>("roto_filter_num_filtered_messages"), 0);
     }
 
@@ -399,7 +399,7 @@ mod tests {
         assert!(is_filtered(&filter, mk_filter_payload(mk_peer_up_notification_msg())).await);
         assert!(!is_filtered(&filter, mk_filter_payload(mk_statistics_report_msg())).await);
 
-        let metrics = mk_testable_metrics(&filter.status_reporter.metrics().unwrap());
+        let metrics = get_testable_metrics_snapshot(&filter.status_reporter.metrics().unwrap());
         assert_eq!(metrics.with_name::<usize>("roto_filter_num_filtered_messages"), 2);
     }
 

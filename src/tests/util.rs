@@ -16,7 +16,7 @@ pub(crate) mod internal {
             .try_init();
     }
 
-    pub(crate) fn mk_testable_metrics(metrics: &Arc<impl metrics::Source + ?Sized>) -> Target {
+    pub(crate) fn get_testable_metrics_snapshot(metrics: &Arc<impl metrics::Source + ?Sized>) -> Target {
         let mut target = Target::new(OutputFormat::Test);
         metrics.append("testunit", &mut target);
         target

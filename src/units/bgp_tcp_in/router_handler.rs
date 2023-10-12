@@ -538,7 +538,7 @@ mod tests {
     use crate::{
         common::status_reporter::AnyStatusReporter,
         comms::GateAgent,
-        tests::util::internal::{mk_testable_metrics, enable_logging},
+        tests::util::internal::{get_testable_metrics_snapshot, enable_logging},
         units::bgp_tcp_in::{
             peer_config::{CombinedConfig, PeerConfig, PrefixOrExact},
             router_handler::Processor,
@@ -570,7 +570,7 @@ mod tests {
         // Wait for the termination command to be handled:
         let mut count = 0;
         while count < 1 {
-            let metrics = mk_testable_metrics(&status_reporter.metrics().unwrap());
+            let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
             count = metrics.with_name::<usize>("bgp_tcp_in_disconnect_count");
         }
 
@@ -582,7 +582,7 @@ mod tests {
         // Now it's safe to wait for the processor to abort.
         join_handle.await.unwrap();
 
-        let metrics = mk_testable_metrics(&status_reporter.metrics().unwrap());
+        let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
         assert_eq!(
             metrics.with_name::<usize>("bgp_tcp_in_connection_lost_count"),
             1
@@ -599,7 +599,7 @@ mod tests {
 
         join_handle.await.unwrap();
 
-        let metrics = mk_testable_metrics(&status_reporter.metrics().unwrap());
+        let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
         assert_eq!(
             metrics.with_name::<usize>("bgp_tcp_in_connection_lost_count"),
             1

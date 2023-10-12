@@ -4,7 +4,7 @@ Roll your own BGP application with Rotonda.
 
 This repository contains the units and the configurations to create a high-performance BGP application.
 
-Other parts of `Rotonda` are the lock-free, concurrent read/write prefix store [`rotonda-store`](https://github.com/NLnetLabs/rotonda-store) and the filter & query language [`roto`](https://github.com/NLnetLabs/roto). `Rotonda` draws heavily upon the BGP packet parsing & creation library called [`routecore`](https://github.com/NLnetLabs/routecore).
+Other parts of `Rotonda` are the lock-free, concurrent read/write prefix store [`rotonda-store`](https://github.com/NLnetLabs/rotonda-store) and the filter & query language [`roto`](https://github.com/NLnetLabs/roto). `Rotonda` draws heavily upon the BGP/BMP packet parsing functionality of the library called [`routecore`](https://github.com/NLnetLabs/routecore).
 
 ### ROADMAP
 

@@ -118,7 +118,7 @@ impl metrics::Source for RibMergeUpdateStatistics {
         #[rustfmt::skip]
         let metric_data = [
             (&Self::RIB_MERGE_UPDATE_WITHDRAW_DURATION_MICROSECONDS, withdraw),
-            (&Self::RIB_MERGE_UPDATE_OTHER_DURATION_MICROSECONDS, other),
+            (&Self::RIB_MERGE_UPDATE_ANNOUNCE_DURATION_MICROSECONDS, other),
         ];
 
         for (metric, data) in metric_data {

@@ -62,7 +62,6 @@ impl ProcessRequest for RouterInfoApi {
         let req_path = request.uri().decoded_path();
         if request.method() == Method::GET && req_path.starts_with(self.http_api_path.deref()) {
             let (base_path, router) = req_path.split_at(self.http_api_path.len());
-            let router = router.trim_start_matches('/');
             if let Some(state_machine) = self.state_machine.upgrade() {
                 let lock = state_machine.lock().await;
                 let sm = lock.as_ref().unwrap();

@@ -38,7 +38,7 @@ impl RibUnitStatusReporter {
         sr_log!(debug: self, "Failed to insert prefix {}: {}", pfx, err);
         self.metrics
             .num_insert_hard_failures
-            .fetch_add(1, Ordering::SeqCst);
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     pub fn insert_ok(
@@ -52,14 +52,14 @@ impl RibUnitStatusReporter {
     ) {
         self.metrics
             .last_insert_duration
-            .store(insert_delay, Ordering::SeqCst);
+            .store(insert_delay, Ordering::Relaxed);
 
         self.insert_or_update(router_id, propagation_delay, num_retries, item_count_delta);
 
         if !is_announcement {
             self.metrics
                 .num_route_withdrawals_without_announcement
-                .fetch_add(1, Ordering::SeqCst);
+                .fetch_add(1, Ordering::Relaxed);
         }
     }
 
@@ -73,7 +73,7 @@ impl RibUnitStatusReporter {
     ) {
         self.metrics
             .last_update_duration
-            .store(insert_delay, Ordering::SeqCst);
+            .store(insert_delay, Ordering::Relaxed);
 
         self.insert_or_update(router_id, propagation_delay, num_retries, item_count_delta);
     }
@@ -88,29 +88,29 @@ impl RibUnitStatusReporter {
         let metrics = self.metrics.router_metrics(router_id);
         metrics
             .last_e2e_delay
-            .store(propagation_delay, Ordering::SeqCst);
+            .store(propagation_delay, Ordering::Relaxed);
         metrics.last_e2e_delay_at.store(Arc::new(Instant::now()));
 
         if num_retries > 0 {
             self.metrics
                 .num_insert_retries
-                .fetch_add(num_retries as usize, Ordering::SeqCst);
+                .fetch_add(num_retries as usize, Ordering::Relaxed);
         }
 
         if item_count_delta > 0 {
             self.metrics
                 .num_items
-                .fetch_add(item_count_delta as usize, Ordering::SeqCst);
+                .fetch_add(item_count_delta as usize, Ordering::Relaxed);
             self.metrics
                 .num_routes_announced
-                .fetch_add(item_count_delta as usize, Ordering::SeqCst);
+                .fetch_add(item_count_delta as usize, Ordering::Relaxed);
         } else {
             self.metrics
                 .num_items
-                .fetch_sub(-item_count_delta as usize, Ordering::SeqCst);
+                .fetch_sub(-item_count_delta as usize, Ordering::Relaxed);
             self.metrics
                 .num_routes_withdrawn
-                .fetch_add(-item_count_delta as usize, Ordering::SeqCst);
+                .fetch_add(-item_count_delta as usize, Ordering::Relaxed);
         }
     }
 
@@ -123,24 +123,24 @@ impl RibUnitStatusReporter {
         if new_announcements > 0 {
             self.metrics
                 .num_routes_announced
-                .fetch_add(new_announcements, Ordering::SeqCst);
+                .fetch_add(new_announcements, Ordering::Relaxed);
         }
         if modified_announcements > 0 {
             self.metrics
                 .num_modified_route_announcements
-                .fetch_add(modified_announcements, Ordering::SeqCst);
+                .fetch_add(modified_announcements, Ordering::Relaxed);
         }
         if new_withdrawals > 0 {
             self.metrics
                 .num_routes_withdrawn
-                .fetch_add(new_withdrawals, Ordering::SeqCst);
+                .fetch_add(new_withdrawals, Ordering::Relaxed);
         }
     }
 
     pub fn unique_prefix_count_updated(&self, num_unique_prefixes: usize) {
         self.metrics
             .num_unique_prefixes
-            .store(num_unique_prefixes, Ordering::SeqCst);
+            .store(num_unique_prefixes, Ordering::Relaxed);
     }
 
     pub fn message_filtering_failure<T: Display>(&self, err: T) {

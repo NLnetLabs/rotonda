@@ -19,8 +19,6 @@ use crate::targets::DEF_MQTT_PORT;
 // NOTE: Unit and target names MUST match the names used in `rotonda.conf`!
 
 pub const CFG_UNIT_BGP_IN: &str = "bgp-in";
-pub const CFG_UNIT_BMP_TCP_IN: &str = "bmp-tcp-in";
-pub const CFG_UNIT_BMP_IN_FILTER: &str = "bmp-in-filter";
 pub const CFG_UNIT_BMP_IN: &str = "bmp-in";
 pub const CFG_UNIT_RIB_IN_PRE: &str = "rib-in-pre";
 pub const CFG_UNIT_RIB_IN_POST: &str = "rib-in-post";
@@ -194,8 +192,7 @@ mod tests {
         manager::Manager,
         mvp::{
             CFG_TARGET_BMP_PROXY, CFG_TARGET_MQTT, CFG_TARGET_NULL, CFG_UNIT_BGP_IN,
-            CFG_UNIT_BMP_IN, CFG_UNIT_BMP_IN_FILTER, CFG_UNIT_BMP_TCP_IN, CFG_UNIT_RIB_IN_POST,
-            CFG_UNIT_RIB_IN_PRE,
+            CFG_UNIT_BMP_IN, CFG_UNIT_RIB_IN_POST, CFG_UNIT_RIB_IN_PRE,
         },
         tests::util::internal::enable_logging,
     };
@@ -254,10 +251,8 @@ mod tests {
         assert_eq!(conf.http.listen(), &["127.0.0.1:8080".parse().unwrap()]);
 
         let units = conf.units.units();
-        assert_eq!(units.len(), 6);
+        assert_eq!(units.len(), 4);
         assert!(units.contains_key(CFG_UNIT_BGP_IN));
-        assert!(units.contains_key(CFG_UNIT_BMP_TCP_IN));
-        assert!(units.contains_key(CFG_UNIT_BMP_IN_FILTER));
         assert!(units.contains_key(CFG_UNIT_BMP_IN));
         assert!(units.contains_key(CFG_UNIT_RIB_IN_PRE));
         assert!(units.contains_key(CFG_UNIT_RIB_IN_POST));
@@ -295,10 +290,8 @@ mod tests {
         assert_eq!(conf.http.listen(), &["127.0.0.1:8080".parse().unwrap()]);
 
         let units = conf.units.units();
-        assert_eq!(units.len(), 6);
+        assert_eq!(units.len(), 4);
         assert!(units.contains_key(CFG_UNIT_BGP_IN));
-        assert!(units.contains_key(CFG_UNIT_BMP_TCP_IN));
-        assert!(units.contains_key(CFG_UNIT_BMP_IN_FILTER));
         assert!(units.contains_key(CFG_UNIT_BMP_IN));
         assert!(units.contains_key(CFG_UNIT_RIB_IN_PRE));
         assert!(units.contains_key(CFG_UNIT_RIB_IN_POST));

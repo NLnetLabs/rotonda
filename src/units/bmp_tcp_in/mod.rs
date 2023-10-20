@@ -1,6 +1,12 @@
-pub(crate) mod io;
-pub(crate) mod metrics;
-pub(crate) mod router_handler;
-pub(crate) mod status_reporter;
+mod io;
+mod metrics;
+mod router_handler;
+mod status_reporter;
+#[cfg(feature = "router-list")]
+mod http;
+mod state_machine;
+#[cfg(feature = "router-list")]
+mod types;
+mod util;
 
 pub mod unit;

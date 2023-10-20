@@ -19,9 +19,8 @@
 //
 // These contain all the actual unit types grouped by shared functionality.
 mod bgp_tcp_in;
-mod filter;
-mod bmp_in;
 mod bmp_tcp_in;
+mod filter;
 mod rib_unit;
 pub use rib_unit::{
     unit::{RibType, RibUnit},
@@ -47,9 +46,6 @@ pub enum Unit {
     #[serde(rename = "filter")]
     Filter(filter::unit::Filter),
 
-    #[serde(rename = "bmp-in")]
-    BmpIn(bmp_in::unit::BmpIn),
-
     #[serde(rename = "rib")]
     RibUnit(rib_unit::unit::RibUnit),
 }
@@ -60,7 +56,6 @@ impl Unit {
             Unit::BgpTcpIn(unit) => unit.run(component, gate, waitpoint).await,
             Unit::BmpTcpIn(unit) => unit.run(component, gate, waitpoint).await,
             Unit::Filter(unit) => unit.run(component, gate, waitpoint).await,
-            Unit::BmpIn(unit) => unit.run(component, gate, waitpoint).await,
             Unit::RibUnit(unit) => unit.run(component, gate, waitpoint).await,
         };
     }
@@ -70,7 +65,6 @@ impl Unit {
             Unit::BgpTcpIn(_) => "bgp-tcp-in",
             Unit::BmpTcpIn(_) => "bmp-tcp-in",
             Unit::Filter(_) => "filter",
-            Unit::BmpIn(_) => "bmp-in",
             Unit::RibUnit(_) => "rib",
         }
     }

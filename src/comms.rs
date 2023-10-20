@@ -74,10 +74,11 @@ use chrono::{DateTime, Utc};
 use crossbeam_utils::atomic::AtomicCell;
 use futures::future::{select, Either, Future};
 use futures::pin_mut;
-use log::{log_enabled, trace};
+use log::{error, log_enabled, trace, Level};
 use rotonda_store::MatchOptions;
 use routecore::addr::Prefix;
 use serde::Deserialize;
+use tokio::sync::mpsc::Sender;
 
 use std::sync::atomic::{AtomicU16, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -186,7 +187,15 @@ pub struct Gate {
 // reference to them is never cleaned up.
 impl Drop for Gate {
     fn drop(&mut self) {
-        if matches!(&self.state, GateState::Clone(_)) {
+        if log_enabled!(Level::Trace) {
+            let clone_txt = if self.is_clone() {
+                format!("{} clone of ", self.clone_id())
+            } else {
+                String::new()
+            };
+            trace!("Gate[{} ({}{})]: Drop", self.name, clone_txt, self.id());
+        }
+        if self.is_clone() {
             if let Ok(handle) = tokio::runtime::Handle::try_current() {
                 tokio::task::block_in_place(move || {
                     handle.block_on(self.detach());
@@ -224,6 +233,9 @@ impl Gate {
             id: gate.id.clone(),
             commands: tx,
         };
+        if log_enabled!(Level::Trace) {
+            trace!("Gate[{} ({})]: New gate created", gate.name, gate.id());
+        }
         (gate, agent)
     }
 
@@ -252,6 +264,13 @@ impl Gate {
         }
     }
 
+    fn clone_id(&self) -> Uuid {
+        let GateState::Clone(CloneGateState { clone_id, .. }) = self.state else {
+            unreachable!()
+        };
+        clone_id
+    }
+
     /// Returns a shareable reference to the gate metrics.
     ///
     /// Metrics are shared between a gate and its clones.
@@ -266,6 +285,10 @@ impl Gate {
             ..
         }) = &self.state
         {
+            if log_enabled!(Level::Trace) {
+                let clone_txt = format!("{clone_id} clone of ");
+                trace!("Gate[{} ({}{})]: Detach", self.name, clone_txt, self.id());
+            }
             if let Err(_err) = parent_command_sender
                 .send(GateCommand::DetachClone {
                     clone_id: *clone_id,
@@ -274,6 +297,12 @@ impl Gate {
             {
                 // TODO
             }
+        } else {
+            error!(
+                "Gate[{} ({})]: Root gates cannot be detached!",
+                self.name,
+                self.id()
+            );
         }
     }
 
@@ -284,11 +313,26 @@ impl Gate {
             ..
         }) = &self.state
         {
+            if log_enabled!(Level::Trace) {
+                let clone_txt = format!("{clone_id} clone of ");
+                trace!(
+                    "Gate[{} ({}{})]: Blocking detach",
+                    self.name,
+                    clone_txt,
+                    self.id()
+                );
+            }
             if let Err(_err) = parent_command_sender.blocking_send(GateCommand::DetachClone {
                 clone_id: *clone_id,
             }) {
                 // TODO
             }
+        } else {
+            error!(
+                "Gate[{} ({})]: Root gates cannot be blocking detached!",
+                self.name,
+                self.id()
+            );
         }
     }
 
@@ -314,11 +358,48 @@ impl Gate {
                 let mut lock = self.commands.write().await;
                 match lock.recv().await {
                     Some(command) => command,
-                    None => return Err(Terminated),
+                    None => {
+                        if log_enabled!(Level::Trace) {
+                            let clone_txt = if self.is_clone() {
+                                format!("{} clone of ", self.clone_id())
+                            } else {
+                                String::new()
+                            };
+                            trace!(
+                                "Gate[{} ({}{})]: Command channel has been closed",
+                                self.name,
+                                clone_txt,
+                                self.id()
+                            );
+                        }
+                        return Err(Terminated);
+                    }
                 }
             };
 
+            if log_enabled!(Level::Trace) {
+                let clone_txt = if self.is_clone() {
+                    format!("{} clone of ", self.clone_id())
+                } else {
+                    String::new()
+                };
+                trace!(
+                    "Gate[{} ({}{})]: Received command '{}'",
+                    self.name,
+                    clone_txt,
+                    self.id(),
+                    command
+                );
+            }
+
             match command {
+                GateCommand::AttachClone { clone_id, tx } => match &self.state {
+                    GateState::Normal(state) => {
+                        let _ = state.clone_senders.insert(clone_id, tx);
+                    }
+                    GateState::Clone(_) => unreachable!(),
+                },
+
                 GateCommand::DetachClone { clone_id } => match &self.state {
                     GateState::Normal(state) => {
                         let _ = state.clone_senders.remove(&clone_id);
@@ -381,7 +462,12 @@ impl Gate {
                         let new_id = *new_gate.id.lock().unwrap();
                         let mut id = self.id.lock().unwrap();
                         if log_enabled!(log::Level::Trace) {
-                            trace!("Gate[{} ({})]: Reconfiguring: new ID={}", self.name, id, new_id);
+                            trace!(
+                                "Gate[{} ({})]: Reconfiguring: new ID={}",
+                                self.name,
+                                id,
+                                new_id
+                            );
                         }
                         *id = new_id;
                     }
@@ -437,13 +523,36 @@ impl Gate {
     async fn notify_clones(&self, cmd: GateCommand) {
         if let GateState::Normal(NormalGateState { clone_senders, .. }) = &self.state {
             let mut closed_sender_found = false;
-            for (_uuid, sender) in clone_senders.guard().iter() {
+            for (uuid, sender) in clone_senders.guard().iter() {
                 if !sender.is_closed() {
+                    if log_enabled!(Level::Trace) {
+                        let clone_txt = if self.is_clone() {
+                            format!("{} clone of ", self.clone_id())
+                        } else {
+                            String::new()
+                        };
+                        trace!(
+                            "Gate[{} ({}{})]: Notifying clone {} of command '{}'",
+                            self.name,
+                            clone_txt,
+                            self.id(),
+                            uuid,
+                            cmd
+                        );
+                    }
                     sender
                         .send(cmd.clone())
                         .await
                         .expect("Internal error: failed to notify cloned gate");
                 } else {
+                    if log_enabled!(Level::Trace) {
+                        let clone_txt = if self.is_clone() {
+                            format!("{} clone of ", self.clone_id())
+                        } else {
+                            String::new()
+                        };
+                        trace!("Gate[{} ({}{})]: Unable to notify clone {} of command '{}': sender is closed", self.name, clone_txt, self.id(), uuid, cmd);
+                    }
                     closed_sender_found = true;
                 }
             }
@@ -516,8 +625,18 @@ impl Gate {
         // let mut sender_lost = false;
         let mut sent_at_least_once = false;
 
-        if log_enabled!(log::Level::Trace) {
-            trace!("Gate[{} ({})]: starting update", self.name, self.id());
+        if log_enabled!(Level::Trace) {
+            let clone_txt = if self.is_clone() {
+                format!("{} clone of ", self.clone_id())
+            } else {
+                String::new()
+            };
+            trace!(
+                "Gate[{} ({}{})]: Starting update",
+                self.name,
+                clone_txt,
+                self.id()
+            );
         }
         for (uuid, item) in self.updates.guard().iter() {
             match (&item.queue, &item.direct) {
@@ -529,9 +648,15 @@ impl Gate {
                 }
                 (None, Some(direct)) => {
                     if log_enabled!(log::Level::Trace) {
+                        let clone_txt = if self.is_clone() {
+                            format!("{} clone of ", self.clone_id())
+                        } else {
+                            String::new()
+                        };
                         trace!(
-                            "Gate[{} ({})]: sending direct update for slot {}",
+                            "Gate[{} ({}{})]: Sending direct update for slot {}",
                             self.name,
+                            clone_txt,
                             self.id(),
                             uuid
                         );
@@ -549,14 +674,24 @@ impl Gate {
             // item.queue = None;
             // sender_lost = true;
         }
-        if log_enabled!(log::Level::Trace) {
-            trace!("Gate[{} ({})]: finished update", self.name, self.id());
+        if log_enabled!(Level::Trace) {
+            let clone_txt = if self.is_clone() {
+                format!("{} clone of ", self.clone_id())
+            } else {
+                String::new()
+            };
+            trace!(
+                "Gate[{} ({}{})]: Finished update",
+                self.name,
+                clone_txt,
+                self.id()
+            );
         }
 
         // if sender_lost {
         //     let updates = self.updates.load();
         //     updates.retain(|_, item| item.queue.is_some());
-        //     self.updates_len.store(updates.len(), Ordering::SeqCst);
+        //     self.updates_len.store(updates.len(), Ordering::Relaxed);
         // }
 
         self.metrics
@@ -699,6 +834,21 @@ impl Clone for Gate {
 
         let clone_id = Uuid::new_v4();
 
+        if log_enabled!(Level::Trace) {
+            let clone_txt = if self.is_clone() {
+                format!("{} clone of ", self.clone_id())
+            } else {
+                String::new()
+            };
+            trace!(
+                "Gate[{} ({}{})]: Cloning gate to new clone id {}",
+                self.name,
+                clone_txt,
+                self.id(),
+                clone_id
+            );
+        }
+
         let parent_command_sender = match &self.state {
             GateState::Normal(state) => state.command_sender.clone(),
             GateState::Clone(state) => state.parent_command_sender.clone(),
@@ -715,13 +865,27 @@ impl Clone for Gate {
             metrics: self.metrics.clone(),
             state: GateState::Clone(CloneGateState {
                 clone_id,
-                parent_command_sender,
+                parent_command_sender: parent_command_sender.clone(),
             }),
         };
 
-        if let GateState::Normal(state) = &self.state {
-            state.clone_senders.insert(clone_id, tx);
-        }
+        // Ask the real gate to add our command sender to the set it sends
+        // command notifications to
+        let cloned_name = self.name.clone();
+        let cloned_id = self.id().clone();
+        crate::tokio::spawn("gate-attach-clone", async move {
+            let saved_clone_id = clone_id;
+            if let Err(_err) = parent_command_sender
+                .send(GateCommand::AttachClone { clone_id, tx })
+                .await
+            {
+                let clone_txt = format!("{} clone of ", saved_clone_id);
+                error!(
+                    "Gate[{} ({}{})]: Failed to attach clone to parent {}",
+                    cloned_name, clone_txt, cloned_id, clone_id
+                );
+            }
+        });
 
         gate
     }
@@ -830,7 +994,7 @@ pub struct GateMetrics {
 
 impl GraphStatus for GateMetrics {
     fn status_text(&self) -> String {
-        format!("out: {}", self.num_updates.load(Ordering::SeqCst))
+        format!("out: {}", self.num_updates.load(Ordering::Relaxed))
     }
 }
 
@@ -842,12 +1006,12 @@ impl GateMetrics {
         _senders: Arc<FrimMap<Uuid, UpdateSender>>,
         sent_at_least_once: bool,
     ) {
-        self.num_updates.fetch_add(1, Ordering::SeqCst);
+        self.num_updates.fetch_add(1, Ordering::Relaxed);
         if !sent_at_least_once {
-            self.num_dropped_updates.fetch_add(1, Ordering::SeqCst);
+            self.num_dropped_updates.fetch_add(1, Ordering::Relaxed);
         }
         if let Update::Bulk(update) = update {
-            self.update_set_size.store(update.len(), Ordering::SeqCst);
+            self.update_set_size.store(update.len(), Ordering::Relaxed);
         }
         self.update.store(Some(Utc::now()));
 
@@ -865,13 +1029,13 @@ impl GateMetrics {
         // }
 
         // if num_queue_senders > 0 {
-        //     self.capacity.store(capacity, Ordering::SeqCst);
+        //     self.capacity.store(capacity, Ordering::Relaxed);
         // }
 
         // self.num_queue_senders
-        //     .store(num_queue_senders, Ordering::SeqCst);
+        //     .store(num_queue_senders, Ordering::Relaxed);
         // self.num_direct_senders
-        //     .store(num_direct_senders, Ordering::SeqCst);
+        //     .store(num_direct_senders, Ordering::Relaxed);
     }
 
     /// Updates the metrics to match the given unit status.
@@ -948,13 +1112,13 @@ impl metrics::Source for GateMetrics {
         target.append_simple(
             &Self::NUM_UPDATES_METRIC,
             Some(unit_name),
-            self.num_updates.load(Ordering::SeqCst),
+            self.num_updates.load(Ordering::Relaxed),
         );
 
         target.append_simple(
             &Self::NUM_DROPPED_UPDATES_METRIC,
             Some(unit_name),
-            self.num_dropped_updates.load(Ordering::SeqCst),
+            self.num_dropped_updates.load(Ordering::Relaxed),
         );
 
         match self.update.load() {
@@ -967,7 +1131,7 @@ impl metrics::Source for GateMetrics {
                 target.append_simple(
                     &Self::UPDATE_SET_SIZE_METRIC,
                     Some(unit_name),
-                    self.update_set_size.load(Ordering::SeqCst),
+                    self.update_set_size.load(Ordering::Relaxed),
                 );
             }
             None => {
@@ -979,17 +1143,17 @@ impl metrics::Source for GateMetrics {
         target.append_simple(
             &Self::LINK_CAPACITY_METRIC,
             Some(unit_name),
-            self.capacity.load(Ordering::SeqCst),
+            self.capacity.load(Ordering::Relaxed),
         );
         target.append_simple(
             &Self::NUM_QUEUE_SENDERS_METRIC,
             Some(unit_name),
-            self.num_queue_senders.load(Ordering::SeqCst),
+            self.num_queue_senders.load(Ordering::Relaxed),
         );
         target.append_simple(
             &Self::NUM_DIRECT_SENDERS_METRIC,
             Some(unit_name),
-            self.num_direct_senders.load(Ordering::SeqCst),
+            self.num_direct_senders.load(Ordering::Relaxed),
         );
     }
 }
@@ -1576,6 +1740,11 @@ enum GateCommand {
 
     Terminate,
 
+    AttachClone {
+        clone_id: Uuid,
+        tx: Sender<GateCommand>,
+    },
+
     DetachClone {
         clone_id: Uuid,
     },
@@ -1600,6 +1769,25 @@ impl Clone for GateCommand {
                 report: report.clone(),
             },
             _ => panic!("Internal error: Unclonable GateCommand"),
+        }
+    }
+}
+
+impl Display for GateCommand {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            GateCommand::ReportLinks { .. } => f.write_str("ReportLinks"),
+            GateCommand::Suspension { .. } => f.write_str("Suspension"),
+            GateCommand::Subscribe { .. } => f.write_str("Subscribe"),
+            GateCommand::Unsubscribe { .. } => f.write_str("Unsubscribe"),
+            GateCommand::FollowSubscribe { .. } => f.write_str("FollowSubscribe"),
+            GateCommand::FollowUnsubscribe { .. } => f.write_str("FollowUnsubscribe"),
+            GateCommand::Reconfigure { .. } => f.write_str("Reconfigure"),
+            GateCommand::FollowReconfigure { .. } => f.write_str("FollowReconfigure"),
+            GateCommand::Trigger { .. } => f.write_str("Trigger"),
+            GateCommand::Terminate => f.write_str("Terminate"),
+            GateCommand::AttachClone { .. } => f.write_str("AttachClone"),
+            GateCommand::DetachClone { .. } => f.write_str("DetachClone"),
         }
     }
 }
@@ -1742,7 +1930,7 @@ mod tests {
                 assert!(matches!(update, Update::Single(_)));
                 if let Update::Single(payload) = update {
                     assert_eq!(payload, mk_test_payload());
-                    self.0.fetch_add(1, Ordering::SeqCst);
+                    self.0.fetch_add(1, Ordering::Relaxed);
                 }
             }
         }
@@ -1779,7 +1967,7 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(3)).await;
 
         eprintln!("CHECKING FOR PAYLOAD");
-        assert_eq!(1, counter.load(Ordering::SeqCst));
+        assert_eq!(1, counter.load(Ordering::Relaxed));
     }
 
     #[tokio::test(flavor = "multi_thread")]

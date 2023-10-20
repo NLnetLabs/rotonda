@@ -32,16 +32,16 @@ pub struct TopicMetrics {
 
 impl GraphStatus for MqttMetrics {
     fn status_text(&self) -> String {
-        match self.connection_established.load(Ordering::SeqCst) {
+        match self.connection_established.load(Ordering::Relaxed) {
             true => {
                 format!(
                     "in-flight: {}\npublished: {}\nerrors: {}",
-                    self.in_flight_count.load(Ordering::SeqCst),
+                    self.in_flight_count.load(Ordering::Relaxed),
                     self.topics
                         .guard()
                         .iter()
-                        .fold(0, |acc, v| acc + v.1.publish_counts.load(Ordering::SeqCst)),
-                    self.transmit_error_count.load(Ordering::SeqCst),
+                        .fold(0, |acc, v| acc + v.1.publish_counts.load(Ordering::Relaxed)),
+                    self.transmit_error_count.load(Ordering::Relaxed),
                 )
             }
             false => "N/A".to_string(),
@@ -49,7 +49,7 @@ impl GraphStatus for MqttMetrics {
     }
 
     fn okay(&self) -> Option<bool> {
-        Some(self.connection_established.load(Ordering::SeqCst))
+        Some(self.connection_established.load(Ordering::Relaxed))
     }
 }
 
@@ -103,22 +103,22 @@ impl metrics::Source for MqttMetrics {
         target.append_simple(
             &Self::UP_METRIC,
             Some(unit_name),
-            self.connection_established.load(atomic::Ordering::SeqCst) as u8,
+            self.connection_established.load(atomic::Ordering::Relaxed) as u8,
         );
         target.append_simple(
             &Self::CONNECTION_LOST_COUNT_METRIC,
             Some(unit_name),
-            self.connection_lost_count.load(atomic::Ordering::SeqCst),
+            self.connection_lost_count.load(atomic::Ordering::Relaxed),
         );
         target.append_simple(
             &Self::IN_FLIGHT_COUNT_PER_TOPIC_METRIC,
             Some(unit_name),
-            self.in_flight_count.load(atomic::Ordering::SeqCst),
+            self.in_flight_count.load(atomic::Ordering::Relaxed),
         );
         target.append_simple(
             &Self::TRANSMIT_ERROR_COUNT_METRIC,
             Some(unit_name),
-            self.transmit_error_count.load(atomic::Ordering::SeqCst),
+            self.transmit_error_count.load(atomic::Ordering::Relaxed),
         );
         for (topic, metrics) in self.topics.guard().iter() {
             let topic = topic.as_str();
@@ -127,14 +127,14 @@ impl metrics::Source for MqttMetrics {
                 target,
                 topic,
                 Self::PUBLISH_COUNT_PER_TOPIC_METRIC,
-                metrics.publish_counts.load(Ordering::SeqCst),
+                metrics.publish_counts.load(Ordering::Relaxed),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 topic,
                 Self::LAST_END_TO_END_DELAY_PER_ROUTER_METRIC,
-                metrics.last_e2e_delay.load(Ordering::SeqCst),
+                metrics.last_e2e_delay.load(Ordering::Relaxed),
             );
         }
     }

@@ -200,18 +200,18 @@ impl Processor {
                                 }) {
                                     if !south.is_empty() {
                                         let source_id = SourceId::from("TODO");
-                                        let update = Payload::from_output_stream_queue(source_id, south).into();
+                                        let update = Payload::from_output_stream_queue(&source_id, south).into();
                                         self.gate.update_data(update).await;
                                     }
                                     if let TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(pdu)) = east {
                                         let pdu = Arc::into_inner(pdu).unwrap(); // This should succeed
-                                            let pdu = pdu.raw_message().0.clone(); // Bytes is cheap to clone
-                                            let update = self.process_update(
-                                                pdu,
-                                                //negotiated.remote_addr(),
-                                                //negotiated.remote_asn()
-                                            ).await;
-                                            self.gate.update_data(update).await;
+                                        let pdu = pdu.raw_message().0.clone(); // Bytes is cheap to clone
+                                        let update = self.process_update(
+                                            pdu,
+                                            //negotiated.remote_addr(),
+                                            //negotiated.remote_asn()
+                                        ).await;
+                                        self.gate.update_data(update).await;
                                     }
                                 }
                             } else {

@@ -10,7 +10,7 @@ use crate::log::{LogConfig, Terminate};
 use crate::manager::{Manager, TargetSet, UnitSet};
 use crate::mvp::{
     MvpConfig, ARG_CONFIG, CFG_TARGET_BMP_PROXY, CFG_TARGET_MQTT, CFG_UNIT_BGP_IN,
-    CFG_UNIT_BMP_TCP_IN,
+    CFG_UNIT_BMP_IN,
 };
 use clap::{Arg, ArgMatches, Command};
 use log::{error, info, trace};
@@ -450,7 +450,7 @@ impl ConfigFile {
             }
             if let Some(addr) = mvp_overrides.bmp_listen_addr {
                 let Value::Table(ref mut units) = root.get_mut(CFG_UNITS).unwrap() else { unreachable!() };
-                let Value::Table(ref mut bmp_tcp_in) = units.get_mut(CFG_UNIT_BMP_TCP_IN).unwrap() else { unreachable!() };
+                let Value::Table(ref mut bmp_tcp_in) = units.get_mut(CFG_UNIT_BMP_IN).unwrap() else { unreachable!() };
                 let Value::String(ref mut listen) = bmp_tcp_in.get_mut("listen").unwrap() else { unreachable!() };
                 *listen = addr.to_string();
             }

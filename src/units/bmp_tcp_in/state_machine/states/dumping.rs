@@ -14,7 +14,7 @@ use smallvec::SmallVec;
 
 use crate::{
     payload::{Payload, Update},
-    units::bmp_in::state_machine::machine::{PeerState, PeerStates},
+    units::bmp_tcp_in::state_machine::machine::{PeerState, PeerStates},
 };
 
 use super::initiating::Initiating;
@@ -173,13 +173,13 @@ pub struct Dumping {
 
 impl BmpStateDetails<Dumping> {
     #[allow(dead_code)]
-    pub async fn process_msg(self, bmp_msg: BmpMsg<Bytes>) -> ProcessingResult {
+    pub fn process_msg(self, bmp_msg: BmpMsg<Bytes>) -> ProcessingResult {
         match bmp_msg {
             // already verified upstream
-            BmpMsg::InitiationMessage(msg) => self.initiate(msg).await,
+            BmpMsg::InitiationMessage(msg) => self.initiate(msg),
 
             BmpMsg::PeerUpNotification(msg) => {
-                let res = self.peer_up(msg).await;
+                let res = self.peer_up(msg);
                 if let BmpState::Dumping(state) = &res.next_state {
                     let num_pending_eors = state.details.peer_states.num_pending_eors();
                     state
@@ -189,16 +189,15 @@ impl BmpStateDetails<Dumping> {
                 res
             }
 
-            BmpMsg::PeerDownNotification(msg) => self.peer_down(msg).await,
+            BmpMsg::PeerDownNotification(msg) => self.peer_down(msg),
 
             BmpMsg::RouteMonitoring(msg) => {
                 self.route_monitoring(msg, RouteStatus::InConvergence, |s, pph, update| {
                     s.route_monitoring_preprocessing(pph, update)
                 })
-                .await
             }
 
-            BmpMsg::TerminationMessage(msg) => self.terminate(Some(msg)).await,
+            BmpMsg::TerminationMessage(msg) => self.terminate(Some(msg)),
 
             _ => {
                 // We ignore these. TODO: Should we count them?
@@ -241,7 +240,7 @@ impl BmpStateDetails<Dumping> {
         ControlFlow::Continue(self)
     }
 
-    pub async fn terminate<Octets: AsRef<[u8]>>(
+    pub fn terminate<Octets: AsRef<[u8]>>(
         mut self,
         _msg: Option<TerminationMessage<Octets>>,
     ) -> ProcessingResult {
@@ -380,7 +379,7 @@ mod tests {
     use crate::{
         bgp::encode::{Announcements, Prefixes},
         payload::{Payload, SourceId, Update},
-        units::bmp_in::state_machine::{processing::MessageType, states::updating::Updating},
+        units::bmp_tcp_in::state_machine::{processing::MessageType, states::updating::Updating},
     };
 
     use super::*;
@@ -388,15 +387,15 @@ mod tests {
     const TEST_ROUTER_SYS_NAME: &str = "test-router";
     const TEST_ROUTER_SYS_DESC: &str = "test-desc";
 
-    #[tokio::test]
-    async fn initiate() {
+    #[test]
+    fn initiate() {
         // Given
         let processor = mk_test_processor();
         let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
         assert!(processor.details.sys_name.is_empty());
 
         // When
-        let res = processor.process_msg(initiation_msg_buf).await;
+        let res = processor.process_msg(initiation_msg_buf);
 
         // Then
         assert!(matches!(res.processing_result, MessageType::Other));
@@ -414,14 +413,14 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn terminate() {
+    #[test]
+    fn terminate() {
         // Given
         let processor = mk_test_processor();
         let termination_msg_buf = mk_termination_msg();
 
         // When
-        let res = processor.process_msg(termination_msg_buf).await;
+        let res = processor.process_msg(termination_msg_buf);
 
         // Then
         assert!(matches!(
@@ -431,8 +430,8 @@ mod tests {
         assert!(matches!(res.next_state, BmpState::Terminated(_)));
     }
 
-    #[tokio::test]
-    async fn statistics_report() {
+    #[test]
+    fn statistics_report() {
         // Given
         let processor = mk_test_processor();
         let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
@@ -441,17 +440,17 @@ mod tests {
         let stats_report_msg_buf = mk_statistics_report_msg(&pph);
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
-        let processor = processor.process_msg(peer_up_msg_buf).await.next_state;
-        let res = processor.process_msg(stats_report_msg_buf).await;
+        let processor = processor.process_msg(initiation_msg_buf).next_state;
+        let processor = processor.process_msg(peer_up_msg_buf).next_state;
+        let res = processor.process_msg(stats_report_msg_buf);
 
         // Then
         assert!(matches!(res.processing_result, MessageType::Other));
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
     }
 
-    #[tokio::test]
-    async fn peer_up_with_eor_capable_peer() {
+    #[test]
+    fn peer_up_with_eor_capable_peer() {
         // Given
         let processor = mk_test_processor();
         assert!(processor.details.peer_states.is_empty());
@@ -460,8 +459,8 @@ mod tests {
         let (_, peer_up_msg_buf) = mk_eor_capable_peer_up_notification_msg("127.0.0.1", 12345);
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
-        let res = processor.process_msg(peer_up_msg_buf).await;
+        let processor = processor.process_msg(initiation_msg_buf).next_state;
+        let res = processor.process_msg(peer_up_msg_buf);
 
         // Then
         assert!(matches!(res.processing_result, MessageType::Other));
@@ -475,8 +474,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn duplicate_peer_up() {
+    #[test]
+    fn duplicate_peer_up() {
         // Given
         let processor = mk_test_processor();
         assert!(processor.details.peer_states.is_empty());
@@ -488,9 +487,9 @@ mod tests {
             mk_peer_up_notification_msg_without_rfc4724_support("127.0.0.1", 12345);
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
-        let processor = processor.process_msg(peer_up_msg_1_buf).await.next_state;
-        let res = processor.process_msg(peer_up_msg_2_buf).await;
+        let processor = processor.process_msg(initiation_msg_buf).next_state;
+        let processor = processor.process_msg(peer_up_msg_1_buf).next_state;
+        let res = processor.process_msg(peer_up_msg_2_buf);
 
         // Then
         assert!(matches!(
@@ -503,8 +502,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn peer_up_peer_down() {
+    #[test]
+    fn peer_up_peer_down() {
         // Given a BMP state machine in the Dumping state with no known peers
         let processor = mk_test_processor();
         let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
@@ -520,9 +519,9 @@ mod tests {
         assert!(processor.details.peer_states.is_empty());
 
         // When the state machine processes the initiate and peer up notifications
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
-        let processor = processor.process_msg(peer_up_msg_1_buf).await.next_state;
-        let res = processor.process_msg(peer_up_msg_2_buf).await;
+        let processor = processor.process_msg(initiation_msg_buf).next_state;
+        let processor = processor.process_msg(peer_up_msg_1_buf).next_state;
+        let res = processor.process_msg(peer_up_msg_2_buf);
 
         // Then the state should remain unchanged
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
@@ -533,7 +532,7 @@ mod tests {
         assert_eq!(get_unique_peer_up_count(&processor), 2);
 
         // When the state machine processes a peer down notification for a peer that announced no routes
-        let res = processor.process_msg(peer_down_msg_1_buf).await;
+        let res = processor.process_msg(peer_down_msg_1_buf);
 
         // Then the state should remain unchanged
         // And there should not be a routing update
@@ -542,8 +541,8 @@ mod tests {
         let processor = res.next_state;
 
         // When the state machine processes a couple of route announcements
-        let processor = processor.process_msg(route_mon_msg_buf).await.next_state;
-        let res = processor.process_msg(ipv6_route_mon_msg_buf).await;
+        let processor = processor.process_msg(route_mon_msg_buf).next_state;
+        let res = processor.process_msg(ipv6_route_mon_msg_buf);
 
         // Then the state should remain unchanged
         // And the number of announced prefixes should increase by 2
@@ -552,7 +551,7 @@ mod tests {
         let processor = res.next_state;
 
         // And when one of the routes is withdrawn
-        let res = processor.process_msg(route_withdraw_msg_buf.clone()).await;
+        let res = processor.process_msg(route_withdraw_msg_buf.clone());
 
         // Then the state should remain unchanged
         // And the number of announced prefixes should decrease by 1
@@ -561,7 +560,7 @@ mod tests {
         let processor = res.next_state;
 
         // Unless it is a not-before-announced/already-withdrawn route
-        let res = processor.process_msg(route_withdraw_msg_buf).await;
+        let res = processor.process_msg(route_withdraw_msg_buf);
 
         // Then the number of announced prefixes should remain unchanged
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
@@ -569,7 +568,7 @@ mod tests {
         let processor = res.next_state;
 
         // And when a peer down notification is received
-        let res = processor.process_msg(peer_down_msg_2_buf).await;
+        let res = processor.process_msg(peer_down_msg_2_buf);
 
         // Then the state should remain unchanged
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
@@ -618,8 +617,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn peer_down_without_peer_up() {
+    #[test]
+    fn peer_down_without_peer_up() {
         // Given
         let processor = mk_test_processor();
         let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
@@ -629,8 +628,8 @@ mod tests {
         let peer_down_msg_buf = mk_peer_down_notification_msg(&pph);
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
-        let res = processor.process_msg(peer_down_msg_buf).await;
+        let processor = processor.process_msg(initiation_msg_buf).next_state;
+        let res = processor.process_msg(peer_down_msg_buf);
 
         // Then
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
@@ -639,8 +638,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn peer_up_different_peer_down() {
+    #[test]
+    fn peer_up_different_peer_down() {
         // Given a BMP state machine in the Dumping state with no known peers
         let processor = mk_test_processor();
         assert!(processor.details.peer_states.is_empty());
@@ -656,8 +655,8 @@ mod tests {
         assert_ne!(&pph_up, &pph_down);
 
         // When the state machine processes a peer up notification
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
-        let res = processor.process_msg(peer_up_msg_buf).await;
+        let processor = processor.process_msg(initiation_msg_buf).next_state;
+        let res = processor.process_msg(peer_up_msg_buf);
 
         // Then the state should remain unchanged
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
@@ -668,7 +667,7 @@ mod tests {
         assert_eq!(get_unique_peer_up_count(&processor), 1);
 
         // When the state machine processes a peer down notification for a different peer
-        let res = processor.process_msg(peer_down_msg_buf).await;
+        let res = processor.process_msg(peer_down_msg_buf);
 
         // Then the state should remain unchanged
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
@@ -687,8 +686,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn peer_down_spreads_withdrawals_across_multiple_bgp_updates_if_needed() {
+    #[test]
+    fn peer_down_spreads_withdrawals_across_multiple_bgp_updates_if_needed() {
         // Given a BMP state machine in the Dumping state with no known peers
         let processor = mk_test_processor();
 
@@ -724,8 +723,8 @@ mod tests {
         let peer_down_msg_buf = mk_peer_down_notification_msg(&pph);
 
         // When the state machine processes the initiate and peer up notifications
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
-        let res = processor.process_msg(peer_up_msg_buf).await;
+        let processor = processor.process_msg(initiation_msg_buf).next_state;
+        let res = processor.process_msg(peer_up_msg_buf);
 
         // Then the state should remain unchanged
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
@@ -737,7 +736,7 @@ mod tests {
 
         // When the state machine processes the route announcements
         for (i, route_mon_msg_buf) in route_mon_msg_bufs.into_iter().enumerate() {
-            let res = processor.process_msg(route_mon_msg_buf).await;
+            let res = processor.process_msg(route_mon_msg_buf);
 
             // Then the state should remain unchanged
             // And the number of announced prefixes should increase
@@ -750,7 +749,7 @@ mod tests {
         }
 
         // And when a peer down notification is received
-        let res = processor.process_msg(peer_down_msg_buf).await;
+        let res = processor.process_msg(peer_down_msg_buf);
 
         // Then the state should remain unchanged
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
@@ -836,8 +835,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn end_of_rib_ipv4_for_a_single_peer() {
+    #[test]
+    fn end_of_rib_ipv4_for_a_single_peer() {
         // Given
         let processor = mk_test_processor();
         let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
@@ -846,8 +845,8 @@ mod tests {
         let eor_msg_buf = mk_route_monitoring_end_of_rib_msg(&pph);
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
-        let res = processor.process_msg(peer_up_msg_buf).await;
+        let processor = processor.process_msg(initiation_msg_buf).next_state;
+        let res = processor.process_msg(peer_up_msg_buf);
 
         // Then there should be one up peer but no pending EoRs
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
@@ -859,7 +858,7 @@ mod tests {
 
         // And when a route announcement is received
         let processor = res.next_state;
-        let res = processor.process_msg(route_mon_msg_buf).await;
+        let res = processor.process_msg(route_mon_msg_buf);
 
         // Then there should be one up peer and one pending EoR
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
@@ -873,7 +872,7 @@ mod tests {
 
         // And when an EoR is received
         let processor = res.next_state;
-        let res = processor.process_msg(eor_msg_buf).await;
+        let res = processor.process_msg(eor_msg_buf);
 
         // Then
         assert!(matches!(
@@ -898,8 +897,8 @@ mod tests {
     #[ignore = "to do"]
     fn end_of_rib_for_all_pending_peers() {}
 
-    #[tokio::test]
-    async fn route_monitoring_invalid_message() {
+    #[test]
+    fn route_monitoring_invalid_message() {
         // Given
         let processor = mk_test_processor();
 
@@ -932,9 +931,9 @@ mod tests {
         );
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
-        let processor = processor.process_msg(peer_up_msg_buf).await.next_state;
-        let res = processor.process_msg(route_mon_msg_buf).await;
+        let processor = processor.process_msg(initiation_msg_buf).next_state;
+        let processor = processor.process_msg(peer_up_msg_buf).next_state;
+        let res = processor.process_msg(route_mon_msg_buf);
 
         // Then
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
@@ -946,9 +945,9 @@ mod tests {
         ));
     }
 
-    #[tokio::test]
+    #[test]
     #[ignore = "to do"]
-    async fn route_monitoring_announce_route() {
+    fn route_monitoring_announce_route() {
         // Given
         let processor = mk_test_processor();
         let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
@@ -957,9 +956,9 @@ mod tests {
         let route_mon_msg_buf = mk_route_monitoring_msg(&pph);
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
-        let processor = processor.process_msg(peer_up_msg_buf).await.next_state;
-        let res = processor.process_msg(route_mon_msg_buf).await;
+        let processor = processor.process_msg(initiation_msg_buf).next_state;
+        let processor = processor.process_msg(peer_up_msg_buf).next_state;
+        let res = processor.process_msg(route_mon_msg_buf);
 
         // Then
         assert!(matches!(res.next_state, BmpState::Dumping(_)));

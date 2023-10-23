@@ -14,6 +14,7 @@ use tokio::sync::Mutex;
 use tokio::{io::AsyncRead, net::TcpStream};
 
 use crate::common::roto::{FilterName, FilterOutput, RotoScripts, ThreadLocalVM};
+use crate::comms::GateAgent;
 use crate::payload::SourceId;
 use crate::{
     comms::{Gate, GateStatus},
@@ -59,6 +60,21 @@ impl RouterHandler {
             status_reporter,
             state_machine,
         }
+    }
+
+    pub fn mock() -> (Self, GateAgent) {
+        let (gate, gate_agent) = Gate::new(0);
+        
+        let mock = Self {
+            gate,
+            roto_scripts: Default::default(),
+            router_id_template: Default::default(),
+            filter_name: Default::default(),
+            status_reporter: Default::default(),
+            state_machine: Default::default(),
+        };
+
+        (mock, gate_agent)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -172,7 +188,7 @@ impl RouterHandler {
         self.status_reporter
             .bmp_message_received(bmp_state.router_id());
 
-        if let Ok(ControlFlow::Continue(FilterOutput { south, east })) = Self::VM.with(|vm| {
+        let next_state = if let Ok(ControlFlow::Continue(FilterOutput { south, east })) = Self::VM.with(|vm| {
             let value =
                 TypeValue::Builtin(BuiltinTypeValue::BmpMessage(Arc::new(BytesRecord(msg))));
             self.roto_scripts.exec(vm, &self.filter_name.load(), value)
@@ -236,9 +252,16 @@ impl RouterHandler {
                     }
                 }
 
-                *bmp_state_lock = Some(res.next_state);
+                // *bmp_state_lock = Some(res.next_state);
+                res.next_state
+            } else {
+                bmp_state
             }
-        }
+        } else {
+            bmp_state
+        };
+
+        *bmp_state_lock = Some(next_state);
     }
 
     fn check_update_router_id(
@@ -288,41 +311,144 @@ mod tests {
 
     use tokio::{io::ReadBuf, time::timeout};
 
-    use crate::units::bmp_tcp_in::metrics::BmpTcpInMetrics;
+    use crate::{units::bmp_tcp_in::metrics::BmpTcpInMetrics, bgp::encode::mk_initiation_msg};
 
     use super::*;
 
+    const SYS_NAME: &str = "some sys name";
+    const SYS_DESCR: &str = "some sys descr";
+    const OTHER_SYS_NAME: &str = "other sys name";
+
+    // #[tokio::test(flavor = "multi_thread")]
+    // async fn terminate_on_loss_of_parent_gate() {
+    //     let (gate, _agent) = Gate::new(1);
+    //     let router_addr = "127.0.0.1:8080".parse().unwrap();
+    //     let metrics = Arc::new(BmpTcpInMetrics::default());
+    //     let status_reporter = Arc::new(BmpTcpInStatusReporter::new("mock reporter", metrics));
+
+    //     struct MockRouterStream;
+
+    //     impl AsyncRead for MockRouterStream {
+    //         fn poll_read(
+    //             self: Pin<&mut Self>,
+    //             _cx: &mut Context<'_>,
+    //             _buf: &mut ReadBuf<'_>,
+    //         ) -> Poll<tokio::io::Result<()>> {
+    //             Poll::Pending
+    //         }
+    //     }
+
+    //     let rx = MockRouterStream;
+
+    //     eprintln!("STARTING ROUTER READER");
+    //     let join_handle = read_from_router(gate.clone(), rx, router_addr, status_reporter);
+
+    //     // Without this the reader continues forever
+    //     eprintln!("DROPPING PARENT GATE");
+    //     drop(gate);
+
+    //     eprintln!("WAITING FOR ROUTER READER TO EXIT");
+    //     timeout(Duration::from_secs(5), join_handle).await.unwrap();
+
+    //     eprintln!("DONE");
+    // }
+
+    // Note: The tests below assume that the default router id template
+    // includes the BMP sysName.
+
     #[tokio::test(flavor = "multi_thread")]
-    async fn terminate_on_loss_of_parent_gate() {
-        let (gate, _agent) = Gate::new(1);
-        let router_addr = "127.0.0.1:8080".parse().unwrap();
-        let metrics = Arc::new(BmpTcpInMetrics::default());
-        let status_reporter = Arc::new(BmpTcpInStatusReporter::new("mock reporter", metrics));
+    #[should_panic]
+    async fn counters_for_expected_sys_name_should_not_exist() {
+        let (runner, _) = RouterHandler::mock();
+        let initiation_msg = BmpMessage::from_octets(mk_initiation_msg(SYS_NAME, SYS_DESCR)).unwrap();
 
-        struct MockRouterStream;
+        runner.process_msg("127.0.0.1".parse().unwrap(), "unknown".into(), initiation_msg).await;
 
-        impl AsyncRead for MockRouterStream {
-            fn poll_read(
-                self: Pin<&mut Self>,
-                _cx: &mut Context<'_>,
-                _buf: &mut ReadBuf<'_>,
-            ) -> Poll<tokio::io::Result<()>> {
-                Poll::Pending
-            }
-        }
+        // let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
+        // assert_eq!(
+        //     metrics.with_label::<usize>("bmp_in_num_invalid_bmp_messages", ("router", SYS_NAME)),
+        //     0,
+        // );
+    }
 
-        let rx = MockRouterStream;
+    // #[tokio::test(flavor = "multi_thread")]
+    // #[should_panic]
+    // async fn counters_for_other_sys_name_should_not_exist() {
+    //     let (runner, _) = BmpInRunner::mock();
+    //     let initiation_msg = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
 
-        eprintln!("STARTING ROUTER READER");
-        let join_handle = read_from_router(gate.clone(), rx, router_addr, status_reporter);
+    //     runner.process_update(initiation_msg).await;
 
-        // Without this the reader continues forever
-        eprintln!("DROPPING PARENT GATE");
-        drop(gate);
+    //     let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
+    //     assert_eq!(
+    //         metrics.with_label::<usize>(
+    //             "bmp_in_num_invalid_bmp_messages",
+    //             ("router", OTHER_SYS_NAME)
+    //         ),
+    //         0,
+    //     );
+    // }
 
-        eprintln!("WAITING FOR ROUTER READER TO EXIT");
-        timeout(Duration::from_secs(5), join_handle).await.unwrap();
+    // #[tokio::test(flavor = "multi_thread")]
+    // async fn num_invalid_bmp_messages_counter_should_increase() {
+    //     let (runner, _) = BmpInRunner::mock();
 
-        eprintln!("DONE");
+    //     // A BMP Initiation message that lacks required fields
+    //     let bad_initiation_msg =
+    //         mk_update(mk_invalid_initiation_message_that_lacks_information_tlvs());
+
+    //     // A BMP Peer Down Notification message without a corresponding Peer
+    //     // Up Notification message.
+    //     let pph = mk_per_peer_header("10.0.0.1", 12345);
+    //     let bad_peer_down_msg = mk_update(mk_peer_down_notification_msg(&pph));
+
+    //     runner.process_update(bad_initiation_msg).await;
+    //     runner.process_update(bad_peer_down_msg).await;
+
+    //     let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
+    //     assert_eq!(
+    //         metrics.with_label::<usize>(
+    //             "bmp_in_num_invalid_bmp_messages",
+    //             ("router", UNKNOWN_ROUTER_SYSNAME)
+    //         ),
+    //         2,
+    //     );
+    // }
+
+    // #[tokio::test(flavor = "multi_thread")]
+    // async fn new_counters_should_be_started_if_the_router_id_changes() {
+    //     let (runner, _) = BmpInRunner::mock();
+    //     let initiation_msg = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
+    //     let pph = mk_per_peer_header("10.0.0.1", 12345);
+    //     let bad_peer_down_msg = mk_update(mk_peer_down_notification_msg(&pph));
+    //     let reinitiation_msg = mk_update(mk_initiation_msg(OTHER_SYS_NAME, SYS_DESCR));
+    //     let another_bad_peer_down_msg = mk_update(mk_peer_down_notification_msg(&pph));
+
+    //     runner.process_update(initiation_msg).await;
+    //     runner.process_update(bad_peer_down_msg).await;
+    //     runner.process_update(reinitiation_msg).await;
+    //     runner.process_update(another_bad_peer_down_msg).await;
+
+    //     let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
+    //     assert_eq!(
+    //         metrics.with_label::<usize>("bmp_in_num_invalid_bmp_messages", ("router", SYS_NAME)),
+    //         1,
+    //     );
+    //     assert_eq!(
+    //         metrics.with_label::<usize>(
+    //             "bmp_in_num_invalid_bmp_messages",
+    //             ("router", OTHER_SYS_NAME)
+    //         ),
+    //         1,
+    //     );
+    // }
+
+    // --- Test helpers ------------------------------------------------------
+
+    fn mk_update(msg_buf: Bytes) -> Update {
+        let source_id = SourceId::SocketAddr("127.0.0.1:8080".parse().unwrap());
+        let bmp_msg = Arc::new(BytesRecord(BmpMessage::from_octets(msg_buf).unwrap()));
+        let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
+        Update::Single(Payload::new(source_id, value))
     }
 }

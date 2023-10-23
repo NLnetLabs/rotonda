@@ -14,6 +14,7 @@ use tokio::sync::Mutex;
 use tokio::{io::AsyncRead, net::TcpStream};
 
 use crate::common::roto::{FilterName, FilterOutput, RotoScripts, ThreadLocalVM};
+use crate::log::{Tracer, BoundTracer};
 use crate::payload::SourceId;
 use crate::{
     comms::{Gate, GateStatus},
@@ -27,6 +28,7 @@ use crate::{
 use super::io::FatalError;
 use super::state_machine::machine::BmpState;
 use super::state_machine::processing::MessageType;
+use super::unit::TracingMode;
 use super::util::format_source_id;
 
 pub struct RouterHandler {
@@ -36,6 +38,8 @@ pub struct RouterHandler {
     filter_name: Arc<ArcSwap<FilterName>>,
     status_reporter: Arc<BmpTcpInStatusReporter>,
     state_machine: Arc<Mutex<Option<BmpState>>>,
+    tracer: Arc<Tracer>,
+    tracing_mode: Arc<ArcSwap<TracingMode>>,
 }
 
 impl RouterHandler {
@@ -50,6 +54,8 @@ impl RouterHandler {
         filter_name: Arc<ArcSwap<FilterName>>,
         status_reporter: Arc<BmpTcpInStatusReporter>,
         state_machine: Arc<Mutex<Option<BmpState>>>,
+        tracer: Arc<Tracer>,
+        tracing_mode: Arc<ArcSwap<TracingMode>>,
     ) -> Self {
         Self {
             gate,
@@ -58,6 +64,8 @@ impl RouterHandler {
             filter_name,
             status_reporter,
             state_machine,
+            tracer,
+            tracing_mode,
         }
     }
 
@@ -83,7 +91,7 @@ impl RouterHandler {
         source_id: SourceId,
     ) {
         // Setup BMP streaming
-        let mut stream = BmpStream::new(rx, self.gate.clone());
+        let mut stream = BmpStream::new(rx, self.gate.clone(), self.tracing_mode.clone());
 
         // Ensure that on first use the metrics for the "unknown" router are
         // correctly initialised.
@@ -103,14 +111,14 @@ impl RouterHandler {
                     }
                 }
 
-                Ok((None, _)) => {
+                Ok((None, _, _)) => {
                     // The stream consumer exited in response to a Gate
                     // termination message. Break to close our side of the
                     // connection and stop processing this BMP stream.
                     break;
                 }
 
-                Ok((Some(msg_buf), status)) => {
+                Ok((Some(msg_buf), status, mut trace_id)) => {
                     // We want the stream reading to abort as soon as the Gate
                     // is terminated so we handle status updates to the Gate in
                     // the stream reader. The last non-terminal status updates is
@@ -139,13 +147,29 @@ impl RouterHandler {
                         _ => { /* Nothing to do */ }
                     }
 
+                    let tracing_mode = **self.tracing_mode.load();
+
+                    if trace_id == 0 && tracing_mode == TracingMode::On {
+                        trace_id = self.tracer.next_tracing_id();
+                    }
+
+                    if trace_id > 0 || tracing_mode == TracingMode::On {
+                        self.tracer.reset_trace_id(trace_id);
+                    }
+
                     if let Ok(bmp_msg) = BmpMessage::from_octets(msg_buf) {
-                        self.process_msg(router_addr, source_id.clone(), bmp_msg)
+                        let trace_id = if trace_id > 0 || tracing_mode == TracingMode::On {
+                            self.tracer.note_component_event(
+                                trace_id,
+                                self.gate.id(),
+                                format!("Started tracing BMP message {bmp_msg:#?}"),
+                            );
+                            Some(trace_id)
+                        } else {
+                            None
+                        };
+                        self.process_msg(router_addr, source_id.clone(), bmp_msg, trace_id)
                             .await;
-                        // let bmp_msg = Arc::new(BytesRecord(bmp_msg));
-                        // let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
-                        // let payload = Payload::new(router_addr, value);
-                        // self.gate.update_data(payload.into()).await;
                     }
                 }
             }
@@ -163,11 +187,18 @@ impl RouterHandler {
             .await;
     }
 
-    async fn process_msg(&self, addr: SocketAddr, source_id: SourceId, msg: Message<Bytes>) {
+    async fn process_msg(
+        &self,
+        addr: SocketAddr,
+        source_id: SourceId,
+        msg: Message<Bytes>,
+        trace_id: Option<u8>,
+    ) {
         let mut bmp_state_lock = self.state_machine.lock().await; // SAFETY: should never be poisoned
         let bmp_state = bmp_state_lock.take().unwrap();
 
         // TODO: Update last_msg_at timestamp
+        let bound_tracer = BoundTracer::bind(self.tracer.clone(), self.gate.id());
 
         self.status_reporter
             .bmp_message_received(bmp_state.router_id());
@@ -175,10 +206,10 @@ impl RouterHandler {
         if let Ok(ControlFlow::Continue(FilterOutput { south, east })) = Self::VM.with(|vm| {
             let value =
                 TypeValue::Builtin(BuiltinTypeValue::BmpMessage(Arc::new(BytesRecord(msg))));
-            self.roto_scripts.exec(vm, &self.filter_name.load(), value)
+            self.roto_scripts.exec_with_tracer(vm, &self.filter_name.load(), value, bound_tracer, trace_id)
         }) {
             if !south.is_empty() {
-                let payload = Payload::from_output_stream_queue(&source_id, south).into();
+                let payload = Payload::from_output_stream_queue(&source_id, south, trace_id).into();
                 self.gate.update_data(payload).await;
             }
 
@@ -189,7 +220,7 @@ impl RouterHandler {
                 self.status_reporter
                     .bmp_message_processed(bmp_state.router_id());
 
-                let mut res = bmp_state.process_msg(msg);
+                let mut res = bmp_state.process_msg(msg, trace_id);
 
                 match res.processing_result {
                     MessageType::InvalidMessage {

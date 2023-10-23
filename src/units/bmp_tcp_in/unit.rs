@@ -4,7 +4,7 @@ use std::{
     net::SocketAddr,
     ops::ControlFlow,
     sync::{Arc, Weak},
-    time::Duration,
+    time::Duration, str::FromStr,
 };
 
 use arc_swap::ArcSwap;
@@ -28,7 +28,7 @@ use crate::{
     manager::{Component, WaitPoint},
     payload::SourceId,
     tokio::TokioTaskMetrics,
-    units::Unit,
+    units::Unit, log::Tracer,
 };
 
 use super::{
@@ -79,6 +79,52 @@ impl TcpListener for StandardTcpListener {
 
 //-------- BmpIn -------------------------------------------------------------
 
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+pub enum TracingMode {
+    /// Don't enable tracing of incoming messages through the pipeline.
+    Off,
+
+    /// Only enable tracing if the incoming BMP message includes a trace ID.
+    IfRequested,
+
+    /// Trace all incoming messages by automatically generating sequentially
+    /// rising trace IDs in the range 0..255 then wrapping back to 0.
+    On,
+}
+
+impl Default for TracingMode {
+    fn default() -> Self {
+        TracingMode::Off
+    }
+}
+
+impl FromStr for TracingMode {
+    type Err = &'static str;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let lowered = s.to_lowercase();
+        if lowered == "on" {
+            Ok(TracingMode::On)
+        } else if lowered == "ifrequested" {
+            Ok(TracingMode::IfRequested)
+        } else if lowered == "off" {
+            Ok(TracingMode::Off)
+        } else {
+            Err("tracing_mode must be one of: Off, IfRequested or On")
+        }
+    }
+}
+
+impl std::fmt::Display for TracingMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TracingMode::Off => f.write_str("Off"),
+            TracingMode::IfRequested => f.write_str("IfRequested"),
+            TracingMode::On => f.write_str("On"),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct BmpTcpIn {
     /// A colon separated IP address and port number to listen on for incoming
@@ -98,6 +144,9 @@ pub struct BmpTcpIn {
 
     #[serde(default)]
     pub filter_name: FilterName,
+
+    #[serde(default)]
+    pub tracing_mode: TracingMode,
 }
 
 impl BmpTcpIn {
@@ -156,6 +205,7 @@ impl BmpTcpIn {
         };
 
         let roto_scripts = component.roto_scripts().clone();
+        let tracer = component.tracer().clone();
 
         // Wait for other components to be, and signal to other components
         // that we are, ready to start. All units and targets start together,
@@ -171,6 +221,8 @@ impl BmpTcpIn {
 
         let component = Arc::new(RwLock::new(component));
 
+        let tracing_mode = Arc::new(ArcSwap::from_pointee(self.tracing_mode));
+
         BmpTcpInRunner::new(
             component,
             self.listen,
@@ -185,6 +237,8 @@ impl BmpTcpIn {
             roto_scripts,
             router_id_template,
             filter_name,
+            tracer,
+            tracing_mode,
         )
         .run(Arc::new(StandardTcpListenerFactory))
         .await?;
@@ -219,6 +273,8 @@ struct BmpTcpInRunner {
     roto_scripts: RotoScripts,
     router_id_template: Arc<ArcSwap<String>>,
     filter_name: Arc<ArcSwap<FilterName>>,
+    tracer: Arc<Tracer>,
+    tracing_mode: Arc<ArcSwap<TracingMode>>,
 }
 
 impl BmpTcpInRunner {
@@ -237,6 +293,8 @@ impl BmpTcpInRunner {
         roto_scripts: RotoScripts,
         router_id_template: Arc<ArcSwap<String>>,
         filter_name: Arc<ArcSwap<FilterName>>,
+        tracer: Arc<Tracer>,
+        tracing_mode: Arc<ArcSwap<TracingMode>>,
     ) -> Self {
         Self {
             component,
@@ -252,6 +310,8 @@ impl BmpTcpInRunner {
             roto_scripts,
             router_id_template,
             filter_name,
+            tracer,
+            tracing_mode,
         }
     }
 
@@ -273,6 +333,8 @@ impl BmpTcpInRunner {
             roto_scripts: Default::default(),
             router_id_template: Default::default(),
             filter_name: Default::default(),
+            tracer: Default::default(),
+            tracing_mode: Default::default(),
         };
 
         (runner, gate_agent)
@@ -352,6 +414,8 @@ impl BmpTcpInRunner {
                             self.filter_name.clone(),
                             child_status_reporter,
                             state_machine,
+                            self.tracer.clone(),
+                            self.tracing_mode.clone(),
                         );
 
                         crate::tokio::spawn(&child_name, async move {
@@ -363,8 +427,6 @@ impl BmpTcpInRunner {
                 }
             }
         }
-
-        eprintln!("Loop ending");
     }
 
     async fn process_until<T, U>(
@@ -392,6 +454,7 @@ impl BmpTcpInRunner {
                                     http_api_path: _http_api_path,
                                     router_id_template: new_router_id_template,
                                     filter_name: new_filter_name,
+                                    tracing_mode: new_tracing_mode,
                                 }),
                         } => {
                             // Runtime reconfiguration of this unit has
@@ -406,6 +469,7 @@ impl BmpTcpInRunner {
                             self.listen = new_listen;
                             self.filter_name.store(new_filter_name.into());
                             self.router_id_template.store(new_router_id_template.into());
+                            self.tracing_mode.store(new_tracing_mode.into());
 
                             if rebind {
                                 // Trigger re-binding to the new listen port.

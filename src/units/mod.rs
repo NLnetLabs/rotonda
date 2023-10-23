@@ -26,6 +26,7 @@ pub use rib_unit::{
     unit::{RibType, RibUnit},
     RibValue,
 };
+pub use bmp_tcp_in::unit::TracingMode;
 
 //------------ Unit ----------------------------------------------------------
 

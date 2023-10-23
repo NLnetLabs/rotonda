@@ -173,7 +173,7 @@ pub struct Dumping {
 
 impl BmpStateDetails<Dumping> {
     #[allow(dead_code)]
-    pub fn process_msg(self, bmp_msg: BmpMsg<Bytes>) -> ProcessingResult {
+    pub fn process_msg(self, bmp_msg: BmpMsg<Bytes>, trace_id: Option<u8>) -> ProcessingResult {
         match bmp_msg {
             // already verified upstream
             BmpMsg::InitiationMessage(msg) => self.initiate(msg),
@@ -192,7 +192,7 @@ impl BmpStateDetails<Dumping> {
             BmpMsg::PeerDownNotification(msg) => self.peer_down(msg),
 
             BmpMsg::RouteMonitoring(msg) => {
-                self.route_monitoring(msg, RouteStatus::InConvergence, |s, pph, update| {
+                self.route_monitoring(msg, RouteStatus::InConvergence, trace_id, |s, pph, update| {
                     s.route_monitoring_preprocessing(pph, update)
                 })
             }

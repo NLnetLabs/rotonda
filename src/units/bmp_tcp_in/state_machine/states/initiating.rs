@@ -57,7 +57,7 @@ impl BmpStateDetails<Initiating> {
     }
 
     #[allow(dead_code)]
-    pub fn process_msg(self, bmp_msg: BmpMsg<Bytes>) -> ProcessingResult {
+    pub fn process_msg(self, bmp_msg: BmpMsg<Bytes>, _trace_id: Option<u8>) -> ProcessingResult {
         match bmp_msg {
             // already verified upstream
             BmpMsg::InitiationMessage(msg) => {

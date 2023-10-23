@@ -7,6 +7,7 @@ use crate::{
     comms::{
         AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus, Link, Terminated, TriggerData,
     },
+    log::{BoundTracer, Tracer},
     manager::{Component, WaitPoint},
     payload::{FilterError, Filterable, Payload, RouterId, Update, UpstreamStatus},
     tokio::TokioTaskMetrics,
@@ -211,6 +212,7 @@ pub struct RibUnitRunner {
     rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
     status_reporter: Arc<RibUnitStatusReporter>,
     _process_metrics: Arc<TokioTaskMetrics>,
+    tracer: Arc<Tracer>,
 }
 
 #[async_trait]
@@ -294,6 +296,7 @@ impl RibUnitRunner {
         }
 
         let roto_scripts = component.roto_scripts().clone();
+        let tracer = component.tracer().clone();
 
         Self {
             roto_scripts,
@@ -307,12 +310,13 @@ impl RibUnitRunner {
             pending_vrib_query_results,
             _process_metrics,
             rib_merge_update_stats,
+            tracer,
         }
     }
 
     #[cfg(test)]
     pub(crate) fn mock(roto_script: &str, rib_type: RibType) -> Self {
-        use crate::common::roto::RotoScriptOrigin;
+        use crate::{common::roto::RotoScriptOrigin, log::Tracer};
 
         let roto_scripts = RotoScripts::default();
         if !roto_script.is_empty() {
@@ -338,6 +342,7 @@ impl RibUnitRunner {
             None,
             pending_vrib_query_results.clone(),
         ));
+        let tracer = Arc::new(Tracer::new());
 
         Self {
             roto_scripts,
@@ -351,6 +356,7 @@ impl RibUnitRunner {
             pending_vrib_query_results,
             _process_metrics,
             rib_merge_update_stats,
+            tracer,
         }
     }
 
@@ -599,10 +605,19 @@ impl RibUnitRunner {
             + Send
             + 'static,
     {
+        let bound_tracer = BoundTracer::bind(self.tracer.clone(), self.gate.id());
         if let Some(filtered_update) = Self::VM
             .with(|vm| {
                 payload
-                    .filter(|value| self.roto_scripts.exec(vm, &self.filter_name.load(), value))
+                    .filter(|value, trace_id| {
+                        self.roto_scripts.exec_with_tracer(
+                            vm,
+                            &self.filter_name.load(),
+                            value,
+                            bound_tracer.clone(),
+                            trace_id,
+                        )
+                    })
                     .map(|filtered_payloads| (self.insert_payloads(filtered_payloads, insert_fn)))
             })
             .map_err(|err| {
@@ -792,6 +807,8 @@ impl RibUnitRunner {
     async fn reprocess_rib_value(&self, rib_value: RibValue) -> Option<RibValue> {
         let mut new_values = HashedSet::with_capacity_and_hasher(1, HashBuildHasher::default());
 
+        let tracer = BoundTracer::bind(self.tracer.clone(), self.gate.id());
+
         for route in rib_value.iter() {
             let in_type_value: &TypeValue = route.deref();
             let payload = Payload::from(in_type_value.clone()); // TODO: Do we really want to clone here? Or pass the Arc on?
@@ -799,7 +816,15 @@ impl RibUnitRunner {
             trace!("Re-processing route");
 
             if let Ok(filtered_payloads) = Self::VM.with(|vm| {
-                payload.filter(|value| self.roto_scripts.exec(vm, &self.filter_name.load(), value))
+                payload.filter(|value, trace_id| {
+                    self.roto_scripts.exec_with_tracer(
+                        vm,
+                        &self.filter_name.load(),
+                        value,
+                        tracer.clone(),
+                        trace_id,
+                    )
+                })
             }) {
                 new_values.extend(
                     filtered_payloads

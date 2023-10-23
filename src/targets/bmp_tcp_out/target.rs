@@ -184,6 +184,7 @@ impl DirectUpdate for BmpTcpOutRunner {
             Update::Single(Payload {
                 source_id,
                 value: TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bytes)),
+                ..
             }) => {
                 // Dispatch the message to the proxy for this router. Create the proxy if it doesn't exist yet.
                 if let Some(addr) = source_id.socket_addr() {

@@ -65,6 +65,7 @@
 //! clones configuration in sync with that of the original Gate.
 
 use crate::common::frim::FrimMap;
+use crate::log::Tracer;
 use crate::manager::UpstreamLinkReport;
 use crate::metrics::{Metric, MetricType, MetricUnit};
 use crate::{config::Marked, payload::Update, units::Unit};
@@ -180,6 +181,9 @@ pub struct Gate {
 
     /// Gate type dependent state.
     state: GateState,
+
+    /// Tracer
+    tracer: Option<Arc<Tracer>>,
 }
 
 // On drop, notify the parent of a cloned gate that this clone is detaching itself so that the parent Gate remove the
@@ -228,6 +232,7 @@ impl Gate {
                 command_sender: tx.clone(),
                 clone_senders: Default::default(),
             }),
+            tracer: None,
         };
         let agent = GateAgent {
             id: gate.id.clone(),
@@ -334,6 +339,10 @@ impl Gate {
                 self.id()
             );
         }
+    }
+
+    pub fn set_tracer(&mut self, tracer: Arc<Tracer>) {
+        self.tracer = Some(tracer);
     }
 
     /// Runs the gate’s internal machine.
@@ -641,6 +650,15 @@ impl Gate {
         for (uuid, item) in self.updates.guard().iter() {
             match (&item.queue, &item.direct) {
                 (Some(sender), None) => {
+                    if let Some(tracer) = &self.tracer {
+                        for trace_id in update.trace_ids() {
+                            tracer.note_gate_event(
+                                trace_id,
+                                self.id(),
+                                format!("Sent by queue from gate {} to slot {uuid}", self.id()),
+                            );
+                        }
+                    }
                     if sender.send(Ok(update.clone())).await.is_ok() {
                         sent_at_least_once = true;
                         continue;
@@ -660,6 +678,18 @@ impl Gate {
                             self.id(),
                             uuid
                         );
+                    }
+                    if let Some(tracer) = &self.tracer {
+                        for trace_id in update.trace_ids() {
+                            tracer.note_gate_event(
+                                trace_id,
+                                self.id(),
+                                format!(
+                                    "Sent by direct update from gate {} to slot {uuid}",
+                                    self.id()
+                                ),
+                            );
+                        }
                     }
                     if let Some(direct) = direct.upgrade() {
                         direct.direct_update(update.clone()).await;
@@ -867,6 +897,7 @@ impl Clone for Gate {
                 clone_id,
                 parent_command_sender: parent_command_sender.clone(),
             }),
+            tracer: self.tracer.clone(),
         };
 
         // Ask the real gate to add our command sender to the set it sends

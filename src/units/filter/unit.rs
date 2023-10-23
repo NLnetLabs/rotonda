@@ -4,6 +4,7 @@ use crate::{
         status_reporter::{AnyStatusReporter, UnitStatusReporter},
     },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus, Terminated},
+    log::{BoundTracer, Tracer},
     manager::{Component, WaitPoint},
     payload::{FilterError, Filterable, Update, UpstreamStatus},
     units::Unit,
@@ -45,6 +46,7 @@ struct RotoFilterRunner {
     gate: Arc<Gate>,
     status_reporter: Arc<RotoFilterStatusReporter>,
     filter_name: Arc<ArcSwap<FilterName>>,
+    tracer: Arc<Tracer>,
 }
 
 impl RotoFilterRunner {
@@ -65,18 +67,20 @@ impl RotoFilterRunner {
 
         let filter_name = Arc::new(ArcSwap::from_pointee(filter_name));
         let roto_scripts = component.roto_scripts().clone();
+        let tracer = component.tracer().clone();
 
         Self {
             roto_scripts,
             gate,
             status_reporter,
             filter_name,
+            tracer,
         }
     }
 
     #[cfg(test)]
     fn mock(roto_script: &str, filter_name: &str) -> Self {
-        use crate::common::roto::RotoScriptOrigin;
+        use crate::{common::roto::RotoScriptOrigin, log::Tracer};
 
         let roto_scripts = RotoScripts::default();
         roto_scripts
@@ -86,11 +90,14 @@ impl RotoFilterRunner {
         let gate = gate.into();
         let status_reporter = RotoFilterStatusReporter::default().into();
         let filter_name = Arc::new(ArcSwap::from_pointee(FilterName::from(filter_name)));
+        let tracer = Arc::new(Tracer::new());
+
         Self {
             roto_scripts,
             gate,
             status_reporter,
             filter_name,
+            tracer,
         }
     }
 
@@ -185,10 +192,20 @@ impl RotoFilterRunner {
     }
 
     async fn filter_payload<T: Filterable>(&self, payload: T) -> Result<(), FilterError> {
+        let tracer = BoundTracer::bind(self.tracer.clone(), self.gate.id());
+
         if let Some(filtered_update) = Self::VM
             .with(|vm| {
                 payload
-                    .filter(|value| self.roto_scripts.exec(vm, &self.filter_name.load(), value))
+                    .filter(|value, trace_id| {
+                        self.roto_scripts.exec_with_tracer(
+                            vm,
+                            &self.filter_name.load(),
+                            value,
+                            tracer.clone(),
+                            trace_id,
+                        )
+                    })
                     .map(|mut filtered_payloads| match filtered_payloads.len() {
                         0 => None,
                         1 => Some(Update::Single(filtered_payloads.pop().unwrap())),

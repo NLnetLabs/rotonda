@@ -4,7 +4,7 @@ use crate::common::file_io::{FileIo, TheFileIo};
 use crate::common::roto::{FilterName, LoadErrorKind, RotoError, RotoScriptOrigin, RotoScripts};
 use crate::comms::{DirectLink, Gate, GateAgent, GraphStatus, Link, UPDATE_QUEUE_LEN};
 use crate::config::{Config, ConfigFile, Marked};
-use crate::log::Terminate;
+use crate::log::{Terminate, Tracer};
 use crate::targets::Target;
 use crate::units::Unit;
 use crate::{http, metrics};
@@ -55,6 +55,9 @@ pub struct Component {
 
     /// A reference to the Roto script collection.
     roto_scripts: RotoScripts,
+
+    /// A reference to the Tracer
+    tracer: Arc<Tracer>,
 }
 
 #[cfg(test)]
@@ -67,6 +70,7 @@ impl Default for Component {
             metrics: Default::default(),
             http_resources: Default::default(),
             roto_scripts: Default::default(),
+            tracer: Default::default(),
         }
     }
 }
@@ -80,6 +84,7 @@ impl Component {
         metrics: metrics::Collection,
         http_resources: http::Resources,
         roto_scripts: RotoScripts,
+        tracer: Arc<Tracer>,
     ) -> Self {
         Component {
             name: name.into(),
@@ -88,6 +93,7 @@ impl Component {
             metrics: Some(metrics),
             http_resources,
             roto_scripts,
+            tracer,
         }
     }
 
@@ -112,6 +118,10 @@ impl Component {
 
     pub fn roto_scripts(&self) -> &RotoScripts {
         &self.roto_scripts
+    }
+
+    pub fn tracer(&self) -> &Arc<Tracer> {
+        &self.tracer
     }
 
     /// Register a metrics source.
@@ -223,13 +233,18 @@ impl LinkReport {
         }
     }
 
+    fn get_gate_id(&self, name: &str) -> Option<Uuid> {
+        self.gates.get(name).copied()
+    }
+
     #[cfg(not(feature = "config-graph"))]
     fn get_svg(self) -> String {
         String::new()
     }
 
+    // TODO: accept trace id here and colour route through gates by gate id of trace steps.
     #[cfg(feature = "config-graph")]
-    fn get_svg(&self) -> String {
+    fn get_svg(&self, tracer: Arc<Tracer>, trace_id: Option<u8>) -> String {
         use chrono::Utc;
         use layout::backends::svg::SVGWriter;
         use layout::core::base::Orientation;
@@ -240,8 +255,12 @@ impl LinkReport {
         use layout::std_shapes::shapes::*;
         use layout::topo::layout::VisualGraph;
 
+        use crate::log::{MsgRelation, Trace};
+
         let mut vg = VisualGraph::new(Orientation::LeftToRight);
         let mut nodes = HashMap::new();
+
+        let trace = trace_id.map_or_else(Trace::new, |id| tracer.get_trace(id));
 
         // add nodes for each unit and target
         for (unit_or_target_name, report) in &self.links {
@@ -249,7 +268,7 @@ impl LinkReport {
                 .graph_status()
                 .and_then(|weak_ref| weak_ref.upgrade())
             {
-                Some(graph_status) => {
+                Some(graph_status) if trace_id.is_none() => {
                     let shape_kind = ShapeKind::new_box(&format!(
                         "{}\n{}",
                         &unit_or_target_name,
@@ -266,11 +285,37 @@ impl LinkReport {
 
                     (shape_kind, style_attr)
                 }
-                None => (
+
+                _ if trace_id.is_some() => {
+                    // TODO: Inefficient
+                    let mut box_colour = "black";
+                    let mut trace_txt = String::new();
+
+                    if let Some(gate_id) = self.get_gate_id(&unit_or_target_name) {
+                        let msg_indices = trace.msg_indices(gate_id, MsgRelation::ALL);
+                        if !msg_indices.is_empty() {
+                            box_colour = "blue";
+                            trace_txt = trace
+                                .msg_indices(gate_id, MsgRelation::ALL)
+                                .iter()
+                                .map(ToString::to_string)
+                                .collect::<Vec<String>>()
+                                .join(", ");
+                        }
+                    }
+
+                    (
+                        ShapeKind::new_box(&format!("{}\n{}", &unit_or_target_name, trace_txt)),
+                        StyleAttr::new(Color::fast(box_colour), 2, None, 0, 15),
+                    )
+                }
+
+                _ => (
                     ShapeKind::new_box(unit_or_target_name),
                     StyleAttr::new(Color::fast("black"), 2, None, 0, 15),
                 ),
             };
+
             let node = Element::create(
                 shape_kind,
                 style_attr,
@@ -297,9 +342,24 @@ impl LinkReport {
                     .map_or("unknown", |(name, _id)| name);
                 debug!("Gate: id={} name={gate_name}", link.gate_id);
 
+                let mut arrow = Arrow::simple(link_type);
+                if trace_id.is_some()
+                    && !trace
+                        .msg_indices(link.gate_id, MsgRelation::GATE)
+                        .is_empty()
+                {
+                    arrow.look = StyleAttr::new(
+                        Color::fast("blue"),
+                        2,
+                        Option::Some(Color::fast("blue")),
+                        0,
+                        15,
+                    )
+                }
+
                 let to_node = nodes.get(unit_or_target_name).unwrap();
                 if let Some(from_node) = nodes.get(gate_name) {
-                    vg.add_edge(Arrow::simple(link_type), *from_node, *to_node);
+                    vg.add_edge(arrow, *from_node, *to_node);
                 } else {
                     // This can happen if a unit or target didn't honor a new set of sources announced to it via
                     // a reconfigure message.
@@ -445,6 +505,10 @@ pub struct Manager {
     graph_svg_data: Arc<ArcSwap<(Instant, LinkReport)>>,
 
     file_io: TheFileIo,
+
+    tracer: Arc<Tracer>,
+
+    tracer_processor: Arc<dyn ProcessRequest>,
 }
 
 impl Default for Manager {
@@ -457,10 +521,14 @@ impl Manager {
     /// Creates a new manager.
     pub fn new() -> Self {
         let graph_svg_data = Arc::new(ArcSwap::from_pointee((Instant::now(), LinkReport::new())));
+        let tracer = Arc::new(Tracer::new());
 
         #[cfg(feature = "config-graph")]
-        let (graph_svg_processor, rel_base_url) =
-            Self::mk_svg_http_processor(graph_svg_data.clone());
+        let (graph_svg_processor, graph_svg_rel_base_url) =
+            Self::mk_svg_http_processor(graph_svg_data.clone(), tracer.clone());
+
+        let (tracer_processor, tracer_rel_base_url) =
+            Self::mk_tracer_http_processor(tracer.clone());
 
         #[allow(clippy::let_and_return, clippy::default_constructed_unit_structs)]
         let manager = Manager {
@@ -475,15 +543,25 @@ impl Manager {
             graph_svg_processor,
             graph_svg_data,
             file_io: TheFileIo::default(),
+            tracer,
+            tracer_processor,
         };
 
         // Register the /status/graph endpoint.
         #[cfg(feature = "config-graph")]
         manager.http_resources.register(
             Arc::downgrade(&manager.graph_svg_processor),
-            "manager".into(),
-            "manager",
-            rel_base_url,
+            "status_graph".into(),
+            "status_graph",
+            graph_svg_rel_base_url,
+            true,
+        );
+
+        manager.http_resources.register(
+            Arc::downgrade(&manager.tracer_processor),
+            "tracer".into(),
+            "tracer",
+            tracer_rel_base_url,
             true,
         );
 
@@ -707,7 +785,8 @@ impl Manager {
         // collection to be handled later by spawn(). For unresolvable links
         // the corresponding Gate will be dropped here.
         for (name, load) in gates {
-            if let Some(gate) = load.gate {
+            if let Some(mut gate) = load.gate {
+                gate.set_tracer(self.tracer.clone());
                 if !config.units.units.contains_key(&name) {
                     for mut link in load.links {
                         link.resolve_config(file);
@@ -978,6 +1057,7 @@ impl Manager {
                 self.metrics.clone(),
                 self.http_resources.clone(),
                 self.roto_scripts.clone(),
+                self.tracer.clone(),
             );
 
             let target_type = std::mem::discriminant(&new_target);
@@ -1039,6 +1119,7 @@ impl Manager {
                 self.metrics.clone(),
                 self.http_resources.clone(),
                 self.roto_scripts.clone(),
+                self.tracer.clone(),
             );
 
             let unit_type = std::mem::discriminant(&new_unit);
@@ -1254,16 +1335,100 @@ impl Manager {
     #[cfg(feature = "config-graph")]
     fn mk_svg_http_processor(
         graph_svg_data: Arc<arc_swap::ArcSwapAny<Arc<(Instant, LinkReport)>>>,
+        tracer: Arc<Tracer>,
     ) -> (Arc<dyn ProcessRequest>, &'static str) {
         const REL_BASE_URL: &str = "/status/graph";
+
+        let processor = Arc::new(move |request: &Request<_>| {
+            let req_path = request.uri().decoded_path();
+            if request.method() == Method::GET && req_path.starts_with(REL_BASE_URL) {
+                let (_base_path, restant) = req_path.split_at(REL_BASE_URL.len());
+                let trace_id = if restant.contains("/traces/") {
+                    restant.split_at("/traces/".len()).1.parse::<u8>().ok()
+                } else {
+                    None
+                };
+                let svg = graph_svg_data.load().1.get_svg(tracer.clone(), trace_id);
+                let traces = if let Some(trace_id) = trace_id {
+                    let trace = tracer.get_trace(trace_id);
+
+                    let mut traces_html = format!(r###"
+                        <p>Showing pipeline route and processing details of trace {trace_id}:</p>
+                        <table>
+                          <tr>
+                            <th>#</th>
+                            <th>When</th>
+                            <th>What</th>
+                          </tr>
+                    "###);
+
+                    for (idx, msg) in trace.msgs().iter().enumerate() {
+                        traces_html.push_str(&format!(
+                            r###"
+                        <tr>
+                          <td>{idx}</td>
+                          <td>{}</td>
+                          <td><pre>{}</pre></td>
+                        </tr>
+                        "###,
+                            msg.timestamp, msg.msg
+                        ));
+                    }
+                    traces_html.push_str("</table>\n");
+                    traces_html
+                } else {
+                    String::new()
+                };
+                let html = format!(
+                    r###"
+                    <html lang="en">
+                    <head>
+                    <meta charset="UTF-8">
+                    <style>
+                        table {{
+                        border-collapse: collapse;
+                        }}
+                        th, td {{
+                        border: 1px solid black;
+                        padding: 2px 20px 2px 20px;
+                        }}
+                    </style>
+                    </head>
+                    <body>
+                      <svg xmlns="http://www.w3.org/2000/svg" style="width: 100%; height: 300px;">
+                         {svg}
+                      </svg>
+                      {traces}
+                    </body>
+                    </html>
+                "###
+                );
+                let body = Body::from(html);
+                let response = Response::builder()
+                    .status(hyper::StatusCode::OK)
+                    .header("Content-Type", "text/html")
+                    .body(body)
+                    .unwrap();
+
+                Some(response)
+            } else {
+                None
+            }
+        });
+
+        (processor, REL_BASE_URL)
+    }
+
+    fn mk_tracer_http_processor(tracer: Arc<Tracer>) -> (Arc<dyn ProcessRequest>, &'static str) {
+        const REL_BASE_URL: &str = "/status/traces";
 
         let processor = Arc::new(move |request: &Request<_>| {
             let req_path = request.uri().decoded_path();
             if request.method() == Method::GET && req_path == REL_BASE_URL {
                 let response = Response::builder()
                     .status(hyper::StatusCode::OK)
-                    .header("Content-Type", "image/svg+xml")
-                    .body(Body::from(graph_svg_data.load().1.get_svg()))
+                    .header("Content-Type", "text/plain")
+                    .body(Body::from(format!("{tracer:#?}")))
                     .unwrap();
 
                 Some(response)

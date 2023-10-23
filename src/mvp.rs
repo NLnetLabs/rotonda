@@ -13,6 +13,7 @@ use std::str::FromStr;
 use crate::log::Terminate;
 
 use crate::targets::DEF_MQTT_PORT;
+use crate::units::TracingMode;
 
 //------------ Constants -----------------------------------------------------
 
@@ -32,6 +33,7 @@ pub const ARG_PRINT_CONFIG_AND_EXIT: &str = "print-config-and-exit";
 pub const ARG_HTTP_LISTEN: &str = "http-listen";
 pub const ARG_BGP_LISTEN: &str = "bgp-listen";
 pub const ARG_BMP_LISTEN: &str = "bmp-listen";
+pub const ARG_BMP_TRACING_MODE: &str = "bmp-tracing-mode";
 pub const ARG_BMP_PROXY_DESTINATION: &str = "bmp-proxy-destination";
 pub const ARG_MQTT_DESTINATION: &str = "mqtt-destination";
 
@@ -67,6 +69,9 @@ pub struct MvpConfig {
     /// Print finalised embedded config and exit
     #[serde(default)]
     pub print_config_and_exit: bool,
+
+    #[serde(default)]
+    pub tracing_mode: Option<TracingMode>,
 }
 
 impl MvpConfig {
@@ -96,6 +101,14 @@ impl MvpConfig {
                     .value_name("IP:PORT")
                     .conflicts_with(ARG_CONFIG)
                     .help("Listen for BGP connections on this address"),
+            )
+            .arg(
+                Arg::new(ARG_BMP_TRACING_MODE)
+                    .long(ARG_BMP_TRACING_MODE)
+                    .required(false)
+                    .value_name("<Off|IfRequested|On>")
+                    .conflicts_with(ARG_CONFIG)
+                    .help("Whether and how to enable tracing of BMP messages"),
             )
             .arg(
                 Arg::new(ARG_BMP_LISTEN)
@@ -141,6 +154,7 @@ impl MvpConfig {
         self.http_listen_addr = Self::from_str_value_of(matches, ARG_HTTP_LISTEN)?;
         self.mqtt_destination_addr = Self::from_str_value_of(matches, ARG_MQTT_DESTINATION)?;
         self.print_config_and_exit = matches.get_flag(ARG_PRINT_CONFIG_AND_EXIT);
+        self.tracing_mode = Self::from_str_value_of(matches, ARG_BMP_TRACING_MODE)?;
 
         // If a config file is specified it should be valid, but if not specified then we are using an embedded MVP
         // config file that references Roto filters that the user may not have the required .roto files for, e.g.

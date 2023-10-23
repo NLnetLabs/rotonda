@@ -108,7 +108,7 @@ pub enum UpstreamStatus {
 pub trait Filterable {
     fn filter<E, T>(self, filter_fn: T) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
-        T: Fn(TypeValue) -> FilterResult<E> + Clone,
+        T: Fn(TypeValue, Option<u8>) -> FilterResult<E> + Clone,
         FilterError: From<E>;
 }
 
@@ -142,10 +142,11 @@ impl Display for FilterError {
 pub struct Payload {
     pub source_id: SourceId,
     pub value: TypeValue,
+    pub trace_id: Option<u8>,
 }
 
 impl Payload {
-    pub fn new<S, T>(source_id: S, value: T) -> Self
+    pub fn new<S, T>(source_id: S, value: T, trace_id: Option<u8>) -> Self
     where
         S: Into<SourceId>,
         T: Into<TypeValue>,
@@ -153,24 +154,30 @@ impl Payload {
         Self {
             source_id: source_id.into(),
             value: value.into(),
+            trace_id,
         }
     }
 
     pub fn source_id(&self) -> &SourceId {
         &self.source_id
     }
+
+    pub fn trace_id(&self) -> Option<u8> {
+        self.trace_id
+    }
 }
 
 impl Filterable for Payload {
     fn filter<E, T>(self, filter_fn: T) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
-        T: Fn(TypeValue) -> FilterResult<E> + Clone,
+        T: Fn(TypeValue, Option<u8>) -> FilterResult<E> + Clone,
         FilterError: From<E>,
     {
-        if let ControlFlow::Continue(filter_output) = filter_fn(self.value)? {
+        if let ControlFlow::Continue(filter_output) = filter_fn(self.value, self.trace_id)? {
             Ok(Payload::from_filter_output(
                 self.source_id.clone(),
                 filter_output,
+                self.trace_id,
             ))
         } else {
             Ok(smallvec![])
@@ -181,7 +188,7 @@ impl Filterable for Payload {
 impl Filterable for SmallVec<[Payload; 8]> {
     fn filter<E, T>(self, filter_fn: T) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
-        T: Fn(TypeValue) -> FilterResult<E> + Clone,
+        T: Fn(TypeValue, Option<u8>) -> FilterResult<E> + Clone,
         FilterError: From<E>,
     {
         let mut out_payloads = smallvec![];
@@ -198,11 +205,12 @@ impl Payload {
     pub fn from_filter_output(
         source_id: SourceId,
         filter_output: FilterOutput,
+        trace_id: Option<u8>,
     ) -> SmallVec<[Payload; 8]> {
         let mut out_payloads = smallvec![];
 
         // Make a payload out of it
-        let new_payload = Payload::new(source_id.clone(), filter_output.east);
+        let new_payload = Payload::new(source_id.clone(), filter_output.east, trace_id);
 
         // Add the payload to the result
         out_payloads.push(new_payload);
@@ -213,7 +221,7 @@ impl Payload {
                 filter_output
                     .south
                     .into_iter()
-                    .map(|osm| Payload::new(source_id.clone(), osm)),
+                    .map(|osm| Payload::new(source_id.clone(), osm, trace_id)),
             );
         }
 
@@ -223,9 +231,10 @@ impl Payload {
     pub fn from_output_stream_queue(
         source_id: &SourceId,
         osq: OutputStreamQueue,
+        trace_id: Option<u8>,
     ) -> SmallVec<[Payload; 8]> {
         osq.into_iter()
-            .map(|osm| Payload::new(source_id.clone(), osm))
+            .map(|osm| Payload::new(source_id.clone(), osm, trace_id))
             .collect()
     }
 }
@@ -244,7 +253,7 @@ impl From<Payload> for SmallVec<[Update; 1]> {
 
 impl From<TypeValue> for Payload {
     fn from(tv: TypeValue) -> Self {
-        Self::new("generated", tv)
+        Self::new("generated", tv, None)
     }
 }
 
@@ -256,6 +265,17 @@ pub enum Update {
     Bulk(SmallVec<[Payload; 8]>),
     QueryResult(Uuid, Result<QueryResult<RibValue>, String>),
     UpstreamStatusChange(UpstreamStatus),
+}
+
+impl Update {
+    pub fn trace_ids(&self) -> SmallVec::<[u8; 1]> {
+        match self {
+            Update::Single(payload) => [payload].iter().filter_map(|p| p.trace_id()).collect(),
+            Update::Bulk(payloads) => payloads.iter().filter_map(|p| p.trace_id()).collect(),
+            Update::QueryResult(_, _) => smallvec![],
+            Update::UpstreamStatusChange(_) => smallvec![],
+        }
+    }
 }
 
 impl From<Payload> for Update {

@@ -200,7 +200,7 @@ impl Processor {
                                 }) {
                                     if !south.is_empty() {
                                         let source_id = SourceId::from("TODO");
-                                        let update = Payload::from_output_stream_queue(&source_id, south).into();
+                                        let update = Payload::from_output_stream_queue(&source_id, south, None).into();
                                         self.gate.update_data(update).await;
                                     }
                                     if let TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(pdu)) = east {
@@ -338,7 +338,7 @@ impl Processor {
                 route_status,
             );
             let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
-            Payload::new(source_id.clone(), typval)
+            Payload::new(source_id.clone(), typval, None)
         }
 
         // When sending both v4 and v6 nlri using exabgp, exa sends a v4

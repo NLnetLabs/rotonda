@@ -509,6 +509,7 @@ where
         mut self,
         msg: RouteMonitoring<Bytes>,
         route_status: RouteStatus,
+        trace_id: Option<u8>,
         do_state_specific_pre_processing: CB,
     ) -> ProcessingResult
     where
@@ -562,7 +563,7 @@ where
                     };
 
                     let (payloads, n_new_prefixes, n_announcements, n_withdrawals) = saved_self
-                        .extract_route_monitoring_routes(pph.clone(), &update, route_status);
+                        .extract_route_monitoring_routes(pph.clone(), &update, route_status, trace_id);
 
                     if n_announcements > 0
                         && saved_self.details.is_peer_eor_capable(&pph) == Some(true)
@@ -613,6 +614,7 @@ where
         pph: PerPeerHeader<Bytes>,
         update: &UpdateMessage<Bytes>,
         route_status: RouteStatus,
+        trace_id: Option<u8>,
     ) -> (SmallVec<[Payload; 8]>, usize, usize, usize) {
         let mut num_new_prefixes = 0;
         let num_announcements: usize = update.nlris().iter().count();
@@ -646,7 +648,7 @@ where
                     route_status,
                 );
 
-                payloads.push(Payload::new(self.source_id.clone(), route));
+                payloads.push(Payload::new(self.source_id.clone(), route, trace_id));
             }
         }
 
@@ -679,7 +681,7 @@ where
                         RouteStatus::Withdrawn,
                     );
 
-                    payloads.push(Payload::new(self.source_id.clone(), route));
+                    payloads.push(Payload::new(self.source_id.clone(), route, trace_id));
 
                     self.details.remove_announced_prefix(&pph, &prefix);
                 } else {
@@ -715,7 +717,7 @@ impl BmpState {
     }
 
     #[allow(dead_code)]
-    pub fn process_msg(self, bmp_msg: BmpMsg<Bytes>) -> ProcessingResult {
+    pub fn process_msg(self, bmp_msg: BmpMsg<Bytes>, trace_id: Option<u8>) -> ProcessingResult {
         let saved_addr = self.source_id();
         let saved_router_id = self.router_id().clone();
         let saved_state_idx = self.state_idx();
@@ -738,10 +740,10 @@ impl BmpState {
         //      Cargo.toml we will no longer be able to catch this panic and
         //      this defensive logic will become useless.
         let may_panic_res = std::panic::catch_unwind(|| match self {
-            BmpState::Initiating(inner) => inner.process_msg(bmp_msg),
-            BmpState::Dumping(inner) => inner.process_msg(bmp_msg),
-            BmpState::Updating(inner) => inner.process_msg(bmp_msg),
-            BmpState::Terminated(inner) => inner.process_msg(bmp_msg),
+            BmpState::Initiating(inner) => inner.process_msg(bmp_msg, trace_id),
+            BmpState::Dumping(inner) => inner.process_msg(bmp_msg, trace_id),
+            BmpState::Updating(inner) => inner.process_msg(bmp_msg, trace_id),
+            BmpState::Terminated(inner) => inner.process_msg(bmp_msg, trace_id),
             BmpState::Aborted(source_id, router_id) => ProcessingResult::new(
                 MessageType::Aborted,
                 BmpState::Aborted(source_id, router_id),

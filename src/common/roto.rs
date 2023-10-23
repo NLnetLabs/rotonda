@@ -15,7 +15,7 @@ use roto::{
 };
 use serde::Deserialize;
 
-use crate::manager;
+use crate::{log::BoundTracer, manager};
 
 use super::frim::FrimMap;
 
@@ -363,13 +363,13 @@ impl RotoScripts {
 
             if let Some(found) = 
                 self.scripts_by_filter.get(&filter_name.clone().into()) {
-                    let err = CompileError::from(format!(
-                        "Filter {filter_name} in {origin} is already defined \
+                let err = CompileError::from(format!(
+                    "Filter {filter_name} in {origin} is already defined \
                         in {}",
-                        found.parent_script.origin
-                    ));
-                    return Err(RotoError::CompileError { origin, err });
-                }
+                    found.parent_script.origin
+                ));
+                return Err(RotoError::CompileError { origin, err });
+            }
         }
 
         // Create the new RotoScript for these packs.
@@ -392,12 +392,12 @@ impl RotoScripts {
 
             self.scripts_by_filter
                 .insert(
-                    filter_name.into(), 
-                    ScopedRotoScript { 
-                        parent_script: Arc::clone(&new_script), 
+                filter_name.into(),
+                ScopedRotoScript {
+                    parent_script: Arc::clone(&new_script),
                         pack: Arc::clone(scope) 
                     }
-                );
+            );
         }
 
         if log::log_enabled!(log::Level::Trace) {
@@ -454,9 +454,47 @@ impl RotoScripts {
         filter_name: &FilterName,
         rx: TypeValue,
     ) -> FilterResult<RotoError> {
+        self.do_exec(vm_ref, filter_name, rx, None)
+    }
+
+    pub fn exec_with_tracer(
+        &self,
+        vm_ref: &ThreadLocalVM,
+        filter_name: &FilterName,
+        rx: TypeValue,
+        tracer: BoundTracer,
+        trace_id: Option<u8>,
+    ) -> FilterResult<RotoError> {
+        if let Some(trace_id) = trace_id {
+            self.do_exec(vm_ref, filter_name, rx, Some((tracer, trace_id)))
+        } else {
+            self.do_exec(vm_ref, filter_name, rx, None)
+        }
+    }
+
+    pub fn do_exec(
+        &self,
+        vm_ref: &ThreadLocalVM,
+        filter_name: &FilterName,
+        rx: TypeValue,
+        trace_details: Option<(BoundTracer, u8)>,
+    ) -> FilterResult<RotoError> {
         // Let the payload through if it is actually an output stream message as we don't filter those, we just forward them
         // down the pipeline to a target where they can be handled, or if no roto script exists.
         if matches!(rx, TypeValue::OutputStreamMessage(_)) || filter_name.is_empty() {
+            if let Some((tracer, trace_id)) = trace_details {
+                if matches!(rx, TypeValue::OutputStreamMessage(_)) {
+                    tracer.note_event(
+                        trace_id,
+                        format!("Accepting message as is of type output stream message"),
+                    );
+                } else {
+                    tracer.note_event(
+                        trace_id,
+                        format!("Accepting message as no filter name is set"),
+                    );
+                }
+            }
             return Ok(ControlFlow::Continue(FilterOutput::from(rx)));
         }
 
@@ -481,11 +519,27 @@ impl RotoScripts {
             }
         }
 
+        if let Some((tracer, trace_id)) = &trace_details {
+            tracer.note_event(
+                *trace_id,
+                format!(
+                    "Filtering message with filter name '{filter_name}' using VM built {}s ago",
+                    Instant::now()
+                        .duration_since(stateful_vm.built_when)
+                        .as_secs()
+                ),
+            );
+        }
+
         // Run the Roto script on the given rx value.
         let res = stateful_vm
             .vm
             .exec(rx, None::<TypeValue>, None, &mut stateful_vm.mem)
             .map_err(|err| RotoError::exec_err(&stateful_vm.filter_name, err))?;
+
+        if let Some((tracer, trace_id)) = &trace_details {
+            tracer.note_event(*trace_id, format!("Filtering result: {res:#?}"));
+        }
 
         match res {
             VmResult {

@@ -81,7 +81,7 @@ where
                             nlri.prefix(),
                             RouteStatus::Withdrawn,
                         );
-                        let payload = Payload::new(source_id.clone(), route);
+                        let payload = Payload::new(source_id.clone(), route, None);
                         payloads.push(payload);
                     }
                 }

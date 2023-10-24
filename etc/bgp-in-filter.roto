@@ -1,18 +1,9 @@
 filter bgp-in-filter {
     define {
-        rx msg: Route;
-    }
-
-    term dummy {
-        match {
-            1 == 1;
-        }
+        rx bgp_msg: BgpUpdateMessage;
     }
 
     apply {
-        filter match dummy matching {
-             return accept;
-        };
         accept;
     }
 }

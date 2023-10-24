@@ -1,35 +1,36 @@
 filter bmp-in-filter {
-    define {
-        rx msg: BmpMessage;
+    // // Uncomment to use ASN filtering
+    // define {
+    //     rx msg: BmpMessage;
+    //     filtered_asn = 65000;
+    // }
 
-        //// Uncomment and set the ASN number as desired to use ASN filtering
-        //filtered_asn = 1818;
-    }
-
-    //// Uncomment to use ASN filtering
-    //term has_asn {
-    //    // Compare the ASN for BMP message types that have a Per Peer Header.
-    //    // Other message types not mentioned here lack the Per Peer Header and
-    //    // so do not have a matching ASN and are treated as such.
+    // term has_asn {
+    // // Compare the ASN for BMP message types that have a Per Peer Header.
+    // // Other message types not mentioned here lack the Per Peer Header and so
+    // // do not have a matching ASN and are treated as such. 
     //    match msg with {
     //        PeerDownNotification(pd_msg) -> pd_msg.per_peer_header.asn == filtered_asn,
     //        PeerUpNotification(pu_msg) -> pu_msg.per_peer_header.asn == filtered_asn,
     //        RouteMonitoring(rm_msg) -> rm_msg.per_peer_header.asn == filtered_asn,
     //        StatisticsReport(sr_msg) -> sr_msg.per_peer_header.asn == filtered_asn,
     //    }
-    //}
+    // }
 
-    // Comment out to use ASN filtering
-    term has_asn {
-        match {
-            1 != 1;
-        }
+    // apply {
+    //     filter match has_asn matching {
+    //         return reject;
+    //     };
+    //     accept;
+    // }
+
+    // Accept all, do not forget to comment out if you want to do the ASN
+    // filtering.
+    define {
+        rx msg: BmpMessage;
     }
 
     apply {
-        filter match has_asn matching {
-             return reject;
-        };
         accept;
     }
 }

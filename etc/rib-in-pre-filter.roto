@@ -1,9 +1,9 @@
-filter bmp-in-post-filter {
+filter rib-in-pre-filter {
     define {
         rx msg: Route;
     }
 
     apply {
-        accept;
+         accept;
     }
 }

@@ -651,11 +651,11 @@ impl Gate {
             match (&item.queue, &item.direct) {
                 (Some(sender), None) => {
                     if let Some(tracer) = &self.tracer {
-                        for trace_id in update.trace_ids() {
+                        for payload in update.trace_ids() {
                             tracer.note_gate_event(
-                                trace_id,
+                                payload.trace_id().unwrap(),
                                 self.id(),
-                                format!("Sent by queue from gate {} to slot {uuid}", self.id()),
+                                format!("Sent by queue from gate {} to slot {uuid}: {payload:#?}", self.id()),
                             );
                         }
                     }
@@ -680,12 +680,12 @@ impl Gate {
                         );
                     }
                     if let Some(tracer) = &self.tracer {
-                        for trace_id in update.trace_ids() {
+                        for payload in update.trace_ids() {
                             tracer.note_gate_event(
-                                trace_id,
+                                payload.trace_id().unwrap(),
                                 self.id(),
                                 format!(
-                                    "Sent by direct update from gate {} to slot {uuid}",
+                                    "Sent by direct update from gate {} to slot {uuid}: {payload:#?}",
                                     self.id()
                                 ),
                             );

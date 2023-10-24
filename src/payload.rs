@@ -268,10 +268,10 @@ pub enum Update {
 }
 
 impl Update {
-    pub fn trace_ids(&self) -> SmallVec::<[u8; 1]> {
+    pub fn trace_ids(&self) -> SmallVec::<[&Payload; 1]> {
         match self {
-            Update::Single(payload) => [payload].iter().filter_map(|p| p.trace_id()).collect(),
-            Update::Bulk(payloads) => payloads.iter().filter_map(|p| p.trace_id()).collect(),
+            Update::Single(payload) => { if payload.trace_id().is_some() { [payload].into() } else { smallvec![] } },
+            Update::Bulk(payloads) => payloads.iter().filter(|p| p.trace_id().is_some()).collect(),
             Update::QueryResult(_, _) => smallvec![],
             Update::UpstreamStatusChange(_) => smallvec![],
         }

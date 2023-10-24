@@ -203,10 +203,13 @@ impl RouterHandler {
         self.status_reporter
             .bmp_message_received(bmp_state.router_id());
 
-        if let Ok(ControlFlow::Continue(FilterOutput { south, east })) = Self::VM.with(|vm| {
+        let next_state = if let Ok(ControlFlow::Continue(FilterOutput { south, east })) = Self::VM.with(|vm| {
             let value =
                 TypeValue::Builtin(BuiltinTypeValue::BmpMessage(Arc::new(BytesRecord(msg))));
             self.roto_scripts.exec_with_tracer(vm, &self.filter_name.load(), value, bound_tracer, trace_id)
+        }).map_err(|err| {
+            self.status_reporter.message_filtering_failure(&err);
+            err
         }) {
             if !south.is_empty() {
                 let payload = Payload::from_output_stream_queue(&source_id, south, trace_id).into();
@@ -267,9 +270,15 @@ impl RouterHandler {
                     }
                 }
 
-                *bmp_state_lock = Some(res.next_state);
+                res.next_state
+            } else {
+                bmp_state
             }
-        }
+        } else {
+            bmp_state
+        };
+
+        *bmp_state_lock = Some(next_state);
     }
 
     fn check_update_router_id(

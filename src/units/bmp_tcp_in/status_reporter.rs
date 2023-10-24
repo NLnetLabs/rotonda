@@ -33,12 +33,12 @@ impl BmpTcpInStatusReporter {
 
     pub fn listener_listening(&self, server_uri: &str) {
         sr_log!(info: self, "Listening for connections on {}", server_uri);
-        self.metrics.listener_bound_count.fetch_add(1, Ordering::Relaxed);
+        self.metrics.listener_bound_count.fetch_add(1, Ordering::SeqCst);
     }
 
     pub fn listener_connection_accepted(&self, router_addr: SocketAddr) {
         sr_log!(debug: self, "Router connected from {}", router_addr);
-        self.metrics.connection_accepted_count.fetch_add(1, Ordering::Relaxed);
+        self.metrics.connection_accepted_count.fetch_add(1, Ordering::SeqCst);
     }
 
     pub fn router_id_changed(&self, old_router_id: Arc<RouterId>, new_router_id: Arc<RouterId>) {
@@ -50,7 +50,7 @@ impl BmpTcpInStatusReporter {
         self.metrics
             .router_metrics(router_id)
             .num_bmp_messages_received
-            .fetch_add(1, Ordering::Relaxed);
+            .fetch_add(1, Ordering::SeqCst);
     }
 
     pub fn bmp_message_processed(&self, router_id: Arc<RouterId>) {
@@ -58,7 +58,7 @@ impl BmpTcpInStatusReporter {
         self.metrics
             .router_metrics(router_id)
             .num_bmp_messages_received
-            .fetch_add(1, Ordering::Relaxed);
+            .fetch_add(1, Ordering::SeqCst);
     }
 
     pub fn invalid_bmp_message_received(&self, router_id: Arc<RouterId>) {
@@ -66,7 +66,7 @@ impl BmpTcpInStatusReporter {
         self.metrics
             .router_metrics(router_id)
             .num_invalid_bmp_messages
-            .fetch_add(1, Ordering::Relaxed);
+            .fetch_add(1, Ordering::SeqCst);
     }
 
     pub fn internal_error<T: Display>(&self, err: T) {

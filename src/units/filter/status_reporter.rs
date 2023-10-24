@@ -39,12 +39,12 @@ impl RotoFilterStatusReporter {
             self.metrics
                 .router_metrics(router_addr)
                 .num_filtered_messages
-                .fetch_add(1, Ordering::Relaxed);
+                .fetch_add(1, Ordering::SeqCst);
         }
 
         self.metrics
             .num_filtered_messages
-            .fetch_add(1, Ordering::Relaxed);
+            .fetch_add(1, Ordering::SeqCst);
     }
 
     pub fn message_filtering_failure(&self, err: &FilterError) {

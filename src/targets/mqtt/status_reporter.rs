@@ -42,7 +42,7 @@ impl MqttStatusReporter {
         sr_log!(info: self, "Connected to MQTT server {}", server_uri);
         self.metrics
             .connection_established
-            .store(true, atomic::Ordering::Relaxed);
+            .store(true, atomic::Ordering::SeqCst);
     }
 
     pub fn connection_error<T: Display>(&self, err: T, connect_retry_secs: Duration) {
@@ -54,13 +54,13 @@ impl MqttStatusReporter {
         );
         self.metrics
             .connection_established
-            .store(false, atomic::Ordering::Relaxed);
+            .store(false, atomic::Ordering::SeqCst);
     }
 
     pub fn publishing<T: Display, C: Display>(&self, topic: T, content: C) {
         self.metrics
             .in_flight_count
-            .fetch_add(1, atomic::Ordering::Relaxed);
+            .fetch_add(1, atomic::Ordering::SeqCst);
 
         sr_log!(
             trace: self,
@@ -80,24 +80,24 @@ impl MqttStatusReporter {
 
         let metrics = self.metrics.topic_metrics(Arc::new(topic));
 
-        metrics.publish_counts.fetch_add(1, Ordering::Relaxed);
+        metrics.publish_counts.fetch_add(1, Ordering::SeqCst);
         metrics
             .last_e2e_delay
-            .store(delay.num_milliseconds(), Ordering::Relaxed);
+            .store(delay.num_milliseconds(), Ordering::SeqCst);
 
         self.metrics
             .in_flight_count
-            .fetch_sub(1, atomic::Ordering::Relaxed);
+            .fetch_sub(1, atomic::Ordering::SeqCst);
     }
 
     pub fn publish_error<T: Display>(&self, err: T) {
         sr_log!(warn: self, "Publishing failed: {}", err);
         self.metrics
             .transmit_error_count
-            .fetch_add(1, atomic::Ordering::Relaxed);
+            .fetch_add(1, atomic::Ordering::SeqCst);
         self.metrics
             .in_flight_count
-            .fetch_sub(1, atomic::Ordering::Relaxed);
+            .fetch_sub(1, atomic::Ordering::SeqCst);
     }
 }
 

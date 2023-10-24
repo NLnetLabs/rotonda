@@ -444,8 +444,8 @@ mod tests {
         let filter = RotoFilterRunner::mock(roto_source_code, "my-module");
         filter.process_update(update).await.unwrap();
         let gate_metrics = filter.gate.metrics();
-        let num_dropped_updates = gate_metrics.num_dropped_updates.load(Ordering::Relaxed);
-        let num_updates = gate_metrics.num_updates.load(Ordering::Relaxed);
+        let num_dropped_updates = gate_metrics.num_dropped_updates.load(Ordering::SeqCst);
+        let num_updates = gate_metrics.num_updates.load(Ordering::SeqCst);
         num_dropped_updates == 0 && num_updates == 0
     }
 }

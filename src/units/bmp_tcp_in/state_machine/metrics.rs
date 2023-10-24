@@ -75,13 +75,13 @@ impl ParseErrorsRingBuffer {
 impl ParseErrorsRingBuffer {
     pub fn push(&self, error: String, bytes: Option<Bytes>, recoverable: bool) {
         if let Ok(mut locked) = self.errors.write() {
-            let next_idx = self.next_idx.load(Ordering::Relaxed);
+            let next_idx = self.next_idx.load(Ordering::SeqCst);
             if next_idx + 1 > locked.len() {
                 locked.resize(next_idx + 1, ParseError::default());
             }
             locked[next_idx] = ParseError::new(error, bytes, recoverable);
             self.next_idx
-                .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |v| {
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |v| {
                     if v >= MAX_RECENT_PARSE_ERRORS - 1 {
                         Some(0)
                     } else {
@@ -98,7 +98,7 @@ impl ParseErrorsRingBuffer {
                 // never wrapped
                 (locked.clone(), vec![])
             } else {
-                let (start, end) = locked.split_at(self.next_idx.load(Ordering::Relaxed));
+                let (start, end) = locked.split_at(self.next_idx.load(Ordering::SeqCst));
                 (end.to_vec(), start.to_vec())
             }
         } else {
@@ -124,7 +124,7 @@ impl BmpMetrics {
             let metrics = RouterBmpMetrics::default();
             metrics
                 .bmp_state_machine_state
-                .store(BmpStateIdx::Dumping, Ordering::Relaxed);
+                .store(BmpStateIdx::Dumping, Ordering::SeqCst);
             Arc::new(metrics)
         })
     }
@@ -258,28 +258,28 @@ impl metrics::Source for BmpMetrics {
                 target,
                 router_id,
                 Self::BMP_STATE_MACHINE_STATE_METRIC,
-                metrics.bmp_state_machine_state.load(Ordering::Relaxed),
+                metrics.bmp_state_machine_state.load(Ordering::SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 router_id,
                 Self::NUM_RECEIVED_PREFIXES_METRIC,
-                metrics.num_received_prefixes.load(Ordering::Relaxed),
+                metrics.num_received_prefixes.load(Ordering::SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 router_id,
                 Self::NUM_STORED_PREFIXES_METRIC,
-                metrics.num_stored_prefixes.load(Ordering::Relaxed),
+                metrics.num_stored_prefixes.load(Ordering::SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 router_id,
                 Self::NUM_BGP_UPDATES_PROCESSED_METRIC,
-                metrics.num_bgp_updates_processed.load(Ordering::Relaxed),
+                metrics.num_bgp_updates_processed.load(Ordering::SeqCst),
             );
             append_per_router_metric(
                 unit_name,
@@ -288,7 +288,7 @@ impl metrics::Source for BmpMetrics {
                 Self::NUM_BGP_UPDATES_FOR_UNKNOWN_PEER_METRIC,
                 metrics
                     .num_bgp_updates_for_unknown_peer
-                    .load(Ordering::Relaxed),
+                    .load(Ordering::SeqCst),
             );
             append_per_router_metric(
                 unit_name,
@@ -297,7 +297,7 @@ impl metrics::Source for BmpMetrics {
                 Self::NUM_BGP_UPDATES_WITH_RECOVERABLE_PARSING_FAILURE_FOR_KNOWN_PEER,
                 metrics
                     .num_bgp_updates_with_recoverable_parsing_failures_for_known_peers
-                    .load(Ordering::Relaxed),
+                    .load(Ordering::SeqCst),
             );
             append_per_router_metric(
                 unit_name,
@@ -306,7 +306,7 @@ impl metrics::Source for BmpMetrics {
                 Self::NUM_BGP_UPDATES_WITH_RECOVERABLE_PARSING_FAILURE_FOR_UNKNOWN_PEER,
                 metrics
                     .num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers
-                    .load(Ordering::Relaxed),
+                    .load(Ordering::SeqCst),
             );
             append_per_router_metric(
                 unit_name,
@@ -315,7 +315,7 @@ impl metrics::Source for BmpMetrics {
                 Self::NUM_BGP_UPDATES_WITH_UNRECOVERABLE_PARSING_FAILURE_FOR_KNOWN_PEER,
                 metrics
                     .num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers
-                    .load(Ordering::Relaxed),
+                    .load(Ordering::SeqCst),
             );
             append_per_router_metric(
                 unit_name,
@@ -324,49 +324,49 @@ impl metrics::Source for BmpMetrics {
                 Self::NUM_BGP_UPDATES_WITH_UNRECOVERABLE_PARSING_FAILURE_FOR_UNKNOWN_PEER,
                 metrics
                     .num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers
-                    .load(Ordering::Relaxed),
+                    .load(Ordering::SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 router_id,
                 Self::NUM_BGP_UPDATES_FILTERED,
-                metrics.num_bgp_updates_filtered.load(Ordering::Relaxed),
+                metrics.num_bgp_updates_filtered.load(Ordering::SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 router_id,
                 Self::NUM_ANNOUNCEMENTS_METRIC,
-                metrics.num_announcements.load(Ordering::Relaxed),
+                metrics.num_announcements.load(Ordering::SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 router_id,
                 Self::NUM_WITHDRAWALS_METRIC,
-                metrics.num_withdrawals.load(Ordering::Relaxed),
+                metrics.num_withdrawals.load(Ordering::SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 router_id,
                 Self::NUM_PEERS_UP_METRIC,
-                metrics.num_peers_up.load(Ordering::Relaxed),
+                metrics.num_peers_up.load(Ordering::SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 router_id,
                 Self::NUM_PEERS_UP_EOR_CAPABLE_METRIC,
-                metrics.num_peers_up_eor_capable.load(Ordering::Relaxed),
+                metrics.num_peers_up_eor_capable.load(Ordering::SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 router_id,
                 Self::NUM_PEERS_UP_DUMPING_METRIC,
-                metrics.num_peers_up_dumping.load(Ordering::Relaxed),
+                metrics.num_peers_up_dumping.load(Ordering::SeqCst),
             );
         }
     }

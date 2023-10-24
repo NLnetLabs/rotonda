@@ -554,11 +554,11 @@ impl QueryParam {
     }
 
     pub fn mark_used(&self) {
-        self.used.store(true, Ordering::Relaxed);
+        self.used.store(true, Ordering::SeqCst);
     }
 
     pub fn used(&self) -> bool {
-        self.used.load(Ordering::Relaxed)
+        self.used.load(Ordering::SeqCst)
     }
 }
 

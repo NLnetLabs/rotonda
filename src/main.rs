@@ -632,7 +632,7 @@ mod tests {
         .await
         .is_err()
         {
-            if result.load(Ordering::Relaxed) != MetricLookupResult::Ok {
+            if result.load(Ordering::SeqCst) != MetricLookupResult::Ok {
                 eprintln!("Metric dump: {:#?}", get_metrics(&metrics));
                 panic!(
                     "Metric '{}' with label '{:?}' != {} after {} seconds (reason: {})",
@@ -640,7 +640,7 @@ mod tests {
                     label,
                     wanted_v,
                     duration.as_secs(),
-                    result.load(Ordering::Relaxed),
+                    result.load(Ordering::SeqCst),
                 );
             }
         }
@@ -663,7 +663,7 @@ mod tests {
         .await
         .is_ok()
         {
-            if result.load(Ordering::Relaxed) != MetricLookupResult::Ok {
+            if result.load(Ordering::SeqCst) != MetricLookupResult::Ok {
                 eprintln!("Metric dump: {:#?}", get_metrics(&metrics));
                 panic!(
                     "Metric '{}' with label '{:?}' != {} after {} seconds (reason: {})",
@@ -671,7 +671,7 @@ mod tests {
                     label,
                     wanted_v,
                     duration.as_secs(),
-                    result.load(Ordering::Relaxed),
+                    result.load(Ordering::SeqCst),
                 );
             }
         }
@@ -688,7 +688,7 @@ mod tests {
         loop {
             if get_metrics(metrics).get(&full_metric_name, label, result.clone()) == Some(wanted_v)
             {
-                result.store(MetricLookupResult::Ok, Ordering::Relaxed);
+                result.store(MetricLookupResult::Ok, Ordering::SeqCst);
                 break;
             }
 
@@ -847,20 +847,20 @@ mod tests {
                     if let Some((label_name, label_value)) = label {
                         if let Some(v) = sample.labels.get(label_name) {
                             if v == *label_value {
-                                result.store(MetricLookupResult::Ok, Ordering::Relaxed);
+                                result.store(MetricLookupResult::Ok, Ordering::SeqCst);
                                 return true;
                             } else {
-                                result.store(MetricLookupResult::ValueNotMatched, Ordering::Relaxed);
+                                result.store(MetricLookupResult::ValueNotMatched, Ordering::SeqCst);
                             }
                         } else {
-                            result.store(MetricLookupResult::LabelNotFound, Ordering::Relaxed);
+                            result.store(MetricLookupResult::LabelNotFound, Ordering::SeqCst);
                         }
                     } else {
-                        result.store(MetricLookupResult::Ok, Ordering::Relaxed);
+                        result.store(MetricLookupResult::Ok, Ordering::SeqCst);
                         return true;
                     }
                 } else {
-                    result.store(MetricLookupResult::NameNotFound, Ordering::Relaxed);
+                    result.store(MetricLookupResult::NameNotFound, Ordering::SeqCst);
                 }
 
                 false

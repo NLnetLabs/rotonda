@@ -97,20 +97,20 @@ impl metrics::Source for BmpTcpInMetrics {
         target.append_simple(
             &Self::LISTENER_BOUND_COUNT_METRIC,
             Some(unit_name),
-            self.listener_bound_count.load(Ordering::Relaxed),
+            self.listener_bound_count.load(Ordering::SeqCst),
         );
 
         target.append_simple(
             &Self::CONNECTION_ACCEPTED_COUNT_METRIC,
             Some(unit_name),
             self.connection_accepted_count
-                .load(Ordering::Relaxed),
+                .load(Ordering::SeqCst),
         );
 
         target.append_simple(
             &Self::CONNECTION_LOST_COUNT_METRIC,
             Some(unit_name),
-            self.connection_lost_count.load(Ordering::Relaxed),
+            self.connection_lost_count.load(Ordering::SeqCst),
         );
 
         for (router_id, metrics) in self.routers.guard().iter() {
@@ -120,21 +120,21 @@ impl metrics::Source for BmpTcpInMetrics {
                 target,
                 router_id,
                 Self::CONNECTION_COUNT_METRIC,
-                metrics.connection_count.load(Ordering::Relaxed),
+                metrics.connection_count.load(Ordering::SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 router_id,
                 Self::NUM_BMP_MESSAGES_RECEIVED_METRIC,
-                metrics.num_bmp_messages_received.load(Ordering::Relaxed),
+                metrics.num_bmp_messages_received.load(Ordering::SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 router_id,
                 Self::NUM_INVALID_BMP_MESSAGES_METRIC,
-                metrics.num_invalid_bmp_messages.load(Ordering::Relaxed),
+                metrics.num_invalid_bmp_messages.load(Ordering::SeqCst),
             );
         }
     }

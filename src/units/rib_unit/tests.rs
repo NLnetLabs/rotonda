@@ -273,7 +273,7 @@ async fn is_filtered(runner: &RibUnitRunner, update: Update) -> bool {
         .await
         .unwrap();
     let gate_metrics = runner.gate().metrics();
-    let num_dropped_updates = gate_metrics.num_dropped_updates.load(Ordering::Relaxed);
-    let num_updates = gate_metrics.num_updates.load(Ordering::Relaxed);
+    let num_dropped_updates = gate_metrics.num_dropped_updates.load(Ordering::SeqCst);
+    let num_updates = gate_metrics.num_updates.load(Ordering::SeqCst);
     num_dropped_updates == 0 && num_updates == 0
 }

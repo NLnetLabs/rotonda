@@ -26,11 +26,11 @@ impl BgpTcpInMetrics {
 
 impl GraphStatus for BgpTcpInMetrics {
     fn status_text(&self) -> String {
-        //let num_sessions = self.established_session_count.load(Ordering::Relaxed);
+        //let num_sessions = self.established_session_count.load(Ordering::SeqCst);
         let num_msgs_out = self
             .gate
             .as_ref()
-            .map(|gate| gate.num_updates.load(Ordering::Relaxed))
+            .map(|gate| gate.num_updates.load(Ordering::SeqCst))
             .unwrap_or_default();
 
         format!(
@@ -78,26 +78,26 @@ impl metrics::Source for BgpTcpInMetrics {
         target.append_simple(
             &Self::LISTENER_BOUND_COUNT_METRIC,
             Some(unit_name),
-            self.listener_bound_count.load(atomic::Ordering::Relaxed),
+            self.listener_bound_count.load(atomic::Ordering::SeqCst),
         );
 
         target.append_simple(
             &Self::CONNECTION_ACCEPTED_COUNT_METRIC,
             Some(unit_name),
             self.connection_accepted_count
-                .load(atomic::Ordering::Relaxed),
+                .load(atomic::Ordering::SeqCst),
         );
 
         target.append_simple(
             &Self::CONNECTION_LOST_COUNT_METRIC,
             Some(unit_name),
-            self.connection_lost_count.load(atomic::Ordering::Relaxed),
+            self.connection_lost_count.load(atomic::Ordering::SeqCst),
         );
 
         target.append_simple(
             &Self::DISCONNECT_COUNT_METRIC,
             Some(unit_name),
-            self.disconnect_count.load(atomic::Ordering::Relaxed),
+            self.disconnect_count.load(atomic::Ordering::SeqCst),
         );
 
         // TODO per peer stats:
@@ -105,13 +105,13 @@ impl metrics::Source for BgpTcpInMetrics {
         //target.append_simple(
         //    &Self::NUM_BGP_MESSAGES_RECEIVED_METRIC,
         //    Some(unit_name),
-        //    self.NUM_BGP_MESSAGES_RECEIVED_METRIC.load(atomic::Ordering::Relaxed),
+        //    self.NUM_BGP_MESSAGES_RECEIVED_METRIC.load(atomic::Ordering::SeqCst),
         //);
 
         //target.append_simple(
         //    &Self::NUM_RECEIVE_IO_ERRORS_METRIC,
         //    Some(unit_name),
-        //    self.num_receive_io_errors.load(atomic::Ordering::Relaxed),
+        //    self.num_receive_io_errors.load(atomic::Ordering::SeqCst),
         //);
     }
 }

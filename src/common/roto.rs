@@ -531,14 +531,17 @@ impl RotoScripts {
             }
         }
 
+        let tx = None::<TypeValue>;
+        let filter_map_args = None;
+
         if let Some((tracer, trace_id)) = &trace_details {
             tracer.note_event(
                 *trace_id,
                 format!(
-                    "Filtering message with filter name '{filter_name}' using VM built {}s ago",
+                    "Filtering message with filter name '{filter_name}' using VM built {}s ago. VM inputs are:\n\nrx: {rx:#?}\n\ntx: {tx:#?}\n\nfilter_map_args: {filter_map_args:#?}",
                     Instant::now()
                         .duration_since(stateful_vm.built_when)
-                        .as_secs()
+                        .as_secs(),
                 ),
             );
         }
@@ -546,7 +549,7 @@ impl RotoScripts {
         // Run the Roto script on the given rx value.
         let res = stateful_vm
             .vm
-            .exec(rx, None::<TypeValue>, None, &mut stateful_vm.mem)
+            .exec(rx, tx, filter_map_args, &mut stateful_vm.mem)
             .map_err(|err| RotoError::exec_err(&stateful_vm.filter_name, err))?;
 
         if let Some((tracer, trace_id)) = &trace_details {

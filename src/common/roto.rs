@@ -464,7 +464,17 @@ impl RotoScripts {
         }
 
         // Initialize the VM if needed.
-        let was_initialized = self.init_vm(vm_ref, filter_name)?;
+        let was_initialized_res = self.init_vm(vm_ref, filter_name);
+
+        // Don't fail on missing filters. If they are missing this is because
+        // the earlier check in RotoScripts allows them to be missing because
+        // we are running in MVP mode (and thus the user might not have the
+        // .roto script files if they just ran `cargo install`).
+        if matches!(&was_initialized_res, Err(RotoError::FilterNotFound { .. })) {
+            return Ok(ControlFlow::Continue(FilterOutput::from(rx)));
+        }
+
+        let was_initialized = was_initialized_res?;
 
         let stateful_vm = &mut vm_ref.borrow_mut();
         let stateful_vm = stateful_vm.as_mut().unwrap();

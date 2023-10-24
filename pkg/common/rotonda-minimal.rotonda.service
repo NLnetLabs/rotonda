@@ -1,0 +1,11 @@
+[Unit]
+Description=Rotonda
+Documentation=man:rotonda(1)
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/rotonda --config=/etc/rotonda/rotonda.conf --syslog server
+User=rotonda
+
+[Install]
+WantedBy=multi-user.target

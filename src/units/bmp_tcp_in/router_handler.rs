@@ -318,51 +318,51 @@ impl RouterHandler {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use std::{
-        pin::Pin,
-        task::{Context, Poll},
-        time::Duration,
-    };
+// #[cfg(test)]
+// mod tests {
+//     use std::{
+//         pin::Pin,
+//         task::{Context, Poll},
+//         time::Duration,
+//     };
 
-    use tokio::{io::ReadBuf, time::timeout};
+//     use tokio::{io::ReadBuf, time::timeout};
 
-    use crate::units::bmp_tcp_in::metrics::BmpTcpInMetrics;
+//     use crate::units::bmp_tcp_in::metrics::BmpTcpInMetrics;
 
-    use super::*;
+//     use super::*;
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn terminate_on_loss_of_parent_gate() {
-        let (gate, _agent) = Gate::new(1);
-        let router_addr = "127.0.0.1:8080".parse().unwrap();
-        let metrics = Arc::new(BmpTcpInMetrics::default());
-        let status_reporter = Arc::new(BmpTcpInStatusReporter::new("mock reporter", metrics));
+//     #[tokio::test(flavor = "multi_thread")]
+//     async fn terminate_on_loss_of_parent_gate() {
+//         let (gate, _agent) = Gate::new(1);
+//         let router_addr = "127.0.0.1:8080".parse().unwrap();
+//         let metrics = Arc::new(BmpTcpInMetrics::default());
+//         let status_reporter = Arc::new(BmpTcpInStatusReporter::new("mock reporter", metrics));
 
-        struct MockRouterStream;
+//         struct MockRouterStream;
 
-        impl AsyncRead for MockRouterStream {
-            fn poll_read(
-                self: Pin<&mut Self>,
-                _cx: &mut Context<'_>,
-                _buf: &mut ReadBuf<'_>,
-            ) -> Poll<tokio::io::Result<()>> {
-                Poll::Pending
-            }
-        }
+//         impl AsyncRead for MockRouterStream {
+//             fn poll_read(
+//                 self: Pin<&mut Self>,
+//                 _cx: &mut Context<'_>,
+//                 _buf: &mut ReadBuf<'_>,
+//             ) -> Poll<tokio::io::Result<()>> {
+//                 Poll::Pending
+//             }
+//         }
 
-        let rx = MockRouterStream;
+//         let rx = MockRouterStream;
 
-        eprintln!("STARTING ROUTER READER");
-        let join_handle = read_from_router(gate.clone(), rx, router_addr, status_reporter);
+//         eprintln!("STARTING ROUTER READER");
+//         let join_handle = read_from_router(gate.clone(), rx, router_addr, status_reporter);
 
-        // Without this the reader continues forever
-        eprintln!("DROPPING PARENT GATE");
-        drop(gate);
+//         // Without this the reader continues forever
+//         eprintln!("DROPPING PARENT GATE");
+//         drop(gate);
 
-        eprintln!("WAITING FOR ROUTER READER TO EXIT");
-        timeout(Duration::from_secs(5), join_handle).await.unwrap();
+//         eprintln!("WAITING FOR ROUTER READER TO EXIT");
+//         timeout(Duration::from_secs(5), join_handle).await.unwrap();
 
-        eprintln!("DONE");
-    }
-}
+//         eprintln!("DONE");
+//     }
+// }

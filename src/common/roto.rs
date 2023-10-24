@@ -464,7 +464,17 @@ impl RotoScripts {
         }
 
         // Initialize the VM if needed.
-        let was_initialized = self.init_vm(vm_ref, filter_name)?;
+        let was_initialized_res = self.init_vm(vm_ref, filter_name);
+
+        // Don't fail on missing filters. If they are missing this is because
+        // the earlier check in RotoScripts allows them to be missing because
+        // we are running in MVP mode (and thus the user might not have the
+        // .roto script files if they just ran `cargo install`).
+        if matches!(&was_initialized_res, Err(RotoError::FilterNotFound { .. })) {
+            return Ok(ControlFlow::Continue(FilterOutput::from(rx)));
+        }
+
+        let was_initialized = was_initialized_res?;
 
         let stateful_vm = &mut vm_ref.borrow_mut();
         let stateful_vm = stateful_vm.as_mut().unwrap();
@@ -480,7 +490,7 @@ impl RotoScripts {
                 stateful_vm.vm = self.build_vm(filter_name)?;
                 stateful_vm.built_when = found_filter.parent_script.loaded_when;
             } else {
-                stateful_vm.vm.reset();
+                stateful_vm.vm.reset_stack();
             }
         }
 
@@ -527,7 +537,9 @@ impl RotoScripts {
     }
 
     fn init_vm(&self, vm_ref: &ThreadLocalVM, filter_name: &FilterName) -> Result<bool, RotoError> {
+        let mut was_replaced = true;
         let vm_ref = &mut vm_ref.borrow_mut();
+
         if vm_ref.is_none() {
             let filter_name = filter_name.clone();
             let built_when = Instant::now();
@@ -539,9 +551,27 @@ impl RotoScripts {
                 mem,
                 vm,
             });
-            Ok(true)
+            Ok(was_replaced)
         } else {
-            Ok(false)
+            // This VM was already initialized, but we have to check if the
+            // correct the correct mir code for this filter was loaded.
+            let scoped_script = self
+                .scripts_by_filter
+                .get(filter_name)
+                .ok_or_else(|| RotoError::not_found(filter_name))?;
+
+            let pack = RotoPackArc::from(scoped_script.pack.as_ref());
+
+            if let Some(vm) = vm_ref.as_mut() {
+                // This will replace the mir_code and the data sources if one
+                // or both are different
+                was_replaced = vm.vm.replace_mir_code_and_data_sources(
+                    pack.get_mir().into(),
+                    pack.get_data_sources().into(),
+                );
+            }
+
+            Ok(was_replaced)
         }
     }
 

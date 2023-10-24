@@ -4,7 +4,7 @@ use crate::common::file_io::{FileIo, TheFileIo};
 use crate::common::roto::{FilterName, LoadErrorKind, RotoError, RotoScriptOrigin, RotoScripts};
 use crate::comms::{DirectLink, Gate, GateAgent, GraphStatus, Link, UPDATE_QUEUE_LEN};
 use crate::config::{Config, ConfigFile, Marked};
-use crate::log::{Terminate, Tracer};
+use crate::log::{Terminate, Tracer, Trace, MsgRelation};
 use crate::targets::Target;
 use crate::units::Unit;
 use crate::{http, metrics};
@@ -295,12 +295,7 @@ impl LinkReport {
                         let msg_indices = trace.msg_indices(gate_id, MsgRelation::ALL);
                         if !msg_indices.is_empty() {
                             box_colour = "blue";
-                            trace_txt = trace
-                                .msg_indices(gate_id, MsgRelation::ALL)
-                                .iter()
-                                .map(ToString::to_string)
-                                .collect::<Vec<String>>()
-                                .join(", ");
+                            trace_txt = extract_msg_indices(&trace, gate_id);
                         }
                     }
 
@@ -378,6 +373,63 @@ impl LinkReport {
         );
         svg.finalize()
     }
+}
+
+fn extract_msg_indices(trace: &Trace, gate_id: Uuid) -> String {
+    let (mut msg_indices, first, last) = trace
+        .msg_indices(gate_id, MsgRelation::ALL)
+        .iter()
+        .fold((String::new(), None::<usize>, None::<usize>), |(mut out, mut first, mut last), idx| {
+            match (first, last) {
+                (None, None) => { first = Some(*idx); },
+                (None, Some(_l)) => unreachable!(),
+                (Some(f), None) => {
+                    if *idx == f+1 {
+                        last = Some(*idx);
+                    } else if *idx > f+1 {
+                        if !out.is_empty() {
+                            out.push_str(", ");
+                        }
+                        out.push_str(&format!("{}", f));
+                        first = Some(*idx);
+                    } else {
+                        unreachable!();
+                    }
+                },
+                (Some(f), Some(l)) => {
+                    if *idx == l+1 {
+                        last = Some(*idx);
+                    } else if *idx > l+1 {
+                        if !out.is_empty() {
+                            out.push_str(", ");
+                        }
+                        out.push_str(&format!("{}-{}", f, l));
+                        first = Some(*idx);
+                        last = None;
+                    }
+                }
+            }
+            (out, first, last)
+        });
+
+    match (first, last) {
+        (None, None) => {},
+        (None, Some(_l)) => unreachable!(),
+        (Some(f), None) => {
+            if !msg_indices.is_empty() {
+                msg_indices.push_str(", ");
+            }
+            msg_indices.push_str(&format!("{}", f));
+        }
+        (Some(f), Some(l)) => {
+            if !msg_indices.is_empty() {
+                msg_indices.push_str(", ");
+            }
+            msg_indices.push_str(&format!("{}-{}", f, l));
+        }
+    }
+
+    format!("[{msg_indices}]")
 }
 
 #[derive(Clone, Default)]

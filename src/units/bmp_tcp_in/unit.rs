@@ -309,7 +309,8 @@ impl BmpTcpInRunner {
                             let err = format!(
                                 "{err}: Will retry in {wait} seconds."
                             );
-                            status_reporter.bind_error(&listen_addr.to_string(), &err);
+                            status_reporter
+                                .bind_error(&listen_addr.to_string(), &err);
                             sleep(Duration::from_secs(wait)).await;
                             wait *= 2;
                         }
@@ -635,7 +636,6 @@ mod tests {
         }
     }
 
-
     #[async_trait::async_trait]
     impl<T> TcpListenerFactory<MockTcpListener> for MockTcpListenerFactory<T>
     where
@@ -692,7 +692,12 @@ mod tests {
         // "127.0.0.1:11019":
         let (new_gate, new_agent) = Gate::new(1);
         let listen = Arc::new("127.0.0.1:11019".parse().unwrap());
-        let new_config = BmpTcpIn {listen, http_api_path: Default::default(), router_id_template: Default::default(), filter_name: Default::default() };
+        let new_config = BmpTcpIn {
+            listen,
+            http_api_path: Default::default(),
+            router_id_template: Default::default(),
+            filter_name: Default::default(),
+        };
         let new_config = Unit::BmpTcpIn(new_config);
         agent.reconfigure(new_config, new_gate).await.unwrap();
 
@@ -749,7 +754,12 @@ mod tests {
         // an unchanged listen address:
         let (new_gate, new_agent) = Gate::new(1);
         let listen = Arc::new("127.0.0.1:11019".parse().unwrap());
-        let new_config = BmpTcpIn {listen, http_api_path: Default::default(), router_id_template: Default::default(), filter_name: Default::default() };
+        let new_config = BmpTcpIn {
+            listen,
+            http_api_path: Default::default(),
+            router_id_template: Default::default(),
+            filter_name: Default::default(),
+        };
         let new_config = Unit::BmpTcpIn(new_config);
         agent.reconfigure(new_config, new_gate).await.unwrap();
 
@@ -812,7 +822,12 @@ mod tests {
         // an unchanged listen address:
         let (new_gate, new_agent) = Gate::new(1);
         let listen = Arc::new("127.0.0.1:11019".parse().unwrap());
-        let new_config = BmpTcpIn {listen, http_api_path: Default::default(), router_id_template: Default::default(), filter_name: Default::default() };
+        let new_config = BmpTcpIn {
+            listen,
+            http_api_path: Default::default(),
+            router_id_template: Default::default(),
+            filter_name: Default::default(),
+        };
         let new_config = Unit::BmpTcpIn(new_config);
         agent.reconfigure(new_config, new_gate).await.unwrap();
 

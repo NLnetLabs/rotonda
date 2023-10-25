@@ -23,9 +23,8 @@ pub struct BmpTcpInMetrics {
 
 impl GraphStatus for BmpTcpInMetrics {
     fn status_text(&self) -> String {
-        let num_clients =
-            self.connection_accepted_count.load(SeqCst)
-                - self.connection_lost_count.load(SeqCst);
+        let num_clients = self.connection_accepted_count.load(SeqCst)
+            - self.connection_lost_count.load(SeqCst);
         let num_msgs_out = self
             .gate
             .as_ref()

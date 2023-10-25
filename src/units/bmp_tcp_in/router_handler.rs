@@ -81,11 +81,15 @@ impl RouterHandler {
 
         let (parent_gate, gate_agent) = Gate::new(0);
 
-        let source_id = SourceId::SocketAddr("1.2.3.4:12345".parse().unwrap());
+        let source_id =
+            SourceId::SocketAddr("1.2.3.4:12345".parse().unwrap());
         let router_id = Arc::new("unknown".into());
         let bmp_in_metrics = Arc::new(BmpTcpInMetrics::default());
         let bmp_metrics = Arc::new(BmpMetrics::default());
-        let parent_status_reporter = Arc::new(BmpTcpInStatusReporter::new("dummy", bmp_in_metrics.clone()));
+        let parent_status_reporter = Arc::new(BmpTcpInStatusReporter::new(
+            "dummy",
+            bmp_in_metrics.clone(),
+        ));
 
         let state_machine = BmpState::new(
             source_id,
@@ -208,7 +212,9 @@ impl RouterHandler {
 
         let bmp_state_lock = self.state_machine.lock().await;
 
-        self.status_reporter.router_connection_lost(bmp_state_lock.as_ref().unwrap().router_id());
+        self.status_reporter.router_connection_lost(
+            bmp_state_lock.as_ref().unwrap().router_id(),
+        );
 
         // Notify downstream units that the data stream for this
         // particular monitored router has ended.
@@ -499,12 +505,7 @@ mod tests {
             0
         );
 
-        runner.read_from_router(
-            rx,
-            router_addr,
-            source_id,
-        )
-        .await;
+        runner.read_from_router(rx, router_addr, source_id).await;
 
         let metrics = get_testable_metrics_snapshot(
             &runner.status_reporter.metrics().unwrap(),

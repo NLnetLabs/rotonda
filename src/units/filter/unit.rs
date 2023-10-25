@@ -538,15 +538,13 @@ mod tests {
         let gate_metrics = filter.gate.metrics();
         let num_dropped_updates_before =
             gate_metrics.num_dropped_updates.load(SeqCst);
-        let num_updates_before =
-            gate_metrics.num_updates.load(SeqCst);
+        let num_updates_before = gate_metrics.num_updates.load(SeqCst);
 
         filter.process_update(update).await.unwrap();
 
         let num_dropped_updates_after =
             gate_metrics.num_dropped_updates.load(SeqCst);
-        let num_updates_after =
-            gate_metrics.num_updates.load(SeqCst);
+        let num_updates_after = gate_metrics.num_updates.load(SeqCst);
 
         // If not filtered then the number of updates processed by the gate should have increased,
         // either by failing to deliver the update i.e. dropping it, or by delivering it. So if the

@@ -496,8 +496,10 @@ mod tests {
         let stats_report_msg_buf = mk_statistics_report_msg(&pph);
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf, None).next_state;
-        let processor = processor.process_msg(peer_up_msg_buf, None).next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf, None).next_state;
+        let processor =
+            processor.process_msg(peer_up_msg_buf, None).next_state;
         let res = processor.process_msg(stats_report_msg_buf, None);
 
         // Then
@@ -517,7 +519,8 @@ mod tests {
             mk_eor_capable_peer_up_notification_msg("127.0.0.1", 12345);
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf, None).next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf, None).next_state;
         let res = processor.process_msg(peer_up_msg_buf, None);
 
         // Then
@@ -552,8 +555,10 @@ mod tests {
             );
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf, None).next_state;
-        let processor = processor.process_msg(peer_up_msg_1_buf, None).next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf, None).next_state;
+        let processor =
+            processor.process_msg(peer_up_msg_1_buf, None).next_state;
         let res = processor.process_msg(peer_up_msg_2_buf, None);
 
         // Then
@@ -595,8 +600,10 @@ mod tests {
         assert!(processor.details.peer_states.is_empty());
 
         // When the state machine processes the initiate and peer up notifications
-        let processor = processor.process_msg(initiation_msg_buf, None).next_state;
-        let processor = processor.process_msg(peer_up_msg_1_buf, None).next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf, None).next_state;
+        let processor =
+            processor.process_msg(peer_up_msg_1_buf, None).next_state;
         let res = processor.process_msg(peer_up_msg_2_buf, None);
 
         // Then the state should remain unchanged
@@ -617,7 +624,8 @@ mod tests {
         let processor = res.next_state;
 
         // When the state machine processes a couple of route announcements
-        let processor = processor.process_msg(route_mon_msg_buf, None).next_state;
+        let processor =
+            processor.process_msg(route_mon_msg_buf, None).next_state;
         let res = processor.process_msg(ipv6_route_mon_msg_buf, None);
 
         // Then the state should remain unchanged
@@ -675,7 +683,10 @@ mod tests {
                     Prefix::from_str("2001:2000:3080:e9c::2/128").unwrap();
                 let mut expected_roto_prefixes: Vec<TypeValue> =
                     vec![pfx.into()];
-                for Payload { source_id, value, .. } in bulk.drain(..) {
+                for Payload {
+                    source_id, value, ..
+                } in bulk.drain(..)
+                {
                     if let TypeValue::Builtin(BuiltinTypeValue::Route(
                         route,
                     )) = value
@@ -725,7 +736,8 @@ mod tests {
         let peer_down_msg_buf = mk_peer_down_notification_msg(&pph);
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf, None).next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf, None).next_state;
         let res = processor.process_msg(peer_down_msg_buf, None);
 
         // Then
@@ -762,7 +774,8 @@ mod tests {
         assert_ne!(&pph_up, &pph_down);
 
         // When the state machine processes a peer up notification
-        let processor = processor.process_msg(initiation_msg_buf, None).next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf, None).next_state;
         let res = processor.process_msg(peer_up_msg_buf, None);
 
         // Then the state should remain unchanged
@@ -839,7 +852,8 @@ mod tests {
         let peer_down_msg_buf = mk_peer_down_notification_msg(&pph);
 
         // When the state machine processes the initiate and peer up notifications
-        let processor = processor.process_msg(initiation_msg_buf, None).next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf, None).next_state;
         let res = processor.process_msg(peer_up_msg_buf, None);
 
         // Then the state should remain unchanged
@@ -909,7 +923,10 @@ mod tests {
                     std::collections::HashSet::new();
                 let mut num_withdrawals_seen = 0;
 
-                for Payload { source_id, value, .. } in bulk.drain(..) {
+                for Payload {
+                    source_id, value, ..
+                } in bulk.drain(..)
+                {
                     if let TypeValue::Builtin(BuiltinTypeValue::Route(
                         route,
                     )) = value
@@ -980,7 +997,8 @@ mod tests {
         let eor_msg_buf = mk_route_monitoring_end_of_rib_msg(&pph);
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf, None).next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf, None).next_state;
         let res = processor.process_msg(peer_up_msg_buf, None);
 
         // Then there should be one up peer but no pending EoRs
@@ -1071,8 +1089,10 @@ mod tests {
         );
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf, None).next_state;
-        let processor = processor.process_msg(peer_up_msg_buf, None).next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf, None).next_state;
+        let processor =
+            processor.process_msg(peer_up_msg_buf, None).next_state;
         let res = processor.process_msg(route_mon_msg_buf, None);
 
         // Then
@@ -1100,8 +1120,10 @@ mod tests {
         let route_mon_msg_buf = mk_route_monitoring_msg(&pph);
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf, None).next_state;
-        let processor = processor.process_msg(peer_up_msg_buf, None).next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf, None).next_state;
+        let processor =
+            processor.process_msg(peer_up_msg_buf, None).next_state;
         let res = processor.process_msg(route_mon_msg_buf, None);
 
         // Then

@@ -854,7 +854,7 @@ mod tests {
         );
     }
 
-//     // --- Test helpers ------------------------------------------------------
+    //     // --- Test helpers ------------------------------------------------------
 
     fn mk_roto_output_stream_payload(
         value: TypeValue,

@@ -441,7 +441,6 @@ mod tests {
     use tokio::{io::ReadBuf, time::timeout};
 
     use crate::{
-
         common::status_reporter::AnyStatusReporter,
         tests::util::internal::{
             enable_logging, get_testable_metrics_snapshot,

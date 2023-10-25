@@ -89,7 +89,10 @@ impl RotoFilterRunner {
     }
 
     #[cfg(test)]
-    fn mock(roto_script: &str, filter_name: &str) -> (Self, crate::comms::GateAgent) {
+    fn mock(
+        roto_script: &str,
+        filter_name: &str,
+    ) -> (Self, crate::comms::GateAgent) {
         use crate::common::roto::RotoScriptOrigin;
 
         let roto_scripts = RotoScripts::default();
@@ -230,18 +233,20 @@ impl RotoFilterRunner {
         if let Some(filtered_update) = Self::VM
             .with(|vm| {
                 payload
-                    .filter(|value, trace_id| {
-                        self.roto_scripts.exec_with_tracer(
-                            vm,
-                            &self.filter_name.load(),
-                            value,
-                            tracer.clone(),
-                            trace_id,
-                        )
-                    },
-                    |source_id| {
-                        self.status_reporter.message_filtered(source_id)
-                    })
+                    .filter(
+                        |value, trace_id| {
+                            self.roto_scripts.exec_with_tracer(
+                                vm,
+                                &self.filter_name.load(),
+                                value,
+                                tracer.clone(),
+                                trace_id,
+                            )
+                        },
+                        |source_id| {
+                            self.status_reporter.message_filtered(source_id)
+                        },
+                    )
                     .map(|mut filtered_payloads| {
                         match filtered_payloads.len() {
                             0 => None,
@@ -300,11 +305,11 @@ mod tests {
 
     use super::*;
 
-        const TEST_ROUTER_SYS_NAME: &str = "test-router";
-        const TEST_ROUTER_SYS_DESC: &str = "test-desc";
-        const TEST_PEER_ASN: u32 = 12345;
+    const TEST_ROUTER_SYS_NAME: &str = "test-router";
+    const TEST_ROUTER_SYS_DESC: &str = "test-desc";
+    const TEST_PEER_ASN: u32 = 12345;
 
-        const FILTER_OUT_ASN_ROTO: &str = r###"
+    const FILTER_OUT_ASN_ROTO: &str = r###"
             filter my-module {
                 define {
                     rx msg: BmpMessage;
@@ -333,7 +338,7 @@ mod tests {
             }
         "###;
 
-        const FILTER_IN_ASN_ROTO: &str = r###"
+    const FILTER_IN_ASN_ROTO: &str = r###"
             filter my-module {
                 define {
                     rx msg: BmpMessage;
@@ -362,7 +367,7 @@ mod tests {
             }
         "###;
 
-        const MSG_TYPE_MATCHING_ROTO: &str = r###"
+    const MSG_TYPE_MATCHING_ROTO: &str = r###"
             filter my-module {
                 define {
                     rx msg: BmpMessage;
@@ -481,35 +486,35 @@ mod tests {
         )
     }
 
-        fn mk_termination_msg() -> Bytes {
-            crate::bgp::encode::mk_termination_msg()
-        }
+    fn mk_termination_msg() -> Bytes {
+        crate::bgp::encode::mk_termination_msg()
+    }
 
-        fn mk_per_peer_header() -> crate::bgp::encode::PerPeerHeader {
-            crate::bgp::encode::PerPeerHeader {
-                peer_type: PeerType::GlobalInstance.into(),
-                peer_flags: 0,
-                peer_distinguisher: [0u8; 8],
-                peer_address: "127.0.0.1".parse().unwrap(),
-                peer_as: Asn::from_u32(TEST_PEER_ASN),
-                peer_bgp_id: [1u8, 2u8, 3u8, 4u8],
-            }
+    fn mk_per_peer_header() -> crate::bgp::encode::PerPeerHeader {
+        crate::bgp::encode::PerPeerHeader {
+            peer_type: PeerType::GlobalInstance.into(),
+            peer_flags: 0,
+            peer_distinguisher: [0u8; 8],
+            peer_address: "127.0.0.1".parse().unwrap(),
+            peer_as: Asn::from_u32(TEST_PEER_ASN),
+            peer_bgp_id: [1u8, 2u8, 3u8, 4u8],
         }
+    }
 
-        fn mk_peer_up_notification_msg() -> Bytes {
-            crate::bgp::encode::mk_peer_up_notification_msg(
-                &mk_per_peer_header(),
-                "10.0.0.1".parse().unwrap(),
-                11019,
-                4567,
-                111,
-                222,
-                0,
-                0,
-                vec![],
-                false,
-            )
-        }
+    fn mk_peer_up_notification_msg() -> Bytes {
+        crate::bgp::encode::mk_peer_up_notification_msg(
+            &mk_per_peer_header(),
+            "10.0.0.1".parse().unwrap(),
+            11019,
+            4567,
+            111,
+            222,
+            0,
+            0,
+            vec![],
+            false,
+        )
+    }
 
     fn mk_peer_down_notification_msg() -> Bytes {
         crate::bgp::encode::mk_peer_down_notification_msg(
@@ -517,18 +522,18 @@ mod tests {
         )
     }
 
-        fn mk_route_monitoring_msg() -> Bytes {
-            crate::bgp::encode::mk_route_monitoring_msg(
-                &mk_per_peer_header(),
-                &Prefixes::default(),
-                &Announcements::default(),
-                &[],
-            )
-        }
+    fn mk_route_monitoring_msg() -> Bytes {
+        crate::bgp::encode::mk_route_monitoring_msg(
+            &mk_per_peer_header(),
+            &Prefixes::default(),
+            &Announcements::default(),
+            &[],
+        )
+    }
 
-        fn mk_statistics_report_msg() -> Bytes {
-            crate::bgp::encode::mk_statistics_report_msg(&mk_per_peer_header())
-        }
+    fn mk_statistics_report_msg() -> Bytes {
+        crate::bgp::encode::mk_statistics_report_msg(&mk_per_peer_header())
+    }
 
     fn mk_filter_payload(msg_buf: Bytes) -> Update {
         let source_id =

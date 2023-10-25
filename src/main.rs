@@ -377,13 +377,6 @@ mod tests {
                 1,
             )
             .await;
-            // assert_metric_eq(
-            //     manager.metrics(),
-            //     "roto_filter_num_filtered_messages_total",
-            //     Some(("component", "filter")),
-            //     0,
-            // )
-            // .await;
 
             // query the route to make sure it was stored
             eprintln!("Querying prefix store...");

@@ -1565,7 +1565,7 @@ mod tests {
     use std::{
         fmt::Display,
         ops::{Deref, DerefMut},
-        sync::atomic::{AtomicU8, Ordering},
+        sync::atomic::{AtomicU8, Ordering::SeqCst},
     };
 
     use super::*;
@@ -1953,7 +1953,7 @@ mod tests {
 
         let item = get_log_item(&log, "some-unit", SpawnAction::ReconfigureUnit);
         if let UnitOrTargetConfig::UnitConfig(Unit::BmpTcpIn(config)) = &item.config {
-            assert_eq!(config.listen, "changed");
+            assert_eq!(config.listen.as_str(), "changed");
         } else {
             unreachable!();
         }
@@ -2029,7 +2029,7 @@ mod tests {
         let join_handle = {
             let alarm_fired_count = alarm_fired_count.clone();
             tokio::task::spawn(coordinator.wait(move |_, _| {
-                alarm_fired_count.fetch_add(1, Ordering::SeqCst);
+                alarm_fired_count.fetch_add(1, SeqCst);
             }))
         };
 
@@ -2039,7 +2039,7 @@ mod tests {
         tokio::time::sleep(advance_time_by).await;
 
         // Check that the alarm fired once
-        assert_eq!(alarm_fired_count.load(Ordering::SeqCst), 1);
+        assert_eq!(alarm_fired_count.load(SeqCst), 1);
 
         // Set the component state to the final state 'running'
         wait_point.running().await;
@@ -2058,7 +2058,7 @@ mod tests {
         let join_handle = {
             let alarm_fired_count = alarm_fired_count.clone();
             tokio::task::spawn(coordinator.wait(move |_, _| {
-                alarm_fired_count.fetch_add(1, Ordering::SeqCst);
+                alarm_fired_count.fetch_add(1, SeqCst);
             }))
         };
 
@@ -2068,7 +2068,7 @@ mod tests {
         tokio::time::sleep(advance_time_by).await;
 
         // Check that the alarm fired once
-        assert_eq!(alarm_fired_count.load(Ordering::SeqCst), 1);
+        assert_eq!(alarm_fired_count.load(SeqCst), 1);
 
         // Achieve the 'ready' state in the component under test, but not yet the 'running' state
         wait_point.ready().await;
@@ -2079,7 +2079,7 @@ mod tests {
         tokio::time::sleep(advance_time_by).await;
 
         // Check that the alarm fired again
-        assert_eq!(alarm_fired_count.load(Ordering::SeqCst), 2);
+        assert_eq!(alarm_fired_count.load(SeqCst), 2);
 
         // Set the component state to the final state 'running'
         wait_point.running().await;

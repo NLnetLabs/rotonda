@@ -14,7 +14,7 @@ use roto::types::{
 use rotonda_store::{epoch, MatchOptions, MatchType};
 use routecore::{addr::Prefix, bgp::message::SessionConfig};
 
-use std::sync::atomic::Ordering;
+use std::sync::atomic::Ordering::SeqCst;
 use std::{str::FromStr, sync::Arc};
 
 #[tokio::test]
@@ -273,7 +273,7 @@ async fn is_filtered(runner: &RibUnitRunner, update: Update) -> bool {
         .await
         .unwrap();
     let gate_metrics = runner.gate().metrics();
-    let num_dropped_updates = gate_metrics.num_dropped_updates.load(Ordering::SeqCst);
-    let num_updates = gate_metrics.num_updates.load(Ordering::SeqCst);
+    let num_dropped_updates = gate_metrics.num_dropped_updates.load(SeqCst);
+    let num_updates = gate_metrics.num_updates.load(SeqCst);
     num_dropped_updates == 0 && num_updates == 0
 }

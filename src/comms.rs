@@ -80,7 +80,7 @@ use routecore::addr::Prefix;
 use serde::Deserialize;
 use tokio::sync::mpsc::Sender;
 
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicU16, Ordering::SeqCst};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use std::{
@@ -691,7 +691,7 @@ impl Gate {
         // if sender_lost {
         //     let updates = self.updates.load();
         //     updates.retain(|_, item| item.queue.is_some());
-        //     self.updates_len.store(updates.len(), Ordering::SeqCst);
+        //     self.updates_len.store(updates.len(), SeqCst);
         // }
 
         self.metrics
@@ -994,7 +994,7 @@ pub struct GateMetrics {
 
 impl GraphStatus for GateMetrics {
     fn status_text(&self) -> String {
-        format!("out: {}", self.num_updates.load(Ordering::SeqCst))
+        format!("out: {}", self.num_updates.load(SeqCst))
     }
 }
 
@@ -1006,12 +1006,12 @@ impl GateMetrics {
         _senders: Arc<FrimMap<Uuid, UpdateSender>>,
         sent_at_least_once: bool,
     ) {
-        self.num_updates.fetch_add(1, Ordering::SeqCst);
+        self.num_updates.fetch_add(1, SeqCst);
         if !sent_at_least_once {
-            self.num_dropped_updates.fetch_add(1, Ordering::SeqCst);
+            self.num_dropped_updates.fetch_add(1, SeqCst);
         }
         if let Update::Bulk(update) = update {
-            self.update_set_size.store(update.len(), Ordering::SeqCst);
+            self.update_set_size.store(update.len(), SeqCst);
         }
         self.update.store(Some(Utc::now()));
 
@@ -1029,13 +1029,13 @@ impl GateMetrics {
         // }
 
         // if num_queue_senders > 0 {
-        //     self.capacity.store(capacity, Ordering::SeqCst);
+        //     self.capacity.store(capacity, SeqCst);
         // }
 
         // self.num_queue_senders
-        //     .store(num_queue_senders, Ordering::SeqCst);
+        //     .store(num_queue_senders, SeqCst);
         // self.num_direct_senders
-        //     .store(num_direct_senders, Ordering::SeqCst);
+        //     .store(num_direct_senders, SeqCst);
     }
 
     /// Updates the metrics to match the given unit status.
@@ -1112,13 +1112,13 @@ impl metrics::Source for GateMetrics {
         target.append_simple(
             &Self::NUM_UPDATES_METRIC,
             Some(unit_name),
-            self.num_updates.load(Ordering::SeqCst),
+            self.num_updates.load(SeqCst),
         );
 
         target.append_simple(
             &Self::NUM_DROPPED_UPDATES_METRIC,
             Some(unit_name),
-            self.num_dropped_updates.load(Ordering::SeqCst),
+            self.num_dropped_updates.load(SeqCst),
         );
 
         match self.update.load() {
@@ -1131,7 +1131,7 @@ impl metrics::Source for GateMetrics {
                 target.append_simple(
                     &Self::UPDATE_SET_SIZE_METRIC,
                     Some(unit_name),
-                    self.update_set_size.load(Ordering::SeqCst),
+                    self.update_set_size.load(SeqCst),
                 );
             }
             None => {
@@ -1143,17 +1143,17 @@ impl metrics::Source for GateMetrics {
         target.append_simple(
             &Self::LINK_CAPACITY_METRIC,
             Some(unit_name),
-            self.capacity.load(Ordering::SeqCst),
+            self.capacity.load(SeqCst),
         );
         target.append_simple(
             &Self::NUM_QUEUE_SENDERS_METRIC,
             Some(unit_name),
-            self.num_queue_senders.load(Ordering::SeqCst),
+            self.num_queue_senders.load(SeqCst),
         );
         target.append_simple(
             &Self::NUM_DIRECT_SENDERS_METRIC,
             Some(unit_name),
-            self.num_direct_senders.load(Ordering::SeqCst),
+            self.num_direct_senders.load(SeqCst),
         );
     }
 }
@@ -1839,7 +1839,7 @@ struct SubscribeResponse {
 mod tests {
     use roto::types::builtin::U8;
 
-    use crate::payload::Payload;
+    use crate::{payload::Payload, tests::util::internal::enable_logging};
 
     use super::*;
 
@@ -1930,7 +1930,7 @@ mod tests {
                 assert!(matches!(update, Update::Single(_)));
                 if let Update::Single(payload) = update {
                     assert_eq!(payload, mk_test_payload());
-                    self.0.fetch_add(1, Ordering::SeqCst);
+                    self.0.fetch_add(1, SeqCst);
                 }
             }
         }
@@ -1967,7 +1967,7 @@ mod tests {
         tokio::time::sleep(Duration::from_secs(3)).await;
 
         eprintln!("CHECKING FOR PAYLOAD");
-        assert_eq!(1, counter.load(Ordering::SeqCst));
+        assert_eq!(1, counter.load(SeqCst));
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1998,6 +1998,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     async fn gate_clones_receive_termination_signal() {
+        enable_logging("trace");
         let (gate, agent) = Gate::new(10);
         let gate_clone = gate.clone();
 

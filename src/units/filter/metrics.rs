@@ -1,7 +1,7 @@
 use std::{
     net::SocketAddr,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicUsize, Ordering::SeqCst},
         Arc,
     },
 };
@@ -62,14 +62,14 @@ impl metrics::Source for RotoFilterMetrics {
                 target,
                 socket_addr,
                 Self::NUM_FILTERED_MESSAGES_METRIC,
-                metrics.num_filtered_messages.load(Ordering::SeqCst),
+                metrics.num_filtered_messages.load(SeqCst),
             );
         }
 
         target.append_simple(
             &Self::NUM_FILTERED_MESSAGES_METRIC,
             Some(unit_name),
-            self.num_filtered_messages.load(Ordering::SeqCst),
+            self.num_filtered_messages.load(SeqCst),
         );
     }
 }

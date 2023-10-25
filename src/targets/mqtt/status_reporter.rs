@@ -1,7 +1,7 @@
 use std::{
     fmt::{Debug, Display},
     sync::{
-        atomic::{self, Ordering},
+        atomic::{self, Ordering::SeqCst},
         Arc,
     },
     time::Duration,
@@ -40,9 +40,7 @@ impl MqttStatusReporter {
 
     pub fn connected(&self, server_uri: &str) {
         sr_log!(info: self, "Connected to MQTT server {}", server_uri);
-        self.metrics
-            .connection_established
-            .store(true, atomic::Ordering::SeqCst);
+        self.metrics.connection_established.store(true, SeqCst);
     }
 
     pub fn connection_error<T: Display>(&self, err: T, connect_retry_secs: Duration) {
@@ -52,15 +50,11 @@ impl MqttStatusReporter {
             "Retrying in {} seconds",
             connect_retry_secs.as_secs()
         );
-        self.metrics
-            .connection_established
-            .store(false, atomic::Ordering::SeqCst);
+        self.metrics.connection_established.store(false, SeqCst);
     }
 
     pub fn publishing<T: Display, C: Display>(&self, topic: T, content: C) {
-        self.metrics
-            .in_flight_count
-            .fetch_add(1, atomic::Ordering::SeqCst);
+        self.metrics.in_flight_count.fetch_add(1, SeqCst);
 
         sr_log!(
             trace: self,
@@ -80,24 +74,18 @@ impl MqttStatusReporter {
 
         let metrics = self.metrics.topic_metrics(Arc::new(topic));
 
-        metrics.publish_counts.fetch_add(1, Ordering::SeqCst);
+        metrics.publish_counts.fetch_add(1, SeqCst);
         metrics
             .last_e2e_delay
-            .store(delay.num_milliseconds(), Ordering::SeqCst);
+            .store(delay.num_milliseconds(), SeqCst);
 
-        self.metrics
-            .in_flight_count
-            .fetch_sub(1, atomic::Ordering::SeqCst);
+        self.metrics.in_flight_count.fetch_sub(1, SeqCst);
     }
 
     pub fn publish_error<T: Display>(&self, err: T) {
         sr_log!(warn: self, "Publishing failed: {}", err);
-        self.metrics
-            .transmit_error_count
-            .fetch_add(1, atomic::Ordering::SeqCst);
-        self.metrics
-            .in_flight_count
-            .fetch_sub(1, atomic::Ordering::SeqCst);
+        self.metrics.transmit_error_count.fetch_add(1, SeqCst);
+        self.metrics.in_flight_count.fetch_sub(1, SeqCst);
     }
 }
 

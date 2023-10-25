@@ -1,7 +1,7 @@
 use std::{
     net::SocketAddr,
     sync::{
-        atomic::{AtomicU8, AtomicUsize, Ordering},
+        atomic::{AtomicU8, AtomicUsize, Ordering::SeqCst},
         Arc,
     },
 };
@@ -73,9 +73,7 @@ impl BmpProxyMetrics {
             .proxies
             .entry(Arc::new(socket_addr))
             .or_insert_with(Default::default);
-        metrics
-            .queue_capacity
-            .store(queue_capacity, Ordering::SeqCst);
+        metrics.queue_capacity.store(queue_capacity, SeqCst);
         metrics
     }
 
@@ -94,28 +92,28 @@ impl metrics::Source for BmpProxyMetrics {
                 target,
                 proxy_addr,
                 Self::PROXY_STATE_METRIC,
-                metrics.proxy_state.load(Ordering::SeqCst),
+                metrics.proxy_state.load(SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 proxy_addr,
                 Self::PROXY_HANDLER_STATE_METRIC,
-                metrics.proxy_handler_state.load(Ordering::SeqCst),
+                metrics.proxy_handler_state.load(SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 proxy_addr,
                 Self::NUM_UNDELIVERABLE_MESSAGES_METRIC,
-                metrics.num_undeliverable_messages.load(Ordering::SeqCst),
+                metrics.num_undeliverable_messages.load(SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 proxy_addr,
                 Self::QUEUE_CAPACITY_METRIC,
-                metrics.queue_capacity.load(Ordering::SeqCst),
+                metrics.queue_capacity.load(SeqCst),
             );
         }
     }

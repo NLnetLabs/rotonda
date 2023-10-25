@@ -1,4 +1,4 @@
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::{atomic::Ordering::SeqCst, Arc};
 
 use hyper::{Body, Response};
 use indoc::formatdoc;
@@ -34,7 +34,7 @@ impl RouterListApi {
             .unwrap()
     }
 
-    fn build_response_header(&self, keys: &[SourceId],) -> String {
+    fn build_response_header(&self, keys: &[SourceId]) -> String {
         formatdoc! {
             r#"
             <!DOCTYPE html>
@@ -126,12 +126,11 @@ impl RouterListApi {
                         ));
                         let metrics = self.bmp_metrics.router_metrics(router_id.clone());
 
-                        let state = metrics.bmp_state_machine_state.load(Ordering::SeqCst);
-                        let num_peers_up = metrics.num_peers_up.load(Ordering::SeqCst);
+                        let state = metrics.bmp_state_machine_state.load(SeqCst);
+                        let num_peers_up = metrics.num_peers_up.load(SeqCst);
                         let num_peers_up_eor_capable =
-                            metrics.num_peers_up_eor_capable.load(Ordering::SeqCst);
-                        let num_peers_up_dumping =
-                            metrics.num_peers_up_dumping.load(Ordering::SeqCst);
+                            metrics.num_peers_up_eor_capable.load(SeqCst);
+                        let num_peers_up_dumping = metrics.num_peers_up_dumping.load(SeqCst);
                         let num_peers_up_eor_capable_pc =
                             calc_u8_pc(num_peers_up, num_peers_up_eor_capable);
                         let num_peers_up_dumping_pc =
@@ -140,18 +139,18 @@ impl RouterListApi {
                             self.router_metrics
                                 .router_metrics(router_id)
                                 .num_invalid_bmp_messages
-                                .load(Ordering::SeqCst)
+                                .load(SeqCst)
                         } else {
                             0
                         };
                         let num_soft_parsing_failures = metrics
                             .num_bgp_updates_with_recoverable_parsing_failures_for_known_peers
-                            .load(Ordering::SeqCst)
+                            .load(SeqCst)
                             + metrics
                                 .num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers
-                                .load(Ordering::SeqCst);
-                        let num_hard_parsing_failures = metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers.load(Ordering::SeqCst) +
-                            metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers.load(Ordering::SeqCst);
+                                .load(SeqCst);
+                        let num_hard_parsing_failures = metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers.load(SeqCst) +
+                            metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers.load(SeqCst);
 
                         formatdoc! {
                             r#"

@@ -1,10 +1,11 @@
-use std::sync::{atomic::Ordering, Arc, RwLock};
+use std::sync::{atomic::Ordering::SeqCst, Arc, RwLock};
 
 use chrono::{DateTime, Utc};
-use hyper::{Body, Response, StatusCode};
+use hyper::{Body, Response};
 use indoc::formatdoc;
 
 use crate::{
+    http,
     payload::{RouterId, SourceId},
     units::bmp_tcp_in::{
         metrics::{BmpTcpInMetrics, RouterMetrics},
@@ -12,7 +13,7 @@ use crate::{
             machine::{PeerAware, PeerStates},
             metrics::BmpMetrics,
         },
-    }, http,
+    },
 };
 
 use super::RouterInfoApi;
@@ -116,37 +117,28 @@ impl RouterInfoApi {
         let last_message_at = last_message_at.read().unwrap().to_rfc3339();
         let router_bmp_metrics = bmp_metrics.router_metrics(router_id.clone());
 
-        let state = router_bmp_metrics
-            .bmp_state_machine_state
-            .load(Ordering::SeqCst);
+        let state = router_bmp_metrics.bmp_state_machine_state.load(SeqCst);
 
-        let num_msg_issues: usize = router_conn_metrics
-            .num_invalid_bmp_messages
-            .load(Ordering::SeqCst);
+        let num_msg_issues: usize = router_conn_metrics.num_invalid_bmp_messages.load(SeqCst);
         let num_retried_bgp_updates_known_peer: usize = router_bmp_metrics
             .num_bgp_updates_with_recoverable_parsing_failures_for_known_peers
-            .load(Ordering::SeqCst);
+            .load(SeqCst);
         let num_unusable_bgp_updates_known_peer: usize = router_bmp_metrics
             .num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers
-            .load(Ordering::SeqCst);
+            .load(SeqCst);
         let num_retried_bgp_updates_unknown_peer: usize = router_bmp_metrics
             .num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers
-            .load(Ordering::SeqCst);
+            .load(SeqCst);
         let num_unusable_bgp_updates_unknown_peer: usize = router_bmp_metrics
             .num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers
-            .load(Ordering::SeqCst);
-        let num_prefixes: usize = router_bmp_metrics
-            .num_stored_prefixes
-            .load(Ordering::SeqCst);
-        let num_announce: usize = router_bmp_metrics.num_announcements.load(Ordering::SeqCst);
-        let num_withdraw: usize = router_bmp_metrics.num_withdrawals.load(Ordering::SeqCst);
-        let num_peers_up: usize = router_bmp_metrics.num_peers_up.load(Ordering::SeqCst);
-        let num_peers_up_eor_capable: usize = router_bmp_metrics
-            .num_peers_up_eor_capable
-            .load(Ordering::SeqCst);
-        let num_peers_up_dumping: usize = router_bmp_metrics
-            .num_peers_up_dumping
-            .load(Ordering::SeqCst);
+            .load(SeqCst);
+        let num_prefixes: usize = router_bmp_metrics.num_stored_prefixes.load(SeqCst);
+        let num_announce: usize = router_bmp_metrics.num_announcements.load(SeqCst);
+        let num_withdraw: usize = router_bmp_metrics.num_withdrawals.load(SeqCst);
+        let num_peers_up: usize = router_bmp_metrics.num_peers_up.load(SeqCst);
+        let num_peers_up_eor_capable: usize =
+            router_bmp_metrics.num_peers_up_eor_capable.load(SeqCst);
+        let num_peers_up_dumping: usize = router_bmp_metrics.num_peers_up_dumping.load(SeqCst);
 
         use std::fmt::Write;
 
@@ -243,7 +235,7 @@ impl RouterInfoApi {
                                 writeln!(peer_report, "</pre></td></tr>").unwrap();
                             }
                         }
-                    }
+                    },
                 }
             }
 

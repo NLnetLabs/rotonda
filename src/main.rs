@@ -101,8 +101,10 @@ async fn handle_signals(config_source: Source, mut manager: Manager) -> Result<(
                         }
                     }
                 } else {
-                    info!("SIGHUP signal received, nothing to do. No \
-                    configuration file specified to re-read (default used).");
+                    info!(
+                        "SIGHUP signal received, nothing to do. No \
+                    configuration file specified to re-read (default used)."
+                    );
                 }
             }
             Either::Right((Err(err), _)) => {
@@ -159,7 +161,7 @@ mod tests {
     use std::{
         net::IpAddr,
         str::FromStr,
-        sync::{atomic::Ordering, Arc},
+        sync::{atomic::Ordering::SeqCst, Arc},
         time::Duration,
     };
 
@@ -632,7 +634,7 @@ mod tests {
         .await
         .is_err()
         {
-            if result.load(Ordering::SeqCst) != MetricLookupResult::Ok {
+            if result.load(SeqCst) != MetricLookupResult::Ok {
                 eprintln!("Metric dump: {:#?}", get_metrics(&metrics));
                 panic!(
                     "Metric '{}' with label '{:?}' != {} after {} seconds (reason: {})",
@@ -640,7 +642,7 @@ mod tests {
                     label,
                     wanted_v,
                     duration.as_secs(),
-                    result.load(Ordering::SeqCst),
+                    result.load(SeqCst),
                 );
             }
         }
@@ -663,7 +665,7 @@ mod tests {
         .await
         .is_ok()
         {
-            if result.load(Ordering::SeqCst) != MetricLookupResult::Ok {
+            if result.load(SeqCst) != MetricLookupResult::Ok {
                 eprintln!("Metric dump: {:#?}", get_metrics(&metrics));
                 panic!(
                     "Metric '{}' with label '{:?}' != {} after {} seconds (reason: {})",
@@ -671,7 +673,7 @@ mod tests {
                     label,
                     wanted_v,
                     duration.as_secs(),
-                    result.load(Ordering::SeqCst),
+                    result.load(SeqCst),
                 );
             }
         }
@@ -688,7 +690,7 @@ mod tests {
         loop {
             if get_metrics(metrics).get(&full_metric_name, label, result.clone()) == Some(wanted_v)
             {
-                result.store(MetricLookupResult::Ok, Ordering::SeqCst);
+                result.store(MetricLookupResult::Ok, SeqCst);
                 break;
             }
 
@@ -847,20 +849,20 @@ mod tests {
                     if let Some((label_name, label_value)) = label {
                         if let Some(v) = sample.labels.get(label_name) {
                             if v == *label_value {
-                                result.store(MetricLookupResult::Ok, Ordering::SeqCst);
+                                result.store(MetricLookupResult::Ok, SeqCst);
                                 return true;
                             } else {
-                                result.store(MetricLookupResult::ValueNotMatched, Ordering::SeqCst);
+                                result.store(MetricLookupResult::ValueNotMatched, SeqCst);
                             }
                         } else {
-                            result.store(MetricLookupResult::LabelNotFound, Ordering::SeqCst);
+                            result.store(MetricLookupResult::LabelNotFound, SeqCst);
                         }
                     } else {
-                        result.store(MetricLookupResult::Ok, Ordering::SeqCst);
+                        result.store(MetricLookupResult::Ok, SeqCst);
                         return true;
                     }
                 } else {
-                    result.store(MetricLookupResult::NameNotFound, Ordering::SeqCst);
+                    result.store(MetricLookupResult::NameNotFound, SeqCst);
                 }
 
                 false

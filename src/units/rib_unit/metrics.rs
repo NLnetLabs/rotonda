@@ -1,6 +1,6 @@
 use std::{
     sync::{
-        atomic::{self, AtomicI64, AtomicUsize, Ordering},
+        atomic::{AtomicI64, AtomicUsize, Ordering::SeqCst},
         Arc,
     },
     time::{Duration, Instant},
@@ -143,54 +143,52 @@ impl metrics::Source for RibUnitMetrics {
         target.append_simple(
             &Self::NUM_UNIQUE_PREFIXES_METRIC,
             Some(unit_name),
-            self.num_unique_prefixes.load(atomic::Ordering::Relaxed),
+            self.num_unique_prefixes.load(SeqCst),
         );
         target.append_simple(
             &Self::NUM_ITEMS_METRIC,
             Some(unit_name),
-            self.num_items.load(atomic::Ordering::Relaxed),
+            self.num_items.load(SeqCst),
         );
         target.append_simple(
             &Self::NUM_INSERT_RETRIES_METRIC,
             Some(unit_name),
-            self.num_insert_retries.load(atomic::Ordering::Relaxed),
+            self.num_insert_retries.load(SeqCst),
         );
         target.append_simple(
             &Self::NUM_INSERT_HARD_FAILURES_METRIC,
             Some(unit_name),
-            self.num_insert_hard_failures.load(atomic::Ordering::Relaxed),
+            self.num_insert_hard_failures.load(SeqCst),
         );
         target.append_simple(
             &Self::NUM_ROUTES_ANNOUNCED_METRIC,
             Some(unit_name),
-            self.num_routes_announced.load(atomic::Ordering::Relaxed),
+            self.num_routes_announced.load(SeqCst),
         );
         target.append_simple(
             &Self::NUM_MODIFIED_ROUTE_ANNOUNCEMENTS_METRIC,
             Some(unit_name),
-            self.num_modified_route_announcements
-                .load(atomic::Ordering::Relaxed),
+            self.num_modified_route_announcements.load(SeqCst),
         );
         target.append_simple(
             &Self::NUM_ROUTES_WITHDRAWN_METRIC,
             Some(unit_name),
-            self.num_routes_withdrawn.load(atomic::Ordering::Relaxed),
+            self.num_routes_withdrawn.load(SeqCst),
         );
         target.append_simple(
             &Self::NUM_WITHDRAWN_ROUTES_WITHOUT_ANNOUNCEMENTS_METRIC,
             Some(unit_name),
-            self.num_route_withdrawals_without_announcement
-                .load(atomic::Ordering::Relaxed),
+            self.num_route_withdrawals_without_announcement.load(SeqCst),
         );
         target.append_simple(
             &Self::LAST_INSERT_DURATION_METRIC,
             Some(unit_name),
-            self.last_insert_duration.load(atomic::Ordering::Relaxed),
+            self.last_insert_duration.load(SeqCst),
         );
         target.append_simple(
             &Self::LAST_UPDATE_DURATION_METRIC,
             Some(unit_name),
-            self.last_update_duration.load(atomic::Ordering::Relaxed),
+            self.last_update_duration.load(SeqCst),
         );
 
         let max_age = Duration::from_secs(60);
@@ -204,7 +202,7 @@ impl metrics::Source for RibUnitMetrics {
                 target,
                 router_id,
                 Self::LAST_END_TO_END_DELAY_PER_ROUTER_METRIC,
-                metrics.last_e2e_delay.load(Ordering::Relaxed),
+                metrics.last_e2e_delay.load(SeqCst),
             );
         }
 

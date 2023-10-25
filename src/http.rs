@@ -26,7 +26,7 @@ use std::fmt::Display;
 use std::net::SocketAddr;
 use std::net::TcpListener as StdListener;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 use std::sync::{Arc, Mutex, Weak};
 use std::task::{Context, Poll};
 use std::{fmt, io};
@@ -139,7 +139,11 @@ impl Server {
         let make_service = make_service_fn(|conn: &HttpStream| {
             let metrics = metrics.clone();
             let resources = resources.clone();
-            let client_ip = Arc::new(conn.sock().peer_addr().map_or_else(|_err| "-".to_string(), |addr| addr.to_string()));
+            let client_ip = Arc::new(
+                conn.sock()
+                    .peer_addr()
+                    .map_or_else(|_err| "-".to_string(), |addr| addr.to_string()),
+            );
             async move {
                 Ok::<_, Infallible>(service_fn(move |req| {
                     let metrics = metrics.clone();
@@ -147,7 +151,8 @@ impl Server {
                     let client_ip = client_ip.clone();
                     async move {
                         if log::log_enabled!(log::Level::Trace) {
-                            let request_line = format!("{} {} {:?}", req.method(), req.uri(), req.version());
+                            let request_line =
+                                format!("{} {} {:?}", req.method(), req.uri(), req.version());
                             let res = Self::handle_request(req, &metrics, &resources).await;
                             if let Ok(res) = &res {
                                 let status_code = res.status().as_u16();
@@ -554,11 +559,11 @@ impl QueryParam {
     }
 
     pub fn mark_used(&self) {
-        self.used.store(true, Ordering::Relaxed);
+        self.used.store(true, SeqCst);
     }
 
     pub fn used(&self) -> bool {
-        self.used.load(Ordering::Relaxed)
+        self.used.load(SeqCst)
     }
 }
 

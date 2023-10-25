@@ -81,7 +81,7 @@ use routecore::addr::Prefix;
 use serde::Deserialize;
 use tokio::sync::mpsc::Sender;
 
-use std::sync::atomic::{AtomicU16, Ordering};
+use std::sync::atomic::{AtomicU16, Ordering::SeqCst};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use std::{
@@ -721,7 +721,7 @@ impl Gate {
         // if sender_lost {
         //     let updates = self.updates.load();
         //     updates.retain(|_, item| item.queue.is_some());
-        //     self.updates_len.store(updates.len(), Ordering::Relaxed);
+        //     self.updates_len.store(updates.len(), SeqCst);
         // }
 
         self.metrics
@@ -1025,7 +1025,7 @@ pub struct GateMetrics {
 
 impl GraphStatus for GateMetrics {
     fn status_text(&self) -> String {
-        format!("out: {}", self.num_updates.load(Ordering::Relaxed))
+        format!("out: {}", self.num_updates.load(SeqCst))
     }
 }
 
@@ -1037,12 +1037,12 @@ impl GateMetrics {
         _senders: Arc<FrimMap<Uuid, UpdateSender>>,
         sent_at_least_once: bool,
     ) {
-        self.num_updates.fetch_add(1, Ordering::Relaxed);
+        self.num_updates.fetch_add(1, SeqCst);
         if !sent_at_least_once {
-            self.num_dropped_updates.fetch_add(1, Ordering::Relaxed);
+            self.num_dropped_updates.fetch_add(1, SeqCst);
         }
         if let Update::Bulk(update) = update {
-            self.update_set_size.store(update.len(), Ordering::Relaxed);
+            self.update_set_size.store(update.len(), SeqCst);
         }
         self.update.store(Some(Utc::now()));
 
@@ -1060,13 +1060,13 @@ impl GateMetrics {
         // }
 
         // if num_queue_senders > 0 {
-        //     self.capacity.store(capacity, Ordering::Relaxed);
+        //     self.capacity.store(capacity, SeqCst);
         // }
 
         // self.num_queue_senders
-        //     .store(num_queue_senders, Ordering::Relaxed);
+        //     .store(num_queue_senders, SeqCst);
         // self.num_direct_senders
-        //     .store(num_direct_senders, Ordering::Relaxed);
+        //     .store(num_direct_senders, SeqCst);
     }
 
     /// Updates the metrics to match the given unit status.
@@ -1143,13 +1143,13 @@ impl metrics::Source for GateMetrics {
         target.append_simple(
             &Self::NUM_UPDATES_METRIC,
             Some(unit_name),
-            self.num_updates.load(Ordering::Relaxed),
+            self.num_updates.load(SeqCst),
         );
 
         target.append_simple(
             &Self::NUM_DROPPED_UPDATES_METRIC,
             Some(unit_name),
-            self.num_dropped_updates.load(Ordering::Relaxed),
+            self.num_dropped_updates.load(SeqCst),
         );
 
         match self.update.load() {
@@ -1162,7 +1162,7 @@ impl metrics::Source for GateMetrics {
                 target.append_simple(
                     &Self::UPDATE_SET_SIZE_METRIC,
                     Some(unit_name),
-                    self.update_set_size.load(Ordering::Relaxed),
+                    self.update_set_size.load(SeqCst),
                 );
             }
             None => {
@@ -1174,17 +1174,17 @@ impl metrics::Source for GateMetrics {
         target.append_simple(
             &Self::LINK_CAPACITY_METRIC,
             Some(unit_name),
-            self.capacity.load(Ordering::Relaxed),
+            self.capacity.load(SeqCst),
         );
         target.append_simple(
             &Self::NUM_QUEUE_SENDERS_METRIC,
             Some(unit_name),
-            self.num_queue_senders.load(Ordering::Relaxed),
+            self.num_queue_senders.load(SeqCst),
         );
         target.append_simple(
             &Self::NUM_DIRECT_SENDERS_METRIC,
             Some(unit_name),
-            self.num_direct_senders.load(Ordering::Relaxed),
+            self.num_direct_senders.load(SeqCst),
         );
     }
 }
@@ -1861,209 +1861,209 @@ struct SubscribeResponse {
 
 //------------ Tests ---------------------------------------------------------
 
-// /// With the RTRTR design units and targets are connected together by MPSC
-// /// pipelines each with their own internal queue. What is the performance
-// /// and resource overhead of these queues vs direct invocation of functions
-// /// from one component to another? This test is intended to give some insight
-// /// into these topics.
-// #[cfg(test)]
-// mod tests {
-//     use roto::types::builtin::U8;
+/// With the RTRTR design units and targets are connected together by MPSC
+/// pipelines each with their own internal queue. What is the performance
+/// and resource overhead of these queues vs direct invocation of functions
+/// from one component to another? This test is intended to give some insight
+/// into these topics.
+#[cfg(test)]
+mod tests {
+    use roto::types::builtin::U8;
 
-//     use crate::payload::Payload;
+    use crate::{payload::Payload, tests::util::internal::enable_logging};
 
-//     use super::*;
+    use super::*;
 
-//     #[tokio::test(flavor = "multi_thread")]
-//     async fn gate_link_lifecycle_test() {
-//         // Lifecycle of a connected gate and link:
-//         //
-//         //   Client    Unit       Gate    Gate Agent    Link
-//         //   ───────────────────────────────────────────────
-//         //     │
-//         //     │              new()
-//         //     │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌▶│╌╌╌╌╌╌╌▶│
-//         //            (gate, agent) │◀╌╌╌╌╌╌╌│
-//         //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│        :
-//         //     │   gate             :        :
-//         //     │╌╌╌╌╌╌╌▶│           :
-//         //     │
-//         //     │  get_gate_status() │
-//         //     │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌▶│
-//         //     │            Dormant │
-//         //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│
-//         //     │
-//         //     │  create_link()
-//         //     │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌▶│╌╌╌╌╌╌╌╌╌╌╌▶│
-//         //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│◀╌╌╌╌╌╌╌╌╌╌╌│
-//         //     │
-//         //     │  query()
-//         //     │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌▶│╌╌ connect() ╌┐
-//         //     │                               SUBSCRIBE  │◀╌╌╌╌╌╌╌╌╌╌╌╌╌┘
-//         //     │                    │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│
-//         //     │                    │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌▶│
-//         //     │                                          │╌╌╌ recv() ╌╌╌┐
-//         //     :                                          :              :
-//         //     :                                          : WAITING...   :
-//         //     │  get_gate_status() │
-//         //     │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌▶│
-//         //     │            Active  │
-//         //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│
-//         //     :
-//         //     :
-//         //              │ update_data()
-//         //              │╌╌╌╌╌╌╌╌╌╌▶│
-//         //              :           │ . . . . . . . . . . . . . . . . . ▶│
-//         //                                                               │
-//         //     │                                   UPDATE │              │
-//         //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│◀╌╌╌╌╌╌╌╌╌╌╌╌╌┘
-//         //     :
-//         //     :
-//         //
-//         //                                                │ drop()
-//         //                                                x
-//         //
-//         //     Then some time later either the link goes away which will be
-//         //     noticed by the gate:
-//         //
-//         //     │  get_gate_status() │
-//         //     │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌▶│
-//         //     │            Dormant │
-//         //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│
-//         //
-//         //
-//         //     Or the gate goes away which will be noticed by the link:
-//         //
-//         //                          │ drop()
-//         //                          x
-//         //     │  query()
-//         //     │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌▶│╌╌ recv() ╌┐
-//         //     │                    Err(UnitStatus::Gone) │      None │
-//         //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│◀╌╌╌╌╌╌╌╌╌╌┘
+    #[tokio::test(flavor = "multi_thread")]
+    async fn gate_link_lifecycle_test() {
+        // Lifecycle of a connected gate and link:
+        //
+        //   Client    Unit       Gate    Gate Agent    Link
+        //   ───────────────────────────────────────────────
+        //     │
+        //     │              new()
+        //     │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌▶│╌╌╌╌╌╌╌▶│
+        //            (gate, agent) │◀╌╌╌╌╌╌╌│
+        //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│        :
+        //     │   gate             :        :
+        //     │╌╌╌╌╌╌╌▶│           :
+        //     │
+        //     │  get_gate_status() │
+        //     │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌▶│
+        //     │            Dormant │
+        //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│
+        //     │
+        //     │  create_link()
+        //     │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌▶│╌╌╌╌╌╌╌╌╌╌╌▶│
+        //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│◀╌╌╌╌╌╌╌╌╌╌╌│
+        //     │
+        //     │  query()
+        //     │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌▶│╌╌ connect() ╌┐
+        //     │                               SUBSCRIBE  │◀╌╌╌╌╌╌╌╌╌╌╌╌╌┘
+        //     │                    │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│
+        //     │                    │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌▶│
+        //     │                                          │╌╌╌ recv() ╌╌╌┐
+        //     :                                          :              :
+        //     :                                          : WAITING...   :
+        //     │  get_gate_status() │
+        //     │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌▶│
+        //     │            Active  │
+        //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│
+        //     :
+        //     :
+        //              │ update_data()
+        //              │╌╌╌╌╌╌╌╌╌╌▶│
+        //              :           │ . . . . . . . . . . . . . . . . . ▶│
+        //                                                               │
+        //     │                                   UPDATE │              │
+        //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│◀╌╌╌╌╌╌╌╌╌╌╌╌╌┘
+        //     :
+        //     :
+        //
+        //                                                │ drop()
+        //                                                x
+        //
+        //     Then some time later either the link goes away which will be
+        //     noticed by the gate:
+        //
+        //     │  get_gate_status() │
+        //     │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌▶│
+        //     │            Dormant │
+        //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│
+        //
+        //
+        //     Or the gate goes away which will be noticed by the link:
+        //
+        //                          │ drop()
+        //                          x
+        //     │  query()
+        //     │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌▶│╌╌ recv() ╌┐
+        //     │                    Err(UnitStatus::Gone) │      None │
+        //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│◀╌╌╌╌╌╌╌╌╌╌┘
+        fn mk_test_payload() -> Payload {
+            Payload::new("test", U8::new(18))
+        }
 
-//         fn mk_test_payload() -> Payload {
-//             Payload::new("test", U8::new(18))
-//         }
+        eprintln!("STARTING");
+        // Create a gate. Updates sent via the gate will be received by links.
+        let (gate, mut agent) = Gate::new(1); // the minimum allowed queue capacity is 1
 
-//         eprintln!("STARTING");
-//         // Create a gate. Updates sent via the gate will be received by links.
-//         let (gate, mut agent) = Gate::new(1); // the minimum allowed queue capacity is 1
+        // Create a link from the gate agent to receive updates from the gate.
+        let mut link = agent.create_link();
 
-//         // Create a link from the gate agent to receive updates from the gate.
-//         let mut link = agent.create_link();
+        #[derive(Debug)]
+        struct TestDirectUpdateTarget(Arc<AtomicUsize>);
 
-//         #[derive(Debug)]
-//         struct TestDirectUpdateTarget(Arc<AtomicUsize>);
+        #[async_trait]
+        impl DirectUpdate for TestDirectUpdateTarget {
+            async fn direct_update(&self, update: Update) {
+                assert!(matches!(update, Update::Single(_)));
+                if let Update::Single(payload) = update {
+                    assert_eq!(payload, mk_test_payload());
+                    self.0.fetch_add(1, SeqCst);
+                }
+            }
+        }
 
-//         #[async_trait]
-//         impl DirectUpdate for TestDirectUpdateTarget {
-//             async fn direct_update(&self, update: Update) {
-//                 assert!(matches!(update, Update::Single(_)));
-//                 if let Update::Single(payload) = update {
-//                     assert_eq!(payload, mk_test_payload());
-//                     self.0.fetch_add(1, Ordering::Relaxed);
-//                 }
-//             }
-//         }
+        impl AnyDirectUpdate for TestDirectUpdateTarget {}
 
-//         impl AnyDirectUpdate for TestDirectUpdateTarget {}
+        let counter = Arc::new(AtomicUsize::default());
+        let dut = Arc::new(TestDirectUpdateTarget(counter.clone()));
 
-//         let counter = Arc::new(AtomicUsize::default());
-//         let dut = Arc::new(TestDirectUpdateTarget(counter.clone()));
+        eprintln!("SETTING LINK TO DU MODE");
+        link.set_direct_update_target(dut.clone());
 
-//         eprintln!("SETTING LINK TO DU MODE");
-//         link.set_direct_update_target(dut.clone());
+        let gate = Arc::new(gate);
+        let gate_clone = gate.clone();
 
-//         let gate = Arc::new(gate);
-//         let gate_clone = gate.clone();
+        // "Run" the gate like a unit does.
+        tokio::spawn(async move {
+            loop {
+                gate.process().await.unwrap();
+            }
+        });
 
-//         // "Run" the gate like a unit does.
-//         tokio::spawn(async move {
-//             loop {
-//                 gate.process().await.unwrap();
-//             }
-//         });
+        eprintln!("CONNECTING LINK TO GATE");
+        link.connect(false).await.unwrap();
 
-//         eprintln!("CONNECTING LINK TO GATE");
-//         link.connect(false).await.unwrap();
+        // Build an update to send
+        let update = Update::Single(mk_test_payload());
 
-//         // Build an update to send
-//         let update = Update::Single(mk_test_payload());
+        // Send the update through the gate
+        eprintln!("SENDING PAYLOAD");
+        gate_clone.update_data(update).await;
 
-//         // Send the update through the gate
-//         eprintln!("SENDING PAYLOAD");
-//         gate_clone.update_data(update).await;
+        eprintln!("WAITING FOR PAYLOAD");
+        tokio::time::sleep(Duration::from_secs(3)).await;
 
-//         eprintln!("WAITING FOR PAYLOAD");
-//         tokio::time::sleep(Duration::from_secs(3)).await;
+        eprintln!("CHECKING FOR PAYLOAD");
+        assert_eq!(1, counter.load(SeqCst));
+    }
 
-//         eprintln!("CHECKING FOR PAYLOAD");
-//         assert_eq!(1, counter.load(Ordering::Relaxed));
-//     }
+    #[tokio::test(flavor = "multi_thread")]
+    async fn gate_clones_terminate_when_parent_gate_is_dropped() {
+        let (gate, agent) = Gate::new(10);
+        let gate_clone = gate.clone();
 
-//     #[tokio::test(flavor = "multi_thread")]
-//     async fn gate_clones_terminate_when_parent_gate_is_dropped() {
-//         let (gate, agent) = Gate::new(10);
-//         let gate_clone = gate.clone();
+        eprintln!("SENDING TERMINATION COMMAND");
+        agent.terminate().await;
 
-//         eprintln!("SENDING TERMINATION COMMAND");
-//         agent.terminate().await;
+        eprintln!("CHECKING GATE IS TERMINATED");
+        assert_eq!(gate.process().await, Err(Terminated));
 
-//         eprintln!("CHECKING GATE IS TERMINATED");
-//         assert_eq!(gate.process().await, Err(Terminated));
+        // Typically at this point the unit owning the gate will exit its
+        // run() function and by doing so drop the master instance of the
+        // gate from which the clones were made.
+        drop(gate);
 
-//         // Typically at this point the unit owning the gate will exit its
-//         // run() function and by doing so drop the master instance of the
-//         // gate from which the clones were made.
-//         drop(gate);
+        // Next time a cloned gate tries to check for commands it finds
+        // that the sender of the commands has been dropped because it was
+        // owned by the "parent" gate and so the clone gate exits the
+        // process() function with Err(Terminated).
+        eprintln!("CHECKING GATE CLONE IS TERMINATED");
+        assert_eq!(gate_clone.process().await, Err(Terminated));
 
-//         // Next time a cloned gate tries to check for commands it finds
-//         // that the sender of the commands has been dropped because it was
-//         // owned by the "parent" gate and so the clone gate exits the
-//         // process() function with Err(Terminated).
-//         eprintln!("CHECKING GATE CLONE IS TERMINATED");
-//         assert_eq!(gate_clone.process().await, Err(Terminated));
+        eprintln!("GATE AND GATE CLONE ARE TERMINATED");
+    }
 
-//         eprintln!("GATE AND GATE CLONE ARE TERMINATED");
-//     }
+    #[tokio::test(flavor = "multi_thread")]
+    async fn gate_clones_receive_termination_signal() {
+        enable_logging("trace");
+        let (gate, agent) = Gate::new(10);
+        let gate_clone = gate.clone();
 
-//     #[tokio::test(flavor = "multi_thread")]
-//     async fn gate_clones_receive_termination_signal() {
-//         let (gate, agent) = Gate::new(10);
-//         let gate_clone = gate.clone();
+        eprintln!("SENDING TERMINATION COMMAND");
+        agent.terminate().await;
 
-//         eprintln!("SENDING TERMINATION COMMAND");
-//         agent.terminate().await;
+        eprintln!("CHECKING GATE IS TERMINATED");
+        assert_eq!(gate.process().await, Err(Terminated));
 
-//         eprintln!("CHECKING GATE IS TERMINATED");
-//         assert_eq!(gate.process().await, Err(Terminated));
+        eprintln!("CHECKING GATE CLONE IS TERMINATED");
+        assert_eq!(gate_clone.process().await, Err(Terminated));
 
-//         eprintln!("CHECKING GATE CLONE IS TERMINATED");
-//         assert_eq!(gate_clone.process().await, Err(Terminated));
+        eprintln!("GATE AND GATE CLONE ARE TERMINATED");
+    }
 
-//         eprintln!("GATE AND GATE CLONE ARE TERMINATED");
-//     }
+    #[tokio::test(flavor = "multi_thread")]
+    async fn gate_parent_cleans_up_when_clone_terminates() {
+        let (gate, _agent) = Gate::new(10);
+        let gate_clone = gate.clone();
 
-//     #[tokio::test(flavor = "multi_thread")]
-//     async fn gate_parent_cleans_up_when_clone_terminates() {
-//         let (gate, _agent) = Gate::new(10);
-//         let gate_clone = gate.clone();
+        eprintln!("CHECKING GATE HAS CLONE SENDER");
+        assert!(
+            matches!(&gate.state, GateState::Normal(NormalGateState { clone_senders, .. }) if !clone_senders.is_empty())
+        );
 
-//         eprintln!("CHECKING GATE HAS CLONE SENDER");
-//         assert!(
-//             matches!(&gate.state, GateState::Normal(NormalGateState { clone_senders, .. }) if !clone_senders.is_empty())
-//         );
+        eprintln!("DROPPING CLONED GATE");
+        drop(gate_clone);
 
-//         eprintln!("DROPPING CLONED GATE");
-//         drop(gate_clone);
+        // Allow the DetachClone command to be received and acted upon
+        eprintln!("PROCESS COMMANDS IN PARENT GATE");
+        gate.wait(1).await.unwrap();
 
-//         // Allow the DetachClone command to be received and acted upon
-//         eprintln!("PROCESS COMMANDS IN PARENT GATE");
-//         gate.wait(1).await.unwrap();
-
-//         eprintln!("CHECKING GATE HAS NO CLONE SENDER");
-//         assert!(
-//             matches!(&gate.state, GateState::Normal(NormalGateState { clone_senders, .. }) if clone_senders.is_empty())
-//         );
-//     }
-// }
+        eprintln!("CHECKING GATE HAS NO CLONE SENDER");
+        assert!(
+            matches!(&gate.state, GateState::Normal(NormalGateState { clone_senders, .. }) if clone_senders.is_empty())
+        );
+    }
+}

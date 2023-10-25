@@ -1779,11 +1779,11 @@ pub fn load_filter_name(filter_name: FilterName) -> FilterName {
 
 #[cfg(test)]
 mod tests {
-//     use std::{
-//         fmt::Display,
-//         ops::{Deref, DerefMut},
-//         sync::atomic::{AtomicU8, Ordering},
-//     };
+    use std::{
+        fmt::Display,
+        ops::{Deref, DerefMut},
+        sync::atomic::{AtomicU8, Ordering::SeqCst},
+    };
 
 //     use super::*;
 
@@ -2407,199 +2407,546 @@ use crate::{log::{Trace, MsgRelation}, manager::extract_msg_indices};
         assert_eq!("[0-1, 3]", trace_txt);
     }
 
-    //     // --- Test helpers ------------------------------------------------------
+    #[tokio::test(flavor = "multi_thread")]
+    async fn unused_unit_should_not_be_spawned() -> Result<(), Terminate> {
+        // given a config with only a single target with a link to a missing unit
+        let toml = r#"
+        http_listen = []
 
-//     fn mk_config_from_toml(toml: &str) -> ConfigFile {
-//         ConfigFile::new(
-//             toml.as_bytes().to_vec(),
-//             Source::default(),
-//             Default::default(),
-//         )
-//     }
+        [units.unused-unit]
+        type = "bmp-tcp-in"
+        listen = ""
 
-//     type UnitOrTargetName = String;
+        [units.some-unit]
+        type = "bmp-tcp-in"
+        listen = ""
 
-//     #[derive(Debug, Eq, PartialEq)]
-//     enum SpawnAction {
-//         SpawnUnit,
-//         SpawnTarget,
-//         ReconfigureUnit,
-//         ReconfigureTarget,
-//         TerminateUnit,
-//         TerminateTarget,
-//     }
+        [targets.null]
+        type = "null-out"
+        source = "some-unit"
+        "#;
+        let config_file = mk_config_from_toml(toml);
 
-//     impl Display for SpawnAction {
-//         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//             match self {
-//                 SpawnAction::SpawnUnit => f.write_str("SpawnUnit"),
-//                 SpawnAction::SpawnTarget => f.write_str("SpawnTarget"),
-//                 SpawnAction::ReconfigureUnit => f.write_str("ReconfigureUnit"),
-//                 SpawnAction::ReconfigureTarget => f.write_str("ReconfigureTarget"),
-//                 SpawnAction::TerminateUnit => f.write_str("TerminateUnit"),
-//                 SpawnAction::TerminateTarget => f.write_str("TerminateTarget"),
-//             }
-//         }
-//     }
+        // when loaded into the manager and spawned
+        let mut manager = init_manager();
+        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
+        spawn(&mut manager, config);
 
-//     #[derive(Debug)]
-//     enum UnitOrTargetConfig {
-//         None,
-//         UnitConfig(Unit),
-//         TargetConfig(Target),
-//     }
+        // then it should spawn the unit and target
+        let log = SPAWN_LOG.with(|log| log.take());
+        assert_eq!(log.len(), 2);
+        assert_log_contains(&log, "some-unit", SpawnAction::SpawnUnit);
+        assert_log_contains(&log, "null", SpawnAction::SpawnTarget);
+        Ok(())
+    }
 
-//     #[derive(Debug)]
-//     struct SpawnLogItem {
-//         pub name: UnitOrTargetName,
-//         pub action: SpawnAction,
-//         pub config: UnitOrTargetConfig,
-//     }
+    #[tokio::test(flavor = "multi_thread")]
+    async fn added_target_should_be_spawned() -> Result<(), Terminate> {
+        // given a config with only a single target with a link to a single unit
+        let toml = r#"
+        http_listen = []
 
-//     impl SpawnLogItem {
-//         fn new(name: UnitOrTargetName, action: SpawnAction, _config: UnitOrTargetConfig) -> Self {
-//             Self {
-//                 name,
-//                 action,
-//                 config: _config,
-//             }
-//         }
-//     }
+        [units.some-unit]
+        type = "bmp-tcp-in"
+        listen = ""
 
-//     impl Display for SpawnLogItem {
-//         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//             write!(f, "'{}' for unit/target '{}'", self.action, self.name)
-//         }
-//     }
+        [targets.null]
+        type = "null-out"
+        source = "some-unit"
+        "#;
+        let config_file = mk_config_from_toml(toml);
 
-//     #[derive(Debug, Default)]
-//     struct SpawnLog(pub Vec<SpawnLogItem>);
+        // when loaded into the manager and spawned
+        let mut manager = init_manager();
+        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
+        spawn(&mut manager, config);
 
-//     impl SpawnLog {
-//         pub fn new() -> Self {
-//             Self(vec![])
-//         }
-//     }
+        // then it should spawn the unit and target
+        let log = SPAWN_LOG.with(|log| log.take());
+        assert_eq!(log.len(), 2);
+        assert_log_contains(&log, "some-unit", SpawnAction::SpawnUnit);
+        assert_log_contains(&log, "null", SpawnAction::SpawnTarget);
 
-//     impl Display for SpawnLog {
-//         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-//             writeln!(f, "[")?;
-//             for item in &self.0 {
-//                 writeln!(f, "  {}", item)?;
-//             }
-//             writeln!(f, "]")
-//         }
-//     }
+        // when the config is modified to include a new target
+        let toml = r#"
+        http_listen = []
 
-//     impl Deref for SpawnLog {
-//         type Target = Vec<SpawnLogItem>;
+        [units.some-unit]
+        type = "bmp-tcp-in"
+        listen = ""
 
-//         fn deref(&self) -> &Self::Target {
-//             &self.0
-//         }
-//     }
+        [targets.null]
+        type = "null-out"
+        source = "some-unit"
 
-//     impl DerefMut for SpawnLog {
-//         fn deref_mut(&mut self) -> &mut Self::Target {
-//             &mut self.0
-//         }
-//     }
+        [targets.null2]
+        type = "null-out"
+        source = "some-unit"
+        "#;
+        let config_file = mk_config_from_toml(toml);
 
-//     thread_local!(
-//         static SPAWN_LOG: RefCell<SpawnLog> = RefCell::new(SpawnLog::new())
-//     );
+        // when loaded into the manager and spawned
+        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
+        spawn(&mut manager, config);
 
-//     fn assert_log_contains(log: &SpawnLog, name: &str, action: SpawnAction) {
-//         assert!(
-//             log.iter()
-//                 .any(|item| item.name == name && item.action == action),
-//             "No '{}' action for unit/target '{}' found in spawn log: {}",
-//             action,
-//             name,
-//             log
-//         );
-//     }
+        // then it should spawn the added target
+        let log = SPAWN_LOG.with(|log| log.take());
+        assert_eq!(log.len(), 3);
+        assert_log_contains(&log, "some-unit", SpawnAction::ReconfigureUnit);
+        assert_log_contains(&log, "null", SpawnAction::ReconfigureTarget);
+        assert_log_contains(&log, "null2", SpawnAction::SpawnTarget);
+        Ok(())
+    }
 
-//     fn get_log_item<'a>(log: &'a SpawnLog, name: &str, action: SpawnAction) -> &'a SpawnLogItem {
-//         let found = log
-//             .iter()
-//             .find(|item| item.name == name && item.action == action);
-//         assert!(found.is_some());
-//         found.unwrap()
-//     }
+    #[tokio::test(flavor = "multi_thread")]
+    async fn removed_target_should_be_terminated() -> Result<(), Terminate> {
+        // given a config with only a single target with a link to a missing unit
+        let toml = r#"
+        http_listen = []
 
-//     fn spawn_unit(c: Component, u: Unit, _: Gate, _: WaitPoint) {
-//         log_spawn_action(
-//             c.name.to_string(),
-//             SpawnAction::SpawnUnit,
-//             UnitOrTargetConfig::UnitConfig(u),
-//         );
-//     }
+        [units.some-unit]
+        type = "bmp-tcp-in"
+        listen = ""
 
-//     fn spawn_target(c: Component, t: Target, _: Receiver<TargetCommand>, _: WaitPoint) {
-//         log_spawn_action(
-//             c.name.to_string(),
-//             SpawnAction::SpawnTarget,
-//             UnitOrTargetConfig::TargetConfig(t),
-//         );
-//     }
+        [targets.null]
+        type = "null-out"
+        source = "some-unit"
 
-//     fn reconfigure_unit(name: &str, _: GateAgent, u: Unit, _: Gate) {
-//         log_spawn_action(
-//             name.to_string(),
-//             SpawnAction::ReconfigureUnit,
-//             UnitOrTargetConfig::UnitConfig(u),
-//         );
-//     }
+        [targets.null2]
+        type = "null-out"
+        source = "some-unit"
+        "#;
+        let config_file = mk_config_from_toml(toml);
 
-//     fn reconfigure_target(name: &str, _: Sender<TargetCommand>, t: Target) {
-//         log_spawn_action(
-//             name.to_string(),
-//             SpawnAction::ReconfigureTarget,
-//             UnitOrTargetConfig::TargetConfig(t),
-//         );
-//     }
+        // when loaded into the manager and spawned
+        let mut manager = init_manager();
+        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
+        spawn(&mut manager, config);
 
-//     fn terminate_unit(name: &str, _: Arc<GateAgent>) {
-//         log_spawn_action(
-//             name.to_string(),
-//             SpawnAction::TerminateUnit,
-//             UnitOrTargetConfig::None,
-//         );
-//     }
+        // then it should spawn the unit and target
+        let log = SPAWN_LOG.with(|log| log.take());
+        assert_eq!(log.len(), 3);
+        assert_log_contains(&log, "some-unit", SpawnAction::SpawnUnit);
+        assert_log_contains(&log, "null", SpawnAction::SpawnTarget);
+        assert_log_contains(&log, "null2", SpawnAction::SpawnTarget);
 
-//     fn terminate_target(name: &str, _: Arc<Sender<TargetCommand>>) {
-//         log_spawn_action(
-//             name.to_string(),
-//             SpawnAction::TerminateTarget,
-//             UnitOrTargetConfig::None,
-//         );
-//     }
+        // when the config is modified to remove a target
+        let toml = r#"
+        http_listen = []
 
-//     fn clear_spawn_action_log() {
-//         SPAWN_LOG.with(|log| log.borrow_mut().clear());
-//     }
+        [units.some-unit]
+        type = "bmp-tcp-in"
+        listen = ""
 
-//     fn log_spawn_action(name: String, action: SpawnAction, cfg: UnitOrTargetConfig) {
-//         SPAWN_LOG.with(|log| log.borrow_mut().push(SpawnLogItem::new(name, action, cfg)));
-//     }
+        #[targets.null]
+        #type = "null-out"
+        #source = "some-unit"
 
-//     fn spawn(manager: &mut Manager, mut config: Config) {
-//         clear_spawn_action_log();
-//         manager.spawn_internal(
-//             &mut config,
-//             spawn_unit,
-//             spawn_target,
-//             reconfigure_unit,
-//             reconfigure_target,
-//             terminate_unit,
-//             terminate_target,
-//         );
-//     }
+        [targets.null2]
+        type = "null-out"
+        source = "some-unit"
+        "#;
+        let config_file = mk_config_from_toml(toml);
 
-//     fn init_manager() -> Manager {
-//         GATES.with(|gates| gates.replace(Some(Default::default())));
-//         ROTO_FILTER_NAMES.with(|filter_names| filter_names.replace(Some(Default::default())));
-//         Manager::new()
-//     }
+        // when loaded into the manager and spawned
+        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
+        spawn(&mut manager, config);
+
+        // then it should terminate the removed target
+        let log = SPAWN_LOG.with(|log| log.take());
+        assert_eq!(log.len(), 3);
+        assert_log_contains(&log, "some-unit", SpawnAction::ReconfigureUnit);
+        assert_log_contains(&log, "null", SpawnAction::TerminateTarget);
+        assert_log_contains(&log, "null2", SpawnAction::ReconfigureTarget);
+
+        // Note: we don't check that the gate of some-unit has been updated to
+        // remove the Sender for the Link to target null because that is logic
+        // within the Gate itself and should be tested in the Gate unit tests.
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn modified_settings_are_correctly_announced() -> Result<(), Terminate> {
+        // given a config with only a single target with a link to a missing unit
+        let toml = r#"
+        http_listen = []
+
+        [units.some-unit]
+        type = "bmp-tcp-in"
+        listen = ""
+
+        [targets.null]
+        type = "null-out"
+        source = "some-unit"
+        "#;
+        let config_file = mk_config_from_toml(toml);
+
+        // when loaded into the manager and spawned
+        let mut manager = init_manager();
+        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
+        spawn(&mut manager, config);
+
+        // then it should spawn the unit and target
+        let log = SPAWN_LOG.with(|log| log.take());
+        assert_eq!(log.len(), 2);
+        assert_log_contains(&log, "some-unit", SpawnAction::SpawnUnit);
+        assert_log_contains(&log, "null", SpawnAction::SpawnTarget);
+
+        // when the config is modified
+        let toml = r#"
+        http_listen = []
+
+        [units.some-unit]
+        type = "bmp-tcp-in"
+        listen = "changed"
+
+        [targets.null]
+        type = "null-out"
+        source = "some-unit"
+        "#;
+        let config_file = mk_config_from_toml(toml);
+
+        // when loaded into the manager and spawned
+        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
+        spawn(&mut manager, config);
+
+        // then it should terminate the removed target
+        let log = SPAWN_LOG.with(|log| log.take());
+        assert_eq!(log.len(), 2);
+        assert_log_contains(&log, "some-unit", SpawnAction::ReconfigureUnit);
+        assert_log_contains(&log, "null", SpawnAction::ReconfigureTarget);
+
+        let item = get_log_item(&log, "some-unit", SpawnAction::ReconfigureUnit);
+        if let UnitOrTargetConfig::UnitConfig(Unit::BmpTcpIn(config)) = &item.config {
+            assert_eq!(config.listen.as_str(), "changed");
+        } else {
+            unreachable!();
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn coordinator_with_no_components_should_finish_immediately() {
+        let coordinator = Coordinator::new(0);
+        let mut alarm_fired = false;
+        coordinator.wait(|_, _| alarm_fired = true).await;
+        assert!(!alarm_fired);
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn coordinator_track_too_many_components_causes_panic() {
+        let coordinator = Coordinator::new(0);
+        coordinator.track(SOME_COMPONENT.to_string());
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn coordinator_track_component_twice_causes_panic() {
+        let coordinator = Coordinator::new(0);
+        coordinator.clone().track(SOME_COMPONENT.to_string());
+        coordinator.track(SOME_COMPONENT.to_string());
+    }
+
+    #[tokio::test]
+    #[should_panic]
+    async fn coordinator_unknown_ready_component_twice_causes_panic() {
+        let coordinator = Coordinator::new(0);
+        coordinator.ready(SOME_COMPONENT).await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn coordinator_with_one_ready_component_should_not_raise_alarm() {
+        let coordinator = Coordinator::new(1);
+        let mut alarm_fired = false;
+        let wait_point = coordinator.clone().track(SOME_COMPONENT.to_string());
+        let join_handle = tokio::task::spawn(wait_point.running());
+        assert!(!join_handle.is_finished());
+        coordinator.wait(|_, _| alarm_fired = true).await;
+        join_handle.await.unwrap();
+        assert!(!alarm_fired);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn coordinator_with_two_ready_components_should_not_raise_alarm() {
+        let coordinator = Coordinator::new(2);
+        let mut alarm_fired = false;
+        let wait_point1 = coordinator.clone().track(SOME_COMPONENT.to_string());
+        let wait_point2 = coordinator.clone().track(OTHER_COMPONENT.to_string());
+        let join_handle1 = tokio::task::spawn(wait_point1.running());
+        let join_handle2 = tokio::task::spawn(wait_point2.running());
+        assert!(!join_handle1.is_finished());
+        assert!(!join_handle2.is_finished());
+        coordinator.wait(|_, _| alarm_fired = true).await;
+        join_handle1.await.unwrap();
+        join_handle2.await.unwrap();
+        assert!(!alarm_fired);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn coordinator_with_component_with_slow_ready_phase_should_raise_alarm() {
+        let coordinator = Coordinator::new(1);
+        let alarm_fired_count = Arc::new(AtomicU8::new(0));
+        let wait_point = coordinator.clone().track(SOME_COMPONENT.to_string());
+
+        // Deliberately don't call wait_point.ready() or wait_point.running()
+        let join_handle = {
+            let alarm_fired_count = alarm_fired_count.clone();
+            tokio::task::spawn(coordinator.wait(move |_, _| {
+                alarm_fired_count.fetch_add(1, SeqCst);
+            }))
+        };
+
+        // Advance time beyond the maximum time allowed for the 'ready' state to be reached
+        let advance_time_by = Coordinator::SLOW_COMPONENT_ALARM_DURATION;
+        let advance_time_by = advance_time_by.checked_add(Duration::from_secs(1)).unwrap();
+        tokio::time::sleep(advance_time_by).await;
+
+        // Check that the alarm fired once
+        assert_eq!(alarm_fired_count.load(SeqCst), 1);
+
+        // Set the component state to the final state 'running'
+        wait_point.running().await;
+
+        // Which should unblock the coordinator wait
+        join_handle.await.unwrap();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn coordinator_with_component_with_slow_running_phase_should_raise_alarm() {
+        let coordinator = Coordinator::new(1);
+        let alarm_fired_count = Arc::new(AtomicU8::new(0));
+        let mut wait_point = coordinator.clone().track(SOME_COMPONENT.to_string());
+
+        // Deliberately don't call wait_point.ready() or wait_point.running()
+        let join_handle = {
+            let alarm_fired_count = alarm_fired_count.clone();
+            tokio::task::spawn(coordinator.wait(move |_, _| {
+                alarm_fired_count.fetch_add(1, SeqCst);
+            }))
+        };
+
+        // Advance time beyond the maximum time allowed for the 'ready' state to be reached
+        let advance_time_by = Coordinator::SLOW_COMPONENT_ALARM_DURATION;
+        let advance_time_by = advance_time_by.checked_add(Duration::from_secs(1)).unwrap();
+        tokio::time::sleep(advance_time_by).await;
+
+        // Check that the alarm fired once
+        assert_eq!(alarm_fired_count.load(SeqCst), 1);
+
+        // Achieve the 'ready' state in the component under test, but not yet the 'running' state
+        wait_point.ready().await;
+
+        // Advance time beyond the maximum time allowed for the 'running' state to be reached
+        let advance_time_by = Coordinator::SLOW_COMPONENT_ALARM_DURATION;
+        let advance_time_by = advance_time_by.checked_add(Duration::from_secs(1)).unwrap();
+        tokio::time::sleep(advance_time_by).await;
+
+        // Check that the alarm fired again
+        assert_eq!(alarm_fired_count.load(SeqCst), 2);
+
+        // Set the component state to the final state 'running'
+        wait_point.running().await;
+
+        // Which should unblock the coordinator wait
+        join_handle.await.unwrap();
+    }
+
+    // --- Test helpers ------------------------------------------------------
+
+    fn mk_config_from_toml(toml: &str) -> ConfigFile {
+        ConfigFile::new(
+            toml.as_bytes().to_vec(),
+            Source::default(),
+            Default::default(),
+        )
+    }
+
+    type UnitOrTargetName = String;
+
+    #[derive(Debug, Eq, PartialEq)]
+    enum SpawnAction {
+        SpawnUnit,
+        SpawnTarget,
+        ReconfigureUnit,
+        ReconfigureTarget,
+        TerminateUnit,
+        TerminateTarget,
+    }
+
+    impl Display for SpawnAction {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                SpawnAction::SpawnUnit => f.write_str("SpawnUnit"),
+                SpawnAction::SpawnTarget => f.write_str("SpawnTarget"),
+                SpawnAction::ReconfigureUnit => f.write_str("ReconfigureUnit"),
+                SpawnAction::ReconfigureTarget => f.write_str("ReconfigureTarget"),
+                SpawnAction::TerminateUnit => f.write_str("TerminateUnit"),
+                SpawnAction::TerminateTarget => f.write_str("TerminateTarget"),
+            }
+        }
+    }
+
+    #[derive(Debug)]
+    enum UnitOrTargetConfig {
+        None,
+        UnitConfig(Unit),
+        TargetConfig(Target),
+    }
+
+    #[derive(Debug)]
+    struct SpawnLogItem {
+        pub name: UnitOrTargetName,
+        pub action: SpawnAction,
+        pub config: UnitOrTargetConfig,
+    }
+
+    impl SpawnLogItem {
+        fn new(name: UnitOrTargetName, action: SpawnAction, _config: UnitOrTargetConfig) -> Self {
+            Self {
+                name,
+                action,
+                config: _config,
+            }
+        }
+    }
+
+    impl Display for SpawnLogItem {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "'{}' for unit/target '{}'", self.action, self.name)
+        }
+    }
+
+    #[derive(Debug, Default)]
+    struct SpawnLog(pub Vec<SpawnLogItem>);
+
+    impl SpawnLog {
+        pub fn new() -> Self {
+            Self(vec![])
+        }
+    }
+
+    impl Display for SpawnLog {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            writeln!(f, "[")?;
+            for item in &self.0 {
+                writeln!(f, "  {}", item)?;
+            }
+            writeln!(f, "]")
+        }
+    }
+
+    impl Deref for SpawnLog {
+        type Target = Vec<SpawnLogItem>;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    impl DerefMut for SpawnLog {
+        fn deref_mut(&mut self) -> &mut Self::Target {
+            &mut self.0
+        }
+    }
+
+    thread_local!(
+        static SPAWN_LOG: RefCell<SpawnLog> = RefCell::new(SpawnLog::new())
+    );
+
+    fn assert_log_contains(log: &SpawnLog, name: &str, action: SpawnAction) {
+        assert!(
+            log.iter()
+                .any(|item| item.name == name && item.action == action),
+            "No '{}' action for unit/target '{}' found in spawn log: {}",
+            action,
+            name,
+            log
+        );
+    }
+
+    fn get_log_item<'a>(log: &'a SpawnLog, name: &str, action: SpawnAction) -> &'a SpawnLogItem {
+        let found = log
+            .iter()
+            .find(|item| item.name == name && item.action == action);
+        assert!(found.is_some());
+        found.unwrap()
+    }
+
+    fn spawn_unit(c: Component, u: Unit, _: Gate, _: WaitPoint) {
+        log_spawn_action(
+            c.name.to_string(),
+            SpawnAction::SpawnUnit,
+            UnitOrTargetConfig::UnitConfig(u),
+        );
+    }
+
+    fn spawn_target(c: Component, t: Target, _: Receiver<TargetCommand>, _: WaitPoint) {
+        log_spawn_action(
+            c.name.to_string(),
+            SpawnAction::SpawnTarget,
+            UnitOrTargetConfig::TargetConfig(t),
+        );
+    }
+
+    fn reconfigure_unit(name: &str, _: GateAgent, u: Unit, _: Gate) {
+        log_spawn_action(
+            name.to_string(),
+            SpawnAction::ReconfigureUnit,
+            UnitOrTargetConfig::UnitConfig(u),
+        );
+    }
+
+    fn reconfigure_target(name: &str, _: Sender<TargetCommand>, t: Target) {
+        log_spawn_action(
+            name.to_string(),
+            SpawnAction::ReconfigureTarget,
+            UnitOrTargetConfig::TargetConfig(t),
+        );
+    }
+
+    fn terminate_unit(name: &str, _: Arc<GateAgent>) {
+        log_spawn_action(
+            name.to_string(),
+            SpawnAction::TerminateUnit,
+            UnitOrTargetConfig::None,
+        );
+    }
+
+    fn terminate_target(name: &str, _: Arc<Sender<TargetCommand>>) {
+        log_spawn_action(
+            name.to_string(),
+            SpawnAction::TerminateTarget,
+            UnitOrTargetConfig::None,
+        );
+    }
+
+    fn clear_spawn_action_log() {
+        SPAWN_LOG.with(|log| log.borrow_mut().clear());
+    }
+
+    fn log_spawn_action(name: String, action: SpawnAction, cfg: UnitOrTargetConfig) {
+        SPAWN_LOG.with(|log| log.borrow_mut().push(SpawnLogItem::new(name, action, cfg)));
+    }
+
+    fn spawn(manager: &mut Manager, mut config: Config) {
+        clear_spawn_action_log();
+        manager.spawn_internal(
+            &mut config,
+            spawn_unit,
+            spawn_target,
+            reconfigure_unit,
+            reconfigure_target,
+            terminate_unit,
+            terminate_target,
+        );
+    }
+
+    fn init_manager() -> Manager {
+        GATES.with(|gates| gates.replace(Some(Default::default())));
+        ROTO_FILTER_NAMES.with(|filter_names| filter_names.replace(Some(Default::default())));
+        Manager::new()
+    }
 }

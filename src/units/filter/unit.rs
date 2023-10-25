@@ -239,9 +239,9 @@ impl std::fmt::Debug for RotoFilterRunner {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use std::sync::atomic::Ordering;
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::Ordering::SeqCst;
 
 //     use bytes::Bytes;
 //     use roto::types::{
@@ -457,12 +457,12 @@ impl std::fmt::Debug for RotoFilterRunner {
 //         Update::Single(Payload::new(source_id, value))
 //     }
 
-//     async fn is_filtered(update: Update, roto_source_code: &str) -> bool {
-//         let filter = RotoFilterRunner::mock(roto_source_code, "my-module");
-//         filter.process_update(update).await.unwrap();
-//         let gate_metrics = filter.gate.metrics();
-//         let num_dropped_updates = gate_metrics.num_dropped_updates.load(Ordering::Relaxed);
-//         let num_updates = gate_metrics.num_updates.load(Ordering::Relaxed);
-//         num_dropped_updates == 0 && num_updates == 0
-//     }
-// }
+    async fn is_filtered(update: Update, roto_source_code: &str) -> bool {
+        let filter = RotoFilterRunner::mock(roto_source_code, "my-module");
+        filter.process_update(update).await.unwrap();
+        let gate_metrics = filter.gate.metrics();
+        let num_dropped_updates = gate_metrics.num_dropped_updates.load(SeqCst);
+        let num_updates = gate_metrics.num_updates.load(SeqCst);
+        num_dropped_updates == 0 && num_updates == 0
+    }
+}

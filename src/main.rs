@@ -227,7 +227,7 @@ mod tests {
 
         [units.global-rib]
         type = "rib"
-        sources = ["bmp-tcp-in"] #["routers"]
+        sources = ["bmp-tcp-in"]
         filter_names = ["my-module", "my-module", "my-module"]
 
         [targets.dummy-null]

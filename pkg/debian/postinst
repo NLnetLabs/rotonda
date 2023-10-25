@@ -1,0 +1,17 @@
+#!/bin/sh -e
+
+ROTONDA_HOME="/var/lib/rotonda/"
+ROTONDA_USER="rotonda"
+
+create_user() {
+    if id ${ROTONDA_USER} > /dev/null 2>&1; then return; fi
+    adduser --system --home "${ROTONDA_HOME}" --group ${ROTONDA_USER}
+}
+
+case "$1" in
+configure)
+    create_user
+    ;;
+esac
+
+#DEBHELPER#

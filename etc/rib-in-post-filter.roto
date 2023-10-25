@@ -1,4 +1,4 @@
-filter bmp-in-post-filter {
+filter rib-in-post-filter {
     define {
         rx msg: Route;
     }

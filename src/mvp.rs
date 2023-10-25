@@ -226,11 +226,11 @@ mod tests {
             ),
             (
                 "etc/rib-in-pre.roto".into(),
-                include_str!("../etc/rib-in-pre.roto").into(),
+                include_str!("../etc/rib-in-pre-filter.roto").into(),
             ),
             (
                 "etc/rib-in-post.roto".into(),
-                include_str!("../etc/rib-in-post.roto").into(),
+                include_str!("../etc/rib-in-post-filter.roto").into(),
             ),
         ];
         let mock_io = TheFileIo::new(readable_paths);

@@ -337,19 +337,19 @@ impl RouterHandler {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use std::{
-//         pin::Pin,
-//         task::{Context, Poll},
-//         time::Duration,
-//     };
+#[cfg(test)]
+mod tests {
+    use std::{
+        pin::Pin,
+        task::{Context, Poll},
+        time::Duration,
+    };
 
-//     use tokio::{io::ReadBuf, time::timeout};
+    use tokio::{io::ReadBuf, time::timeout};
 
     use crate::{units::bmp_tcp_in::metrics::BmpTcpInMetrics, bgp::encode::mk_initiation_msg};
 
-//     use super::*;
+    use super::*;
 
     const SYS_NAME: &str = "some sys name";
     const SYS_DESCR: &str = "some sys descr";

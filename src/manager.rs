@@ -1953,7 +1953,7 @@ mod tests {
 
         let item = get_log_item(&log, "some-unit", SpawnAction::ReconfigureUnit);
         if let UnitOrTargetConfig::UnitConfig(Unit::BmpTcpIn(config)) = &item.config {
-            assert_eq!(config.listen.as_str(), "changed");
+            assert_eq!(config.listen.to_string(), "changed");
         } else {
             unreachable!();
         }

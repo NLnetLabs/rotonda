@@ -10,6 +10,7 @@ use std::{
 use arc_swap::ArcSwap;
 use futures::{future::select, pin_mut, Future};
 use serde::Deserialize;
+use serde_with::{serde_as, DisplayFromStr};
 use tokio::{
     net::TcpStream,
     sync::{Mutex, RwLock},
@@ -47,7 +48,7 @@ use super::{
 
 #[async_trait::async_trait]
 trait TcpListenerFactory<T> {
-    async fn bind(&self, addr: &str) -> std::io::Result<T>;
+    async fn bind(&self, addr: SocketAddr) -> std::io::Result<T>;
 }
 
 #[async_trait::async_trait]
@@ -59,7 +60,7 @@ struct StandardTcpListenerFactory;
 
 #[async_trait::async_trait]
 impl TcpListenerFactory<StandardTcpListener> for StandardTcpListenerFactory {
-    async fn bind(&self, addr: &str) -> std::io::Result<StandardTcpListener> {
+    async fn bind(&self, addr: SocketAddr) -> std::io::Result<StandardTcpListener> {
         let listener = ::tokio::net::TcpListener::bind(addr).await?;
         Ok(StandardTcpListener(listener))
     }
@@ -76,6 +77,7 @@ impl TcpListener for StandardTcpListener {
 
 //-------- BmpIn -------------------------------------------------------------
 
+#[serde_as]
 #[derive(Clone, Debug, Deserialize)]
 pub struct BmpTcpIn {
     /// A colon separated IP address and port number to listen on for incoming
@@ -83,7 +85,8 @@ pub struct BmpTcpIn {
     ///
     /// On change: existing connections to routers will be unaffected, new
     ///            connections will only be accepted at the changed URI.
-    pub listen: Arc<String>,
+    #[serde_as(as = "Arc<DisplayFromStr>")]
+    pub listen: Arc<SocketAddr>,
 
     /// The relative path at which we should listen for HTTP query API requests
     #[cfg(feature = "router-list")]
@@ -203,7 +206,7 @@ impl BmpTcpIn {
 
 struct BmpTcpInRunner {
     component: Arc<RwLock<Component>>,
-    listen: Arc<String>,
+    listen: Arc<SocketAddr>,
     http_api_path: Arc<String>,
     gate: Gate,
     router_states: Arc<FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>, // Option is never None, instead Some is take()'n and replace()'d.
@@ -221,7 +224,7 @@ impl BmpTcpInRunner {
     #[allow(clippy::too_many_arguments)]
     fn new(
         component: Arc<RwLock<Component>>,
-        listen: Arc<String>,
+        listen: Arc<SocketAddr>,
         http_api_path: Arc<String>,
         gate: Gate,
         router_states: Arc<FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>, // Option is never None, instead Some is take()'n and replace()'d.
@@ -257,7 +260,7 @@ impl BmpTcpInRunner {
 
         let runner = Self {
             component: Default::default(),
-            listen: Default::default(),
+            listen: Arc::new("127.0.0.1:12345".parse().unwrap()),
             http_api_path: BmpTcpIn::default_http_api_path().into(),
             gate,
             router_states: Default::default(),
@@ -289,7 +292,7 @@ impl BmpTcpInRunner {
             let bind_with_backoff = || async {
                 let mut wait = 1;
                 loop {
-                    match listener_factory.bind(&listen_addr).await {
+                    match listener_factory.bind(*listen_addr).await {
                         Err(_err) => {
                             // let err = format!("{err}: Will retry in {wait} seconds.");
                             // status_reporter.bind_error(&listen_addr, &err);
@@ -307,7 +310,7 @@ impl BmpTcpInRunner {
                 ControlFlow::Break(Terminated) => return Err(Terminated),
             };
 
-            status_reporter.listener_listening(&listen_addr);
+            status_reporter.listener_listening(&listen_addr.to_string());
 
             'inner: loop {
                 match self.process_until(listener.accept()).await {
@@ -532,11 +535,19 @@ mod tests {
 
     #[test]
     fn listen_is_required() {
-        // suppress the panic backtrace as we expect the panic
-        std::panic::set_hook(Box::new(|_| {}));
-
-        // parse and panic due to missing 'sources' field
         assert!(mk_config_from_toml("").is_err());
+    }
+
+    #[test]
+    fn listen_must_be_a_valid_socket_address() {
+        assert!(mk_config_from_toml("listen = ''").is_err());
+        assert!(mk_config_from_toml("listen = '12345'").is_err());
+        assert!(mk_config_from_toml("listen = '1.2.3.4'").is_err());
+    }
+
+    #[test]
+    fn listen_is_the_only_required_field() {
+        assert!(mk_config_from_toml("listen = '1.2.3.4:12345'").is_ok());
     }
 
     // --- Test helpers ------------------------------------------------------

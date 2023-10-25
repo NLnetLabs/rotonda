@@ -1,4 +1,4 @@
-use std::sync::{atomic::SeqCst, Arc, RwLock};
+use std::sync::{atomic::Ordering::SeqCst, Arc, RwLock};
 
 use chrono::{DateTime, Utc};
 use hyper::{Body, Response};

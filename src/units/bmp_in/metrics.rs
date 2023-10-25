@@ -18,17 +18,11 @@ pub struct BmpInMetrics {
 
 #[derive(Debug, Default)]
 pub struct RouterMetrics {
-    pub connection_count: AtomicUsize,
     pub num_invalid_bmp_messages: AtomicUsize,
 }
 
 impl BmpInMetrics {
-    const CONNECTION_COUNT_METRIC: Metric = Metric::new(
-        "bmp_in_connection_count",
-        "the number times the BMP initiation message has been seen per router",
-        MetricType::Gauge,
-        MetricUnit::Total,
-    );
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_INVALID_BMP_MESSAGES_METRIC: Metric = Metric::new(
         "bmp_in_num_invalid_bmp_messages",
         "the number of received BMP messages that were invalid (e.g. not RFC compliant, could not be parsed, etc)",
@@ -45,19 +39,17 @@ impl BmpInMetrics {
         }
     }
 
-    pub fn init_metrics_for_router(&self, router_id: Arc<RouterId>) -> Arc<RouterMetrics> {
-        let metrics = self
-            .routers
-            .entry(router_id)
-            .or_insert_with(Default::default);
-        metrics.connection_count.fetch_add(1, Ordering::SeqCst);
-        metrics
+    pub fn contains(&self, router_id: &Arc<RouterId>) -> bool {
+        self.routers.contains_key(&router_id)
     }
 
-    /// Assumes that the metrics for the router exist, i.e. that
-    /// init_metrics_for_router() was already called for this router id.
-    pub fn router_metrics(&self, router_id: Arc<RouterId>) -> Option<Arc<RouterMetrics>> {
-        self.routers.get(&router_id)
+    /// Warning: This fn will create a metric set for the given router id if
+    /// it doesn't already exist. Use `contains()` to test if metrics exist
+    /// for a given router id.
+    pub fn router_metrics(&self, router_id: Arc<RouterId>) -> Arc<RouterMetrics> {
+        self.routers
+            .entry(router_id)
+            .or_insert_with(Default::default)
     }
 }
 
@@ -69,13 +61,6 @@ impl metrics::Source for BmpInMetrics {
 
         for (router_id, metrics) in self.routers.guard().iter() {
             let router_id = router_id.as_str();
-            append_per_router_metric(
-                unit_name,
-                target,
-                router_id,
-                Self::CONNECTION_COUNT_METRIC,
-                metrics.connection_count.load(Ordering::SeqCst),
-            );
             append_per_router_metric(
                 unit_name,
                 target,

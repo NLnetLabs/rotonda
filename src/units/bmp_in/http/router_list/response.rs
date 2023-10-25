@@ -136,10 +136,9 @@ impl RouterListApi {
                             calc_u8_pc(num_peers_up, num_peers_up_eor_capable);
                         let num_peers_up_dumping_pc =
                             calc_u8_pc(num_peers_up_eor_capable, num_peers_up_dumping);
-                        let num_invalid_bmp_messages = if let Some(router_metrics) =
-                            self.router_metrics.router_metrics(router_id)
-                        {
-                            router_metrics
+                        let num_invalid_bmp_messages = if self.router_metrics.contains(&router_id) {
+                            self.router_metrics
+                                .router_metrics(router_id)
                                 .num_invalid_bmp_messages
                                 .load(Ordering::SeqCst)
                         } else {

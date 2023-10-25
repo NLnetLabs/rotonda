@@ -187,8 +187,8 @@ impl RouterListApi {
                                 }
 
                                 Some("invalid_messages") => {
-                                    if let Some(router_metrics) = self.router_metrics.router_metrics(router_id) {
-                                        router_metrics.num_invalid_bmp_messages.load(Ordering::SeqCst)
+                                    if self.router_metrics.contains(&router_id) {
+                                        self.router_metrics.router_metrics(router_id).num_invalid_bmp_messages.load(Ordering::SeqCst)
                                     } else {
                                         0
                                     }

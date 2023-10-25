@@ -170,10 +170,6 @@ impl RouterHandler {
                     if let Ok(bmp_msg) = BmpMessage::from_octets(msg_buf) {
                         self.process_msg(router_addr, source_id.clone(), bmp_msg)
                             .await;
-                        // let bmp_msg = Arc::new(BytesRecord(bmp_msg));
-                        // let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
-                        // let payload = Payload::new(router_addr, value);
-                        // self.gate.update_data(payload.into()).await;
                     }
                 }
             }

@@ -333,7 +333,6 @@ mod tests {
 
             eprintln!("Subscribed to MQTT broker, sending BMP messages...");
             let mut bmp_conn = wait_for_bmp_connect().await;
-            // let local_addr = format!("{}", bmp_conn.local_addr().unwrap());
             let sys_name = bmp_initiate(&mut bmp_conn).await;
             bmp_peer_up(&mut bmp_conn).await;
             bmp_route_announce(&mut bmp_conn, test_prefix).await;
@@ -450,20 +449,6 @@ mod tests {
                 4,
             )
             .await;
-            // assert_metric_eq(
-            //     manager.metrics(),
-            //     "num_updates_total",
-            //     Some(("component", "filter")),
-            //     4,
-            // )
-            // .await;
-            // assert_metric_eq(
-            //     manager.metrics(),
-            //     "num_updates_total",
-            //     Some(("component", "routers")),
-            //     2,
-            // )
-            // .await;
             assert_metric_eq(
                 manager.metrics(),
                 "num_updates_total",

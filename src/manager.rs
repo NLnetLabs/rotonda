@@ -5,7 +5,7 @@ use crate::common::roto::{
     FilterName, LoadErrorKind, RotoError, RotoScriptOrigin, RotoScripts,
 };
 use crate::comms::{
-    DirectLink, Gate, GateAgent, GraphStatus, Link, UPDATE_QUEUE_LEN,
+    DirectLink, Gate, GateAgent, GraphStatus, Link, DEF_UPDATE_QUEUE_LEN,
 };
 use crate::config::{Config, ConfigFile, Marked};
 use crate::log::{MsgRelation, Terminate, Trace, Tracer};
@@ -258,8 +258,6 @@ impl LinkReport {
         use layout::core::style::*;
         use layout::std_shapes::shapes::*;
         use layout::topo::layout::VisualGraph;
-
-        use crate::log::{MsgRelation, Trace};
 
         let mut vg = VisualGraph::new(Orientation::LeftToRight);
         let mut nodes = HashMap::new();
@@ -1864,13 +1862,13 @@ fn get_queue_size_for_link(link_id: String) -> (String, usize) {
         let queue_len = options.parse::<usize>().unwrap_or_else(|err| {
             warn!(
                 "Invalid queue length '{}' for '{}', falling back to the default ({}): {}",
-                options, name, UPDATE_QUEUE_LEN, err
+                options, name, DEF_UPDATE_QUEUE_LEN, err
             );
-            UPDATE_QUEUE_LEN
+            DEF_UPDATE_QUEUE_LEN
         });
         (name.to_string(), queue_len)
     } else {
-        (link_id, UPDATE_QUEUE_LEN)
+        (link_id, DEF_UPDATE_QUEUE_LEN)
     };
     (name, queue_size)
 }
@@ -2540,11 +2538,11 @@ mod tests {
 
         [units.unused-unit]
         type = "bmp-tcp-in"
-        listen = ""
+        listen = "1.2.3.4:12345"
 
         [units.some-unit]
         type = "bmp-tcp-in"
-        listen = ""
+        listen = "1.2.3.4:12345"
 
         [targets.null]
         type = "null-out"
@@ -2574,7 +2572,7 @@ mod tests {
 
         [units.some-unit]
         type = "bmp-tcp-in"
-        listen = ""
+        listen = "1.2.3.4:12345"
 
         [targets.null]
         type = "null-out"
@@ -2600,7 +2598,7 @@ mod tests {
 
         [units.some-unit]
         type = "bmp-tcp-in"
-        listen = ""
+        listen = "1.2.3.4:12345"
 
         [targets.null]
         type = "null-out"
@@ -2634,7 +2632,7 @@ mod tests {
 
         [units.some-unit]
         type = "bmp-tcp-in"
-        listen = ""
+        listen = "1.2.3.4:12345"
 
         [targets.null]
         type = "null-out"
@@ -2665,7 +2663,7 @@ mod tests {
 
         [units.some-unit]
         type = "bmp-tcp-in"
-        listen = ""
+        listen = "1.2.3.4:12345"
 
         #[targets.null]
         #type = "null-out"
@@ -2705,7 +2703,7 @@ mod tests {
 
         [units.some-unit]
         type = "bmp-tcp-in"
-        listen = ""
+        listen = "1.2.3.4:12345"
 
         [targets.null]
         type = "null-out"
@@ -2731,7 +2729,7 @@ mod tests {
 
         [units.some-unit]
         type = "bmp-tcp-in"
-        listen = "changed"
+        listen = "5.6.7.8:1818"
 
         [targets.null]
         type = "null-out"
@@ -2755,7 +2753,7 @@ mod tests {
         if let UnitOrTargetConfig::UnitConfig(Unit::BmpTcpIn(config)) =
             &item.config
         {
-            assert_eq!(config.listen.as_str(), "changed");
+            assert_eq!(config.listen.to_string(), "5.6.7.8:1818");
         } else {
             unreachable!();
         }

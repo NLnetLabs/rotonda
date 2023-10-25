@@ -37,7 +37,11 @@ impl BmpFsOutStatusReporter {
 
 impl TargetStatusReporter for BmpFsOutStatusReporter {}
 
-impl AnyStatusReporter for BmpFsOutStatusReporter {}
+impl AnyStatusReporter for BmpFsOutStatusReporter {
+    fn metrics(&self) -> Option<Arc<dyn crate::metrics::Source>> {
+        Some(self.metrics.clone())
+    }
+}
 
 impl Chainable for BmpFsOutStatusReporter {
     fn add_child<T: Display>(&self, child_name: T) -> Self {

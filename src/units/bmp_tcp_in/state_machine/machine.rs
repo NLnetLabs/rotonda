@@ -912,18 +912,20 @@ impl From<BmpStateDetails<Terminated>> for BmpState {
 
 // #[cfg(test)]
 // mod tests {
-//     use std::{ffi::OsStr, fs::File, io::Read, net::SocketAddr, time::Instant};
-
-//     use bytes::BytesMut;
-//     // use chrono::{DateTime, NaiveDateTime};
-//     use futures::future::join_all;
-
-//     use crate::{
-//         metrics::{OutputFormat, Source},
-//         units::bmp_tcp_in::state_machine::metrics::BmpMetrics,
+//     use std::{
+//         ffi::OsStr, fs::File, io::Read, net::SocketAddr, time::Instant,
 //     };
 
-//     use super::*;
+// //     use bytes::BytesMut;
+// //     // use chrono::{DateTime, NaiveDateTime};
+// //     use futures::future::join_all;
+
+// //     use crate::{
+// //         metrics::{OutputFormat, Source},
+// //         units::bmp_tcp_in::state_machine::metrics::BmpMetrics,
+// //     };
+
+// //     use super::*;
 
 //     /// This test replays data captured by BmpRawDumper.
 //     #[tokio::test(flavor = "multi_thread")]
@@ -931,27 +933,36 @@ impl From<BmpStateDetails<Terminated>> for BmpState {
 //     async fn replay_test() {
 //         const USIZE_BYTES: usize = (usize::BITS as usize) >> 3;
 //         let bmp_metrics = Arc::new(BmpMetrics::default());
-//         let status_reporter =
-//             Arc::new(BmpTcpInStatusReporter::new("some reporter", bmp_metrics.clone()));
+//         let status_reporter = Arc::new(BmpTcpInStatusReporter::new(
+//             "some reporter",
+//             bmp_metrics.clone(),
+//         ));
 
-//         let mut inputs = Vec::new();
-//         for entry in std::fs::read_dir("bmp-dump").unwrap() {
-//             let entry = entry.unwrap();
-//             let path = entry.path();
-//             if path.extension() == Some(OsStr::new("bin")) {
-//                 inputs.push(path);
-//             }
-//         }
+// //         let mut inputs = Vec::new();
+// //         for entry in std::fs::read_dir("bmp-dump").unwrap() {
+// //             let entry = entry.unwrap();
+// //             let path = entry.path();
+// //             if path.extension() == Some(OsStr::new("bin")) {
+// //                 inputs.push(path);
+// //             }
+// //         }
 
-//         let mut join_handles = Vec::new();
+// //         let mut join_handles = Vec::new();
 
 //         for path in inputs {
 //             if let Some(fname) = path.file_name().and_then(OsStr::to_str) {
 //                 let pieces: Vec<&str> = fname.splitn(3, '-').collect();
 //                 let ip = pieces[1];
 //                 let port = pieces[2].split('.').next().unwrap();
-//                 let client_addr = SocketAddr::new(ip.parse().unwrap(), port.parse().unwrap());
-//                 let router_id = Arc::new(format!("{}-{}", client_addr.ip(), client_addr.port()));
+//                 let client_addr = SocketAddr::new(
+//                     ip.parse().unwrap(),
+//                     port.parse().unwrap(),
+//                 );
+//                 let router_id = Arc::new(format!(
+//                     "{}-{}",
+//                     client_addr.ip(),
+//                     client_addr.port()
+//                 ));
 //                 let status_reporter = status_reporter.clone();
 //                 let mut bmp_state = BmpState::new(
 //                     SourceId::SocketAddr(client_addr),
@@ -963,22 +974,25 @@ impl From<BmpStateDetails<Terminated>> for BmpState {
 //                 let handle = tokio::task::spawn(async move {
 //                     let mut file = File::open(path).unwrap();
 //                     let mut ts_bytes: [u8; 16] = [0; 16];
-//                     let mut num_bmp_bytes: [u8; USIZE_BYTES] = [0; USIZE_BYTES];
+//                     let mut num_bmp_bytes: [u8; USIZE_BYTES] =
+//                         [0; USIZE_BYTES];
 //                     let mut last_ts = None;
 //                     let mut last_push = Instant::now();
 
 //                     loop {
-//                         let mut bmp_bytes = BytesMut::with_capacity(64 * 1024);
+//                         let mut bmp_bytes =
+//                             BytesMut::with_capacity(64 * 1024);
 
-//                         // Each line has the form <timestamp:u128><num bytes:usize><bmp bytes>
-//                         file.read_exact(&mut ts_bytes).unwrap();
-//                         let ts = u128::from_be_bytes(ts_bytes);
+// //                         // Each line has the form <timestamp:u128><num bytes:usize><bmp bytes>
+// //                         file.read_exact(&mut ts_bytes).unwrap();
+// //                         let ts = u128::from_be_bytes(ts_bytes);
 
 //                         file.read_exact(&mut num_bmp_bytes).unwrap();
-//                         let num_bytes_to_read = usize::from_be_bytes(num_bmp_bytes);
+//                         let num_bytes_to_read =
+//                             usize::from_be_bytes(num_bmp_bytes);
 //                         bmp_bytes.resize(num_bytes_to_read, 0);
 
-//                         file.read_exact(&mut bmp_bytes).unwrap();
+// //                         file.read_exact(&mut bmp_bytes).unwrap();
 
 //                         // Did the original stream contain the message at this
 //                         // point in time or do we need to wait a bit so as to
@@ -986,71 +1000,82 @@ impl From<BmpStateDetails<Terminated>> for BmpState {
 //                         // data was seen?
 //                         if let Some(last_ts) = last_ts {
 //                             let millis_between_messages = ts - last_ts;
-//                             let millis_since_last_push = last_push.elapsed().as_millis();
-//                             if millis_since_last_push < millis_between_messages {
-//                                 let _millis_to_sleep =
-//                                     millis_between_messages - millis_since_last_push;
+//                             let millis_since_last_push =
+//                                 last_push.elapsed().as_millis();
+//                             if millis_since_last_push
+//                                 < millis_between_messages
+//                             {
+//                                 let _millis_to_sleep = millis_between_messages
+//                                     - millis_since_last_push;
 //                                 //sleep(Duration::from_millis(_millis_to_sleep.try_into().unwrap()));
 //                             }
 //                         }
 
-//                         let bmp_msg = BmpMsg::from_octets(bmp_bytes.freeze()).unwrap();
+//                         let bmp_msg =
+//                             BmpMsg::from_octets(bmp_bytes.freeze()).unwrap();
 //                         let mut res = bmp_state.process_msg(bmp_msg);
 
-//                         match res.processing_result {
-//                             MessageType::InvalidMessage { err, .. } => {
-//                                 log::warn!(
-//                                     "{}: Invalid message: {}",
-//                                     res.next_state.router_id(),
-//                                     err
-//                                 );
-//                             }
+// //                         match res.processing_result {
+// //                             MessageType::InvalidMessage { err, .. } => {
+// //                                 log::warn!(
+// //                                     "{}: Invalid message: {}",
+// //                                     res.next_state.router_id(),
+// //                                     err
+// //                                 );
+// //                             }
 
 //                             MessageType::StateTransition => {
-//                                 if let BmpState::Dumping(next_state) = &mut res.next_state {
-//                                     next_state.router_id =
-//                                         Arc::new(next_state.details.sys_name.clone());
+//                                 if let BmpState::Dumping(next_state) =
+//                                     &mut res.next_state
+//                                 {
+//                                     next_state.router_id = Arc::new(
+//                                         next_state.details.sys_name.clone(),
+//                                     );
 
-//                                     // This will enable metrics to be stored for the router id.
-//                                     // status_reporter.router_id_changed(next_state.router_id.clone());
-//                                 }
-//                             }
+// //                                     // This will enable metrics to be stored for the router id.
+// //                                     // status_reporter.router_id_changed(next_state.router_id.clone());
+// //                                 }
+// //                             }
 
 //                             MessageType::Aborted => {
-//                                 log::warn!("{}: Aborted", res.next_state.router_id());
+//                                 log::warn!(
+//                                     "{}: Aborted",
+//                                     res.next_state.router_id()
+//                                 );
 //                                 break;
 //                             }
 
-//                             _ => {}
-//                         }
+// //                             _ => {}
+// //                         }
 
-//                         bmp_state = res.next_state;
+// //                         bmp_state = res.next_state;
 
-//                         last_ts = Some(ts);
-//                         last_push = Instant::now();
-//                     }
-//                 });
+// //                         last_ts = Some(ts);
+// //                         last_push = Instant::now();
+// //                     }
+// //                 });
 
-//                 join_handles.push(handle);
-//             }
-//         }
+// //                 join_handles.push(handle);
+// //             }
+// //         }
 
-//         join_all(join_handles).await;
+// //         join_all(join_handles).await;
 
-//         let mut metrics_target = crate::metrics::Target::new(OutputFormat::Plain);
+//         let mut metrics_target =
+//             crate::metrics::Target::new(OutputFormat::Plain);
 //         bmp_metrics.append("test", &mut metrics_target);
 //         eprintln!("{}", metrics_target.into_string());
 
-//         // TODO
-//         // assert_eq!(
-//         //     bmp_metrics
-//         //         .num_receive_io_errors
-//         //         .iter()
-//         //         .fold(0, |acc, v| acc + v.value()),
-//         //     0
-//         // );
-//     }
-// }
+// //         // TODO
+// //         // assert_eq!(
+// //         //     bmp_metrics
+// //         //         .num_receive_io_errors
+// //         //         .iter()
+// //         //         .fold(0, |acc, v| acc + v.value()),
+// //         //     0
+// //         // );
+// //     }
+// // }
 
 #[derive(Debug, Default)]
 pub struct PeerStates(HashMap<PerPeerHeader<Bytes>, PeerState>);

@@ -227,7 +227,7 @@ mod tests {
 
         [units.global-rib]
         type = "rib"
-        sources = ["bmp-tcp-in"] #["routers"]
+        sources = ["bmp-tcp-in"]
         filter_names = ["my-module", "my-module", "my-module"]
 
         [targets.dummy-null]
@@ -333,7 +333,6 @@ mod tests {
 
             eprintln!("Subscribed to MQTT broker, sending BMP messages...");
             let mut bmp_conn = wait_for_bmp_connect().await;
-            // let local_addr = format!("{}", bmp_conn.local_addr().unwrap());
             let sys_name = bmp_initiate(&mut bmp_conn).await;
             bmp_peer_up(&mut bmp_conn).await;
             bmp_route_announce(&mut bmp_conn, test_prefix).await;
@@ -378,13 +377,6 @@ mod tests {
                 1,
             )
             .await;
-            // assert_metric_eq(
-            //     manager.metrics(),
-            //     "roto_filter_num_filtered_messages_total",
-            //     Some(("component", "filter")),
-            //     0,
-            // )
-            // .await;
 
             // query the route to make sure it was stored
             eprintln!("Querying prefix store...");
@@ -450,20 +442,6 @@ mod tests {
                 4,
             )
             .await;
-            // assert_metric_eq(
-            //     manager.metrics(),
-            //     "num_updates_total",
-            //     Some(("component", "filter")),
-            //     4,
-            // )
-            // .await;
-            // assert_metric_eq(
-            //     manager.metrics(),
-            //     "num_updates_total",
-            //     Some(("component", "routers")),
-            //     2,
-            // )
-            // .await;
             assert_metric_eq(
                 manager.metrics(),
                 "num_updates_total",

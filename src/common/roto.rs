@@ -724,119 +724,150 @@ impl From<(TypeValue, OutputStreamQueue)> for FilterOutput {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use roto::types::{
-//         builtin::U8, collections::Record, outputs::OutputStreamMessage, typedef::TypeDef,
-//     };
-//     use smallvec::smallvec;
+#[cfg(test)]
+mod tests {
+    use roto::types::{
+        builtin::U8, collections::Record, outputs::OutputStreamMessage,
+        typedef::TypeDef,
+    };
+    use smallvec::smallvec;
 
-//     use crate::payload::{FilterError, Filterable, Payload};
+    use crate::payload::{FilterError, Filterable, Payload};
 
-//     use super::*;
+    use super::*;
 
-//     #[test]
-//     fn single_update_yields_single_result() {
-//         let test_value: TypeValue = U8::new(0).into();
-//         let in_payload = Payload::new("test", test_value.clone());
-//         let out_payloads = in_payload
-//             .filter(|payload| Result::<_, FilterError>::Ok(ControlFlow::Continue(payload.into())))
-//             .unwrap();
-//         assert_eq!(out_payloads.len(), 1);
-//         assert!(
-//             matches!(&out_payloads[0], Payload { source_id, value } if source_id.name() == Some("test") && *value == test_value)
-//         );
-//     }
+    #[test]
+    fn single_update_yields_single_result() {
+        let test_value: TypeValue = U8::new(0).into();
+        let in_payload = Payload::new("test", test_value.clone(), None);
+        let out_payloads = in_payload
+            .filter(
+                |payload, _trace_id| {
+                    Result::<_, FilterError>::Ok(ControlFlow::Continue(
+                        payload.into(),
+                    ))
+                },
+                |_source_id| { /* NO OP */ },
+            )
+            .unwrap();
+        assert_eq!(out_payloads.len(), 1);
+        assert!(
+            matches!(&out_payloads[0], Payload { source_id, value, .. } if source_id.name() == Some("test") && *value == test_value)
+        );
+    }
 
-//     #[test]
-//     fn single_update_plus_output_stream_yields_both_as_bulk_update() {
-//         let test_value: TypeValue = U8::new(0).into();
-//         let in_payload = Payload::new("test", test_value.clone());
-//         let test_output_stream_message =
-//             mk_roto_output_stream_payload(test_value.clone(), TypeDef::U8);
-//         let mut output_stream_queue = OutputStreamQueue::new();
-//         output_stream_queue.push(test_output_stream_message.clone());
-//         let out_payloads = in_payload
-//             .filter(move |payload| {
-//                 Result::<_, FilterError>::Ok(ControlFlow::Continue(FilterOutput {
-//                     east: payload,
-//                     south: output_stream_queue.clone(),
-//                 }))
-//             })
-//             .unwrap();
+    #[test]
+    fn single_update_plus_output_stream_yields_both_as_bulk_update() {
+        let test_value: TypeValue = U8::new(0).into();
+        let in_payload = Payload::new("test", test_value.clone(), None);
+        let test_output_stream_message =
+            mk_roto_output_stream_payload(test_value.clone(), TypeDef::U8);
+        let mut output_stream_queue = OutputStreamQueue::new();
+        output_stream_queue.push(test_output_stream_message.clone());
+        let out_payloads = in_payload
+            .filter(
+                move |payload, _trace_id| {
+                    Result::<_, FilterError>::Ok(ControlFlow::Continue(
+                        FilterOutput {
+                            east: payload,
+                            south: output_stream_queue.clone(),
+                        },
+                    ))
+                },
+                |_source_id| { /* NO OP */ },
+            )
+            .unwrap();
 
-//         assert_eq!(out_payloads.len(), 2);
-//         assert!(
-//             matches!(&out_payloads[0], Payload { source_id, value } if source_id.name() == Some("test") && *value == test_value)
-//         );
-//         assert!(
-//             matches!(&out_payloads[1], Payload { source_id, value: TypeValue::OutputStreamMessage(osm) } if source_id.name() == Some("test") && **osm == test_output_stream_message)
-//         );
-//     }
+        assert_eq!(out_payloads.len(), 2);
+        assert!(
+            matches!(&out_payloads[0], Payload { source_id, value, .. } if source_id.name() == Some("test") && *value == test_value)
+        );
+        assert!(
+            matches!(&out_payloads[1], Payload { source_id, value: TypeValue::OutputStreamMessage(osm), .. } if source_id.name() == Some("test") && **osm == test_output_stream_message)
+        );
+    }
 
-//     #[test]
-//     fn bulk_update_yields_bulk_update() {
-//         let test_value1: TypeValue = U8::new(1).into();
-//         let test_value2: TypeValue = U8::new(2).into();
-//         let payload1 = Payload::new("test1", test_value1.clone());
-//         let payload2 = Payload::new("test2", test_value2.clone());
-//         let in_payload = smallvec![payload1, payload2];
-//         let out_payloads = in_payload
-//             .filter(|payload| Result::<_, FilterError>::Ok(ControlFlow::Continue(payload.into())))
-//             .unwrap();
+    #[test]
+    fn bulk_update_yields_bulk_update() {
+        let test_value1: TypeValue = U8::new(1).into();
+        let test_value2: TypeValue = U8::new(2).into();
+        let payload1 = Payload::new("test1", test_value1.clone(), None);
+        let payload2 = Payload::new("test2", test_value2.clone(), None);
+        let in_payload = smallvec![payload1, payload2];
+        let out_payloads = in_payload
+            .filter(
+                |payload, _trace_id| {
+                    Result::<_, FilterError>::Ok(ControlFlow::Continue(
+                        payload.into(),
+                    ))
+                },
+                |_source_id| { /* NO OP */ },
+            )
+            .unwrap();
 
-//         assert_eq!(out_payloads.len(), 2);
-//         assert!(
-//             matches!(&out_payloads[0], Payload { source_id, value } if source_id.name() == Some("test1") && *value == test_value1)
-//         );
-//         assert!(
-//             matches!(&out_payloads[1], Payload { source_id, value } if source_id.name() == Some("test2") && *value == test_value2)
-//         );
-//     }
+        assert_eq!(out_payloads.len(), 2);
+        assert!(
+            matches!(&out_payloads[0], Payload { source_id, value, .. } if source_id.name() == Some("test1") && *value == test_value1)
+        );
+        assert!(
+            matches!(&out_payloads[1], Payload { source_id, value, .. } if source_id.name() == Some("test2") && *value == test_value2)
+        );
+    }
 
-//     #[test]
-//     fn bulk_update_plus_output_stream_yields_bulk_update() {
-//         let test_value1: TypeValue = U8::new(1).into();
-//         let test_value2: TypeValue = U8::new(2).into();
-//         let payload1 = Payload::new("test1", test_value1.clone());
-//         let payload2 = Payload::new("test2", test_value2.clone());
-//         let in_payload = smallvec![payload1, payload2];
-//         let test_output_stream_message =
-//             mk_roto_output_stream_payload(test_value1.clone(), TypeDef::U8);
-//         let mut output_stream_queue = OutputStreamQueue::new();
-//         output_stream_queue.push(test_output_stream_message.clone());
-//         let out_payloads = in_payload
-//             .filter(move |payload| {
-//                 Result::<_, FilterError>::Ok(ControlFlow::Continue(FilterOutput {
-//                     east: payload,
-//                     south: output_stream_queue.clone(),
-//                 }))
-//             })
-//             .unwrap();
+    #[test]
+    fn bulk_update_plus_output_stream_yields_bulk_update() {
+        let test_value1: TypeValue = U8::new(1).into();
+        let test_value2: TypeValue = U8::new(2).into();
+        let payload1 = Payload::new("test1", test_value1.clone(), None);
+        let payload2 = Payload::new("test2", test_value2.clone(), None);
+        let in_payload = smallvec![payload1, payload2];
+        let test_output_stream_message =
+            mk_roto_output_stream_payload(test_value1.clone(), TypeDef::U8);
+        let mut output_stream_queue = OutputStreamQueue::new();
+        output_stream_queue.push(test_output_stream_message.clone());
+        let out_payloads = in_payload
+            .filter(
+                move |payload, _trace_id| {
+                    Result::<_, FilterError>::Ok(ControlFlow::Continue(
+                        FilterOutput {
+                            east: payload,
+                            south: output_stream_queue.clone(),
+                        },
+                    ))
+                },
+                |_source_id| { /* NO OP */ },
+            )
+            .unwrap();
 
-//         assert_eq!(out_payloads.len(), 4);
-//         assert!(
-//             matches!(&out_payloads[0], Payload { source_id, value } if source_id.name() == Some("test1") && *value == test_value1)
-//         );
-//         assert!(
-//             matches!(&out_payloads[1], Payload { source_id, value: TypeValue::OutputStreamMessage(osm) } if source_id.name() == Some("test1") && **osm == test_output_stream_message)
-//         );
-//         assert!(
-//             matches!(&out_payloads[2], Payload { source_id, value } if source_id.name() == Some("test2") && *value == test_value2)
-//         );
-//         assert!(
-//             matches!(&out_payloads[3], Payload { source_id, value: TypeValue::OutputStreamMessage(osm) } if source_id.name() == Some("test2") && **osm == test_output_stream_message)
-//         );
-//     }
+        assert_eq!(out_payloads.len(), 4);
+        assert!(
+            matches!(&out_payloads[0], Payload { source_id, value, .. } if source_id.name() == Some("test1") && *value == test_value1)
+        );
+        assert!(
+            matches!(&out_payloads[1], Payload { source_id, value: TypeValue::OutputStreamMessage(osm), .. } if source_id.name() == Some("test1") && **osm == test_output_stream_message)
+        );
+        assert!(
+            matches!(&out_payloads[2], Payload { source_id, value, .. } if source_id.name() == Some("test2") && *value == test_value2)
+        );
+        assert!(
+            matches!(&out_payloads[3], Payload { source_id, value: TypeValue::OutputStreamMessage(osm), .. } if source_id.name() == Some("test2") && **osm == test_output_stream_message)
+        );
+    }
 
 //     // --- Test helpers ------------------------------------------------------
 
-//     fn mk_roto_output_stream_payload(value: TypeValue, type_def: TypeDef) -> OutputStreamMessage {
-//         let typedef = TypeDef::new_record_type(vec![("value", Box::new(type_def))]).unwrap();
+    fn mk_roto_output_stream_payload(
+        value: TypeValue,
+        type_def: TypeDef,
+    ) -> OutputStreamMessage {
+        let typedef =
+            TypeDef::new_record_type(vec![("value", Box::new(type_def))])
+                .unwrap();
 
-//         let fields = vec![("value", value)];
+        let fields = vec![("value", value)];
 
-//         let record = Record::create_instance_with_sort(&typedef, fields).unwrap();
-//         OutputStreamMessage::from(record)
-//     }
-// }
+        let record =
+            Record::create_instance_with_sort(&typedef, fields).unwrap();
+        OutputStreamMessage::from(record)
+    }
+}

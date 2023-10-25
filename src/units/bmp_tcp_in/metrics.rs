@@ -21,41 +21,81 @@ pub struct BmpTcpInMetrics {
     routers: Arc<FrimMap<Arc<RouterId>, Arc<RouterMetrics>>>,
 }
 
+impl GraphStatus for BmpTcpInMetrics {
+    fn status_text(&self) -> String {
+        let num_clients = self.connection_accepted_count.load(SeqCst)
+            - self.connection_lost_count.load(SeqCst);
+        let num_msgs_out = self
+            .gate
+            .as_ref()
+            .map(|gate| gate.num_updates.load(SeqCst))
+            .unwrap_or_default();
+        format!("clients: {}\nout: {}", num_clients, num_msgs_out)
+    }
+
+    fn okay(&self) -> Option<bool> {
+        let connection_accepted_count =
+            self.connection_accepted_count.load(SeqCst);
+        if connection_accepted_count > 0 {
+            let connection_lost_count =
+                self.connection_lost_count.load(SeqCst);
+            let num_clients =
+                connection_accepted_count - connection_lost_count;
+            Some(num_clients > 0)
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct RouterMetrics {
     pub connection_count: Arc<AtomicUsize>,
+    pub num_receive_io_errors: Arc<AtomicUsize>,
     pub num_bmp_messages_received: AtomicUsize,
     pub num_invalid_bmp_messages: AtomicUsize,
 }
 
 impl BmpTcpInMetrics {
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const LISTENER_BOUND_COUNT_METRIC: Metric = Metric::new(
         "bmp_tcp_in_listener_bound_count",
         "the number of times the TCP listen port was bound to",
         MetricType::Counter,
         MetricUnit::Total,
     );
+    // TEST STATUS: [/] makes sense? [ ] passes tests?
     const CONNECTION_ACCEPTED_COUNT_METRIC: Metric = Metric::new(
         "bmp_tcp_in_connection_accepted_count",
         "the number of times a connection from a router was accepted",
         MetricType::Counter,
         MetricUnit::Total,
     );
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const CONNECTION_LOST_COUNT_METRIC: Metric = Metric::new(
         "bmp_tcp_in_connection_lost_count",
         "the number of times the connection to a router was lost",
         MetricType::Counter,
         MetricUnit::Total,
     );
+    // TEST STATUS: [/] makes sense? [ ] passes tests?
     const CONNECTION_COUNT_METRIC: Metric = Metric::new(
         "bmp_tcp_in_connection_count",
         "the number of router initiation messages seen per router",
         MetricType::Gauge,
         MetricUnit::Total,
     );
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_BMP_MESSAGES_RECEIVED_METRIC: Metric = Metric::new(
         "bmp_tcp_in_num_bmp_messages_received",
         "the number of BMP messages successfully received",
+        MetricType::Counter,
+        MetricUnit::Total,
+    );
+    // TEST STATUS: [/] makes sense? [/] passes tests?
+    const NUM_RECEIVE_IO_ERRORS_METRIC: Metric = Metric::new(
+        "bmp_tcp_in_num_receive_io_errors",
+        "the number of BMP messages that could not be received due to an I/O error",
         MetricType::Counter,
         MetricUnit::Total,
     );
@@ -90,6 +130,10 @@ impl BmpTcpInMetrics {
         self.routers
             .entry(router_id)
             .or_insert_with(Default::default)
+    }
+
+    pub fn remove_router(&self, router_id: Arc<RouterId>) {
+        self.routers.remove(&router_id);
     }
 }
 
@@ -130,6 +174,13 @@ impl metrics::Source for BmpTcpInMetrics {
                 unit_name,
                 target,
                 router_id,
+                Self::NUM_RECEIVE_IO_ERRORS_METRIC,
+                metrics.num_receive_io_errors.load(SeqCst),
+            );
+            append_per_router_metric(
+                unit_name,
+                target,
+                router_id,
                 Self::NUM_BMP_MESSAGES_RECEIVED_METRIC,
                 metrics.num_bmp_messages_received.load(SeqCst),
             );
@@ -140,33 +191,6 @@ impl metrics::Source for BmpTcpInMetrics {
                 Self::NUM_INVALID_BMP_MESSAGES_METRIC,
                 metrics.num_invalid_bmp_messages.load(SeqCst),
             );
-        }
-    }
-}
-
-impl GraphStatus for BmpTcpInMetrics {
-    fn status_text(&self) -> String {
-        let num_clients = self.connection_accepted_count.load(SeqCst)
-            - self.connection_lost_count.load(SeqCst);
-        let num_msgs_out = self
-            .gate
-            .as_ref()
-            .map(|gate| gate.num_updates.load(SeqCst))
-            .unwrap_or_default();
-        format!("clients: {}\nout: {}", num_clients, num_msgs_out)
-    }
-
-    fn okay(&self) -> Option<bool> {
-        let connection_accepted_count =
-            self.connection_accepted_count.load(SeqCst);
-        if connection_accepted_count > 0 {
-            let connection_lost_count =
-                self.connection_lost_count.load(SeqCst);
-            let num_clients =
-                connection_accepted_count - connection_lost_count;
-            Some(num_clients > 0)
-        } else {
-            None
         }
     }
 }

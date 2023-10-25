@@ -336,8 +336,11 @@ impl RibUnitRunner {
     }
 
     #[cfg(test)]
-    pub(crate) fn mock(roto_script: &str, rib_type: RibType) -> Self {
-        use crate::{common::roto::RotoScriptOrigin, log::Tracer};
+    pub(crate) fn mock(
+        roto_script: &str,
+        rib_type: RibType,
+    ) -> (Self, crate::comms::GateAgent) {
+        use crate::common::roto::RotoScriptOrigin;
 
         let roto_scripts = RotoScripts::default();
         if !roto_script.is_empty() {
@@ -348,7 +351,7 @@ impl RibUnitRunner {
                 )
                 .unwrap();
         }
-        let (gate, _) = Gate::new(0);
+        let (gate, gate_agent) = Gate::new(0);
         let gate = gate.into();
         let query_limits =
             Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
@@ -371,7 +374,7 @@ impl RibUnitRunner {
         ));
         let tracer = Arc::new(Tracer::new());
 
-        Self {
+        let runner = Self {
             roto_scripts,
             gate,
             http_processor,
@@ -384,7 +387,9 @@ impl RibUnitRunner {
             _process_metrics,
             rib_merge_update_stats,
             tracer,
-        }
+        };
+
+        (runner, gate_agent)
     }
 
     fn http_api_path_for_rib_type(
@@ -712,9 +717,10 @@ impl RibUnitRunner {
                             bound_tracer.clone(),
                             trace_id,
                         )
-                    })
+                    },
+                    |_source_id| { /* TODO: self.status_reporter.message_filtered(source_id) */ })
                     .map(|filtered_payloads| {
-                        (self.insert_payloads(filtered_payloads, insert_fn))
+                        self.insert_payloads(filtered_payloads, insert_fn)
                     })
             })
             .map_err(|err| {
@@ -953,7 +959,7 @@ impl RibUnitRunner {
                         tracer.clone(),
                         trace_id,
                     )
-                })
+                }, |_source_id| { /* TODO: self.status_reporter.message_filtered(source_id) */ })
             }) {
                 new_values.extend(
                     filtered_payloads

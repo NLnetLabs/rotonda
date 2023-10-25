@@ -38,24 +38,28 @@ pub struct ProxyMetrics {
 }
 
 impl BmpProxyMetrics {
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const PROXY_STATE_METRIC: Metric = Metric::new(
         "bmp_tcp_out_connection_state",
         "the state of the proxy connection, if any",
         MetricType::Text,
         MetricUnit::Info,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const PROXY_HANDLER_STATE_METRIC: Metric = Metric::new(
         "bmp_tcp_out_handler_state",
         "the state of the proxy handler, if any",
         MetricType::Gauge,
         MetricUnit::State,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_UNDELIVERABLE_MESSAGES_METRIC: Metric = Metric::new(
         "bmp_tcp_out_num_undeliverable_messages",
         "the number of messages that could not be delivered due to the proxy being in the stalled state",
         MetricType::Gauge,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const QUEUE_CAPACITY_METRIC: Metric = Metric::new(
         "bmp_tcp_out_queue_capacity",
         "the number of messages that can still be queued before the queue is full",

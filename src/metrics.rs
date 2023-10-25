@@ -23,9 +23,12 @@
 use arc_swap::ArcSwap;
 use chrono::Utc;
 use clap::{crate_name, crate_version};
-use std::fmt;
 use std::fmt::Write;
+use std::fmt::{self, Debug};
 use std::sync::{Arc, Mutex, Weak};
+
+#[cfg(test)]
+use std::{cmp::Ordering, collections::BTreeMap};
 
 //------------ Module Configuration ------------------------------------------
 
@@ -149,6 +152,135 @@ impl<T: Source> Source for Arc<T> {
 
 //------------ Target --------------------------------------------------------
 
+// Raw metrics are a metric output format only used for internal unit testing,
+// via OutputFormat::Test.
+#[cfg(test)]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RawMetricValue(String);
+
+#[cfg(test)]
+impl RawMetricValue {
+    pub fn raw(self) -> String {
+        self.0
+    }
+
+    pub fn parse<T>(self) -> T
+    where
+        T: std::str::FromStr,
+        <T as std::str::FromStr>::Err: Debug,
+    {
+        str::parse(self.0.as_str()).unwrap()
+    }
+}
+
+#[cfg(test)]
+impl<T> From<T> for RawMetricValue
+where
+    T: std::fmt::Display,
+{
+    fn from(value: T) -> Self {
+        Self(format!("{value}"))
+    }
+}
+
+#[cfg(test)]
+#[derive(Clone, Debug, Hash, PartialEq, Eq)]
+pub struct RawMetricKey {
+    pub name: String,
+    pub unit: MetricUnit,
+    pub suffix: Option<String>,
+    pub label: Option<(String, String)>,
+}
+
+#[cfg(test)]
+impl RawMetricKey {
+    pub fn named(
+        name: String,
+        unit: MetricUnit,
+        suffix: Option<String>,
+    ) -> Self {
+        Self {
+            name,
+            unit,
+            suffix,
+            label: None,
+        }
+    }
+
+    pub fn labelled(
+        name: String,
+        unit: MetricUnit,
+        suffix: Option<String>,
+        label: (String, String),
+    ) -> Self {
+        Self {
+            name,
+            unit,
+            suffix,
+            label: Some(label),
+        }
+    }
+}
+
+#[cfg(test)]
+impl PartialOrd for RawMetricKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+#[cfg(test)]
+impl Ord for RawMetricKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        match self.name.cmp(&other.name) {
+            Ordering::Equal => {}
+            ord => return ord,
+        }
+        match self.suffix.cmp(&other.suffix) {
+            Ordering::Equal => {}
+            ord => return ord,
+        }
+        self.label.cmp(&other.label)
+    }
+}
+
+/// Support creation of RawMetricKey from a '|' separated string of metric
+/// identification components. Currently supports two source formats:
+///   - |name|unit type|suffix|
+///   - |name|unit type|suffix|labelkey=labelvalue|
+#[cfg(test)]
+impl TryFrom<String> for RawMetricKey {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        let parts = value.split('|').collect::<Vec<_>>();
+        match parts.len() {
+            3|4 => {
+                let name = parts[0].to_string();
+                let unit = MetricUnit::try_from(parts[1])?;
+                let suffix = parts[2];
+                let suffix = match suffix {
+                    "None" => None,
+                    _ => Some(suffix.to_string()),
+                };
+                match parts.len() {
+                    3 => Ok(RawMetricKey::named(name, unit, suffix)),
+                    4 => {
+                        let label = {
+                            let (lhs, rhs) = parts[3].split_once('=').ok_or(format!("Expected label to be of the form k=v in '{value}'"))?;
+                            (lhs.to_string(), rhs.to_string())
+                        };
+                        Ok(RawMetricKey::labelled(name, unit, suffix, label))
+                    }
+                    _ => unreachable!(),
+                }
+            }
+
+            _ => Err(format!("Metric key '{value}' should be in the form name|unit|suffix or name|unit|suffix|label"))
+        }
+    }
+}
+
 /// A target for outputting metrics.
 ///
 /// A new target can be created via [`new`](Self::new), passing in the
@@ -164,6 +296,9 @@ pub struct Target {
 
     /// The output assembled so far.
     target: String,
+
+    #[cfg(test)]
+    raw: BTreeMap<RawMetricKey, RawMetricValue>,
 }
 
 impl Target {
@@ -181,7 +316,48 @@ impl Target {
                 "\n"
             ));
         }
-        Target { format, target }
+        Target {
+            format,
+            target,
+            #[cfg(test)]
+            raw: Default::default(),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn with_name<T>(&self, name: &str) -> T
+    where
+        T: std::str::FromStr,
+        <T as std::str::FromStr>::Err: Debug,
+    {
+        self.raw
+            .iter()
+            .find(|(k, _v)| k.name == name && k.label.is_none())
+            .map(|(_k, v)| v.clone())
+            .unwrap()
+            .parse()
+    }
+
+    #[cfg(test)]
+    pub fn with_label<T>(&self, name: &str, label: (&str, &str)) -> T
+    where
+        T: std::str::FromStr,
+        <T as std::str::FromStr>::Err: Debug,
+    {
+        self.raw
+            .iter()
+            .find(|(k, _v)| {
+                k.name == name
+                    && k.label
+                        .as_ref()
+                        .filter(|(lk, lv)| {
+                            (lk.as_str(), lv.as_str()) == label
+                        })
+                        .is_some()
+            })
+            .map(|(_k, v)| v.clone())
+            .unwrap()
+            .parse()
     }
 
     /// Converts the target into a string with the assembled output.
@@ -273,6 +449,8 @@ impl Target {
                     write!(&mut self.target, "{}", metric.name).unwrap();
                 }
             },
+            #[cfg(test)]
+            OutputFormat::Test => {}
         }
     }
 }
@@ -335,6 +513,18 @@ impl<'b, 'a: 'b> Records<'a> {
                 );
                 writeln!(&mut self.target.target, ": {}", value).unwrap()
             }
+            #[cfg(test)]
+            OutputFormat::Test => {
+                let key = format!(
+                    "{}|{}|{}",
+                    self.metric.name,
+                    self.metric.unit,
+                    suffix.unwrap_or("None")
+                );
+                self.target
+                    .raw
+                    .insert(key.try_into().unwrap(), value.into());
+            }
         }
     }
 
@@ -346,7 +536,7 @@ impl<'b, 'a: 'b> Records<'a> {
     pub fn label_value(
         &mut self,
         labels: &[(&str, &str)],
-        value: impl fmt::Display,
+        value: impl fmt::Display + Clone,
     ) {
         self.suffixed_label_value(labels, value, None)
     }
@@ -354,7 +544,7 @@ impl<'b, 'a: 'b> Records<'a> {
     pub fn suffixed_label_value(
         &mut self,
         labels: &[(&str, &str)],
-        value: impl fmt::Display,
+        value: impl fmt::Display + Clone,
         suffix: Option<&str>,
     ) {
         match self.target.format {
@@ -407,6 +597,23 @@ impl<'b, 'a: 'b> Records<'a> {
                 }
                 writeln!(&mut self.target.target, ": {}", value).unwrap()
             }
+            #[cfg(test)]
+            OutputFormat::Test => {
+                for (label_name, label_value) in labels {
+                    let key = format!(
+                        "{}|{}|{}|{}={}",
+                        self.metric.name,
+                        self.metric.unit,
+                        suffix.unwrap_or("None"),
+                        label_name,
+                        label_value
+                    );
+                    self.target.raw.insert(
+                        key.try_into().unwrap(),
+                        value.clone().into(),
+                    );
+                }
+            }
         }
     }
 }
@@ -429,6 +636,10 @@ pub enum OutputFormat {
 
     /// Simple, human-readable plain-text output.
     Plain,
+
+    /// Internal format for use by unit tests.
+    #[cfg(test)]
+    Test,
 }
 
 impl OutputFormat {
@@ -438,6 +649,8 @@ impl OutputFormat {
         match self {
             OutputFormat::Prometheus => false,
             OutputFormat::Plain => true,
+            #[cfg(test)]
+            OutputFormat::Test => true,
         }
     }
 
@@ -534,19 +747,12 @@ impl fmt::Display for MetricType {
 /// A unit of measure for a metric.
 ///
 /// This determines what a value of 1 means.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]
 pub enum MetricUnit {
     Second,
     Millisecond,
     Microsecond,
-    Celsius,
-    Meter,
     Byte,
-    Ratio,
-    Volt,
-    Ampere,
-    Joule,
-    Gram,
 
     /// Use this for counting things.
     Total,
@@ -564,17 +770,31 @@ impl fmt::Display for MetricUnit {
             MetricUnit::Second => f.write_str("seconds"),
             MetricUnit::Millisecond => f.write_str("milliseconds"),
             MetricUnit::Microsecond => f.write_str("microseconds"),
-            MetricUnit::Celsius => f.write_str("celsius"),
-            MetricUnit::Meter => f.write_str("meters"),
             MetricUnit::Byte => f.write_str("bytes"),
-            MetricUnit::Ratio => f.write_str("ratio"),
-            MetricUnit::Volt => f.write_str("volts"),
-            MetricUnit::Ampere => f.write_str("amperes"),
-            MetricUnit::Joule => f.write_str("joules"),
-            MetricUnit::Gram => f.write_str("grams"),
             MetricUnit::Total => f.write_str("total"),
             MetricUnit::Info => f.write_str("info"),
             MetricUnit::State => f.write_str("state"),
+        }
+    }
+}
+
+impl TryFrom<&str> for MetricUnit {
+    type Error = String;
+
+    fn try_from(unit: &str) -> Result<Self, Self::Error> {
+        match unit.to_lowercase().as_str() {
+            "s" | "second" | "seconds" => Ok(MetricUnit::Second),
+            "ms" | "millisecond" | "milliseconds" => {
+                Ok(MetricUnit::Millisecond)
+            }
+            "µs" | "microsecond" | "microseconds" => {
+                Ok(MetricUnit::Microsecond)
+            }
+            "byte" | "bytes" => Ok(MetricUnit::Byte),
+            "total" => Ok(MetricUnit::Total),
+            "info" => Ok(MetricUnit::Info),
+            "state" => Ok(MetricUnit::State),
+            _ => Err(format!("Unknown metric unit '{unit}'")),
         }
     }
 }
@@ -586,7 +806,7 @@ pub mod util {
 
     use super::{Metric, Target};
 
-    pub fn append_per_router_metric<K: AsRef<str>, V: Display>(
+    pub fn append_per_router_metric<K: AsRef<str>, V: Display + Clone>(
         unit_name: &str,
         target: &mut Target,
         router_id: K,

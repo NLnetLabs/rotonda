@@ -155,7 +155,11 @@ impl BmpTcpInStatusReporter {
 
 impl UnitStatusReporter for BmpTcpInStatusReporter {}
 
-impl AnyStatusReporter for BmpTcpInStatusReporter {}
+impl AnyStatusReporter for BmpTcpInStatusReporter {
+    fn metrics(&self) -> Option<Arc<dyn crate::metrics::Source>> {
+        Some(self.metrics.clone())
+    }
+}
 
 impl Chainable for BmpTcpInStatusReporter {
     fn add_child<T: Display>(&self, child_name: T) -> Self {

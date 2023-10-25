@@ -2005,6 +2005,20 @@ mod tests {
         let (gate, agent) = Gate::new(10);
         let gate_clone = gate.clone();
 
+        eprintln!("CHECKING GATE DOES NOT YET HAVE CLONE SENDER");
+        assert!(
+            matches!(&gate.state, GateState::Normal(NormalGateState { clone_senders, .. }) if clone_senders.is_empty())
+        );
+
+        // Give the parent gate a chance to process the AttachClone command
+        // that will be sent by the new clone.
+        let _ = gate.process_until(tokio::time::sleep(Duration::from_secs(1))).await;
+
+        eprintln!("CHECKING GATE HAS CLONE SENDER");
+        assert!(
+            matches!(&gate.state, GateState::Normal(NormalGateState { clone_senders, .. }) if !clone_senders.is_empty())
+        );
+
         eprintln!("SENDING TERMINATION COMMAND");
         agent.terminate().await;
 

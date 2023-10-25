@@ -59,7 +59,11 @@ pub struct Updating {
 
 impl BmpStateDetails<Updating> {
     #[allow(dead_code)]
-    pub fn process_msg(self, bmp_msg: BmpMsg<Bytes>, trace_id: Option<u8>) -> ProcessingResult {
+    pub fn process_msg(
+        self,
+        bmp_msg: BmpMsg<Bytes>,
+        trace_id: Option<u8>,
+    ) -> ProcessingResult {
         match bmp_msg {
             // already verified upstream
             BmpMsg::InitiationMessage(msg) => self.initiate(msg),
@@ -68,11 +72,14 @@ impl BmpStateDetails<Updating> {
 
             BmpMsg::PeerDownNotification(msg) => self.peer_down(msg),
 
-            BmpMsg::RouteMonitoring(msg) => {
-                self.route_monitoring(msg, RouteStatus::UpToDate, trace_id, |s, pph, update| {
+            BmpMsg::RouteMonitoring(msg) => self.route_monitoring(
+                msg,
+                RouteStatus::UpToDate,
+                trace_id,
+                |s, pph, update| {
                     s.route_monitoring_preprocessing(pph, update)
-                })
-            }
+                },
+            ),
 
             BmpMsg::TerminationMessage(msg) => self.terminate(Some(msg)),
 
@@ -93,15 +100,20 @@ impl BmpStateDetails<Updating> {
         if let Some((afi, safi)) = update.is_eor() {
             if self.details.remove_pending_eor(pph, afi, safi) {
                 let num_pending_eors = self.details.num_pending_eors();
-                self.status_reporter
-                    .pending_eors_update(self.router_id.clone(), num_pending_eors);
+                self.status_reporter.pending_eors_update(
+                    self.router_id.clone(),
+                    num_pending_eors,
+                );
             }
         }
 
         ControlFlow::Continue(self)
     }
 
-    pub fn terminate(mut self, _msg: Option<TerminationMessage<Bytes>>) -> ProcessingResult {
+    pub fn terminate(
+        mut self,
+        _msg: Option<TerminationMessage<Bytes>>,
+    ) -> ProcessingResult {
         // let reason = msg
         //     .information()
         //     .map(|tlv| tlv.to_string())
@@ -116,7 +128,10 @@ impl BmpStateDetails<Updating> {
         if routes.is_empty() {
             Self::mk_state_transition_result(next_state)
         } else {
-            Self::mk_final_routing_update_result(next_state, Update::Bulk(routes))
+            Self::mk_final_routing_update_result(
+                next_state,
+                Update::Bulk(routes),
+            )
         }
     }
 }
@@ -145,7 +160,12 @@ impl From<BmpStateDetails<Dumping>> for BmpStateDetails<Updating> {
 }
 
 impl Initiable for Updating {
-    fn set_information_tlvs(&mut self, sys_name: String, sys_desc: String, sys_extra: Vec<String>) {
+    fn set_information_tlvs(
+        &mut self,
+        sys_name: String,
+        sys_desc: String,
+        sys_extra: Vec<String>,
+    ) {
         self.sys_name = sys_name;
         self.sys_desc = sys_desc;
         self.sys_extra = sys_extra;
@@ -171,11 +191,18 @@ impl PeerAware for Updating {
         self.peer_states.get_peers()
     }
 
-    fn update_peer_config(&mut self, pph: &PerPeerHeader<Bytes>, config: SessionConfig) -> bool {
+    fn update_peer_config(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        config: SessionConfig,
+    ) -> bool {
         self.peer_states.update_peer_config(pph, config)
     }
 
-    fn get_peer_config(&self, pph: &PerPeerHeader<Bytes>) -> Option<&SessionConfig> {
+    fn get_peer_config(
+        &self,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> Option<&SessionConfig> {
         self.peer_states.get_peer_config(pph)
     }
 
@@ -187,15 +214,28 @@ impl PeerAware for Updating {
         self.peer_states.num_peer_configs()
     }
 
-    fn is_peer_eor_capable(&self, pph: &PerPeerHeader<Bytes>) -> Option<bool> {
+    fn is_peer_eor_capable(
+        &self,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> Option<bool> {
         self.peer_states.is_peer_eor_capable(pph)
     }
 
-    fn add_pending_eor(&mut self, pph: &PerPeerHeader<Bytes>, afi: AFI, safi: SAFI) {
+    fn add_pending_eor(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        afi: AFI,
+        safi: SAFI,
+    ) {
         self.peer_states.add_pending_eor(pph, afi, safi)
     }
 
-    fn remove_pending_eor(&mut self, pph: &PerPeerHeader<Bytes>, afi: AFI, safi: SAFI) -> bool {
+    fn remove_pending_eor(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        afi: AFI,
+        safi: SAFI,
+    ) -> bool {
         self.peer_states.remove_pending_eor(pph, afi, safi)
     }
 

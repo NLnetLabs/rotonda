@@ -21,7 +21,9 @@ use routecore::asn::Asn;
 use serde::Deserialize;
 
 /// Enum carrying either a exact IP address, or a `Prefix`.
-#[derive(Clone, Copy, Debug, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Hash, Eq, PartialEq, Ord, PartialOrd,
+)]
 #[serde(untagged)]
 pub enum PrefixOrExact {
     Exact(IpAddr),
@@ -131,7 +133,8 @@ impl PeerConfig {
 
 impl PartialEq for PeerConfig {
     fn eq(&self, other: &PeerConfig) -> bool {
-        self.remote_asn == other.remote_asn && self.hold_time == other.hold_time
+        self.remote_asn == other.remote_asn
+            && self.hold_time == other.hold_time
     }
 }
 
@@ -188,7 +191,8 @@ impl BgpConfig for CombinedConfig {
     }
 
     fn is_exact(&self) -> bool {
-        self.remote_prefix_or_exact.is_exact() && self.peer_config.single_asn()
+        self.remote_prefix_or_exact.is_exact()
+            && self.peer_config.single_asn()
     }
 }
 
@@ -241,7 +245,10 @@ hold_time = 10
 
 "#;
 
-        let Unit::BgpTcpIn(cfg) = toml::from_str::<Unit>(toml).unwrap() else { unreachable!() };
+        let Unit::BgpTcpIn(cfg) = toml::from_str::<Unit>(toml).unwrap()
+        else {
+            unreachable!()
+        };
 
         let ip1 = IpAddr::from_str("1.2.3.10").unwrap();
         let asn1 = Asn::from_u32(100);

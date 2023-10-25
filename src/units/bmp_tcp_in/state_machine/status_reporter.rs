@@ -6,7 +6,9 @@ use std::{
 use bytes::Bytes;
 
 use crate::{
-    common::status_reporter::{AnyStatusReporter, Chainable, Named, UnitStatusReporter},
+    common::status_reporter::{
+        AnyStatusReporter, Chainable, Named, UnitStatusReporter,
+    },
     payload::RouterId,
 };
 
@@ -61,7 +63,11 @@ impl BmpTcpInStatusReporter {
         }
     }
 
-    pub fn peer_down(&self, router_id: Arc<RouterId>, eor_capable: Option<bool>) {
+    pub fn peer_down(
+        &self,
+        router_id: Arc<RouterId>,
+        eor_capable: Option<bool>,
+    ) {
         let metrics = self.metrics.router_metrics(router_id);
         metrics.num_peers_up.fetch_sub(1, SeqCst);
         if Some(true) == eor_capable {
@@ -118,7 +124,11 @@ impl BmpTcpInStatusReporter {
         metrics.parse_errors.push(err, bytes, false);
     }
 
-    pub fn pending_eors_update(&self, router_id: Arc<RouterId>, n_peers_dumping: usize) {
+    pub fn pending_eors_update(
+        &self,
+        router_id: Arc<RouterId>,
+        n_peers_dumping: usize,
+    ) {
         self.metrics
             .router_metrics(router_id)
             .num_peers_up_dumping

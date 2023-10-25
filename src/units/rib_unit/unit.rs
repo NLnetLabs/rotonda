@@ -5,11 +5,14 @@ use crate::{
         status_reporter::{AnyStatusReporter, UnitStatusReporter},
     },
     comms::{
-        AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus, Link, Terminated, TriggerData,
+        AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus, Link,
+        Terminated, TriggerData,
     },
     log::{BoundTracer, Tracer},
     manager::{Component, WaitPoint},
-    payload::{FilterError, Filterable, Payload, RouterId, Update, UpstreamStatus},
+    payload::{
+        FilterError, Filterable, Payload, RouterId, Update, UpstreamStatus,
+    },
     tokio::TokioTaskMetrics,
     units::Unit,
 };
@@ -35,7 +38,9 @@ use rotonda_store::{
 use routecore::addr::Prefix;
 use serde::Deserialize;
 use smallvec::SmallVec;
-use std::{cell::RefCell, ops::Deref, str::FromStr, string::ToString, sync::Arc};
+use std::{
+    cell::RefCell, ops::Deref, str::FromStr, string::ToString, sync::Arc,
+};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -45,7 +50,9 @@ use super::{
     rib::{HashedRib, PreHashedTypeValue, RibValue, RouteExtra},
     status_reporter::RibUnitStatusReporter,
 };
-use super::{rib::StoreInsertionReport, statistics::RibMergeUpdateStatistics};
+use super::{
+    rib::StoreInsertionReport, statistics::RibMergeUpdateStatistics,
+};
 
 const RECORD_MERGE_UPDATE_SPEED_EVERY_N_CALLS: u64 = 1000;
 
@@ -219,7 +226,9 @@ pub struct RibUnitRunner {
 impl DirectUpdate for RibUnitRunner {
     async fn direct_update(&self, update: Update) {
         if let Err(err) = self
-            .process_update(update, |pfx, meta, store| store.insert(pfx, meta))
+            .process_update(update, |pfx, meta, store| {
+                store.insert(pfx, meta)
+            })
             .await
         {
             error!("Error handling update: {err}");
@@ -238,7 +247,8 @@ impl AnyDirectUpdate for RibUnitRunner {}
 pub type QueryId = Uuid;
 pub type QueryOperationResult = Result<QueryResult<RibValue>, String>;
 pub type QueryOperationResultSender = oneshot::Sender<QueryOperationResult>;
-pub type PendingVirtualRibQueryResults = FrimMap<QueryId, Arc<QueryOperationResultSender>>;
+pub type PendingVirtualRibQueryResults =
+    FrimMap<QueryId, Arc<QueryOperationResultSender>>;
 
 impl RibUnitRunner {
     thread_local!(
@@ -259,18 +269,23 @@ impl RibUnitRunner {
         let unit_name = component.name().clone();
         let gate = Arc::new(gate);
         let rib = Self::mk_rib(rib_type, rib_keys);
-        let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> = Default::default();
+        let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> =
+            Default::default();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
 
         // Setup metrics
         let _process_metrics = Arc::new(TokioTaskMetrics::new());
         component.register_metrics(_process_metrics.clone());
 
-        let metrics = Arc::new(RibUnitMetrics::new(&gate, rib_merge_update_stats.clone()));
+        let metrics = Arc::new(RibUnitMetrics::new(
+            &gate,
+            rib_merge_update_stats.clone(),
+        ));
         component.register_metrics(metrics.clone());
 
         // Setup status reporting
-        let status_reporter = Arc::new(RibUnitStatusReporter::new(&unit_name, metrics.clone()));
+        let status_reporter =
+            Arc::new(RibUnitStatusReporter::new(&unit_name, metrics.clone()));
 
         // Setup the Roto filter source
         let filter_name = Arc::new(ArcSwap::from_pointee(filter_name));
@@ -290,9 +305,15 @@ impl RibUnitRunner {
         );
         let http_processor = Arc::new(http_processor);
         if is_sub_resource {
-            component.register_sub_http_resource(http_processor.clone(), &http_api_path);
+            component.register_sub_http_resource(
+                http_processor.clone(),
+                &http_api_path,
+            );
         } else {
-            component.register_http_resource(http_processor.clone(), &http_api_path);
+            component.register_http_resource(
+                http_processor.clone(),
+                &http_api_path,
+            );
         }
 
         let roto_scripts = component.roto_scripts().clone();
@@ -321,19 +342,25 @@ impl RibUnitRunner {
         let roto_scripts = RotoScripts::default();
         if !roto_script.is_empty() {
             roto_scripts
-                .add_or_update_script(RotoScriptOrigin::Named("mock".to_string()), roto_script)
+                .add_or_update_script(
+                    RotoScriptOrigin::Named("mock".to_string()),
+                    roto_script,
+                )
                 .unwrap();
         }
         let (gate, _) = Gate::new(0);
         let gate = gate.into();
-        let query_limits = Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
+        let query_limits =
+            Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
         let rib_keys = RibUnit::default_rib_keys();
         let rib = Self::mk_rib(rib_type, &rib_keys);
         let status_reporter = RibUnitStatusReporter::default().into();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
-        let filter_name = Arc::new(ArcSwap::from_pointee(FilterName::default()));
+        let filter_name =
+            Arc::new(ArcSwap::from_pointee(FilterName::default()));
         let _process_metrics = Arc::new(TokioTaskMetrics::new());
-        let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> = Default::default();
+        let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> =
+            Default::default();
         let http_processor = Arc::new(PrefixesApi::new(
             rib.clone(),
             Arc::new("dummy".to_string()),
@@ -360,10 +387,15 @@ impl RibUnitRunner {
         }
     }
 
-    fn http_api_path_for_rib_type(http_api_path: &str, rib_type: RibType) -> (Arc<String>, bool) {
+    fn http_api_path_for_rib_type(
+        http_api_path: &str,
+        rib_type: RibType,
+    ) -> (Arc<String>, bool) {
         let http_api_path = http_api_path.trim_end_matches('/').to_string();
         let (http_api_path, is_sub_resource) = match rib_type {
-            RibType::Physical | RibType::Virtual => (Arc::new(format!("{http_api_path}/")), false),
+            RibType::Physical | RibType::Virtual => {
+                (Arc::new(format!("{http_api_path}/")), false)
+            }
             RibType::GeneratedVirtual(index) => {
                 (Arc::new(format!("{http_api_path}/{index}/")), true)
             }
@@ -371,7 +403,10 @@ impl RibUnitRunner {
         (http_api_path, is_sub_resource)
     }
 
-    fn mk_rib(rib_type: RibType, rib_keys: &[RouteToken]) -> Arc<ArcSwap<HashedRib>> {
+    fn mk_rib(
+        rib_type: RibType,
+        rib_keys: &[RouteToken],
+    ) -> Arc<ArcSwap<HashedRib>> {
         //
         // --- TODO: Create the Rib based on the Roto script Rib 'contains' type
         //
@@ -438,17 +473,23 @@ impl RibUnitRunner {
                         } => {
                             arc_self.status_reporter.reconfigured();
 
-                            let old_http_api_path = arc_self.http_processor.http_api_path();
+                            let old_http_api_path =
+                                arc_self.http_processor.http_api_path();
                             let (new_http_api_path, _is_sub_resource) =
-                                Self::http_api_path_for_rib_type(&new_http_api_path, new_rib_type);
-                            if new_http_api_path.as_str() != old_http_api_path {
+                                Self::http_api_path_for_rib_type(
+                                    &new_http_api_path,
+                                    new_rib_type,
+                                );
+                            if new_http_api_path.as_str() != old_http_api_path
+                            {
                                 warn!(
                                     "Ignoring changed http_api_path: {} -> {}",
                                     old_http_api_path, new_http_api_path
                                 );
                             }
 
-                            let old_rib_keys = arc_self.rib.load().key_fields();
+                            let old_rib_keys =
+                                arc_self.rib.load().key_fields();
                             if new_rib_keys.as_slice() != old_rib_keys {
                                 warn!(
                                     "Ignoring changed rib_keys: {:?} -> {:?}",
@@ -464,40 +505,63 @@ impl RibUnitRunner {
                             }
 
                             // Replace the vRIB upstream link with the new one
-                            arc_self.http_processor.set_vrib_upstream(new_vrib_upstream);
+                            arc_self
+                                .http_processor
+                                .set_vrib_upstream(new_vrib_upstream);
 
                             // Replace the roto script with the new one
-                            let old_filter_name = &*arc_self.filter_name.load();
+                            let old_filter_name =
+                                &*arc_self.filter_name.load();
                             match new_filter_name {
                                 Some(new_filter_name) => {
-                                    if old_filter_name.as_ref() != &new_filter_name {
-                                        arc_self.status_reporter.filter_name_changed(
-                                            &old_filter_name,
-                                            Some(&new_filter_name),
-                                        );
-                                        arc_self.filter_name.store(new_filter_name.into());
+                                    if old_filter_name.as_ref()
+                                        != &new_filter_name
+                                    {
+                                        arc_self
+                                            .status_reporter
+                                            .filter_name_changed(
+                                                &old_filter_name,
+                                                Some(&new_filter_name),
+                                            );
+                                        arc_self
+                                            .filter_name
+                                            .store(new_filter_name.into());
                                     }
                                 }
                                 None => {
-                                    if old_filter_name.as_ref() != &FilterName::default() {
+                                    if old_filter_name.as_ref()
+                                        != &FilterName::default()
+                                    {
                                         arc_self
                                             .status_reporter
-                                            .filter_name_changed(&old_filter_name, None);
-                                        arc_self.filter_name.store(FilterName::default().into());
+                                            .filter_name_changed(
+                                                &old_filter_name,
+                                                None,
+                                            );
+                                        arc_self.filter_name.store(
+                                            FilterName::default().into(),
+                                        );
                                     }
                                 }
                             }
 
-                            arc_self.query_limits.store(Arc::new(new_query_limits));
+                            arc_self
+                                .query_limits
+                                .store(Arc::new(new_query_limits));
 
                             // Register as a direct update receiver with the new
                             // set of linked gates.
                             arc_self
                                 .status_reporter
-                                .upstream_sources_changed(sources.len(), new_sources.len());
+                                .upstream_sources_changed(
+                                    sources.len(),
+                                    new_sources.len(),
+                                );
                             sources = new_sources;
                             for link in sources.iter_mut() {
-                                link.connect(arc_self.clone(), false).await.unwrap();
+                                link.connect(arc_self.clone(), false)
+                                    .await
+                                    .unwrap();
                             }
                         }
 
@@ -507,16 +571,32 @@ impl RibUnitRunner {
                         }
 
                         GateStatus::Triggered {
-                            data: TriggerData::MatchPrefix(uuid, prefix, match_options),
+                            data:
+                                TriggerData::MatchPrefix(
+                                    uuid,
+                                    prefix,
+                                    match_options,
+                                ),
                         } => {
-                            assert!(matches!(arc_self.rib_type, RibType::Physical));
+                            assert!(matches!(
+                                arc_self.rib_type,
+                                RibType::Physical
+                            ));
                             let res = {
-                                if let Ok(store) = arc_self.rib.load().store() {
+                                if let Ok(store) = arc_self.rib.load().store()
+                                {
                                     let guard = &epoch::pin();
-                                    trace!("Performing triggered query {uuid}");
-                                    Ok(store.match_prefix(&prefix, &match_options, guard))
+                                    trace!(
+                                        "Performing triggered query {uuid}"
+                                    );
+                                    Ok(store.match_prefix(
+                                        &prefix,
+                                        &match_options,
+                                        guard,
+                                    ))
                                 } else {
-                                    Err("Cannot query non-existent RIB".to_string())
+                                    Err("Cannot query non-existent RIB"
+                                        .to_string())
                                 }
                             };
                             trace!("Sending query {uuid} results downstream");
@@ -548,22 +628,29 @@ impl RibUnitRunner {
                 &Prefix,
                 TypeValue,
                 &HashedRib,
-            )
-                -> Result<(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32), PrefixStoreError>
-            + Copy
+            ) -> Result<
+                (Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                PrefixStoreError,
+            > + Copy
             + Clone
             + Send
             + 'static,
     {
         match update {
-            Update::UpstreamStatusChange(UpstreamStatus::EndOfStream { .. }) => {
+            Update::UpstreamStatusChange(UpstreamStatus::EndOfStream {
+                ..
+            }) => {
                 // Nothing to do, pass it on
                 self.gate.update_data(update).await;
             }
 
-            Update::Bulk(payloads) => self.filter_payload(payloads, insert_fn).await?,
+            Update::Bulk(payloads) => {
+                self.filter_payload(payloads, insert_fn).await?
+            }
 
-            Update::Single(payload) => self.filter_payload(payload, insert_fn).await?,
+            Update::Single(payload) => {
+                self.filter_payload(payload, insert_fn).await?
+            }
 
             Update::QueryResult(uuid, upstream_query_result) => {
                 trace!("Re-processing received query {uuid} result");
@@ -573,7 +660,9 @@ impl RibUnitRunner {
                 };
 
                 // Were we waiting for this result?
-                if let Some(tx) = self.pending_vrib_query_results.remove(&uuid) {
+                if let Some(tx) =
+                    self.pending_vrib_query_results.remove(&uuid)
+                {
                     // Yes, send the result to the waiting HTTP request processing task
                     trace!("Notifying waiting HTTP request processor of query {uuid} results");
                     let tx = Arc::try_unwrap(tx).unwrap(); // TODO: handle this unwrap
@@ -591,21 +680,27 @@ impl RibUnitRunner {
         Ok(())
     }
 
-    async fn filter_payload<T, F>(&self, payload: T, insert_fn: F) -> Result<(), FilterError>
+    async fn filter_payload<T, F>(
+        &self,
+        payload: T,
+        insert_fn: F,
+    ) -> Result<(), FilterError>
     where
         T: Filterable,
         F: Fn(
                 &Prefix,
                 TypeValue,
                 &HashedRib,
-            )
-                -> Result<(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32), PrefixStoreError>
-            + Copy
+            ) -> Result<
+                (Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                PrefixStoreError,
+            > + Copy
             + Clone
             + Send
             + 'static,
     {
-        let bound_tracer = BoundTracer::bind(self.tracer.clone(), self.gate.id());
+        let bound_tracer =
+            BoundTracer::bind(self.tracer.clone(), self.gate.id());
         if let Some(filtered_update) = Self::VM
             .with(|vm| {
                 payload
@@ -618,7 +713,9 @@ impl RibUnitRunner {
                             trace_id,
                         )
                     })
-                    .map(|filtered_payloads| (self.insert_payloads(filtered_payloads, insert_fn)))
+                    .map(|filtered_payloads| {
+                        (self.insert_payloads(filtered_payloads, insert_fn))
+                    })
             })
             .map_err(|err| {
                 self.status_reporter.message_filtering_failure(&err);
@@ -646,9 +743,10 @@ impl RibUnitRunner {
                 &Prefix,
                 TypeValue,
                 &HashedRib,
-            )
-                -> Result<(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32), PrefixStoreError>
-            + Copy
+            ) -> Result<
+                (Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                PrefixStoreError,
+            > + Copy
             + Send
             + 'static,
     {
@@ -669,20 +767,25 @@ impl RibUnitRunner {
                 &Prefix,
                 TypeValue,
                 &HashedRib,
-            )
-                -> Result<(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32), PrefixStoreError>
-            + Send
+            ) -> Result<
+                (Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                PrefixStoreError,
+            > + Send
             + 'static,
     {
         let rib = self.rib.load();
         if rib.is_physical() {
             let prefix: Option<Prefix> = match &payload.value {
-                TypeValue::Builtin(BuiltinTypeValue::Route(route)) => Some(route.prefix.into()),
+                TypeValue::Builtin(BuiltinTypeValue::Route(route)) => {
+                    Some(route.prefix.into())
+                }
 
-                TypeValue::Record(record) => match record.get_value_for_field("prefix") {
-                    Some(ElementTypeValue::Primitive(TypeValue::Builtin(
-                        BuiltinTypeValue::Prefix(prefix),
-                    ))) => Some((*prefix).into()),
+                TypeValue::Record(record) => match record
+                    .get_value_for_field("prefix")
+                {
+                    Some(ElementTypeValue::Primitive(
+                        TypeValue::Builtin(BuiltinTypeValue::Prefix(prefix)),
+                    )) => Some((*prefix).into()),
                     _ => None,
                 },
 
@@ -704,8 +807,10 @@ impl RibUnitRunner {
                         // let propagation_delay = (post_insert - rib_el.received).num_milliseconds();
                         let propagation_delay = 0;
 
-                        let router_id =
-                            Arc::new(RouterId::from_str("not implemented yet").unwrap());
+                        let router_id = Arc::new(
+                            RouterId::from_str("not implemented yet")
+                                .unwrap(),
+                        );
 
                         match upsert {
                             Upsert::Insert => {
@@ -761,7 +866,10 @@ impl RibUnitRunner {
         }
     }
 
-    async fn reprocess_query_results(&self, res: QueryResult<RibValue>) -> QueryResult<RibValue> {
+    async fn reprocess_query_results(
+        &self,
+        res: QueryResult<RibValue>,
+    ) -> QueryResult<RibValue> {
         let mut processed_res = QueryResult::<RibValue> {
             match_type: res.match_type,
             prefix: res.prefix,
@@ -773,25 +881,40 @@ impl RibUnitRunner {
         let is_in_prefix_meta_set = res.prefix_meta.is_some();
 
         if let Some(rib_value) = res.prefix_meta {
-            processed_res.prefix_meta = self.reprocess_rib_value(rib_value).await;
+            processed_res.prefix_meta =
+                self.reprocess_rib_value(rib_value).await;
         }
 
         if let Some(record_set) = &res.less_specifics {
-            processed_res.less_specifics = self.reprocess_record_set(record_set).await;
+            processed_res.less_specifics =
+                self.reprocess_record_set(record_set).await;
         }
 
         if let Some(record_set) = &res.more_specifics {
-            processed_res.more_specifics = self.reprocess_record_set(record_set).await;
+            processed_res.more_specifics =
+                self.reprocess_record_set(record_set).await;
         }
 
         if log_enabled!(log::Level::Trace) {
             let is_out_prefix_meta_set = processed_res.prefix_meta.is_some();
-            let exact_match_diff = (is_in_prefix_meta_set as u8) - (is_out_prefix_meta_set as u8);
-            let less_specifics_diff = res.less_specifics.map_or(0, |v| v.len())
-                - processed_res.less_specifics.as_ref().map_or(0, |v| v.len());
-            let more_specifics_diff = res.more_specifics.map_or(0, |v| v.len())
-                - processed_res.more_specifics.as_ref().map_or(0, |v| v.len());
-            if exact_match_diff != 0 || less_specifics_diff != 0 || more_specifics_diff != 0 {
+            let exact_match_diff = (is_in_prefix_meta_set as u8)
+                - (is_out_prefix_meta_set as u8);
+            let less_specifics_diff =
+                res.less_specifics.map_or(0, |v| v.len())
+                    - processed_res
+                        .less_specifics
+                        .as_ref()
+                        .map_or(0, |v| v.len());
+            let more_specifics_diff =
+                res.more_specifics.map_or(0, |v| v.len())
+                    - processed_res
+                        .more_specifics
+                        .as_ref()
+                        .map_or(0, |v| v.len());
+            if exact_match_diff != 0
+                || less_specifics_diff != 0
+                || more_specifics_diff != 0
+            {
                 trace!("Virtual RIB reprocessing of QueryResult discarded some results: exact: {}, less_specific: {}, more_specific: {}",
                     exact_match_diff, less_specifics_diff, more_specifics_diff);
             }
@@ -804,8 +927,14 @@ impl RibUnitRunner {
     ///
     /// Used by virtual RIBs when a query result flows through them from West to East as a result of a query from a virtual
     /// RIB to the East made against a physical RIB to the West.
-    async fn reprocess_rib_value(&self, rib_value: RibValue) -> Option<RibValue> {
-        let mut new_values = HashedSet::with_capacity_and_hasher(1, HashBuildHasher::default());
+    async fn reprocess_rib_value(
+        &self,
+        rib_value: RibValue,
+    ) -> Option<RibValue> {
+        let mut new_values = HashedSet::with_capacity_and_hasher(
+            1,
+            HashBuildHasher::default(),
+        );
 
         let tracer = BoundTracer::bind(self.tracer.clone(), self.gate.id());
 
@@ -830,12 +959,19 @@ impl RibUnitRunner {
                     filtered_payloads
                         .into_iter()
                         .filter(|payload| {
-                            !matches!(payload.value, TypeValue::OutputStreamMessage(_))
+                            !matches!(
+                                payload.value,
+                                TypeValue::OutputStreamMessage(_)
+                            )
                         })
                         .map(|payload| {
                             // Add this processed query result route into the new query result
-                            let hash = self.rib.load().precompute_hash_code(&payload.value);
-                            PreHashedTypeValue::new(payload.value, hash).into()
+                            let hash = self
+                                .rib
+                                .load()
+                                .precompute_hash_code(&payload.value);
+                            PreHashedTypeValue::new(payload.value, hash)
+                                .into()
                         }),
                 );
             }
@@ -856,7 +992,8 @@ impl RibUnitRunner {
 
         for record in record_set.iter() {
             let rib_value = record.meta;
-            if let Some(rib_value) = self.reprocess_rib_value(rib_value).await {
+            if let Some(rib_value) = self.reprocess_rib_value(rib_value).await
+            {
                 new_record_set.push(record.prefix, rib_value);
             }
         }

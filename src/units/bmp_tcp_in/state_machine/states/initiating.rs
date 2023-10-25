@@ -57,7 +57,11 @@ impl BmpStateDetails<Initiating> {
     }
 
     #[allow(dead_code)]
-    pub fn process_msg(self, bmp_msg: BmpMsg<Bytes>, _trace_id: Option<u8>) -> ProcessingResult {
+    pub fn process_msg(
+        self,
+        bmp_msg: BmpMsg<Bytes>,
+        _trace_id: Option<u8>,
+    ) -> ProcessingResult {
         match bmp_msg {
             // already verified upstream
             BmpMsg::InitiationMessage(msg) => {
@@ -73,7 +77,9 @@ impl BmpStateDetails<Initiating> {
                             let next_state = BmpState::Dumping(state.into());
                             Self::mk_state_transition_result(next_state)
                         } else {
-                            unreachable!("We should still be in state Initiating")
+                            unreachable!(
+                                "We should still be in state Initiating"
+                            )
                         }
                     }
                 }
@@ -95,14 +101,22 @@ impl BmpStateDetails<Initiating> {
         }
     }
 
-    pub fn terminate(self, _msg: Option<TerminationMessage<Bytes>>) -> ProcessingResult {
+    pub fn terminate(
+        self,
+        _msg: Option<TerminationMessage<Bytes>>,
+    ) -> ProcessingResult {
         let next_state = BmpState::Terminated(self.into());
         Self::mk_state_transition_result(next_state)
     }
 }
 
 impl Initiable for Initiating {
-    fn set_information_tlvs(&mut self, sys_name: String, sys_desc: String, sys_extra: Vec<String>) {
+    fn set_information_tlvs(
+        &mut self,
+        sys_name: String,
+        sys_desc: String,
+        sys_extra: Vec<String>,
+    ) {
         self.sys_name = Some(sys_name);
         self.sys_desc = Some(sys_desc);
         self.sys_extra = sys_extra;

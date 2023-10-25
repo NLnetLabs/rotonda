@@ -3,12 +3,17 @@ use std::{
     sync::Arc,
 };
 
-use super::{metrics::BmpProxyMetrics, proxy::BmpProxy, status_reporter::BmpProxyStatusReporter};
+use super::{
+    metrics::BmpProxyMetrics, proxy::BmpProxy,
+    status_reporter::BmpProxyStatusReporter,
+};
 
 use crate::{
     common::{
         frim::FrimMap,
-        status_reporter::{AnyStatusReporter, Chainable, TargetStatusReporter},
+        status_reporter::{
+            AnyStatusReporter, Chainable, TargetStatusReporter,
+        },
     },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
     manager::{Component, TargetCommand, WaitPoint},
@@ -17,7 +22,9 @@ use crate::{
 
 use async_trait::async_trait;
 use non_empty_vec::NonEmpty;
-use roto::types::{builtin::BuiltinTypeValue, collections::BytesRecord, typevalue::TypeValue};
+use roto::types::{
+    builtin::BuiltinTypeValue, collections::BytesRecord, typevalue::TypeValue,
+};
 use serde::Deserialize;
 use tokio::sync::{mpsc, RwLock};
 
@@ -79,7 +86,8 @@ impl BmpTcpOutRunner {
         let metrics = Arc::new(BmpProxyMetrics::new());
         component.register_metrics(metrics.clone());
 
-        let status_reporter = Arc::new(BmpProxyStatusReporter::new(component.name(), metrics));
+        let status_reporter =
+            Arc::new(BmpProxyStatusReporter::new(component.name(), metrics));
 
         Self {
             component,
@@ -149,11 +157,16 @@ impl BmpTcpOutRunner {
     }
 
     fn spawn_proxy(&self, router_addr: SocketAddr) -> BmpProxy {
-        let child_name = format!("proxy_handler[{}:{}]", router_addr.ip(), router_addr.port());
-        let proxy_status_reporter = Arc::new(self.status_reporter.add_child(child_name));
+        let child_name = format!(
+            "proxy_handler[{}:{}]",
+            router_addr.ip(),
+            router_addr.port()
+        );
+        let proxy_status_reporter =
+            Arc::new(self.status_reporter.add_child(child_name));
 
-        let accepted =
-            self.config.accept.is_empty() || self.config.accept.contains(&router_addr.ip());
+        let accepted = self.config.accept.is_empty()
+            || self.config.accept.contains(&router_addr.ip());
 
         let rejected = self.config.reject.contains(&router_addr.ip());
 
@@ -164,8 +177,11 @@ impl BmpTcpOutRunner {
                 router_addr,
             )
         } else {
-            self.status_reporter
-                .proxy_router_excluded(&router_addr, accepted, rejected);
+            self.status_reporter.proxy_router_excluded(
+                &router_addr,
+                accepted,
+                rejected,
+            );
             BmpProxy::new(None, proxy_status_reporter, router_addr)
         }
     }
@@ -175,7 +191,9 @@ impl BmpTcpOutRunner {
 impl DirectUpdate for BmpTcpOutRunner {
     async fn direct_update(&self, update: Update) {
         match update {
-            Update::UpstreamStatusChange(UpstreamStatus::EndOfStream { source_id }) => {
+            Update::UpstreamStatusChange(UpstreamStatus::EndOfStream {
+                source_id,
+            }) => {
                 // The connection to the router has been lost so drop the connection state machine we have for it, if
                 // any.
                 self.proxies.remove(&source_id);
@@ -190,10 +208,10 @@ impl DirectUpdate for BmpTcpOutRunner {
                 if let Some(addr) = source_id.socket_addr() {
                     let bytes = BytesRecord::as_ref(&bytes);
 
-                    let proxy = self
-                        .proxies
-                        .entry(source_id.clone())
-                        .or_insert_with(|| Arc::new(RwLock::new(self.spawn_proxy(*addr))));
+                    let proxy =
+                        self.proxies.entry(source_id.clone()).or_insert_with(
+                            || Arc::new(RwLock::new(self.spawn_proxy(*addr))),
+                        );
                     proxy.write().await.send(bytes).await;
                 }
             }

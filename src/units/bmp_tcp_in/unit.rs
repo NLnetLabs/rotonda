@@ -3,8 +3,9 @@
 use std::{
     net::SocketAddr,
     ops::ControlFlow,
+    str::FromStr,
     sync::{Arc, Weak},
-    time::Duration, str::FromStr,
+    time::Duration,
 };
 
 use arc_swap::ArcSwap;
@@ -24,10 +25,11 @@ use crate::{
         unit::UnitActivity,
     },
     comms::{Gate, GateStatus, Terminated},
+    log::Tracer,
     manager::{Component, WaitPoint},
     payload::SourceId,
     tokio::TokioTaskMetrics,
-    units::Unit, log::Tracer,
+    units::Unit,
 };
 
 use super::{
@@ -177,7 +179,8 @@ impl BmpTcpIn {
         // once.
         let router_states = Arc::new(FrimMap::default());
 
-        let router_id_template = Arc::new(ArcSwap::from_pointee(self.router_id_template));
+        let router_id_template =
+            Arc::new(ArcSwap::from_pointee(self.router_id_template));
 
         let filter_name = Arc::new(ArcSwap::from_pointee(self.filter_name));
 
@@ -196,7 +199,10 @@ impl BmpTcpIn {
                 router_states.clone(),
             ));
 
-            component.register_http_resource(processor.clone(), &self.http_api_path);
+            component.register_http_resource(
+                processor.clone(),
+                &self.http_api_path,
+            );
 
             (processor, router_info)
         };
@@ -260,7 +266,8 @@ struct BmpTcpInRunner {
     listen: Arc<String>,
     http_api_path: Arc<String>,
     gate: Gate,
-    router_states: Arc<FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>, // Option is never None, instead Some is take()'n and replace()'d.
+    router_states:
+        Arc<FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>, // Option is never None, instead Some is take()'n and replace()'d.
     router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
     bmp_metrics: Arc<BmpMetrics>,
     bmp_in_metrics: Arc<BmpTcpInMetrics>,
@@ -280,7 +287,9 @@ impl BmpTcpInRunner {
         listen: Arc<String>,
         http_api_path: Arc<String>,
         gate: Gate,
-        router_states: Arc<FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>, // Option is never None, instead Some is take()'n and replace()'d.
+        router_states: Arc<
+            FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
+        >, // Option is never None, instead Some is take()'n and replace()'d.
         router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
         bmp_metrics: Arc<BmpMetrics>,
         bmp_in_metrics: Arc<BmpTcpInMetrics>,
@@ -336,7 +345,10 @@ impl BmpTcpInRunner {
         (runner, gate_agent)
     }
 
-    async fn run<T, U>(mut self, listener_factory: Arc<T>) -> Result<(), crate::comms::Terminated>
+    async fn run<T, U>(
+        mut self,
+        listener_factory: Arc<T>,
+    ) -> Result<(), crate::comms::Terminated>
     where
         T: TcpListenerFactory<U>,
         U: TcpListener,
@@ -363,7 +375,8 @@ impl BmpTcpInRunner {
                 }
             };
 
-            let listener = match self.process_until(bind_with_backoff()).await {
+            let listener = match self.process_until(bind_with_backoff()).await
+            {
                 ControlFlow::Continue(Ok(res)) => res,
                 ControlFlow::Continue(Err(_err)) => continue,
                 ControlFlow::Break(Terminated) => return Err(Terminated),
@@ -376,32 +389,40 @@ impl BmpTcpInRunner {
                     ControlFlow::Continue(Ok((tcp_stream, client_addr))) => {
                         let source_id = SourceId::from(client_addr);
 
-                        let state_machine =
-                            Arc::new(Mutex::new(Some(self.router_connected(&source_id))));
+                        let state_machine = Arc::new(Mutex::new(Some(
+                            self.router_connected(&source_id),
+                        )));
 
                         let weak_ref = Arc::downgrade(&state_machine);
-                        self.setup_router_specific_api_endpoint(weak_ref, &source_id)
-                            .await;
+                        self.setup_router_specific_api_endpoint(
+                            weak_ref, &source_id,
+                        )
+                        .await;
 
                         self.router_states
                             .insert(source_id.clone(), state_machine.clone());
 
-                        status_reporter.listener_connection_accepted(client_addr);
+                        status_reporter
+                            .listener_connection_accepted(client_addr);
 
                         // Spawn a task to handle the newly connected routers BMP
                         // message stream.
 
                         // Choose a name to be reported in application logs.
-                        let child_name =
-                            format!("router[{}:{}]", client_addr.ip(), client_addr.port());
+                        let child_name = format!(
+                            "router[{}:{}]",
+                            client_addr.ip(),
+                            client_addr.port()
+                        );
 
                         // Create a status reporter whose name in output will be
                         // a combination of ours as parent and the newly chosen
                         // child name, enabling logged messages relating to this
                         // newly connected router to be distinguished from logged
                         // messages relating to other connected routers.
-                        let child_status_reporter =
-                            Arc::new(self.status_reporter.add_child(&child_name));
+                        let child_status_reporter = Arc::new(
+                            self.status_reporter.add_child(&child_name),
+                        );
 
                         let router_handler = RouterHandler::new(
                             self.gate.clone(),
@@ -415,7 +436,9 @@ impl BmpTcpInRunner {
                         );
 
                         crate::tokio::spawn(&child_name, async move {
-                            router_handler.run(tcp_stream, client_addr, source_id).await
+                            router_handler
+                                .run(tcp_stream, client_addr, source_id)
+                                .await
                         });
                     }
                     ControlFlow::Continue(Err(_err)) => break 'inner,
@@ -464,19 +487,24 @@ impl BmpTcpInRunner {
 
                             self.listen = new_listen;
                             self.filter_name.store(new_filter_name.into());
-                            self.router_id_template.store(new_router_id_template.into());
+                            self.router_id_template
+                                .store(new_router_id_template.into());
                             self.tracing_mode.store(new_tracing_mode.into());
 
                             if rebind {
                                 // Trigger re-binding to the new listen port.
                                 let err = std::io::ErrorKind::Other;
-                                return ControlFlow::Continue(Err(err.into()));
+                                return ControlFlow::Continue(
+                                    Err(err.into()),
+                                );
                             }
                         }
 
                         GateStatus::ReportLinks { report } => {
                             report.declare_source();
-                            report.set_graph_status(self.bmp_in_metrics.clone());
+                            report.set_graph_status(
+                                self.bmp_in_metrics.clone(),
+                            );
                         }
 
                         _ => { /* Nothing to do */ }
@@ -516,7 +544,8 @@ impl BmpTcpInRunner {
         // messages relating to this newly connected router to be
         // distinguished from logged messages relating to other connected
         // routers.
-        let child_status_reporter = Arc::new(self.status_reporter.add_child(child_name));
+        let child_status_reporter =
+            Arc::new(self.status_reporter.add_child(child_name));
 
         #[cfg(feature = "router-list")]
         {
@@ -526,7 +555,12 @@ impl BmpTcpInRunner {
 
         let metrics = self.bmp_metrics.clone();
 
-        BmpState::new(source_id.clone(), router_id, child_status_reporter, metrics)
+        BmpState::new(
+            source_id.clone(),
+            router_id,
+            child_status_reporter,
+            metrics,
+        )
     }
 
     fn router_disconnected(&self, source_id: &SourceId) {
@@ -567,12 +601,13 @@ impl BmpTcpInRunner {
 
                 let processor = Arc::new(processor);
 
-                self.component
-                    .write()
-                    .await
-                    .register_sub_http_resource(processor.clone(), &self.http_api_path);
+                self.component.write().await.register_sub_http_resource(
+                    processor.clone(),
+                    &self.http_api_path,
+                );
 
-                let updatable_router_info = Arc::make_mut(&mut this_router_info);
+                let updatable_router_info =
+                    Arc::make_mut(&mut this_router_info);
                 updatable_router_info.api_processor = Some(processor);
 
                 self.router_info.insert(source_id.clone(), this_router_info);

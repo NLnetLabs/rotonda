@@ -61,7 +61,12 @@ pub struct RibMergeUpdateStatistics {
 }
 
 impl RibMergeUpdateStatistics {
-    pub fn add(&self, microseconds: u64, hashset_size: usize, withdraw: bool) {
+    pub fn add(
+        &self,
+        microseconds: u64,
+        hashset_size: usize,
+        withdraw: bool,
+    ) {
         let bucket = match withdraw {
             true => &self.withdraw,
             false => &self.other,
@@ -123,27 +128,51 @@ impl metrics::Source for RibMergeUpdateStatistics {
             target.append(metric, Some(unit_name), |records| {
                 let mut cum_v = data.le1.value();
                 let mut cum_n = data.le1.count();
-                records.suffixed_label_value(&[("le", "1")], cum_v, Some("bucket"));
+                records.suffixed_label_value(
+                    &[("le", "1")],
+                    cum_v,
+                    Some("bucket"),
+                );
 
                 cum_v += data.le10.value();
                 cum_n += data.le10.count();
-                records.suffixed_label_value(&[("le", "10")], cum_v, Some("bucket"));
+                records.suffixed_label_value(
+                    &[("le", "10")],
+                    cum_v,
+                    Some("bucket"),
+                );
 
                 cum_v += data.le100.value();
                 cum_n += data.le100.count();
-                records.suffixed_label_value(&[("le", "100")], cum_v, Some("bucket"));
+                records.suffixed_label_value(
+                    &[("le", "100")],
+                    cum_v,
+                    Some("bucket"),
+                );
 
                 cum_v += data.le1000.value();
                 cum_n += data.le1000.count();
-                records.suffixed_label_value(&[("le", "1000")], cum_v, Some("bucket"));
+                records.suffixed_label_value(
+                    &[("le", "1000")],
+                    cum_v,
+                    Some("bucket"),
+                );
 
                 cum_v += data.le10000.value();
                 cum_n += data.le10000.count();
-                records.suffixed_label_value(&[("le", "10000")], cum_v, Some("bucket"));
+                records.suffixed_label_value(
+                    &[("le", "10000")],
+                    cum_v,
+                    Some("bucket"),
+                );
 
                 cum_v += data.leInf.value();
                 cum_n += data.leInf.count();
-                records.suffixed_label_value(&[("le", "+Inf")], cum_v, Some("bucket"));
+                records.suffixed_label_value(
+                    &[("le", "+Inf")],
+                    cum_v,
+                    Some("bucket"),
+                );
 
                 records.suffixed_value(cum_n, Some("sum"));
                 records.suffixed_value(cum_v, Some("count"));

@@ -3,7 +3,9 @@ use std::{iter::Peekable, net::IpAddr, sync::Arc};
 
 use bytes::Bytes;
 use log::error;
-use roto::types::builtin::{BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus};
+use roto::types::builtin::{
+    BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus,
+};
 use routecore::{
     addr::Prefix,
     asn::Asn,
@@ -19,7 +21,9 @@ use smallvec::SmallVec;
 use crate::payload::{Payload, SourceId};
 
 // Based on code in bgmp::main.rs:
-pub fn generate_alternate_config(peer_config: &SessionConfig) -> Option<SessionConfig> {
+pub fn generate_alternate_config(
+    peer_config: &SessionConfig,
+) -> Option<SessionConfig> {
     let mut alt_peer_config = *peer_config;
     if peer_config.four_octet_asn == FourOctetAsn::Disabled {
         alt_peer_config.enable_four_octet_asn();
@@ -67,7 +71,8 @@ where
 
     // Loop over announced prefixes constructing BGP UPDATE PDUs with as many prefixes as can fit in one PDU at a
     // time until withdrawals have been generated for all announced prefixes.
-    let mut withdrawals_iter = prefixes.map(|p| Nlri::Unicast((*p).into())).peekable();
+    let mut withdrawals_iter =
+        prefixes.map(|p| Nlri::Unicast((*p).into())).peekable();
     while withdrawals_iter.peek().is_some() {
         match mk_bgp_update(&mut withdrawals_iter) {
             Ok(bgp_update) => {
@@ -81,7 +86,8 @@ where
                             nlri.prefix(),
                             RouteStatus::Withdrawn,
                         );
-                        let payload = Payload::new(source_id.clone(), route, None);
+                        let payload =
+                            Payload::new(source_id.clone(), route, None);
                         payloads.push(payload);
                     }
                 }
@@ -97,7 +103,9 @@ where
     payloads
 }
 
-fn mk_bgp_update<I>(withdrawals: &mut Peekable<I>) -> Result<UpdateMessage<Bytes>, ComposeError>
+fn mk_bgp_update<I>(
+    withdrawals: &mut Peekable<I>,
+) -> Result<UpdateMessage<Bytes>, ComposeError>
 where
     I: Iterator<Item = Nlri<Vec<u8>>>,
 {
@@ -119,8 +127,13 @@ pub fn mk_route_for_prefix(
     let delta_id = (RotondaId(0), 0); // TODO
     let roto_update_msg = roto::types::builtin::UpdateMessage(update);
     let raw_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
-    RawRouteWithDeltas::new_with_message_ref(delta_id, prefix.into(), &raw_msg, route_status)
-        .with_peer_ip(peer_address)
-        .with_peer_asn(peer_asn)
-        .with_router_id(router_id)
+    RawRouteWithDeltas::new_with_message_ref(
+        delta_id,
+        prefix.into(),
+        &raw_msg,
+        route_status,
+    )
+    .with_peer_ip(peer_address)
+    .with_peer_asn(peer_asn)
+    .with_router_id(router_id)
 }

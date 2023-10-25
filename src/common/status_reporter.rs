@@ -1,4 +1,7 @@
-use std::{fmt::{Display, Debug}, num::NonZeroUsize};
+use std::{
+    fmt::{Debug, Display},
+    num::NonZeroUsize,
+};
 
 use log::{debug, error, trace};
 

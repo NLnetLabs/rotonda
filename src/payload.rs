@@ -106,7 +106,10 @@ pub enum UpstreamStatus {
 //------------ Payload -------------------------------------------------------
 
 pub trait Filterable {
-    fn filter<E, T>(self, filter_fn: T) -> Result<SmallVec<[Payload; 8]>, FilterError>
+    fn filter<E, T>(
+        self,
+        filter_fn: T,
+    ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
         T: Fn(TypeValue, Option<u8>) -> FilterResult<E> + Clone,
         FilterError: From<E>;
@@ -168,12 +171,17 @@ impl Payload {
 }
 
 impl Filterable for Payload {
-    fn filter<E, T>(self, filter_fn: T) -> Result<SmallVec<[Payload; 8]>, FilterError>
+    fn filter<E, T>(
+        self,
+        filter_fn: T,
+    ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
         T: Fn(TypeValue, Option<u8>) -> FilterResult<E> + Clone,
         FilterError: From<E>,
     {
-        if let ControlFlow::Continue(filter_output) = filter_fn(self.value, self.trace_id)? {
+        if let ControlFlow::Continue(filter_output) =
+            filter_fn(self.value, self.trace_id)?
+        {
             Ok(Payload::from_filter_output(
                 self.source_id.clone(),
                 filter_output,
@@ -186,7 +194,10 @@ impl Filterable for Payload {
 }
 
 impl Filterable for SmallVec<[Payload; 8]> {
-    fn filter<E, T>(self, filter_fn: T) -> Result<SmallVec<[Payload; 8]>, FilterError>
+    fn filter<E, T>(
+        self,
+        filter_fn: T,
+    ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
         T: Fn(TypeValue, Option<u8>) -> FilterResult<E> + Clone,
         FilterError: From<E>,
@@ -210,7 +221,8 @@ impl Payload {
         let mut out_payloads = smallvec![];
 
         // Make a payload out of it
-        let new_payload = Payload::new(source_id.clone(), filter_output.east, trace_id);
+        let new_payload =
+            Payload::new(source_id.clone(), filter_output.east, trace_id);
 
         // Add the payload to the result
         out_payloads.push(new_payload);
@@ -218,10 +230,9 @@ impl Payload {
         // Add output stream messages to the result
         if !filter_output.south.is_empty() {
             out_payloads.extend(
-                filter_output
-                    .south
-                    .into_iter()
-                    .map(|osm| Payload::new(source_id.clone(), osm, trace_id)),
+                filter_output.south.into_iter().map(|osm| {
+                    Payload::new(source_id.clone(), osm, trace_id)
+                }),
             );
         }
 
@@ -268,10 +279,18 @@ pub enum Update {
 }
 
 impl Update {
-    pub fn trace_ids(&self) -> SmallVec::<[&Payload; 1]> {
+    pub fn trace_ids(&self) -> SmallVec<[&Payload; 1]> {
         match self {
-            Update::Single(payload) => { if payload.trace_id().is_some() { [payload].into() } else { smallvec![] } },
-            Update::Bulk(payloads) => payloads.iter().filter(|p| p.trace_id().is_some()).collect(),
+            Update::Single(payload) => {
+                if payload.trace_id().is_some() {
+                    [payload].into()
+                } else {
+                    smallvec![]
+                }
+            }
+            Update::Bulk(payloads) => {
+                payloads.iter().filter(|p| p.trace_id().is_some()).collect()
+            }
             Update::QueryResult(_, _) => smallvec![],
             Update::UpstreamStatusChange(_) => smallvec![],
         }

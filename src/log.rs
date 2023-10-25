@@ -112,10 +112,16 @@ impl LogConfig {
     /// This is the Unix version that also considers syslog as a valid
     /// target.
     #[cfg(unix)]
-    fn apply_log_matches(&mut self, matches: &ArgMatches, cur_dir: &Path) -> Result<(), Terminate> {
+    fn apply_log_matches(
+        &mut self,
+        matches: &ArgMatches,
+        cur_dir: &Path,
+    ) -> Result<(), Terminate> {
         if matches.get_flag("syslog") {
             self.log_target = LogTarget::Syslog;
-            if let Some(value) = Self::from_str_value_of(matches, "syslog-facility")? {
+            if let Some(value) =
+                Self::from_str_value_of(matches, "syslog-facility")?
+            {
                 self.log_facility = value
             }
         } else if let Some(file) = matches.get_one::<String>("logfile") {
@@ -134,7 +140,11 @@ impl LogConfig {
     /// This is the non-Unix version that does not use syslog.
     #[cfg(not(unix))]
     #[allow(clippy::unnecessary_wraps)]
-    fn apply_log_matches(&mut self, matches: &ArgMatches, cur_dir: &Path) -> Result<(), Terminate> {
+    fn apply_log_matches(
+        &mut self,
+        matches: &ArgMatches,
+        cur_dir: &Path,
+    ) -> Result<(), Terminate> {
         if let Some(file) = matches.value_of("logfile") {
             if file == "-" {
                 self.log_target = LogTarget::Stderr
@@ -152,7 +162,10 @@ impl LogConfig {
     /// the actual conversion error, it logs it as an invalid value for entry
     /// `key` and returns the standard error.
     #[allow(dead_code)] // unused on Windows
-    fn from_str_value_of<T>(matches: &ArgMatches, key: &str) -> Result<Option<T>, Terminate>
+    fn from_str_value_of<T>(
+        matches: &ArgMatches,
+        key: &str,
+    ) -> Result<Option<T>, Terminate>
     where
         T: FromStr,
         T::Err: fmt::Display,
@@ -232,7 +245,9 @@ impl LogConfig {
         let formatter = formatter;
         let logger = syslog::unix(formatter.clone())
             .or_else(|_| syslog::tcp(formatter.clone(), ("127.0.0.1", 601)))
-            .or_else(|_| syslog::udp(formatter, ("127.0.0.1", 0), ("127.0.0.1", 514)));
+            .or_else(|_| {
+                syslog::udp(formatter, ("127.0.0.1", 0), ("127.0.0.1", 514))
+            });
         match logger {
             Ok(logger) => Ok(Box::new(syslog::BasicLogger::new(logger))),
             Err(err) => {
@@ -275,7 +290,8 @@ impl LogConfig {
             Ok(_) => self.log_level.0.min(LevelFilter::Trace),
             Err(_) => self.log_level.0.min(LevelFilter::Warn),
         };
-        let rotonda_store_log_level = match std::env::var("ROTONDA_STORE_LOG") {
+        let rotonda_store_log_level = match std::env::var("ROTONDA_STORE_LOG")
+        {
             Ok(_) => self.log_level.0.min(LevelFilter::Trace),
             Err(_) => self.log_level.0.min(LevelFilter::Warn),
         };
@@ -298,7 +314,8 @@ impl LogConfig {
         if timestamp_and_level {
             res = res.format(move |out, message, record| {
                 let module_path = record.module_path().unwrap_or("");
-                let show_module = debug_enabled || !module_path.starts_with("rotonda");
+                let show_module =
+                    debug_enabled || !module_path.starts_with("rotonda");
                 out.finish(format_args!(
                     "[{}] {:5} {}{}{}",
                     chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
@@ -311,7 +328,8 @@ impl LogConfig {
         } else {
             res = res.format(move |out, message, record| {
                 let module_path = record.module_path().unwrap_or("");
-                let show_module = debug_enabled || !module_path.starts_with("rotonda");
+                let show_module =
+                    debug_enabled || !module_path.starts_with("rotonda");
                 out.finish(format_args!(
                     "{}{}{}",
                     if show_module { module_path } else { "" },
@@ -567,7 +585,11 @@ pub struct TraceMsg {
 }
 
 impl TraceMsg {
-    pub fn new(gate_id: Uuid, msg: String, msg_relation: MsgRelation) -> Self {
+    pub fn new(
+        gate_id: Uuid,
+        msg: String,
+        msg_relation: MsgRelation,
+    ) -> Self {
         let timestamp = Utc::now();
         Self {
             timestamp,
@@ -588,7 +610,12 @@ impl Trace {
         Self { msgs: Vec::new() }
     }
 
-    pub fn append_msg(&mut self, gate_id: Uuid, msg: String, msg_relation: MsgRelation) {
+    pub fn append_msg(
+        &mut self,
+        gate_id: Uuid,
+        msg: String,
+        msg_relation: MsgRelation,
+    ) {
         self.msgs.push(TraceMsg::new(gate_id, msg, msg_relation));
     }
 
@@ -596,13 +623,18 @@ impl Trace {
         self.msgs.clear();
     }
 
-    pub fn msg_indices(&self, gate_id: Uuid, msg_relation: MsgRelation) -> Vec<usize> {
+    pub fn msg_indices(
+        &self,
+        gate_id: Uuid,
+        msg_relation: MsgRelation,
+    ) -> Vec<usize> {
         self.msgs
             .iter()
             .enumerate()
             .filter_map(|(idx, msg)| {
                 if msg.gate_id == gate_id
-                    && (msg_relation == MsgRelation::ALL || msg.msg_relation == msg_relation)
+                    && (msg_relation == MsgRelation::ALL
+                        || msg.msg_relation == msg_relation)
                 {
                     Some(idx)
                 } else {
@@ -625,7 +657,8 @@ pub struct Tracer {
 impl std::fmt::Debug for Tracer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let lock = self.traces.lock().unwrap();
-        let traces: Vec<&Trace> = lock.iter().filter(|trace| !trace.msgs.is_empty()).collect();
+        let traces: Vec<&Trace> =
+            lock.iter().filter(|trace| !trace.msgs.is_empty()).collect();
         f.debug_struct("Tracer").field("traces", &traces).finish()
     }
 }
@@ -648,10 +681,19 @@ impl Tracer {
     }
 
     pub fn note_gate_event(&self, trace_id: u8, gate_id: Uuid, msg: String) {
-        self.traces.lock().unwrap()[trace_id as usize].append_msg(gate_id, msg, MsgRelation::GATE);
+        self.traces.lock().unwrap()[trace_id as usize].append_msg(
+            gate_id,
+            msg,
+            MsgRelation::GATE,
+        );
     }
 
-    pub fn note_component_event(&self, trace_id: u8, gate_id: Uuid, msg: String) {
+    pub fn note_component_event(
+        &self,
+        trace_id: u8,
+        gate_id: Uuid,
+        msg: String,
+    ) {
         self.traces.lock().unwrap()[trace_id as usize].append_msg(
             gate_id,
             msg,
@@ -678,13 +720,11 @@ pub struct BoundTracer {
 
 impl BoundTracer {
     pub fn bind(tracer: Arc<Tracer>, gate_id: Uuid) -> Self {
-        Self {
-            tracer,
-            gate_id,
-        }
+        Self { tracer, gate_id }
     }
 
     pub fn note_event(&self, trace_id: u8, msg: String) {
-        self.tracer.note_component_event(trace_id, self.gate_id, msg)
+        self.tracer
+            .note_component_event(trace_id, self.gate_id, msg)
     }
 }

@@ -9,7 +9,9 @@ use std::{
 use crate::{
     common::frim::FrimMap,
     comms::{Gate, GateMetrics},
-    metrics::{self, util::append_per_router_metric, Metric, MetricType, MetricUnit},
+    metrics::{
+        self, util::append_per_router_metric, Metric, MetricType, MetricUnit,
+    },
 };
 
 #[derive(Debug, Default)]
@@ -20,7 +22,10 @@ pub struct RotoFilterMetrics {
 }
 
 impl RotoFilterMetrics {
-    pub fn router_metrics(&self, socket_addr: SocketAddr) -> Arc<RouterMetrics> {
+    pub fn router_metrics(
+        &self,
+        socket_addr: SocketAddr,
+    ) -> Arc<RouterMetrics> {
         self.routers
             .entry(Arc::new(socket_addr))
             .or_insert_with(Default::default)

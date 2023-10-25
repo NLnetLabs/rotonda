@@ -42,8 +42,12 @@ where
             }
             UnitActivity::GateStatusChanged(status, next_fut)
         }
-        Either::Right((Err(err), _process_fut)) => UnitActivity::InputError(err),
-        Either::Right((Ok(ok), _process_fut)) => UnitActivity::InputReceived(ok),
+        Either::Right((Err(err), _process_fut)) => {
+            UnitActivity::InputError(err)
+        }
+        Either::Right((Ok(ok), _process_fut)) => {
+            UnitActivity::InputReceived(ok)
+        }
     }
 }
 
@@ -53,7 +57,12 @@ where
     F: Future<Output = X> + Unpin,
     USR: UnitStatusReporter,
 {
-    fn from((status_reporter, either): (&Arc<USR>, SelectResult<Result<O, E>, F, Z>)) -> Self {
+    fn from(
+        (status_reporter, either): (
+            &Arc<USR>,
+            SelectResult<Result<O, E>, F, Z>,
+        ),
+    ) -> Self {
         wait_for_activity(status_reporter, either)
     }
 }
@@ -75,21 +84,27 @@ where
             status_reporter.gate_status_announced(&status);
             UnitActivity::GateStatusChanged(status, next_fut)
         }
-        Either::Right(((ready_fut, _fut_index, _other_futs), _)) => match ready_fut {
-            Err(err) => UnitActivity::InputError(err),
-            Ok(ok) => UnitActivity::InputReceived(ok),
-        },
+        Either::Right(((ready_fut, _fut_index, _other_futs), _)) => {
+            match ready_fut {
+                Err(err) => UnitActivity::InputError(err),
+                Ok(ok) => UnitActivity::InputReceived(ok),
+            }
+        }
     }
 }
 
-impl<O, E, F, V, X, Z, USR> From<(&Arc<USR>, SelectResult<SelectAllOutput<O, E, V>, F, Z>)>
+impl<O, E, F, V, X, Z, USR>
+    From<(&Arc<USR>, SelectResult<SelectAllOutput<O, E, V>, F, Z>)>
     for UnitActivity<O, E, F, X>
 where
     F: Future<Output = X> + Unpin,
     USR: UnitStatusReporter,
 {
     fn from(
-        (status_reporter, res): (&Arc<USR>, SelectResult<SelectAllOutput<O, E, V>, F, Z>),
+        (status_reporter, res): (
+            &Arc<USR>,
+            SelectResult<SelectAllOutput<O, E, V>, F, Z>,
+        ),
     ) -> Self {
         wait_for_first_activity(status_reporter, res)
     }

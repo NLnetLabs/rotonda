@@ -173,7 +173,11 @@ pub struct Dumping {
 
 impl BmpStateDetails<Dumping> {
     #[allow(dead_code)]
-    pub fn process_msg(self, bmp_msg: BmpMsg<Bytes>, trace_id: Option<u8>) -> ProcessingResult {
+    pub fn process_msg(
+        self,
+        bmp_msg: BmpMsg<Bytes>,
+        trace_id: Option<u8>,
+    ) -> ProcessingResult {
         match bmp_msg {
             // already verified upstream
             BmpMsg::InitiationMessage(msg) => self.initiate(msg),
@@ -181,21 +185,26 @@ impl BmpStateDetails<Dumping> {
             BmpMsg::PeerUpNotification(msg) => {
                 let res = self.peer_up(msg);
                 if let BmpState::Dumping(state) = &res.next_state {
-                    let num_pending_eors = state.details.peer_states.num_pending_eors();
-                    state
-                        .status_reporter
-                        .pending_eors_update(state.router_id.clone(), num_pending_eors);
+                    let num_pending_eors =
+                        state.details.peer_states.num_pending_eors();
+                    state.status_reporter.pending_eors_update(
+                        state.router_id.clone(),
+                        num_pending_eors,
+                    );
                 }
                 res
             }
 
             BmpMsg::PeerDownNotification(msg) => self.peer_down(msg),
 
-            BmpMsg::RouteMonitoring(msg) => {
-                self.route_monitoring(msg, RouteStatus::InConvergence, trace_id, |s, pph, update| {
+            BmpMsg::RouteMonitoring(msg) => self.route_monitoring(
+                msg,
+                RouteStatus::InConvergence,
+                trace_id,
+                |s, pph, update| {
                     s.route_monitoring_preprocessing(pph, update)
-                })
-            }
+                },
+            ),
 
             BmpMsg::TerminationMessage(msg) => self.terminate(Some(msg)),
 
@@ -229,11 +238,15 @@ impl BmpStateDetails<Dumping> {
                 //
                 // [1]: https://www.rfc-editor.org/errata/eid7133
                 let num_pending_eors = self.details.num_pending_eors();
-                self.status_reporter
-                    .pending_eors_update(self.router_id.clone(), num_pending_eors);
+                self.status_reporter.pending_eors_update(
+                    self.router_id.clone(),
+                    num_pending_eors,
+                );
 
                 let next_state = BmpState::Updating(self.into());
-                return ControlFlow::Break(Self::mk_state_transition_result(next_state));
+                return ControlFlow::Break(Self::mk_state_transition_result(
+                    next_state,
+                ));
             }
         }
 
@@ -258,7 +271,10 @@ impl BmpStateDetails<Dumping> {
         if routes.is_empty() {
             Self::mk_state_transition_result(next_state)
         } else {
-            Self::mk_final_routing_update_result(next_state, Update::Bulk(routes))
+            Self::mk_final_routing_update_result(
+                next_state,
+                Update::Bulk(routes),
+            )
         }
     }
 }
@@ -292,7 +308,12 @@ impl From<BmpStateDetails<Initiating>> for BmpStateDetails<Dumping> {
 }
 
 impl Initiable for Dumping {
-    fn set_information_tlvs(&mut self, sys_name: String, sys_desc: String, sys_extra: Vec<String>) {
+    fn set_information_tlvs(
+        &mut self,
+        sys_name: String,
+        sys_desc: String,
+        sys_extra: Vec<String>,
+    ) {
         self.sys_name = sys_name;
         self.sys_desc = sys_desc;
         self.sys_extra = sys_extra;
@@ -318,11 +339,18 @@ impl PeerAware for Dumping {
         self.peer_states.get_peers()
     }
 
-    fn update_peer_config(&mut self, pph: &PerPeerHeader<Bytes>, config: SessionConfig) -> bool {
+    fn update_peer_config(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        config: SessionConfig,
+    ) -> bool {
         self.peer_states.update_peer_config(pph, config)
     }
 
-    fn get_peer_config(&self, pph: &PerPeerHeader<Bytes>) -> Option<&SessionConfig> {
+    fn get_peer_config(
+        &self,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> Option<&SessionConfig> {
         self.peer_states.get_peer_config(pph)
     }
 
@@ -334,15 +362,28 @@ impl PeerAware for Dumping {
         self.peer_states.num_peer_configs()
     }
 
-    fn is_peer_eor_capable(&self, pph: &PerPeerHeader<Bytes>) -> Option<bool> {
+    fn is_peer_eor_capable(
+        &self,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> Option<bool> {
         self.peer_states.is_peer_eor_capable(pph)
     }
 
-    fn add_pending_eor(&mut self, pph: &PerPeerHeader<Bytes>, afi: AFI, safi: SAFI) {
+    fn add_pending_eor(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        afi: AFI,
+        safi: SAFI,
+    ) {
         self.peer_states.add_pending_eor(pph, afi, safi)
     }
 
-    fn remove_pending_eor(&mut self, pph: &PerPeerHeader<Bytes>, afi: AFI, safi: SAFI) -> bool {
+    fn remove_pending_eor(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        afi: AFI,
+        safi: SAFI,
+    ) -> bool {
         self.peer_states.remove_pending_eor(pph, afi, safi)
     }
 
@@ -350,11 +391,19 @@ impl PeerAware for Dumping {
         self.peer_states.num_pending_eors()
     }
 
-    fn add_announced_prefix(&mut self, pph: &PerPeerHeader<Bytes>, prefix: Prefix) -> bool {
+    fn add_announced_prefix(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        prefix: Prefix,
+    ) -> bool {
         self.peer_states.add_announced_prefix(pph, prefix)
     }
 
-    fn remove_announced_prefix(&mut self, pph: &PerPeerHeader<Bytes>, prefix: &Prefix) {
+    fn remove_announced_prefix(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        prefix: &Prefix,
+    ) {
         self.peer_states.remove_announced_prefix(pph, prefix)
     }
 

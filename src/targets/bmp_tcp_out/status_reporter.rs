@@ -31,12 +31,21 @@ impl BmpProxyStatusReporter {
     ///
     /// This must be called prior to calling any other member function that
     /// takes a router address as input, otherwise metrics will not be updated.
-    pub fn init_per_proxy_metrics(&self, router_addr: SocketAddr, queue_capacity: usize) {
+    pub fn init_per_proxy_metrics(
+        &self,
+        router_addr: SocketAddr,
+        queue_capacity: usize,
+    ) {
         self.metrics
             .init_metrics_for_proxy(router_addr, queue_capacity);
     }
 
-    pub fn proxy_router_excluded(&self, router_addr: &SocketAddr, accepted: bool, rejected: bool) {
+    pub fn proxy_router_excluded(
+        &self,
+        router_addr: &SocketAddr,
+        accepted: bool,
+        rejected: bool,
+    ) {
         sr_log!(
             warn: self,
             "Proxying denied for router {} (accepted={}, rejected={})",
@@ -74,7 +83,11 @@ impl BmpProxyStatusReporter {
             .store(ProxyState::None, SeqCst);
     }
 
-    fn update_proxy_state_metrics(&self, router_addr: SocketAddr, new_state: ProxyState) {
+    fn update_proxy_state_metrics(
+        &self,
+        router_addr: SocketAddr,
+        new_state: ProxyState,
+    ) {
         let metrics = self.metrics.proxy_metrics(router_addr);
         metrics.proxy_state.store(new_state, SeqCst);
         metrics
@@ -92,7 +105,11 @@ impl BmpProxyStatusReporter {
         self.update_proxy_state_metrics(router_addr, ProxyState::Recovered);
     }
 
-    pub fn proxy_queue_error<T: Display>(&self, router_addr: SocketAddr, err: T) {
+    pub fn proxy_queue_error<T: Display>(
+        &self,
+        router_addr: SocketAddr,
+        err: T,
+    ) {
         sr_log!(warn: self, "Proxy queue: stalled: {}", err);
         self.update_proxy_state_metrics(router_addr, ProxyState::Stalled);
     }
@@ -110,7 +127,11 @@ impl BmpProxyStatusReporter {
         self.metrics.remove_metrics_for_proxy(router_addr);
     }
 
-    pub fn proxy_queue_capacity(&self, router_addr: SocketAddr, capacity: usize) {
+    pub fn proxy_queue_capacity(
+        &self,
+        router_addr: SocketAddr,
+        capacity: usize,
+    ) {
         self.metrics
             .proxy_metrics(router_addr)
             .queue_capacity

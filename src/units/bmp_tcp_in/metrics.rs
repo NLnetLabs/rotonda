@@ -6,7 +6,9 @@ use std::sync::{
 use crate::{
     common::frim::FrimMap,
     comms::{Gate, GateMetrics, GraphStatus},
-    metrics::{self, util::append_per_router_metric, Metric, MetricType, MetricUnit},
+    metrics::{
+        self, util::append_per_router_metric, Metric, MetricType, MetricUnit,
+    },
     payload::RouterId,
 };
 
@@ -81,7 +83,10 @@ impl BmpTcpInMetrics {
     /// Warning: This fn will create a metric set for the given router id if
     /// it doesn't already exist. Use `contains()` to test if metrics exist
     /// for a given router id.
-    pub fn router_metrics(&self, router_id: Arc<RouterId>) -> Arc<RouterMetrics> {
+    pub fn router_metrics(
+        &self,
+        router_id: Arc<RouterId>,
+    ) -> Arc<RouterMetrics> {
         self.routers
             .entry(router_id)
             .or_insert_with(Default::default)
@@ -141,8 +146,8 @@ impl metrics::Source for BmpTcpInMetrics {
 
 impl GraphStatus for BmpTcpInMetrics {
     fn status_text(&self) -> String {
-        let num_clients =
-            self.connection_accepted_count.load(SeqCst) - self.connection_lost_count.load(SeqCst);
+        let num_clients = self.connection_accepted_count.load(SeqCst)
+            - self.connection_lost_count.load(SeqCst);
         let num_msgs_out = self
             .gate
             .as_ref()
@@ -152,10 +157,13 @@ impl GraphStatus for BmpTcpInMetrics {
     }
 
     fn okay(&self) -> Option<bool> {
-        let connection_accepted_count = self.connection_accepted_count.load(SeqCst);
+        let connection_accepted_count =
+            self.connection_accepted_count.load(SeqCst);
         if connection_accepted_count > 0 {
-            let connection_lost_count = self.connection_lost_count.load(SeqCst);
-            let num_clients = connection_accepted_count - connection_lost_count;
+            let connection_lost_count =
+                self.connection_lost_count.load(SeqCst);
+            let num_clients =
+                connection_accepted_count - connection_lost_count;
             Some(num_clients > 0)
         } else {
             None

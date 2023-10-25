@@ -85,10 +85,16 @@ impl RouterListApi {
                 let locked = state_machine.lock().await;
                 let (sys_name, sys_desc) = if let Some(sm) = locked.as_ref() {
                     match sm {
-                        BmpState::Dumping(BmpStateDetails { details, .. }) => {
+                        BmpState::Dumping(BmpStateDetails {
+                            details,
+                            ..
+                        }) => {
                             (Some(&details.sys_name), Some(&details.sys_desc))
                         }
-                        BmpState::Updating(BmpStateDetails { details, .. }) => {
+                        BmpState::Updating(BmpStateDetails {
+                            details,
+                            ..
+                        }) => {
                             (Some(&details.sys_name), Some(&details.sys_desc))
                         }
                         _ => {
@@ -124,25 +130,34 @@ impl RouterListApi {
                             sys_name,
                             addr,
                         ));
-                        let metrics = self.bmp_metrics.router_metrics(router_id.clone());
+                        let metrics = self
+                            .bmp_metrics
+                            .router_metrics(router_id.clone());
 
-                        let state = metrics.bmp_state_machine_state.load(SeqCst);
+                        let state =
+                            metrics.bmp_state_machine_state.load(SeqCst);
                         let num_peers_up = metrics.num_peers_up.load(SeqCst);
                         let num_peers_up_eor_capable =
                             metrics.num_peers_up_eor_capable.load(SeqCst);
-                        let num_peers_up_dumping = metrics.num_peers_up_dumping.load(SeqCst);
-                        let num_peers_up_eor_capable_pc =
-                            calc_u8_pc(num_peers_up, num_peers_up_eor_capable);
-                        let num_peers_up_dumping_pc =
-                            calc_u8_pc(num_peers_up_eor_capable, num_peers_up_dumping);
-                        let num_invalid_bmp_messages = if self.router_metrics.contains(&router_id) {
-                            self.router_metrics
-                                .router_metrics(router_id)
-                                .num_invalid_bmp_messages
-                                .load(SeqCst)
-                        } else {
-                            0
-                        };
+                        let num_peers_up_dumping =
+                            metrics.num_peers_up_dumping.load(SeqCst);
+                        let num_peers_up_eor_capable_pc = calc_u8_pc(
+                            num_peers_up,
+                            num_peers_up_eor_capable,
+                        );
+                        let num_peers_up_dumping_pc = calc_u8_pc(
+                            num_peers_up_eor_capable,
+                            num_peers_up_dumping,
+                        );
+                        let num_invalid_bmp_messages =
+                            if self.router_metrics.contains(&router_id) {
+                                self.router_metrics
+                                    .router_metrics(router_id)
+                                    .num_invalid_bmp_messages
+                                    .load(SeqCst)
+                            } else {
+                                0
+                            };
                         let num_soft_parsing_failures = metrics
                             .num_bgp_updates_with_recoverable_parsing_failures_for_known_peers
                             .load(SeqCst)

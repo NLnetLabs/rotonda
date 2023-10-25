@@ -75,7 +75,8 @@ unsafe impl<T: Allocator> Allocator for TrackingAllocator<T> {
     fn allocate(
         &self,
         layout: Layout,
-    ) -> Result<std::ptr::NonNull<[u8]>, allocator_api2::alloc::AllocError> {
+    ) -> Result<std::ptr::NonNull<[u8]>, allocator_api2::alloc::AllocError>
+    {
         let p = self.allocator.allocate(layout);
         self.record_alloc(layout);
         p

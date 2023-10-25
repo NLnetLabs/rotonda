@@ -47,11 +47,14 @@ impl FatalError for std::io::Error {
 }
 
 /// # Tracing
-/// 
+///
 /// If a trace id is found in the incoming message it will be returned in
 /// the u8 value as a value greater than zero. A zero value indicates that
 /// tracing was not requested.
-async fn bmp_read<T: AsyncRead + Unpin>(mut rx: T, tracing_mode: TracingMode) -> Result<(T, Bytes, u8), (T, std::io::Error)> {
+async fn bmp_read<T: AsyncRead + Unpin>(
+    mut rx: T,
+    tracing_mode: TracingMode,
+) -> Result<(T, Bytes, u8), (T, std::io::Error)> {
     let mut msg_buf = BytesMut::new();
     msg_buf.resize(5, 0u8);
     if let Err(err) = rx.read_exact(&mut msg_buf).await {
@@ -62,7 +65,7 @@ async fn bmp_read<T: AsyncRead + Unpin>(mut rx: T, tracing_mode: TracingMode) ->
     // if any bits are set, i.e. it represents an unsigned integer value
     // greater than zero.
     let mut trace_id = 0;
-    
+
     if tracing_mode != TracingMode::Off {
         trace_id = msg_buf[0] >> 4;
         msg_buf[0] &= 0b0000_1111;
@@ -80,7 +83,9 @@ async fn bmp_read<T: AsyncRead + Unpin>(mut rx: T, tracing_mode: TracingMode) ->
 
     match BmpMsg::from_octets(&msg_buf) {
         Ok(_) => Ok((rx, msg_buf, trace_id)),
-        Err(err) => Err((rx, std::io::Error::new(ErrorKind::Other, err.to_string()))),
+        Err(err) => {
+            Err((rx, std::io::Error::new(ErrorKind::Other, err.to_string())))
+        }
     }
 }
 
@@ -91,8 +96,16 @@ pub struct BmpStream<T: AsyncRead> {
 }
 
 impl<T: AsyncRead + Unpin> BmpStream<T> {
-    pub fn new(rx: T, gate: Gate, tracing_mode: Arc<ArcSwap<TracingMode>>) -> Self {
-        Self { rx: Some(rx), gate, tracing_mode }
+    pub fn new(
+        rx: T,
+        gate: Gate,
+        tracing_mode: Arc<ArcSwap<TracingMode>>,
+    ) -> Self {
+        Self {
+            rx: Some(rx),
+            gate,
+            tracing_mode,
+        }
     }
 
     /// Retrieve the next BMP message from the stream.
@@ -110,17 +123,20 @@ impl<T: AsyncRead + Unpin> BmpStream<T> {
     ///
     /// This function is NOT cancel safe. If cancelled the stream receiver
     /// will be lost and no further updates can be read from the stream.
-    /// 
+    ///
     /// # Tracing
-    /// 
+    ///
     /// If a trace id is found in the incoming message it will be returned in
     /// the u8 value as a value greater than zero. A zero value indicates that
     /// tracing was not requested.
-    pub async fn next(&mut self) -> Result<(Option<Bytes>, Option<GateStatus>, u8), std::io::Error> {
+    pub async fn next(
+        &mut self,
+    ) -> Result<(Option<Bytes>, Option<GateStatus>, u8), std::io::Error> {
         let mut saved_gate_status = None;
 
         if let Some(rx) = self.rx.take() {
-            let mut update_fut = Box::pin(bmp_read(rx, **self.tracing_mode.load()));
+            let mut update_fut =
+                Box::pin(bmp_read(rx, **self.tracing_mode.load()));
             loop {
                 let process = self.gate.process();
                 pin_mut!(process);

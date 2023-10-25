@@ -9,14 +9,15 @@ use hyper::{Body, Method, Request, Response};
 use tokio::sync::Mutex;
 
 use crate::{
-    http::{PercentDecodedPath, ProcessRequest, self},
+    http::{self, PercentDecodedPath, ProcessRequest},
+    payload::SourceId,
     units::bmp_tcp_in::{
         metrics::BmpTcpInMetrics,
         state_machine::{
             machine::{BmpState, BmpStateDetails},
             metrics::BmpMetrics,
         },
-    }, payload::SourceId,
+    },
 };
 
 use super::response::Focus;
@@ -58,19 +59,28 @@ impl RouterInfoApi {
 
 #[async_trait]
 impl ProcessRequest for RouterInfoApi {
-    async fn process_request(&self, request: &Request<Body>) -> Option<Response<Body>> {
+    async fn process_request(
+        &self,
+        request: &Request<Body>,
+    ) -> Option<Response<Body>> {
         let req_path = request.uri().decoded_path();
-        if request.method() == Method::GET && req_path.starts_with(self.http_api_path.deref()) {
-            let (base_path, router) = req_path.split_at(self.http_api_path.len());
+        if request.method() == Method::GET
+            && req_path.starts_with(self.http_api_path.deref())
+        {
+            let (base_path, router) =
+                req_path.split_at(self.http_api_path.len());
             if !router.is_empty() {
                 if let Some(state_machine) = self.state_machine.upgrade() {
                     let lock = state_machine.lock().await;
                     let sm = lock.as_ref().unwrap();
 
-                    let (router, focus) = if let Some((router, peer)) = router.split_once("/prefixes/")
+                    let (router, focus) = if let Some((router, peer)) =
+                        router.split_once("/prefixes/")
                     {
                         (router, Focus::Prefixes(peer.to_string()))
-                    } else if let Some((router, peer)) = router.split_once("/flags/") {
+                    } else if let Some((router, peer)) =
+                        router.split_once("/flags/")
+                    {
                         (router, Focus::Flags(peer.to_string()))
                     } else {
                         (router, Focus::None)
@@ -82,24 +92,31 @@ impl ProcessRequest for RouterInfoApi {
                     let EMPTY_VEC: Vec<String> = vec![];
 
                     let router_id = sm.router_id();
-                    let (sys_name, sys_desc, sys_extra, peer_states) = match sm {
-                        BmpState::Dumping(BmpStateDetails { details, .. }) => (
-                            &details.sys_name,
-                            &details.sys_desc,
-                            &details.sys_extra,
-                            Some(&details.peer_states),
-                        ),
-                        BmpState::Updating(BmpStateDetails { details, .. }) => (
-                            &details.sys_name,
-                            &details.sys_desc,
-                            &details.sys_extra,
-                            Some(&details.peer_states),
-                        ),
-                        _ => {
-                            // no TLVs available
-                            (&EMPTY_STR, &EMPTY_STR, &EMPTY_VEC, None)
-                        }
-                    };
+                    let (sys_name, sys_desc, sys_extra, peer_states) =
+                        match sm {
+                            BmpState::Dumping(BmpStateDetails {
+                                details,
+                                ..
+                            }) => (
+                                &details.sys_name,
+                                &details.sys_desc,
+                                &details.sys_extra,
+                                Some(&details.peer_states),
+                            ),
+                            BmpState::Updating(BmpStateDetails {
+                                details,
+                                ..
+                            }) => (
+                                &details.sys_name,
+                                &details.sys_desc,
+                                &details.sys_extra,
+                                Some(&details.peer_states),
+                            ),
+                            _ => {
+                                // no TLVs available
+                                (&EMPTY_STR, &EMPTY_STR, &EMPTY_VEC, None)
+                            }
+                        };
 
                     if router == self.source_id.to_string()
                         || router == router_id.as_str()

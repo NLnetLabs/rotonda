@@ -1,6 +1,8 @@
 use std::ops::ControlFlow;
 
-use crate::units::bmp_tcp_in::state_machine::{machine::BmpStateDetails, processing::ProcessingResult};
+use crate::units::bmp_tcp_in::state_machine::{
+    machine::BmpStateDetails, processing::ProcessingResult,
+};
 
 use super::{dumping::Dumping, initiating::Initiating, updating::Updating};
 
@@ -74,7 +76,11 @@ impl From<Updating> for Terminated {
 
 impl BmpStateDetails<Terminated> {
     #[allow(dead_code)]
-    pub fn process_msg(self, bmp_msg: BmpMsg<Bytes>, _trace_id: Option<u8>) -> ProcessingResult {
+    pub fn process_msg(
+        self,
+        bmp_msg: BmpMsg<Bytes>,
+        _trace_id: Option<u8>,
+    ) -> ProcessingResult {
         self.process_msg_with_filter(bmp_msg, None::<()>, |msg, _| {
             Ok(ControlFlow::Continue((msg, OutputStreamQueue::new())))
         })
@@ -90,7 +96,10 @@ impl BmpStateDetails<Terminated> {
         F: Fn(
             BgpUpdateMessage,
             Option<D>,
-        ) -> Result<ControlFlow<(), (BgpUpdateMessage, OutputStreamQueue)>, String>,
+        ) -> Result<
+            ControlFlow<(), (BgpUpdateMessage, OutputStreamQueue)>,
+            String,
+        >,
     {
         self.mk_invalid_message_result(format!(
             "RFC 7854 4.3 violation: No messages should be received in the terminated state but received: {}",

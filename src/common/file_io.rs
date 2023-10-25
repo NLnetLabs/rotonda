@@ -27,11 +27,20 @@ pub trait FileIo: Default {
     where
         T: AsRef<[u8]> + Send + Sync;
 
-    async fn flush<W: AsyncWrite + Unpin + Send>(&mut self, writer: W) -> std::io::Result<()>;
+    async fn flush<W: AsyncWrite + Unpin + Send>(
+        &mut self,
+        writer: W,
+    ) -> std::io::Result<()>;
 
-    fn read_to_string<P: AsRef<Path>>(&self, path: P) -> std::io::Result<String>;
+    fn read_to_string<P: AsRef<Path>>(
+        &self,
+        path: P,
+    ) -> std::io::Result<String>;
 
-    fn read_dir<P: AsRef<Path>>(&self, path: P) -> std::io::Result<fileio::ReadDir>;
+    fn read_dir<P: AsRef<Path>>(
+        &self,
+        path: P,
+    ) -> std::io::Result<fileio::ReadDir>;
 }
 
 // --- FileIo trait: real filesystem implementation -------------------------
@@ -56,7 +65,11 @@ mod fileio {
 
     #[async_trait]
     impl super::FileIo for RealFileIo {
-        async fn rename<P, Q>(&mut self, from: P, to: Q) -> std::io::Result<()>
+        async fn rename<P, Q>(
+            &mut self,
+            from: P,
+            to: Q,
+        ) -> std::io::Result<()>
         where
             P: AsRef<std::path::Path> + Send + Sync,
             Q: AsRef<std::path::Path> + Send + Sync,
@@ -91,7 +104,10 @@ mod fileio {
             writer.flush().await
         }
 
-        fn read_to_string<P: AsRef<Path>>(&self, path: P) -> std::io::Result<String> {
+        fn read_to_string<P: AsRef<Path>>(
+            &self,
+            path: P,
+        ) -> std::io::Result<String> {
             std::fs::read_to_string(path.as_ref()).map_err(|err| {
                 Error::new(
                     ErrorKind::Other,
@@ -100,7 +116,10 @@ mod fileio {
             })
         }
 
-        fn read_dir<P: AsRef<Path>>(&self, path: P) -> std::io::Result<ReadDir> {
+        fn read_dir<P: AsRef<Path>>(
+            &self,
+            path: P,
+        ) -> std::io::Result<ReadDir> {
             std::fs::read_dir(path)
         }
     }
@@ -165,7 +184,11 @@ mod fileio {
 
     #[async_trait]
     impl super::FileIo for MockFileIo {
-        async fn rename<P, Q>(&mut self, from: P, to: Q) -> std::io::Result<()>
+        async fn rename<P, Q>(
+            &mut self,
+            from: P,
+            to: Q,
+        ) -> std::io::Result<()>
         where
             P: AsRef<std::path::Path> + Send + Sync,
             Q: AsRef<std::path::Path> + Send + Sync,
@@ -195,22 +218,35 @@ mod fileio {
             Ok(())
         }
 
-        async fn flush<W: AsyncWrite + Unpin + Send>(&mut self, _writer: W) -> std::io::Result<()> {
+        async fn flush<W: AsyncWrite + Unpin + Send>(
+            &mut self,
+            _writer: W,
+        ) -> std::io::Result<()> {
             Ok(())
         }
 
-        fn read_to_string<P: AsRef<Path>>(&self, path: P) -> std::io::Result<String> {
+        fn read_to_string<P: AsRef<Path>>(
+            &self,
+            path: P,
+        ) -> std::io::Result<String> {
             self.readable_paths
                 .get(path.as_ref())
                 .map(|v| v.to_string())
                 .ok_or(Error::new(
                     ErrorKind::Other,
-                    format!("Test path {} not known", path.as_ref().display()),
+                    format!(
+                        "Test path {} not known",
+                        path.as_ref().display()
+                    ),
                 ))
         }
 
-        fn read_dir<P: AsRef<Path>>(&self, path: P) -> std::io::Result<ReadDir> {
-            let paths = self.readable_paths
+        fn read_dir<P: AsRef<Path>>(
+            &self,
+            path: P,
+        ) -> std::io::Result<ReadDir> {
+            let paths = self
+                .readable_paths
                 .keys()
                 .filter(|&readable_path| readable_path.starts_with(&path))
                 .cloned()

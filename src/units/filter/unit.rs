@@ -243,20 +243,20 @@ impl std::fmt::Debug for RotoFilterRunner {
 mod tests {
     use std::sync::atomic::Ordering::SeqCst;
 
-//     use bytes::Bytes;
-//     use roto::types::{
-//         builtin::BuiltinTypeValue, collections::BytesRecord, lazyrecord_types::BmpMessage,
-//         typevalue::TypeValue,
-//     };
-//     use routecore::{asn::Asn, bmp::message::PeerType};
+    use bytes::Bytes;
+    use roto::types::{
+        builtin::BuiltinTypeValue, collections::BytesRecord, lazyrecord_types::BmpMessage,
+        typevalue::TypeValue,
+    };
+    use routecore::{asn::Asn, bmp::message::PeerType};
 
-//     use crate::{
-//         bgp::encode::{Announcements, Prefixes},
-//         payload::{Payload, SourceId},
-//         tests::util::internal::enable_logging,
-//     };
+    use crate::{
+        bgp::encode::{Announcements, Prefixes},
+        payload::{Payload, SourceId},
+        tests::util::internal::enable_logging,
+    };
 
-//     use super::*;
+    use super::*;
 
 //     const TEST_ROUTER_SYS_NAME: &str = "test-router";
 //     const TEST_ROUTER_SYS_DESC: &str = "test-desc";

@@ -1785,12 +1785,12 @@ mod tests {
         sync::atomic::{AtomicU8, Ordering::SeqCst},
     };
 
-//     use super::*;
+    use super::*;
 
-//     use crate::config::Source;
+    use crate::config::Source;
 
-//     static SOME_COMPONENT: &str = "some-component";
-//     static OTHER_COMPONENT: &str = "other-component";
+    static SOME_COMPONENT: &str = "some-component";
+    static OTHER_COMPONENT: &str = "other-component";
 
 //     #[test]
 //     fn gates_singleton_is_correctly_initialized() {
@@ -2305,9 +2305,9 @@ mod tests {
 //         join_handle.await.unwrap();
 //     }
 
-use uuid::Uuid;
+    use uuid::Uuid;
 
-use crate::{log::{Trace, MsgRelation}, manager::extract_msg_indices};
+    use crate::{log::{Trace, MsgRelation}, manager::extract_msg_indices};
 
     #[test]
     fn test_empty_extract_msg_indices() {

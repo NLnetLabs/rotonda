@@ -1,6 +1,10 @@
 #[cfg(test)]
 pub(crate) mod internal {
+    use std::sync::Arc;
+
     use env_logger::Env;
+
+    use crate::metrics::{self, OutputFormat, Target};
 
     /// Tries to enable logging. Intended for use in tests.
     ///
@@ -10,6 +14,12 @@ pub(crate) mod internal {
         let _ = env_logger::Builder::from_env(Env::default().default_filter_or(log_level))
             .is_test(true)
             .try_init();
+    }
+
+    pub(crate) fn get_testable_metrics_snapshot(metrics: &Arc<impl metrics::Source + ?Sized>) -> Target {
+        let mut target = Target::new(OutputFormat::Test);
+        metrics.append("testunit", &mut target);
+        target
     }
 }
 
@@ -1103,6 +1113,17 @@ pub mod bgp {
             }
         }
 
+        pub fn mk_per_peer_header(peer_ip: &str, peer_as: u32) -> PerPeerHeader {
+            PerPeerHeader {
+                peer_type: PeerType::GlobalInstance.into(),
+                peer_flags: 0,
+                peer_distinguisher: [0u8; 8],
+                peer_address: peer_ip.parse().unwrap(),
+                peer_as: Asn::from_u32(peer_as),
+                peer_bgp_id: [1u8, 2u8, 3u8, 4u8],
+            }
+        }
+    
         fn push_bmp_per_peer_header(buf: &mut BytesMut, pph: &PerPeerHeader) {
             //  0                   1                   2                   3
             //  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1

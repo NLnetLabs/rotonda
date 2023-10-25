@@ -10,6 +10,7 @@ use crate::common::status_reporter::{
 
 use super::metrics::BgpTcpInMetrics;
 
+#[derive(Debug, Default)]
 pub struct BgpTcpInStatusReporter {
     name: String,
     metrics: Arc<BgpTcpInMetrics>,
@@ -53,7 +54,12 @@ impl BgpTcpInStatusReporter {
 }
 
 impl UnitStatusReporter for BgpTcpInStatusReporter {}
-impl AnyStatusReporter for BgpTcpInStatusReporter {}
+
+impl AnyStatusReporter for BgpTcpInStatusReporter {
+    fn metrics(&self) -> Option<Arc<dyn crate::metrics::Source>> {
+        Some(self.metrics.clone())
+    }
+}
 
 impl Chainable for BgpTcpInStatusReporter {
     fn add_child<T: Display>(&self, child_name: T) -> Self {

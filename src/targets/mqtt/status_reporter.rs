@@ -103,7 +103,11 @@ impl MqttStatusReporter {
 
 impl TargetStatusReporter for MqttStatusReporter {}
 
-impl AnyStatusReporter for MqttStatusReporter {}
+impl AnyStatusReporter for MqttStatusReporter {
+    fn metrics(&self) -> Option<Arc<dyn crate::metrics::Source>> {
+        Some(self.metrics.clone())
+    }
+}
 
 impl Chainable for MqttStatusReporter {
     fn add_child<T: Display>(&self, child_name: T) -> Self {

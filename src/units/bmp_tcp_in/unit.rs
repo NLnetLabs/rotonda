@@ -293,7 +293,7 @@ mod tests {
 
     use crate::{
         comms::{Gate, GateAgent},
-        tests::util::internal::enable_logging,
+        tests::util::internal::{enable_logging, get_testable_metrics_snapshot},
         units::{
             bmp_tcp_in::{
                 metrics::BmpTcpInMetrics,
@@ -301,7 +301,7 @@ mod tests {
                 unit::{BmpTcpInRunner, TcpListener, TcpListenerFactory},
             },
             Unit,
-        },
+        }, common::status_reporter::AnyStatusReporter,
     };
 
     use super::BmpTcpIn;
@@ -353,6 +353,7 @@ mod tests {
         // Given an instance of the BMP TCP input unit that is configured to
         // listen for incoming connections on "localhost:8080":
         let (runner, agent) = setup_test("localhost:8080");
+        let status_reporter = runner.status_reporter.clone();
         let mock_listener_factory = Arc::new(MockTcpListenerFactory::new(|_| Ok(())));
         let task = runner.run(mock_listener_factory.clone());
         let join_handle = tokio::task::spawn(task);
@@ -385,6 +386,11 @@ mod tests {
         assert_eq!(binds.len(), 2);
         assert_eq!(binds[0], "localhost:8080");
         assert_eq!(binds[1], "otherhost:8081");
+
+        let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
+        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_listener_bound_count"), 2);
+        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_connection_accepted_count"), 0);
+        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_connection_lost_count"), 0);
     }
 
     #[tokio::test(start_paused = true)]
@@ -392,6 +398,7 @@ mod tests {
         // Given an instance of the BMP TCP input unit that is configured to
         // listen for incoming connections on "localhost:8080":
         let (runner, agent) = setup_test("localhost:8080");
+        let status_reporter = runner.status_reporter.clone();
         let mock_listener_factory = Arc::new(MockTcpListenerFactory::new(|_| Ok(())));
         let task = runner.run(mock_listener_factory.clone());
         let join_handle = tokio::task::spawn(task);
@@ -422,6 +429,12 @@ mod tests {
         let binds = mock_listener_factory.binds.lock().unwrap();
         assert_eq!(binds.len(), 1);
         assert_eq!(binds[0], "localhost:8080");
+
+        let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
+        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_listener_bound_count"), 1);
+        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_connection_accepted_count"), 0);
+        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_connection_lost_count"), 0);
+
     }
 
     #[tokio::test(start_paused = true)]
@@ -436,6 +449,7 @@ mod tests {
             }
         };
         let (runner, agent) = setup_test("idontexist:-1");
+        let status_reporter = runner.status_reporter.clone();
         let mock_listener_factory = Arc::new(MockTcpListenerFactory::new(fail_on_bad_addr));
         let task = runner.run(mock_listener_factory.clone());
         let join_handle = tokio::task::spawn(task);
@@ -466,6 +480,11 @@ mod tests {
         let binds = mock_listener_factory.binds.lock().unwrap();
         assert_eq!(binds.len(), 1);
         assert_eq!(binds[0], "localhost:8080");
+
+        let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
+        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_listener_bound_count"), 1);
+        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_connection_accepted_count"), 0);
+        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_connection_lost_count"), 0);
     }
 
     //-------- Test helpers --------------------------------------------------

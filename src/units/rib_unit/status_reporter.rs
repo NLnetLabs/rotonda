@@ -154,7 +154,11 @@ impl RibUnitStatusReporter {
 
 impl UnitStatusReporter for RibUnitStatusReporter {}
 
-impl AnyStatusReporter for RibUnitStatusReporter {}
+impl AnyStatusReporter for RibUnitStatusReporter {
+    fn metrics(&self) -> Option<Arc<dyn crate::metrics::Source>> {
+        Some(self.metrics.clone())
+    }
+}
 
 impl Chainable for RibUnitStatusReporter {
     fn add_child<T: Display>(&self, child_name: T) -> Self {

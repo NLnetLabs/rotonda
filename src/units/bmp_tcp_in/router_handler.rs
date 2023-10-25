@@ -3,8 +3,8 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 
 use roto::types::{
-    builtin::BuiltinTypeValue, collections::BytesRecord, lazyrecord_types::BmpMessage,
-    typevalue::TypeValue,
+    builtin::BuiltinTypeValue, collections::BytesRecord,
+    lazyrecord_types::BmpMessage, typevalue::TypeValue,
 };
 use tokio::{io::AsyncRead, net::TcpStream};
 
@@ -12,7 +12,9 @@ use crate::{
     comms::{Gate, GateStatus},
     payload::{Payload, Update, UpstreamStatus},
     units::{
-        bmp_tcp_in::{io::BmpStream, status_reporter::BmpTcpInStatusReporter},
+        bmp_tcp_in::{
+            io::BmpStream, status_reporter::BmpTcpInStatusReporter,
+        },
         Unit,
     },
 };
@@ -99,7 +101,9 @@ async fn read_from_router<T: AsyncRead + Unpin>(
 
                 if let Ok(bmp_msg) = BmpMessage::from_octets(msg_buf) {
                     let bmp_msg = Arc::new(BytesRecord(bmp_msg));
-                    let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
+                    let value = TypeValue::Builtin(
+                        BuiltinTypeValue::BmpMessage(bmp_msg),
+                    );
                     let payload = Payload::new(router_addr, value);
                     gate_worker.update_data(payload.into()).await;
                 }
@@ -129,7 +133,12 @@ mod tests {
 
     use tokio::{io::ReadBuf, time::timeout};
 
-    use crate::{tests::util::internal::{get_testable_metrics_snapshot, enable_logging}, common::status_reporter::AnyStatusReporter};
+    use crate::{
+        common::status_reporter::AnyStatusReporter,
+        tests::util::internal::{
+            enable_logging, get_testable_metrics_snapshot,
+        },
+    };
 
     use super::*;
 
@@ -154,7 +163,8 @@ mod tests {
         let rx = MockRouterStream;
 
         eprintln!("STARTING ROUTER READER");
-        let fut = read_from_router(gate.clone(), rx, router_addr, status_reporter);
+        let fut =
+            read_from_router(gate.clone(), rx, router_addr, status_reporter);
 
         // Without this the reader continues forever
         eprintln!("DROPPING PARENT GATE");
@@ -194,11 +204,25 @@ mod tests {
                     self.get_mut().interrupted_already = true;
                     Poll::Ready(Err(std::io::ErrorKind::Interrupted.into()))
                 } else {
-                    let metrics = get_testable_metrics_snapshot(&self.status_reporter.metrics().unwrap());
+                    let metrics = get_testable_metrics_snapshot(
+                        &self.status_reporter.metrics().unwrap(),
+                    );
                     let router_addr = self.router_addr.to_string();
                     let label = ("router", router_addr.as_str());
-                    assert_eq!(metrics.with_label::<usize>("bmp_tcp_in_num_bmp_messages_received", label), 0);
-                    assert_eq!(metrics.with_label::<usize>("bmp_tcp_in_num_receive_io_errors", label), 1);
+                    assert_eq!(
+                        metrics.with_label::<usize>(
+                            "bmp_tcp_in_num_bmp_messages_received",
+                            label
+                        ),
+                        0
+                    );
+                    assert_eq!(
+                        metrics.with_label::<usize>(
+                            "bmp_tcp_in_num_receive_io_errors",
+                            label
+                        ),
+                        1
+                    );
 
                     // Fail with a fatal error to stop the reader polling for
                     // more data.
@@ -213,12 +237,28 @@ mod tests {
             status_reporter: status_reporter.clone(),
         };
 
-        let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
-        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_connection_lost_count"), 0);
+        let metrics = get_testable_metrics_snapshot(
+            &status_reporter.metrics().unwrap(),
+        );
+        assert_eq!(
+            metrics.with_name::<usize>("bmp_tcp_in_connection_lost_count"),
+            0
+        );
 
-        read_from_router(gate.clone(), rx, router_addr, status_reporter.clone()).await;
+        read_from_router(
+            gate.clone(),
+            rx,
+            router_addr,
+            status_reporter.clone(),
+        )
+        .await;
 
-        let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
-        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_connection_lost_count"), 1);
+        let metrics = get_testable_metrics_snapshot(
+            &status_reporter.metrics().unwrap(),
+        );
+        assert_eq!(
+            metrics.with_name::<usize>("bmp_tcp_in_connection_lost_count"),
+            1
+        );
     }
 }

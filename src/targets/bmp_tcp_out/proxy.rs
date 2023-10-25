@@ -63,11 +63,17 @@ impl BmpProxy {
             let (tx, rx) = tokio::sync::mpsc::channel(1000);
             let task_name = format!("proxy[{}]", proxy_uri);
 
-            status_reporter.init_per_proxy_metrics(router_addr, tx.capacity());
+            status_reporter
+                .init_per_proxy_metrics(router_addr, tx.capacity());
 
             crate::tokio::spawn(
                 &task_name,
-                Self::do_proxy(router_addr, proxy_uri.clone(), rx, status_reporter.clone()),
+                Self::do_proxy(
+                    router_addr,
+                    proxy_uri.clone(),
+                    rx,
+                    status_reporter.clone(),
+                ),
             );
 
             Some(Arc::new(tx))
@@ -96,7 +102,8 @@ impl BmpProxy {
             match tx.try_send(bytes.to_vec()) {
                 Ok(_) => {
                     if !self.is_connected {
-                        self.status_reporter.proxy_queue_started(self.router_addr);
+                        self.status_reporter
+                            .proxy_queue_started(self.router_addr);
                         self.is_connected = true;
                     } else if self.is_err {
                         self.status_reporter.proxy_queue_ok(self.router_addr);
@@ -131,8 +138,11 @@ impl BmpProxy {
         'outer: loop {
             status_reporter.proxy_handler_connecting();
 
-            if let Ok(Ok(mut stream)) =
-                timeout(Duration::from_millis(100), TcpStream::connect(&*proxy_uri)).await
+            if let Ok(Ok(mut stream)) = timeout(
+                Duration::from_millis(100),
+                TcpStream::connect(&*proxy_uri),
+            )
+            .await
             {
                 status_reporter.proxy_handler_connected();
 

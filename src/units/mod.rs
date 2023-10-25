@@ -19,9 +19,9 @@
 //
 // These contain all the actual unit types grouped by shared functionality.
 mod bgp_tcp_in;
-mod filter;
 mod bmp_in;
 mod bmp_tcp_in;
+mod filter;
 mod rib_unit;
 pub use rib_unit::{
     unit::{RibType, RibUnit},
@@ -55,10 +55,19 @@ pub enum Unit {
 }
 
 impl Unit {
-    pub async fn run(self, component: Component, gate: Gate, waitpoint: WaitPoint) {
+    pub async fn run(
+        self,
+        component: Component,
+        gate: Gate,
+        waitpoint: WaitPoint,
+    ) {
         let _ = match self {
-            Unit::BgpTcpIn(unit) => unit.run(component, gate, waitpoint).await,
-            Unit::BmpTcpIn(unit) => unit.run(component, gate, waitpoint).await,
+            Unit::BgpTcpIn(unit) => {
+                unit.run(component, gate, waitpoint).await
+            }
+            Unit::BmpTcpIn(unit) => {
+                unit.run(component, gate, waitpoint).await
+            }
             Unit::Filter(unit) => unit.run(component, gate, waitpoint).await,
             Unit::BmpIn(unit) => unit.run(component, gate, waitpoint).await,
             Unit::RibUnit(unit) => unit.run(component, gate, waitpoint).await,

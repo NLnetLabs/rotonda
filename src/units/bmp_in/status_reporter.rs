@@ -6,7 +6,9 @@ use std::{
 use log::{debug, error};
 
 use crate::{
-    common::status_reporter::{sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter},
+    common::status_reporter::{
+        sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter,
+    },
     payload::RouterId,
 };
 
@@ -31,7 +33,11 @@ impl BmpInStatusReporter {
         self.metrics.clone()
     }
 
-    pub fn router_id_changed(&self, old_router_id: Arc<RouterId>, new_router_id: Arc<RouterId>) {
+    pub fn router_id_changed(
+        &self,
+        old_router_id: Arc<RouterId>,
+        new_router_id: Arc<RouterId>,
+    ) {
         sr_log!(debug: self, "Router id changed from '{}' to '{}'", old_router_id, new_router_id);
     }
 

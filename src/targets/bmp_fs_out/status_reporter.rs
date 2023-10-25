@@ -3,7 +3,9 @@ use std::{fmt::Display, sync::Arc};
 use log::error;
 
 use crate::{
-    common::status_reporter::{sr_log, AnyStatusReporter, Chainable, Named, TargetStatusReporter},
+    common::status_reporter::{
+        sr_log, AnyStatusReporter, Chainable, Named, TargetStatusReporter,
+    },
     payload::SourceId,
 };
 

@@ -47,7 +47,11 @@ impl BmpTcpInStatusReporter {
         sr_log!(warn: self, "Error while listening for connections: {}", err);
     }
 
-    pub fn receive_io_error<T: Display>(&self, router_addr: SocketAddr, err: T) {
+    pub fn receive_io_error<T: Display>(
+        &self,
+        router_addr: SocketAddr,
+        err: T,
+    ) {
         sr_log!(warn: self, "Error while receiving BMP messages: {}", err);
         self.metrics
             .router_metrics(router_addr)

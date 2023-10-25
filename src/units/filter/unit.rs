@@ -85,7 +85,10 @@ impl RotoFilterRunner {
     }
 
     #[cfg(test)]
-    fn mock(roto_script: &str, filter_name: &str) -> Self {
+    fn mock(
+        roto_script: &str,
+        filter_name: &str,
+    ) -> (Self, crate::comms::GateAgent) {
         use crate::common::roto::RotoScriptOrigin;
 
         let roto_scripts = RotoScripts::default();
@@ -95,17 +98,20 @@ impl RotoFilterRunner {
                 roto_script,
             )
             .unwrap();
-        let (gate, _) = Gate::new(0);
+        let (gate, gate_agent) = Gate::new(0);
         let gate = gate.into();
         let status_reporter = RotoFilterStatusReporter::default().into();
         let filter_name =
             Arc::new(ArcSwap::from_pointee(FilterName::from(filter_name)));
-        Self {
+
+        let runner = Self {
             roto_scripts,
             gate,
             status_reporter,
             filter_name,
-        }
+        };
+
+        (runner, gate_agent)
     }
 
     pub async fn run(
@@ -219,13 +225,18 @@ impl RotoFilterRunner {
         if let Some(filtered_update) = Self::VM
             .with(|vm| {
                 payload
-                    .filter(|value| {
-                        self.roto_scripts.exec(
-                            vm,
-                            &self.filter_name.load(),
-                            value,
-                        )
-                    })
+                    .filter(
+                        |value| {
+                            self.roto_scripts.exec(
+                                vm,
+                                &self.filter_name.load(),
+                                value,
+                            )
+                        },
+                        |source_id| {
+                            self.status_reporter.message_filtered(source_id)
+                        },
+                    )
                     .map(|mut filtered_payloads| {
                         match filtered_payloads.len() {
                             0 => None,
@@ -277,7 +288,9 @@ mod tests {
     use crate::{
         bgp::encode::{Announcements, Prefixes},
         payload::{Payload, SourceId},
-        tests::util::internal::enable_logging,
+        tests::util::internal::{
+            enable_logging, get_testable_metrics_snapshot,
+        },
     };
 
     use super::*;
@@ -374,20 +387,23 @@ mod tests {
         let asn_to_ignore = TEST_PEER_ASN.into();
         let roto_source =
             interpolate_source(FILTER_OUT_ASN_ROTO, asn_to_ignore);
+        let filter = mk_filter(&roto_source);
 
         assert!(
-            !is_filtered(
-                mk_filter_payload(mk_initiation_msg()),
-                &roto_source
-            )
-            .await
+            !is_filtered(&filter, mk_filter_payload(mk_initiation_msg()))
+                .await
         );
         assert!(
-            !is_filtered(
-                mk_filter_payload(mk_termination_msg()),
-                &roto_source
-            )
-            .await
+            !is_filtered(&filter, mk_filter_payload(mk_termination_msg()))
+                .await
+        );
+
+        let metrics = get_testable_metrics_snapshot(
+            &filter.status_reporter.metrics().unwrap(),
+        );
+        assert_eq!(
+            metrics.with_name::<usize>("roto_filter_num_filtered_messages"),
+            0,
         );
     }
 
@@ -396,13 +412,17 @@ mod tests {
     async fn populated_asn_set_should_filter_out_only_matching() {
         let asn_to_ignore = TEST_PEER_ASN.into();
         let roto_source = interpolate_source(FILTER_OUT_ASN_ROTO, asn_to_ignore);
+        let filter = mk_filter(&roto_source);
 
-        assert!(!is_filtered(mk_filter_payload(mk_initiation_msg()), &roto_source).await);
-        assert!(is_filtered(mk_filter_payload(mk_route_monitoring_msg()), &roto_source).await);
-        assert!(is_filtered(mk_filter_payload(mk_peer_down_notification_msg()), &roto_source).await);
-        assert!(is_filtered(mk_filter_payload(mk_peer_up_notification_msg()), &roto_source).await);
-        assert!(is_filtered(mk_filter_payload(mk_statistics_report_msg()), &roto_source).await);
-        assert!(!is_filtered(mk_filter_payload(mk_termination_msg()), &roto_source).await);
+        assert!(!is_filtered(&filter, mk_filter_payload(mk_initiation_msg())).await);
+        assert!(is_filtered(&filter, mk_filter_payload(mk_route_monitoring_msg())).await);
+        assert!(is_filtered(&filter, mk_filter_payload(mk_peer_down_notification_msg())).await);
+        assert!(is_filtered(&filter, mk_filter_payload(mk_peer_up_notification_msg())).await);
+        assert!(is_filtered(&filter, mk_filter_payload(mk_statistics_report_msg())).await);
+        assert!(!is_filtered(&filter, mk_filter_payload(mk_termination_msg())).await);
+
+        let metrics = get_testable_metrics_snapshot(&filter.status_reporter.metrics().unwrap());
+        assert_eq!(metrics.with_name::<usize>("roto_filter_num_filtered_messages"), 4);
     }
 
     #[rustfmt::skip]
@@ -410,13 +430,17 @@ mod tests {
     async fn populated_asn_set_should_filter_in_only_matching() {
         let asn_to_ignore = TEST_PEER_ASN.into();
         let roto_source = interpolate_source(FILTER_IN_ASN_ROTO, asn_to_ignore);
+        let filter = mk_filter(&roto_source);
 
-        assert!(!is_filtered(mk_filter_payload(mk_initiation_msg()), &roto_source).await);
-        assert!(!is_filtered(mk_filter_payload(mk_route_monitoring_msg()), &roto_source).await);
-        assert!(!is_filtered(mk_filter_payload(mk_peer_down_notification_msg()), &roto_source).await);
-        assert!(!is_filtered(mk_filter_payload(mk_peer_up_notification_msg()), &roto_source).await);
-        assert!(!is_filtered(mk_filter_payload(mk_statistics_report_msg()), &roto_source).await);
-        assert!(!is_filtered(mk_filter_payload(mk_termination_msg()), &roto_source).await);
+        assert!(!is_filtered(&filter, mk_filter_payload(mk_initiation_msg())).await);
+        assert!(!is_filtered(&filter, mk_filter_payload(mk_route_monitoring_msg())).await);
+        assert!(!is_filtered(&filter, mk_filter_payload(mk_peer_down_notification_msg())).await);
+        assert!(!is_filtered(&filter, mk_filter_payload(mk_peer_up_notification_msg())).await);
+        assert!(!is_filtered(&filter, mk_filter_payload(mk_statistics_report_msg())).await);
+        assert!(!is_filtered(&filter, mk_filter_payload(mk_termination_msg())).await);
+
+        let metrics = get_testable_metrics_snapshot(&filter.status_reporter.metrics().unwrap());
+        assert_eq!(metrics.with_name::<usize>("roto_filter_num_filtered_messages"), 0);
     }
 
     #[rustfmt::skip]
@@ -425,12 +449,18 @@ mod tests {
     async fn bmp_msg_type_should_match_as_expected() {
         enable_logging("trace");
         let roto_source = MSG_TYPE_MATCHING_ROTO;
+        let filter = mk_filter(roto_source);
 
-        assert!(!is_filtered(mk_filter_payload(mk_route_monitoring_msg()), roto_source).await);
-        assert!(is_filtered(mk_filter_payload(mk_peer_down_notification_msg()), roto_source).await);
-        assert!(is_filtered(mk_filter_payload(mk_peer_up_notification_msg()), roto_source).await);
-        assert!(!is_filtered(mk_filter_payload(mk_statistics_report_msg()), roto_source).await);
+        assert!(!is_filtered(&filter, mk_filter_payload(mk_route_monitoring_msg())).await);
+        assert!(is_filtered(&filter, mk_filter_payload(mk_peer_down_notification_msg())).await);
+        assert!(is_filtered(&filter, mk_filter_payload(mk_peer_up_notification_msg())).await);
+        assert!(!is_filtered(&filter, mk_filter_payload(mk_statistics_report_msg())).await);
+
+        let metrics = get_testable_metrics_snapshot(&filter.status_reporter.metrics().unwrap());
+        assert_eq!(metrics.with_name::<usize>("roto_filter_num_filtered_messages"), 2);
     }
+
+    //-------- Test helpers --------------------------------------------------
 
     fn interpolate_source(
         source: &'static str,
@@ -504,13 +534,31 @@ mod tests {
         Update::Single(Payload::new(source_id, value))
     }
 
-    async fn is_filtered(update: Update, roto_source_code: &str) -> bool {
-        let filter = RotoFilterRunner::mock(roto_source_code, "my-module");
-        filter.process_update(update).await.unwrap();
+    async fn is_filtered(filter: &RotoFilterRunner, update: Update) -> bool {
         let gate_metrics = filter.gate.metrics();
-        let num_dropped_updates =
+        let num_dropped_updates_before =
             gate_metrics.num_dropped_updates.load(SeqCst);
-        let num_updates = gate_metrics.num_updates.load(SeqCst);
-        num_dropped_updates == 0 && num_updates == 0
+        let num_updates_before =
+            gate_metrics.num_updates.load(SeqCst);
+
+        filter.process_update(update).await.unwrap();
+
+        let num_dropped_updates_after =
+            gate_metrics.num_dropped_updates.load(SeqCst);
+        let num_updates_after =
+            gate_metrics.num_updates.load(SeqCst);
+
+        // If not filtered then the number of updates processed by the gate should have increased,
+        // either by failing to deliver the update i.e. dropping it, or by delivering it. So if the
+        // dropped and not dropped metrics remain the same it means no attempt was made to send an
+        // update through the Gate, i.e. it was filtered out before sending via the Gate.
+        num_dropped_updates_before == num_dropped_updates_after
+            && num_updates_before == num_updates_after
+    }
+
+    fn mk_filter(roto_source_code: &str) -> RotoFilterRunner {
+        let (runner, _) =
+            RotoFilterRunner::mock(roto_source_code, "my-module");
+        runner
     }
 }

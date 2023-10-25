@@ -10,7 +10,7 @@ use crate::log::{LogConfig, Terminate};
 use crate::manager::{Manager, TargetSet, UnitSet};
 use crate::mvp::{
     MvpConfig, ARG_CONFIG, CFG_TARGET_BMP_PROXY, CFG_TARGET_MQTT,
-    CFG_UNIT_BGP_IN, CFG_UNIT_BMP_IN,
+    CFG_UNIT_BGP_TCP_IN, CFG_UNIT_BMP_TCP_IN,
 };
 use clap::{Arg, ArgMatches, Command};
 use log::{error, info, trace};
@@ -496,7 +496,7 @@ impl ConfigFile {
                     unreachable!()
                 };
                 let Value::Table(ref mut bgp_in) =
-                    units.get_mut(CFG_UNIT_BGP_IN).unwrap()
+                    units.get_mut(CFG_UNIT_BGP_TCP_IN).unwrap()
                 else {
                     unreachable!()
                 };
@@ -514,7 +514,7 @@ impl ConfigFile {
                     unreachable!()
                 };
                 let Value::Table(ref mut bmp_tcp_in) =
-                    units.get_mut(CFG_UNIT_BMP_IN).unwrap()
+                    units.get_mut(CFG_UNIT_BMP_TCP_IN).unwrap()
                 else {
                     unreachable!()
                 };

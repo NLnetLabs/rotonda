@@ -418,10 +418,10 @@ mod tests {
         builtin::{BuiltinTypeValue, MaterializedRoute},
         typevalue::TypeValue,
     };
-    use routecore::{asn::Asn, bmp::message::PeerType};
+    use routecore::asn::Asn;
 
     use crate::{
-        bgp::encode::{Announcements, Prefixes},
+        bgp::encode::{mk_per_peer_header, Announcements, Prefixes},
         payload::{Payload, SourceId, Update},
         units::bmp_tcp_in::state_machine::{
             processing::MessageType, states::updating::Updating,
@@ -1212,20 +1212,6 @@ mod tests {
     }
 
     // --- Test helpers -----------------------------------------------------------------------------------------------
-
-    fn mk_per_peer_header(
-        peer_ip: &str,
-        peer_as: u32,
-    ) -> crate::bgp::encode::PerPeerHeader {
-        crate::bgp::encode::PerPeerHeader {
-            peer_type: PeerType::GlobalInstance.into(),
-            peer_flags: 0,
-            peer_distinguisher: [0u8; 8],
-            peer_address: peer_ip.parse().unwrap(),
-            peer_as: Asn::from_u32(peer_as),
-            peer_bgp_id: [1u8, 2u8, 3u8, 4u8],
-        }
-    }
 
     // RFC 4724 Graceful Restart Mechanism for BGP
     // BMP uses the End-of-RIB feature of RFC 4724.

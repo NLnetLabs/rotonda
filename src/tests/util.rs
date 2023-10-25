@@ -1,6 +1,10 @@
 #[cfg(test)]
 pub(crate) mod internal {
+    use std::sync::Arc;
+
     use env_logger::Env;
+
+    use crate::metrics::{self, OutputFormat, Target};
 
     /// Tries to enable logging. Intended for use in tests.
     ///
@@ -12,6 +16,14 @@ pub(crate) mod internal {
         )
         .is_test(true)
         .try_init();
+    }
+
+    pub(crate) fn get_testable_metrics_snapshot(
+        metrics: &Arc<impl metrics::Source + ?Sized>,
+    ) -> Target {
+        let mut target = Target::new(OutputFormat::Test);
+        metrics.append("testunit", &mut target);
+        target
     }
 }
 
@@ -1179,6 +1191,20 @@ pub mod bgp {
 
             fn is_ipv6(&self) -> bool {
                 self.peer_flags & 0x80 == 0x80
+            }
+        }
+
+        pub fn mk_per_peer_header(
+            peer_ip: &str,
+            peer_as: u32,
+        ) -> PerPeerHeader {
+            PerPeerHeader {
+                peer_type: PeerType::GlobalInstance.into(),
+                peer_flags: 0,
+                peer_distinguisher: [0u8; 8],
+                peer_address: peer_ip.parse().unwrap(),
+                peer_as: Asn::from_u32(peer_as),
+                peer_bgp_id: [1u8, 2u8, 3u8, 4u8],
             }
         }
 

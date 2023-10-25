@@ -332,7 +332,10 @@ impl RibUnitRunner {
     }
 
     #[cfg(test)]
-    pub(crate) fn mock(roto_script: &str, rib_type: RibType) -> Self {
+    pub(crate) fn mock(
+        roto_script: &str,
+        rib_type: RibType,
+    ) -> (Self, crate::comms::GateAgent) {
         use crate::common::roto::RotoScriptOrigin;
 
         let roto_scripts = RotoScripts::default();
@@ -344,7 +347,7 @@ impl RibUnitRunner {
                 )
                 .unwrap();
         }
-        let (gate, _) = Gate::new(0);
+        let (gate, gate_agent) = Gate::new(0);
         let gate = gate.into();
         let query_limits =
             Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
@@ -366,7 +369,7 @@ impl RibUnitRunner {
             pending_vrib_query_results.clone(),
         ));
 
-        Self {
+        let runner = Self {
             roto_scripts,
             gate,
             http_processor,
@@ -378,7 +381,9 @@ impl RibUnitRunner {
             pending_vrib_query_results,
             _process_metrics,
             rib_merge_update_stats,
-        }
+        };
+
+        (runner, gate_agent)
     }
 
     fn http_api_path_for_rib_type(
@@ -696,16 +701,12 @@ impl RibUnitRunner {
         if let Some(filtered_update) = Self::VM
             .with(|vm| {
                 payload
-                    .filter(|value| {
-                        self.roto_scripts.exec(
-                            vm,
-                            &self.filter_name.load(),
-                            value,
-                        )
-                    })
-                    .map(|filtered_payloads| {
-                        (self.insert_payloads(filtered_payloads, insert_fn))
-                    })
+                    .filter(
+                        |value| self.roto_scripts.exec(vm, &self.filter_name.load(), value),
+                        |_source_id| { /* TODO: self.status_reporter.message_filtered(source_id) */
+                        },
+                    )
+                    .map(|filtered_payloads| (self.insert_payloads(filtered_payloads, insert_fn)))
             })
             .map_err(|err| {
                 self.status_reporter.message_filtering_failure(&err);
@@ -933,13 +934,11 @@ impl RibUnitRunner {
             trace!("Re-processing route");
 
             if let Ok(filtered_payloads) = Self::VM.with(|vm| {
-                payload.filter(|value| {
-                    self.roto_scripts.exec(
-                        vm,
-                        &self.filter_name.load(),
-                        value,
-                    )
-                })
+
+                payload.filter(
+                    |value| self.roto_scripts.exec(vm, &self.filter_name.load(), value),
+                    |_source_id| { /* TODO: self.status_reporter.message_filtered(source_id) */ },
+                )
             }) {
                 new_values.extend(
                     filtered_payloads

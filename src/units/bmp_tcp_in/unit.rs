@@ -117,8 +117,6 @@ impl BmpTcpIn {
         let bmp_in_metrics = Arc::new(BmpTcpInMetrics::new(&gate));
         component.register_metrics(bmp_in_metrics.clone());
 
-        // Setup metrics to be updated by the BMP state machines that we use
-        // to make sense of the BMP data per router that supplies it.
         let bmp_metrics = Arc::new(BmpMetrics::new());
         component.register_metrics(bmp_metrics.clone());
 
@@ -307,9 +305,11 @@ impl BmpTcpInRunner {
                 let mut wait = 1;
                 loop {
                     match listener_factory.bind(*listen_addr).await {
-                        Err(_err) => {
-                            // let err = format!("{err}: Will retry in {wait} seconds.");
-                            // status_reporter.bind_error(&listen_addr, &err);
+                        Err(err) => {
+                            let err = format!(
+                                "{err}: Will retry in {wait} seconds."
+                            );
+                            status_reporter.bind_error(&listen_addr.to_string(), &err);
                             sleep(Duration::from_secs(wait)).await;
                             wait *= 2;
                         }
@@ -579,7 +579,77 @@ impl std::fmt::Debug for BmpTcpInRunner {
 
 #[cfg(test)]
 mod tests {
+    use std::{
+        net::SocketAddr,
+        sync::{Arc, Mutex},
+        time::Duration,
+    };
+
+    use tokio::{net::TcpStream, time::timeout};
+
+    use crate::{
+        common::status_reporter::AnyStatusReporter,
+        comms::{Gate, GateAgent},
+        tests::util::internal::{
+            enable_logging, get_testable_metrics_snapshot,
+        },
+        units::{
+            bmp_tcp_in::{
+                metrics::BmpTcpInMetrics,
+                status_reporter::BmpTcpInStatusReporter,
+                unit::{BmpTcpInRunner, TcpListener, TcpListenerFactory},
+            },
+            Unit,
+        },
+    };
+
     use super::BmpTcpIn;
+
+    struct MockTcpListener;
+
+    #[async_trait::async_trait]
+    impl TcpListener for MockTcpListener {
+        async fn accept(&self) -> std::io::Result<(TcpStream, SocketAddr)> {
+            // block forever
+            std::future::pending().await
+        }
+    }
+
+    struct MockTcpListenerFactory<T>
+    where
+        T: Fn(SocketAddr) -> std::io::Result<()> + Sync,
+    {
+        pub bind_cb: T,
+        pub binds: Arc<Mutex<Vec<SocketAddr>>>,
+    }
+
+    impl<T> MockTcpListenerFactory<T>
+    where
+        T: Fn(SocketAddr) -> std::io::Result<()> + Sync,
+    {
+        pub fn new(bind_cb: T) -> Self {
+            Self {
+                bind_cb,
+                binds: Arc::default(),
+            }
+        }
+    }
+
+
+    #[async_trait::async_trait]
+    impl<T> TcpListenerFactory<MockTcpListener> for MockTcpListenerFactory<T>
+    where
+        T: Fn(SocketAddr) -> std::io::Result<()> + Sync,
+    {
+        async fn bind(
+            &self,
+            addr: SocketAddr,
+        ) -> std::io::Result<MockTcpListener> {
+            (self.bind_cb)(addr.clone())?;
+            self.binds.lock().unwrap().push(addr);
+            Ok(MockTcpListener)
+        }
+    }
 
     #[test]
     fn listen_is_required() {
@@ -602,5 +672,207 @@ mod tests {
 
     fn mk_config_from_toml(toml: &str) -> Result<BmpTcpIn, toml::de::Error> {
         toml::from_str::<BmpTcpIn>(toml)
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_reconfigured_bind_address() {
+        // Given an instance of the BMP TCP input unit that is configured to
+        // listen for incoming connections on "localhost:8080":
+        let (runner, agent) = setup_test("1.2.3.4:12345");
+        let status_reporter = runner.status_reporter.clone();
+        let mock_listener_factory =
+            Arc::new(MockTcpListenerFactory::new(|_| Ok(())));
+        let task = runner.run(mock_listener_factory.clone());
+        let join_handle = tokio::task::spawn(task);
+
+        // Allow time for bind attempts to occur
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        // When the unit is reconfigured to listen for incoming connections on
+        // "127.0.0.1:11019":
+        let (new_gate, new_agent) = Gate::new(1);
+        let listen = Arc::new("127.0.0.1:11019".parse().unwrap());
+        let new_config = BmpTcpIn {listen, http_api_path: Default::default(), router_id_template: Default::default(), filter_name: Default::default() };
+        let new_config = Unit::BmpTcpIn(new_config);
+        agent.reconfigure(new_config, new_gate).await.unwrap();
+
+        // Allow time for bind attempts to occur
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        // Then send a termination command to the gate:
+        assert!(!join_handle.is_finished());
+        new_agent.terminate().await;
+        let _ = timeout(Duration::from_millis(100), join_handle)
+            .await
+            .unwrap();
+
+        // And verify that the unit bound first to the first given URI and
+        // then to the second given URI and not to any other URI.
+        let binds = mock_listener_factory.binds.lock().unwrap();
+        assert_eq!(binds.len(), 2);
+        assert_eq!(binds[0], "1.2.3.4:12345".parse().unwrap());
+        assert_eq!(binds[1], "127.0.0.1:11019".parse().unwrap());
+
+        let metrics = get_testable_metrics_snapshot(
+            &status_reporter.metrics().unwrap(),
+        );
+        assert_eq!(
+            metrics.with_name::<usize>("bmp_tcp_in_listener_bound_count"),
+            2
+        );
+        assert_eq!(
+            metrics
+                .with_name::<usize>("bmp_tcp_in_connection_accepted_count"),
+            0
+        );
+        assert_eq!(
+            metrics.with_name::<usize>("bmp_tcp_in_connection_lost_count"),
+            0
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_unchanged_bind_address() {
+        // Given an instance of the BMP TCP input unit that is configured to
+        // listen for incoming connections on "localhost:8080":
+        let (runner, agent) = setup_test("127.0.0.1:11019");
+        let status_reporter = runner.status_reporter.clone();
+        let mock_listener_factory =
+            Arc::new(MockTcpListenerFactory::new(|_| Ok(())));
+        let task = runner.run(mock_listener_factory.clone());
+        let join_handle = tokio::task::spawn(task);
+
+        // Allow time for bind attempts to occur
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        // When the unit is reconfigured to listen for incoming connections on
+        // an unchanged listen address:
+        let (new_gate, new_agent) = Gate::new(1);
+        let listen = Arc::new("127.0.0.1:11019".parse().unwrap());
+        let new_config = BmpTcpIn {listen, http_api_path: Default::default(), router_id_template: Default::default(), filter_name: Default::default() };
+        let new_config = Unit::BmpTcpIn(new_config);
+        agent.reconfigure(new_config, new_gate).await.unwrap();
+
+        // Allow time for bind attempts to occur
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        // Then send a termination command to the gate:
+        assert!(!join_handle.is_finished());
+        new_agent.terminate().await;
+        let _ = timeout(Duration::from_millis(100), join_handle)
+            .await
+            .unwrap();
+
+        // And verify that the unit bound only once and only to the given URI:
+        let binds = mock_listener_factory.binds.lock().unwrap();
+        assert_eq!(binds.len(), 1);
+        assert_eq!(binds[0], "127.0.0.1:11019".parse().unwrap());
+
+        let metrics = get_testable_metrics_snapshot(
+            &status_reporter.metrics().unwrap(),
+        );
+        assert_eq!(
+            metrics.with_name::<usize>("bmp_tcp_in_listener_bound_count"),
+            1
+        );
+        assert_eq!(
+            metrics
+                .with_name::<usize>("bmp_tcp_in_connection_accepted_count"),
+            0
+        );
+        assert_eq!(
+            metrics.with_name::<usize>("bmp_tcp_in_connection_lost_count"),
+            0
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_overcoming_bind_failure() {
+        // Given an instance of the BMP TCP input unit that is configured to
+        // listen for incoming connections on "localhost:8080":
+        let fail_on_bad_addr = |addr: SocketAddr| {
+            // Not technically a bad address, just one we can match on for test purposes
+            if addr.to_string() != "1.2.3.4:12345" {
+                Ok(())
+            } else {
+                Err(std::io::ErrorKind::PermissionDenied.into())
+            }
+        };
+        let (runner, agent) = setup_test("1.2.3.4:12345");
+        let status_reporter = runner.status_reporter.clone();
+        let mock_listener_factory =
+            Arc::new(MockTcpListenerFactory::new(fail_on_bad_addr));
+        let task = runner.run(mock_listener_factory.clone());
+        let join_handle = tokio::task::spawn(task);
+
+        // Allow time for bind attempts to occur
+        tokio::time::sleep(Duration::from_secs(10)).await;
+
+        // When the unit is reconfigured to listen for incoming connections on
+        // an unchanged listen address:
+        let (new_gate, new_agent) = Gate::new(1);
+        let listen = Arc::new("127.0.0.1:11019".parse().unwrap());
+        let new_config = BmpTcpIn {listen, http_api_path: Default::default(), router_id_template: Default::default(), filter_name: Default::default() };
+        let new_config = Unit::BmpTcpIn(new_config);
+        agent.reconfigure(new_config, new_gate).await.unwrap();
+
+        // Allow time for bind attempts to occur
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        // Then send a termination command to the gate:
+        assert!(!join_handle.is_finished());
+        new_agent.terminate().await;
+        let _ = timeout(Duration::from_millis(100), join_handle)
+            .await
+            .unwrap();
+
+        // And verify that the unit bound only once and only to the given URI:
+        let binds = mock_listener_factory.binds.lock().unwrap();
+        assert_eq!(binds.len(), 1);
+        assert_eq!(binds[0], "127.0.0.1:11019".parse().unwrap());
+
+        let metrics = get_testable_metrics_snapshot(
+            &status_reporter.metrics().unwrap(),
+        );
+        assert_eq!(
+            metrics.with_name::<usize>("bmp_tcp_in_listener_bound_count"),
+            1
+        );
+        assert_eq!(
+            metrics
+                .with_name::<usize>("bmp_tcp_in_connection_accepted_count"),
+            0
+        );
+        assert_eq!(
+            metrics.with_name::<usize>("bmp_tcp_in_connection_lost_count"),
+            0
+        );
+    }
+
+    //-------- Test helpers --------------------------------------------------
+
+    fn setup_test(listen: &str) -> (BmpTcpInRunner, GateAgent) {
+        enable_logging("trace");
+
+        let (gate, gate_agent) = Gate::new(0);
+        let metrics = Arc::new(BmpTcpInMetrics::default());
+        let status_reporter = Arc::new(BmpTcpInStatusReporter::default());
+        let runner = BmpTcpInRunner {
+            component: Default::default(),
+            listen: Arc::new(listen.parse().unwrap()),
+            http_api_path: Default::default(),
+            gate,
+            router_states: Default::default(),
+            router_info: Default::default(),
+            bmp_metrics: Default::default(),
+            bmp_in_metrics: metrics,
+            state_machine_metrics: Default::default(),
+            status_reporter,
+            roto_scripts: Default::default(),
+            router_id_template: Default::default(),
+            filter_name: Default::default(),
+        };
+
+        (runner, gate_agent)
     }
 }

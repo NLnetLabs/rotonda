@@ -106,12 +106,14 @@ pub enum UpstreamStatus {
 //------------ Payload -------------------------------------------------------
 
 pub trait Filterable {
-    fn filter<E, T>(
+    fn filter<E, T, U>(
         self,
         filter_fn: T,
+        filtered_fn: U,
     ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
         T: Fn(TypeValue) -> FilterResult<E> + Clone,
+        U: Fn(SourceId) + Clone,
         FilterError: From<E>;
 }
 
@@ -165,12 +167,14 @@ impl Payload {
 }
 
 impl Filterable for Payload {
-    fn filter<E, T>(
+    fn filter<E, T, U>(
         self,
         filter_fn: T,
+        filtered_fn: U,
     ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
         T: Fn(TypeValue) -> FilterResult<E> + Clone,
+        U: Fn(SourceId) + Clone,
         FilterError: From<E>,
     {
         if let ControlFlow::Continue(filter_output) = filter_fn(self.value)? {
@@ -179,24 +183,29 @@ impl Filterable for Payload {
                 filter_output,
             ))
         } else {
+            filtered_fn(self.source_id);
             Ok(smallvec![])
         }
     }
 }
 
 impl Filterable for SmallVec<[Payload; 8]> {
-    fn filter<E, T>(
+    fn filter<E, T, U>(
         self,
         filter_fn: T,
+        filtered_fn: U,
     ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
         T: Fn(TypeValue) -> FilterResult<E> + Clone,
+        U: Fn(SourceId) + Clone,
         FilterError: From<E>,
     {
         let mut out_payloads = smallvec![];
 
         for payload in self {
-            out_payloads.extend(payload.filter(filter_fn.clone())?);
+            out_payloads.extend(
+                payload.filter(filter_fn.clone(), filtered_fn.clone())?,
+            );
         }
 
         Ok(out_payloads)

@@ -113,6 +113,15 @@ pub struct PeerConfig {
 }
 
 impl PeerConfig {
+    #[cfg(test)]
+    pub fn mock() -> Self {
+        Self {
+            name: "MOCK".to_string(),
+            remote_asn: OneOrManyAsns::Many(vec![]),
+            hold_time: None,
+        }
+    }
+
     pub fn name(&self) -> &String {
         &self.name
     }

@@ -34,6 +34,10 @@ impl BmpTcpInStatusReporter {
         self.metrics.clone()
     }
 
+    pub fn bind_error<T: Display>(&self, listen_addr: &str, err: T) {
+        sr_log!(warn: self, "Error while listening for connections on {}: {}", listen_addr, err);
+    }
+
     pub fn listener_listening(&self, server_uri: &str) {
         sr_log!(info: self, "Listening for connections on {}", server_uri);
         self.metrics.listener_bound_count.fetch_add(1, SeqCst);
@@ -42,6 +46,12 @@ impl BmpTcpInStatusReporter {
     pub fn listener_connection_accepted(&self, router_addr: SocketAddr) {
         sr_log!(debug: self, "Router connected from {}", router_addr);
         self.metrics.connection_accepted_count.fetch_add(1, SeqCst);
+    }
+
+    pub fn router_connection_lost(&self, router_id: Arc<RouterId>) {
+        sr_log!(debug: self, "Router connection lost: {}", router_id);
+        self.metrics.connection_lost_count.fetch_add(1, SeqCst);
+        self.metrics.remove_router(router_id);
     }
 
     pub fn router_id_changed(
@@ -95,11 +105,11 @@ impl BmpTcpInStatusReporter {
 
 impl UnitStatusReporter for BmpTcpInStatusReporter {}
 
-impl AnyStatusReporter for BmpTcpInStatusReporter {}
-//     fn metrics(&self) -> Option<Arc<dyn crate::metrics::Source>> {
-//         Some(self.metrics.clone())
-//     }
-// }
+impl AnyStatusReporter for BmpTcpInStatusReporter {
+    fn metrics(&self) -> Option<Arc<dyn crate::metrics::Source>> {
+        Some(self.metrics.clone())
+    }
+}
 
 impl Chainable for BmpTcpInStatusReporter {
     fn add_child<T: Display>(&self, child_name: T) -> Self {

@@ -671,11 +671,14 @@ mod tests {
         let test_value: TypeValue = U8::new(0).into();
         let in_payload = Payload::new("test", test_value.clone());
         let out_payloads = in_payload
-            .filter(|payload| {
-                Result::<_, FilterError>::Ok(ControlFlow::Continue(
-                    payload.into(),
-                ))
-            })
+            .filter(
+                |payload| {
+                    Result::<_, FilterError>::Ok(ControlFlow::Continue(
+                        payload.into(),
+                    ))
+                },
+                |_source_id| { /* NO OP */ },
+            )
             .unwrap();
         assert_eq!(out_payloads.len(), 1);
         assert!(
@@ -692,14 +695,17 @@ mod tests {
         let mut output_stream_queue = OutputStreamQueue::new();
         output_stream_queue.push(test_output_stream_message.clone());
         let out_payloads = in_payload
-            .filter(move |payload| {
-                Result::<_, FilterError>::Ok(ControlFlow::Continue(
-                    FilterOutput {
-                        east: payload,
-                        south: output_stream_queue.clone(),
-                    },
-                ))
-            })
+            .filter(
+                move |payload| {
+                    Result::<_, FilterError>::Ok(ControlFlow::Continue(
+                        FilterOutput {
+                            east: payload,
+                            south: output_stream_queue.clone(),
+                        },
+                    ))
+                },
+                |_source_id| { /* NO OP */ },
+            )
             .unwrap();
 
         assert_eq!(out_payloads.len(), 2);
@@ -719,11 +725,14 @@ mod tests {
         let payload2 = Payload::new("test2", test_value2.clone());
         let in_payload = smallvec![payload1, payload2];
         let out_payloads = in_payload
-            .filter(|payload| {
-                Result::<_, FilterError>::Ok(ControlFlow::Continue(
-                    payload.into(),
-                ))
-            })
+            .filter(
+                |payload| {
+                    Result::<_, FilterError>::Ok(ControlFlow::Continue(
+                        payload.into(),
+                    ))
+                },
+                |_source_id| { /* NO OP */ },
+            )
             .unwrap();
 
         assert_eq!(out_payloads.len(), 2);
@@ -747,14 +756,17 @@ mod tests {
         let mut output_stream_queue = OutputStreamQueue::new();
         output_stream_queue.push(test_output_stream_message.clone());
         let out_payloads = in_payload
-            .filter(move |payload| {
-                Result::<_, FilterError>::Ok(ControlFlow::Continue(
-                    FilterOutput {
-                        east: payload,
-                        south: output_stream_queue.clone(),
-                    },
-                ))
-            })
+            .filter(
+                move |payload| {
+                    Result::<_, FilterError>::Ok(ControlFlow::Continue(
+                        FilterOutput {
+                            east: payload,
+                            south: output_stream_queue.clone(),
+                        },
+                    ))
+                },
+                |_source_id| { /* NO OP */ },
+            )
             .unwrap();
 
         assert_eq!(out_payloads.len(), 4);

@@ -54,36 +54,42 @@ impl GraphStatus for MqttMetrics {
 }
 
 impl MqttMetrics {
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const UP_METRIC: Metric = Metric::new(
         "mqtt_target_connection_established_count",
         "the number of times the connection to the MQTT broker was established",
         MetricType::Gauge,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const CONNECTION_LOST_COUNT_METRIC: Metric = Metric::new(
         "mqtt_target_connection_lost_count",
         "the number of times the connection to the MQTT broker was lost",
         MetricType::Counter,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const PUBLISH_COUNT_PER_TOPIC_METRIC: Metric = Metric::new(
         "mqtt_target_publish_count",
         "the number of messages published to the MQTT broker per topic",
         MetricType::Counter,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const IN_FLIGHT_COUNT_PER_TOPIC_METRIC: Metric = Metric::new(
         "mqtt_target_in_flight_count",
         "the number of messages currently in flight",
         MetricType::Gauge,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const TRANSMIT_ERROR_COUNT_METRIC: Metric = Metric::new(
         "mqtt_target_transmit_error_count",
         "the number of messages that could not be published to the MQTT broker",
         MetricType::Counter,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const LAST_END_TO_END_DELAY_PER_ROUTER_METRIC: Metric = Metric::new(
         "mqtt_target_e2e_duration",
         "the time taken from initial receipt to completed publication for a prefix to the MQTT server",

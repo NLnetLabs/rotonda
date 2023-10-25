@@ -251,6 +251,7 @@ impl RouterInfoApi {
             writeln!(peer_report, "</table>").unwrap();
         }
 
+        // TODO: Add back in the `Connects: {num_connects}` counter.
         let response_body = formatdoc!(
             r#"
             Router:

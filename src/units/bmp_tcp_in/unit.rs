@@ -189,7 +189,6 @@ impl BmpTcpIn {
         .run(Arc::new(StandardTcpListenerFactory))
         .await?;
 
-        eprintln!("Finished");
         Ok(())
     }
 
@@ -363,8 +362,6 @@ impl BmpTcpInRunner {
                 }
             }
         }
-
-        eprintln!("Loop ending");
     }
 
     async fn process_until<T, U>(

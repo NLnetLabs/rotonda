@@ -84,7 +84,7 @@ test-mode:
 #
 ## Disable upgrade testing on Rocky Linux 9 and Debian Bookworm as we haven't published any packages for
 ## those O/S versions yet.
-test-exclude:
+# test-exclude:
 #  - pkg: 'rotonda'
 #    image: 'rockylinux:9'
 #    mode: 'upgrade-from-published'

@@ -57,10 +57,18 @@ impl Target {
         waitpoint: WaitPoint,
     ) -> Result<(), Terminated> {
         match self {
-            Target::BmpFsOut(target) => target.run(component, cmd, waitpoint).await,
-            Target::BmpTcpOut(target) => target.run(component, cmd, waitpoint).await,
-            Target::Mqtt(target) => target.run(component, cmd, waitpoint).await,
-            Target::Null(target) => target.run(component, cmd, waitpoint).await,
+            Target::BmpFsOut(target) => {
+                target.run(component, cmd, waitpoint).await
+            }
+            Target::BmpTcpOut(target) => {
+                target.run(component, cmd, waitpoint).await
+            }
+            Target::Mqtt(target) => {
+                target.run(component, cmd, waitpoint).await
+            }
+            Target::Null(target) => {
+                target.run(component, cmd, waitpoint).await
+            }
         }
     }
 

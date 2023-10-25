@@ -100,7 +100,8 @@ struct BmpInRunner {
     #[cfg(feature = "router-list")]
     component: Arc<RwLock<Component>>,
     router_id_template: Arc<String>,
-    router_states: Arc<FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>, // Option is never None, instead Some is take()'n and replace()'d.
+    router_states:
+        Arc<FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>, // Option is never None, instead Some is take()'n and replace()'d.
     #[cfg(feature = "router-list")]
     router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
     router_metrics: Arc<BmpMetrics>,
@@ -126,8 +127,10 @@ impl BmpInRunner {
         component.register_metrics(router_metrics.clone());
 
         // Setup our status reporting
-        let status_reporter =
-            Arc::new(BmpInStatusReporter::new(&unit_name, router_metrics.clone()));
+        let status_reporter = Arc::new(BmpInStatusReporter::new(
+            &unit_name,
+            router_metrics.clone(),
+        ));
 
         // Setup metrics to be updated by the BMP state machines that we use
         // to make sense of the BMP data per router that supplies it.
@@ -155,7 +158,8 @@ impl BmpInRunner {
                 router_states.clone(),
             ));
 
-            component.register_http_resource(processor.clone(), &http_api_path);
+            component
+                .register_http_resource(processor.clone(), &http_api_path);
 
             (processor, router_info)
         };
@@ -277,7 +281,8 @@ impl BmpInRunner {
         // messages relating to this newly connected router to be
         // distinguished from logged messages relating to other connected
         // routers.
-        let child_status_reporter = Arc::new(self.status_reporter.add_child(child_name));
+        let child_status_reporter =
+            Arc::new(self.status_reporter.add_child(child_name));
 
         #[cfg(feature = "router-list")]
         {
@@ -287,7 +292,12 @@ impl BmpInRunner {
 
         let metrics = self.router_metrics.clone();
 
-        BmpState::new(source_id.clone(), router_id, child_status_reporter, metrics)
+        BmpState::new(
+            source_id.clone(),
+            router_id,
+            child_status_reporter,
+            metrics,
+        )
     }
 
     fn router_disconnected(&self, source_id: &SourceId) {
@@ -374,7 +384,11 @@ impl BmpInRunner {
         res.next_state
     }
 
-    fn check_update_router_id(&self, next_state: &mut BmpState, source_id: &SourceId) {
+    fn check_update_router_id(
+        &self,
+        next_state: &mut BmpState,
+        source_id: &SourceId,
+    ) {
         let new_sys_name = match next_state {
             BmpState::Dumping(v) => &v.details.sys_name,
             BmpState::Updating(v) => &v.details.sys_name,
@@ -438,12 +452,13 @@ impl BmpInRunner {
 
                 let processor = Arc::new(processor);
 
-                self.component
-                    .write()
-                    .await
-                    .register_sub_http_resource(processor.clone(), &self.http_api_path);
+                self.component.write().await.register_sub_http_resource(
+                    processor.clone(),
+                    &self.http_api_path,
+                );
 
-                let updatable_router_info = Arc::make_mut(&mut this_router_info);
+                let updatable_router_info =
+                    Arc::make_mut(&mut this_router_info);
                 updatable_router_info.api_processor = Some(processor);
 
                 self.router_info.insert(source_id.clone(), this_router_info);
@@ -490,7 +505,9 @@ impl BmpInRunner {
         // is non-trivial and (b) that it wouldn't prevent concurrent
         // processing of BMP messages received from other router connections.
         match update {
-            Update::UpstreamStatusChange(UpstreamStatus::EndOfStream { ref source_id }) => {
+            Update::UpstreamStatusChange(UpstreamStatus::EndOfStream {
+                ref source_id,
+            }) => {
                 // The connection to the router has been lost so drop the connection state machine we have for it, if
                 // any.
                 if let Some(entry) = self.router_states.get(source_id) {
@@ -507,7 +524,8 @@ impl BmpInRunner {
 
             Update::Single(Payload {
                 source_id,
-                value: TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg)),
+                value:
+                    TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg)),
             }) => {
                 let entry = self.router_states.entry(source_id.clone());
 
@@ -520,12 +538,15 @@ impl BmpInRunner {
 
                     Entry::Vacant(map, key) => {
                         // Entry doesn't yet exist, create and insert it.
-                        let new_entry =
-                            Arc::new(Mutex::new(Some(self.router_connected(&source_id))));
+                        let new_entry = Arc::new(Mutex::new(Some(
+                            self.router_connected(&source_id),
+                        )));
 
                         let weak_ref = Arc::downgrade(&new_entry);
-                        self.setup_router_specific_api_endpoint(weak_ref, &source_id)
-                            .await;
+                        self.setup_router_specific_api_endpoint(
+                            weak_ref, &source_id,
+                        )
+                        .await;
 
                         map.insert(key, new_entry.clone());
 
@@ -539,7 +560,11 @@ impl BmpInRunner {
                 // Run the state machine resulting in a new state.
                 let next_state = self
                     .state_machine_metrics
-                    .instrument(self.process_msg(&source_id, this_state, bmp_msg.0.clone())) // Bytes::clone() is cheap
+                    .instrument(self.process_msg(
+                        &source_id,
+                        this_state,
+                        bmp_msg.0.clone(),
+                    )) // Bytes::clone() is cheap
                     .await;
 
                 // TODO: if the next_state is Aborted, we have no way of feeding that back to the TCP connection
@@ -579,11 +604,14 @@ impl std::fmt::Debug for BmpInRunner {
 
 #[cfg(test)]
 mod tests {
-    use roto::types::{collections::BytesRecord, lazyrecord_types::BmpMessage};
+    use roto::types::{
+        collections::BytesRecord, lazyrecord_types::BmpMessage,
+    };
 
     use crate::{
         bgp::encode::{
-            mk_initiation_msg, mk_invalid_initiation_message_that_lacks_information_tlvs,
+            mk_initiation_msg,
+            mk_invalid_initiation_message_that_lacks_information_tlvs,
             mk_peer_down_notification_msg, mk_per_peer_header,
         },
         tests::util::internal::get_testable_metrics_snapshot,
@@ -625,13 +653,19 @@ mod tests {
     #[should_panic]
     async fn counters_for_expected_sys_name_should_not_exist() {
         let (runner, _) = BmpInRunner::mock();
-        let initiation_msg = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
+        let initiation_msg =
+            mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
 
         runner.process_update(initiation_msg).await;
 
-        let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
+        let metrics = get_testable_metrics_snapshot(
+            &runner.status_reporter.metrics().unwrap(),
+        );
         assert_eq!(
-            metrics.with_label::<usize>("bmp_in_num_invalid_bmp_messages", ("router", SYS_NAME)),
+            metrics.with_label::<usize>(
+                "bmp_in_num_invalid_bmp_messages",
+                ("router", SYS_NAME)
+            ),
             0,
         );
     }
@@ -640,11 +674,14 @@ mod tests {
     #[should_panic]
     async fn counters_for_other_sys_name_should_not_exist() {
         let (runner, _) = BmpInRunner::mock();
-        let initiation_msg = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
+        let initiation_msg =
+            mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
 
         runner.process_update(initiation_msg).await;
 
-        let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
+        let metrics = get_testable_metrics_snapshot(
+            &runner.status_reporter.metrics().unwrap(),
+        );
         assert_eq!(
             metrics.with_label::<usize>(
                 "bmp_in_num_invalid_bmp_messages",
@@ -659,18 +696,22 @@ mod tests {
         let (runner, _) = BmpInRunner::mock();
 
         // A BMP Initiation message that lacks required fields
-        let bad_initiation_msg =
-            mk_update(mk_invalid_initiation_message_that_lacks_information_tlvs());
+        let bad_initiation_msg = mk_update(
+            mk_invalid_initiation_message_that_lacks_information_tlvs(),
+        );
 
         // A BMP Peer Down Notification message without a corresponding Peer
         // Up Notification message.
         let pph = mk_per_peer_header("10.0.0.1", 12345);
-        let bad_peer_down_msg = mk_update(mk_peer_down_notification_msg(&pph));
+        let bad_peer_down_msg =
+            mk_update(mk_peer_down_notification_msg(&pph));
 
         runner.process_update(bad_initiation_msg).await;
         runner.process_update(bad_peer_down_msg).await;
 
-        let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
+        let metrics = get_testable_metrics_snapshot(
+            &runner.status_reporter.metrics().unwrap(),
+        );
         assert_eq!(
             metrics.with_label::<usize>(
                 "bmp_in_num_invalid_bmp_messages",
@@ -683,20 +724,29 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn new_counters_should_be_started_if_the_router_id_changes() {
         let (runner, _) = BmpInRunner::mock();
-        let initiation_msg = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
+        let initiation_msg =
+            mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
         let pph = mk_per_peer_header("10.0.0.1", 12345);
-        let bad_peer_down_msg = mk_update(mk_peer_down_notification_msg(&pph));
-        let reinitiation_msg = mk_update(mk_initiation_msg(OTHER_SYS_NAME, SYS_DESCR));
-        let another_bad_peer_down_msg = mk_update(mk_peer_down_notification_msg(&pph));
+        let bad_peer_down_msg =
+            mk_update(mk_peer_down_notification_msg(&pph));
+        let reinitiation_msg =
+            mk_update(mk_initiation_msg(OTHER_SYS_NAME, SYS_DESCR));
+        let another_bad_peer_down_msg =
+            mk_update(mk_peer_down_notification_msg(&pph));
 
         runner.process_update(initiation_msg).await;
         runner.process_update(bad_peer_down_msg).await;
         runner.process_update(reinitiation_msg).await;
         runner.process_update(another_bad_peer_down_msg).await;
 
-        let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
+        let metrics = get_testable_metrics_snapshot(
+            &runner.status_reporter.metrics().unwrap(),
+        );
         assert_eq!(
-            metrics.with_label::<usize>("bmp_in_num_invalid_bmp_messages", ("router", SYS_NAME)),
+            metrics.with_label::<usize>(
+                "bmp_in_num_invalid_bmp_messages",
+                ("router", SYS_NAME)
+            ),
             1,
         );
         assert_eq!(
@@ -715,8 +765,10 @@ mod tests {
     }
 
     fn mk_update(msg_buf: Bytes) -> Update {
-        let source_id = SourceId::SocketAddr("127.0.0.1:8080".parse().unwrap());
-        let bmp_msg = Arc::new(BytesRecord(BmpMessage::from_octets(msg_buf).unwrap()));
+        let source_id =
+            SourceId::SocketAddr("127.0.0.1:8080".parse().unwrap());
+        let bmp_msg =
+            Arc::new(BytesRecord(BmpMessage::from_octets(msg_buf).unwrap()));
         let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
         Update::Single(Payload::new(source_id, value))
     }

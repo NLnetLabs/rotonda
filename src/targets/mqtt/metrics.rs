@@ -6,7 +6,9 @@ use std::sync::{
 use crate::{
     common::frim::FrimMap,
     comms::GraphStatus,
-    metrics::{self, util::append_per_router_metric, Metric, MetricType, MetricUnit},
+    metrics::{
+        self, util::append_per_router_metric, Metric, MetricType, MetricUnit,
+    },
 };
 
 #[derive(Debug, Default)]
@@ -37,10 +39,8 @@ impl GraphStatus for MqttMetrics {
                 format!(
                     "in-flight: {}\npublished: {}\nerrors: {}",
                     self.in_flight_count.load(Ordering::SeqCst),
-                    self.topics
-                        .guard()
-                        .iter()
-                        .fold(0, |acc, v| acc + v.1.publish_counts.load(Ordering::SeqCst)),
+                    self.topics.guard().iter().fold(0, |acc, v| acc
+                        + v.1.publish_counts.load(Ordering::SeqCst)),
                     self.transmit_error_count.load(Ordering::SeqCst),
                 )
             }

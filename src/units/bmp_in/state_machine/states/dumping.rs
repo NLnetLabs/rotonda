@@ -173,7 +173,10 @@ pub struct Dumping {
 
 impl BmpStateDetails<Dumping> {
     #[allow(dead_code)]
-    pub async fn process_msg(self, bmp_msg: BmpMsg<Bytes>) -> ProcessingResult {
+    pub async fn process_msg(
+        self,
+        bmp_msg: BmpMsg<Bytes>,
+    ) -> ProcessingResult {
         match bmp_msg {
             // already verified upstream
             BmpMsg::InitiationMessage(msg) => self.initiate(msg).await,
@@ -181,10 +184,12 @@ impl BmpStateDetails<Dumping> {
             BmpMsg::PeerUpNotification(msg) => {
                 let res = self.peer_up(msg).await;
                 if let BmpState::Dumping(state) = &res.next_state {
-                    let num_pending_eors = state.details.peer_states.num_pending_eors();
-                    state
-                        .status_reporter
-                        .pending_eors_update(state.router_id.clone(), num_pending_eors);
+                    let num_pending_eors =
+                        state.details.peer_states.num_pending_eors();
+                    state.status_reporter.pending_eors_update(
+                        state.router_id.clone(),
+                        num_pending_eors,
+                    );
                 }
                 res
             }
@@ -192,13 +197,19 @@ impl BmpStateDetails<Dumping> {
             BmpMsg::PeerDownNotification(msg) => self.peer_down(msg).await,
 
             BmpMsg::RouteMonitoring(msg) => {
-                self.route_monitoring(msg, RouteStatus::InConvergence, |s, pph, update| {
-                    s.route_monitoring_preprocessing(pph, update)
-                })
+                self.route_monitoring(
+                    msg,
+                    RouteStatus::InConvergence,
+                    |s, pph, update| {
+                        s.route_monitoring_preprocessing(pph, update)
+                    },
+                )
                 .await
             }
 
-            BmpMsg::TerminationMessage(msg) => self.terminate(Some(msg)).await,
+            BmpMsg::TerminationMessage(msg) => {
+                self.terminate(Some(msg)).await
+            }
 
             _ => {
                 // We ignore these. TODO: Should we count them?
@@ -230,11 +241,15 @@ impl BmpStateDetails<Dumping> {
                 //
                 // [1]: https://www.rfc-editor.org/errata/eid7133
                 let num_pending_eors = self.details.num_pending_eors();
-                self.status_reporter
-                    .pending_eors_update(self.router_id.clone(), num_pending_eors);
+                self.status_reporter.pending_eors_update(
+                    self.router_id.clone(),
+                    num_pending_eors,
+                );
 
                 let next_state = BmpState::Updating(self.into());
-                return ControlFlow::Break(Self::mk_state_transition_result(next_state));
+                return ControlFlow::Break(Self::mk_state_transition_result(
+                    next_state,
+                ));
             }
         }
 
@@ -259,7 +274,10 @@ impl BmpStateDetails<Dumping> {
         if routes.is_empty() {
             Self::mk_state_transition_result(next_state)
         } else {
-            Self::mk_final_routing_update_result(next_state, Update::Bulk(routes))
+            Self::mk_final_routing_update_result(
+                next_state,
+                Update::Bulk(routes),
+            )
         }
     }
 }
@@ -293,7 +311,12 @@ impl From<BmpStateDetails<Initiating>> for BmpStateDetails<Dumping> {
 }
 
 impl Initiable for Dumping {
-    fn set_information_tlvs(&mut self, sys_name: String, sys_desc: String, sys_extra: Vec<String>) {
+    fn set_information_tlvs(
+        &mut self,
+        sys_name: String,
+        sys_desc: String,
+        sys_extra: Vec<String>,
+    ) {
         self.sys_name = sys_name;
         self.sys_desc = sys_desc;
         self.sys_extra = sys_extra;
@@ -319,11 +342,18 @@ impl PeerAware for Dumping {
         self.peer_states.get_peers()
     }
 
-    fn update_peer_config(&mut self, pph: &PerPeerHeader<Bytes>, config: SessionConfig) -> bool {
+    fn update_peer_config(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        config: SessionConfig,
+    ) -> bool {
         self.peer_states.update_peer_config(pph, config)
     }
 
-    fn get_peer_config(&self, pph: &PerPeerHeader<Bytes>) -> Option<&SessionConfig> {
+    fn get_peer_config(
+        &self,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> Option<&SessionConfig> {
         self.peer_states.get_peer_config(pph)
     }
 
@@ -335,15 +365,28 @@ impl PeerAware for Dumping {
         self.peer_states.num_peer_configs()
     }
 
-    fn is_peer_eor_capable(&self, pph: &PerPeerHeader<Bytes>) -> Option<bool> {
+    fn is_peer_eor_capable(
+        &self,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> Option<bool> {
         self.peer_states.is_peer_eor_capable(pph)
     }
 
-    fn add_pending_eor(&mut self, pph: &PerPeerHeader<Bytes>, afi: AFI, safi: SAFI) {
+    fn add_pending_eor(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        afi: AFI,
+        safi: SAFI,
+    ) {
         self.peer_states.add_pending_eor(pph, afi, safi)
     }
 
-    fn remove_pending_eor(&mut self, pph: &PerPeerHeader<Bytes>, afi: AFI, safi: SAFI) -> bool {
+    fn remove_pending_eor(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        afi: AFI,
+        safi: SAFI,
+    ) -> bool {
         self.peer_states.remove_pending_eor(pph, afi, safi)
     }
 
@@ -351,11 +394,19 @@ impl PeerAware for Dumping {
         self.peer_states.num_pending_eors()
     }
 
-    fn add_announced_prefix(&mut self, pph: &PerPeerHeader<Bytes>, prefix: Prefix) -> bool {
+    fn add_announced_prefix(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        prefix: Prefix,
+    ) -> bool {
         self.peer_states.add_announced_prefix(pph, prefix)
     }
 
-    fn remove_announced_prefix(&mut self, pph: &PerPeerHeader<Bytes>, prefix: &Prefix) {
+    fn remove_announced_prefix(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        prefix: &Prefix,
+    ) {
         self.peer_states.remove_announced_prefix(pph, prefix)
     }
 
@@ -380,7 +431,9 @@ mod tests {
     use crate::{
         bgp::encode::{mk_per_peer_header, Announcements, Prefixes},
         payload::{Payload, SourceId, Update},
-        units::bmp_in::state_machine::{processing::MessageType, states::updating::Updating},
+        units::bmp_in::state_machine::{
+            processing::MessageType, states::updating::Updating,
+        },
     };
 
     use super::*;
@@ -392,7 +445,8 @@ mod tests {
     async fn initiate() {
         // Given
         let processor = mk_test_processor();
-        let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
+        let initiation_msg_buf =
+            mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
         assert!(processor.details.sys_name.is_empty());
 
         // When
@@ -435,14 +489,20 @@ mod tests {
     async fn statistics_report() {
         // Given
         let processor = mk_test_processor();
-        let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
+        let initiation_msg_buf =
+            mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
         let (pph, peer_up_msg_buf, _real_pph) =
-            mk_peer_up_notification_msg_without_rfc4724_support("127.0.0.1", 12345);
+            mk_peer_up_notification_msg_without_rfc4724_support(
+                "127.0.0.1",
+                12345,
+            );
         let stats_report_msg_buf = mk_statistics_report_msg(&pph);
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
-        let processor = processor.process_msg(peer_up_msg_buf).await.next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf).await.next_state;
+        let processor =
+            processor.process_msg(peer_up_msg_buf).await.next_state;
         let res = processor.process_msg(stats_report_msg_buf).await;
 
         // Then
@@ -456,11 +516,14 @@ mod tests {
         let processor = mk_test_processor();
         assert!(processor.details.peer_states.is_empty());
 
-        let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
-        let (_, peer_up_msg_buf) = mk_eor_capable_peer_up_notification_msg("127.0.0.1", 12345);
+        let initiation_msg_buf =
+            mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
+        let (_, peer_up_msg_buf) =
+            mk_eor_capable_peer_up_notification_msg("127.0.0.1", 12345);
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf).await.next_state;
         let res = processor.process_msg(peer_up_msg_buf).await;
 
         // Then
@@ -481,15 +544,24 @@ mod tests {
         let processor = mk_test_processor();
         assert!(processor.details.peer_states.is_empty());
 
-        let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
+        let initiation_msg_buf =
+            mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
         let (_, peer_up_msg_1_buf, _) =
-            mk_peer_up_notification_msg_without_rfc4724_support("127.0.0.1", 12345);
+            mk_peer_up_notification_msg_without_rfc4724_support(
+                "127.0.0.1",
+                12345,
+            );
         let (_, peer_up_msg_2_buf, _) =
-            mk_peer_up_notification_msg_without_rfc4724_support("127.0.0.1", 12345);
+            mk_peer_up_notification_msg_without_rfc4724_support(
+                "127.0.0.1",
+                12345,
+            );
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
-        let processor = processor.process_msg(peer_up_msg_1_buf).await.next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf).await.next_state;
+        let processor =
+            processor.process_msg(peer_up_msg_1_buf).await.next_state;
         let res = processor.process_msg(peer_up_msg_2_buf).await;
 
         // Then
@@ -498,8 +570,11 @@ mod tests {
             MessageType::InvalidMessage { .. }
         ));
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
-        if let MessageType::InvalidMessage { err, .. } = res.processing_result {
-            assert!(err.starts_with("PeerUpNotification received for peer that is already 'up'"));
+        if let MessageType::InvalidMessage { err, .. } = res.processing_result
+        {
+            assert!(err.starts_with(
+                "PeerUpNotification received for peer that is already 'up'"
+            ));
         }
     }
 
@@ -507,21 +582,31 @@ mod tests {
     async fn peer_up_peer_down() {
         // Given a BMP state machine in the Dumping state with no known peers
         let processor = mk_test_processor();
-        let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
+        let initiation_msg_buf =
+            mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
         let (pph_1, peer_up_msg_1_buf, _) =
-            mk_peer_up_notification_msg_without_rfc4724_support("127.0.0.1", 12345);
+            mk_peer_up_notification_msg_without_rfc4724_support(
+                "127.0.0.1",
+                12345,
+            );
         let (pph_2, peer_up_msg_2_buf, real_pph_2) =
-            mk_peer_up_notification_msg_without_rfc4724_support("127.0.0.2", 12345);
+            mk_peer_up_notification_msg_without_rfc4724_support(
+                "127.0.0.2",
+                12345,
+            );
         let route_mon_msg_buf = mk_route_monitoring_msg(&pph_2);
         let ipv6_route_mon_msg_buf = mk_ipv6_route_monitoring_msg(&pph_2);
-        let route_withdraw_msg_buf = mk_route_monitoring_withdrawal_msg(&pph_2);
+        let route_withdraw_msg_buf =
+            mk_route_monitoring_withdrawal_msg(&pph_2);
         let peer_down_msg_1_buf = mk_peer_down_notification_msg(&pph_1);
         let peer_down_msg_2_buf = mk_peer_down_notification_msg(&pph_2);
         assert!(processor.details.peer_states.is_empty());
 
         // When the state machine processes the initiate and peer up notifications
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
-        let processor = processor.process_msg(peer_up_msg_1_buf).await.next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf).await.next_state;
+        let processor =
+            processor.process_msg(peer_up_msg_1_buf).await.next_state;
         let res = processor.process_msg(peer_up_msg_2_buf).await;
 
         // Then the state should remain unchanged
@@ -542,13 +627,17 @@ mod tests {
         let processor = res.next_state;
 
         // When the state machine processes a couple of route announcements
-        let processor = processor.process_msg(route_mon_msg_buf).await.next_state;
+        let processor =
+            processor.process_msg(route_mon_msg_buf).await.next_state;
         let res = processor.process_msg(ipv6_route_mon_msg_buf).await;
 
         // Then the state should remain unchanged
         // And the number of announced prefixes should increase by 2
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
-        assert_eq!(get_announced_prefix_count(&res.next_state, &real_pph_2), 2);
+        assert_eq!(
+            get_announced_prefix_count(&res.next_state, &real_pph_2),
+            2
+        );
         let processor = res.next_state;
 
         // And when one of the routes is withdrawn
@@ -557,7 +646,10 @@ mod tests {
         // Then the state should remain unchanged
         // And the number of announced prefixes should decrease by 1
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
-        assert_eq!(get_announced_prefix_count(&res.next_state, &real_pph_2), 1);
+        assert_eq!(
+            get_announced_prefix_count(&res.next_state, &real_pph_2),
+            1
+        );
         let processor = res.next_state;
 
         // Unless it is a not-before-announced/already-withdrawn route
@@ -565,7 +657,10 @@ mod tests {
 
         // Then the number of announced prefixes should remain unchanged
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
-        assert_eq!(get_announced_prefix_count(&res.next_state, &real_pph_2), 1);
+        assert_eq!(
+            get_announced_prefix_count(&res.next_state, &real_pph_2),
+            1
+        );
         let processor = res.next_state;
 
         // And when a peer down notification is received
@@ -587,18 +682,28 @@ mod tests {
                 // Verify that the update fits inline into the SmallVec without spilling on to the heap.
                 assert!(!bulk.spilled());
 
-                let pfx = Prefix::from_str("2001:2000:3080:e9c::2/128").unwrap();
-                let mut expected_roto_prefixes: Vec<TypeValue> = vec![pfx.into()];
+                let pfx =
+                    Prefix::from_str("2001:2000:3080:e9c::2/128").unwrap();
+                let mut expected_roto_prefixes: Vec<TypeValue> =
+                    vec![pfx.into()];
                 for Payload { source_id, value } in bulk.drain(..) {
-                    if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = value {
-                        let materialized_route = MaterializedRoute::from(route);
-                        let found_pfx = materialized_route.route.prefix.as_ref().unwrap();
+                    if let TypeValue::Builtin(BuiltinTypeValue::Route(
+                        route,
+                    )) = value
+                    {
+                        let materialized_route =
+                            MaterializedRoute::from(route);
+                        let found_pfx =
+                            materialized_route.route.prefix.as_ref().unwrap();
                         let position = expected_roto_prefixes
                             .iter()
                             .position(|pfx| pfx == found_pfx)
                             .unwrap();
                         expected_roto_prefixes.remove(position);
-                        assert_eq!(materialized_route.status, RouteStatus::Withdrawn);
+                        assert_eq!(
+                            materialized_route.status,
+                            RouteStatus::Withdrawn
+                        );
                     } else {
                         panic!("Expected TypeValue::Builtin(BuiltinTypeValue::Route(_)");
                     }
@@ -622,20 +727,26 @@ mod tests {
     async fn peer_down_without_peer_up() {
         // Given
         let processor = mk_test_processor();
-        let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
+        let initiation_msg_buf =
+            mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
         assert!(processor.details.peer_states.is_empty());
 
-        let (pph, _) = mk_eor_capable_peer_up_notification_msg("127.0.0.1", 12345);
+        let (pph, _) =
+            mk_eor_capable_peer_up_notification_msg("127.0.0.1", 12345);
         let peer_down_msg_buf = mk_peer_down_notification_msg(&pph);
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf).await.next_state;
         let res = processor.process_msg(peer_down_msg_buf).await;
 
         // Then
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
-        if let MessageType::InvalidMessage { err, .. } = res.processing_result {
-            assert!(err.starts_with("PeerDownNotification received for peer that was not 'up'"));
+        if let MessageType::InvalidMessage { err, .. } = res.processing_result
+        {
+            assert!(err.starts_with(
+                "PeerDownNotification received for peer that was not 'up'"
+            ));
         }
     }
 
@@ -645,18 +756,26 @@ mod tests {
         let processor = mk_test_processor();
         assert!(processor.details.peer_states.is_empty());
 
-        let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
+        let initiation_msg_buf =
+            mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
 
         let (pph_up, peer_up_msg_buf, _) =
-            mk_peer_up_notification_msg_without_rfc4724_support("127.0.0.1", 12345);
+            mk_peer_up_notification_msg_without_rfc4724_support(
+                "127.0.0.1",
+                12345,
+            );
         let (pph_down, _, _) =
-            mk_peer_up_notification_msg_without_rfc4724_support("127.0.0.2", 54321);
+            mk_peer_up_notification_msg_without_rfc4724_support(
+                "127.0.0.2",
+                54321,
+            );
         let peer_down_msg_buf = mk_peer_down_notification_msg(&pph_down);
 
         assert_ne!(&pph_up, &pph_down);
 
         // When the state machine processes a peer up notification
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf).await.next_state;
         let res = processor.process_msg(peer_up_msg_buf).await;
 
         // Then the state should remain unchanged
@@ -682,20 +801,28 @@ mod tests {
             res.processing_result,
             MessageType::InvalidMessage { .. }
         ));
-        if let MessageType::InvalidMessage { err, .. } = res.processing_result {
-            assert!(err.starts_with("PeerDownNotification received for peer that was not 'up'"));
+        if let MessageType::InvalidMessage { err, .. } = res.processing_result
+        {
+            assert!(err.starts_with(
+                "PeerDownNotification received for peer that was not 'up'"
+            ));
         }
     }
 
     #[tokio::test]
-    async fn peer_down_spreads_withdrawals_across_multiple_bgp_updates_if_needed() {
+    async fn peer_down_spreads_withdrawals_across_multiple_bgp_updates_if_needed(
+    ) {
         // Given a BMP state machine in the Dumping state with no known peers
         let processor = mk_test_processor();
 
         // And some simulated BMP messages
-        let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
+        let initiation_msg_buf =
+            mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
         let (pph, peer_up_msg_buf, real_pph) =
-            mk_peer_up_notification_msg_without_rfc4724_support("127.0.0.1", 12345);
+            mk_peer_up_notification_msg_without_rfc4724_support(
+                "127.0.0.1",
+                12345,
+            );
 
         // Including a large number of prefix announcements
         const NUM_PREFIXES: usize = 256 * 10;
@@ -710,12 +837,14 @@ mod tests {
                             "e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.{b}.{c}.{d}/32"
                         ))
                         .unwrap();
-                        route_mon_msg_bufs.push(mk_route_monitoring_msg_with_details(
-                            &pph,
-                            &Prefixes::default(),
-                            &announcements,
-                            &[],
-                        ));
+                        route_mon_msg_bufs.push(
+                            mk_route_monitoring_msg_with_details(
+                                &pph,
+                                &Prefixes::default(),
+                                &announcements,
+                                &[],
+                            ),
+                        );
                     }
                 }
             }
@@ -724,7 +853,8 @@ mod tests {
         let peer_down_msg_buf = mk_peer_down_notification_msg(&pph);
 
         // When the state machine processes the initiate and peer up notifications
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf).await.next_state;
         let res = processor.process_msg(peer_up_msg_buf).await;
 
         // Then the state should remain unchanged
@@ -736,7 +866,9 @@ mod tests {
         assert_eq!(get_unique_peer_up_count(&processor), 1);
 
         // When the state machine processes the route announcements
-        for (i, route_mon_msg_buf) in route_mon_msg_bufs.into_iter().enumerate() {
+        for (i, route_mon_msg_buf) in
+            route_mon_msg_bufs.into_iter().enumerate()
+        {
             let res = processor.process_msg(route_mon_msg_buf).await;
 
             // Then the state should remain unchanged
@@ -767,7 +899,8 @@ mod tests {
                 // spill over on to the heap.
                 assert!(bulk.spilled());
 
-                let mut expected_roto_prefixes = Vec::<TypeValue>::with_capacity(NUM_PREFIXES);
+                let mut expected_roto_prefixes =
+                    Vec::<TypeValue>::with_capacity(NUM_PREFIXES);
                 'outer: for b in 0..256 {
                     for c in 0..256 {
                         for d in 0..256 {
@@ -775,9 +908,11 @@ mod tests {
                                 break 'outer;
                             } else {
                                 expected_roto_prefixes.push(
-                                    Prefix::from_str(&format!("127.{b}.{c}.{d}/32"))
-                                        .unwrap()
-                                        .into(),
+                                    Prefix::from_str(&format!(
+                                        "127.{b}.{c}.{d}/32"
+                                    ))
+                                    .unwrap()
+                                    .into(),
                                 );
                             }
                         }
@@ -785,12 +920,18 @@ mod tests {
                 }
 
                 #[allow(clippy::mutable_key_type)]
-                let mut distinct_bgp_updates_seen = std::collections::HashSet::new();
+                let mut distinct_bgp_updates_seen =
+                    std::collections::HashSet::new();
                 let mut num_withdrawals_seen = 0;
 
                 for Payload { source_id, value } in bulk.drain(..) {
-                    if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = value {
-                        if !distinct_bgp_updates_seen.contains(&route.raw_message) {
+                    if let TypeValue::Builtin(BuiltinTypeValue::Route(
+                        route,
+                    )) = value
+                    {
+                        if !distinct_bgp_updates_seen
+                            .contains(&route.raw_message)
+                        {
                             num_withdrawals_seen += route
                                 .raw_message
                                 .raw_message()
@@ -798,16 +939,22 @@ mod tests {
                                 .withdrawals()
                                 .iter()
                                 .count();
-                            distinct_bgp_updates_seen.insert(route.raw_message.clone());
+                            distinct_bgp_updates_seen
+                                .insert(route.raw_message.clone());
                         }
-                        let materialized_route = MaterializedRoute::from(route);
-                        let found_pfx = materialized_route.route.prefix.as_ref().unwrap();
+                        let materialized_route =
+                            MaterializedRoute::from(route);
+                        let found_pfx =
+                            materialized_route.route.prefix.as_ref().unwrap();
                         let position = expected_roto_prefixes
                             .iter()
                             .position(|pfx| pfx == found_pfx)
                             .unwrap();
                         expected_roto_prefixes.remove(position);
-                        assert_eq!(materialized_route.status, RouteStatus::Withdrawn);
+                        assert_eq!(
+                            materialized_route.status,
+                            RouteStatus::Withdrawn
+                        );
                     } else {
                         panic!("Expected TypeValue::Builtin(BuiltinTypeValue::Route(_)");
                     }
@@ -840,13 +987,16 @@ mod tests {
     async fn end_of_rib_ipv4_for_a_single_peer() {
         // Given
         let processor = mk_test_processor();
-        let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
-        let (pph, peer_up_msg_buf) = mk_eor_capable_peer_up_notification_msg("127.0.0.1", 12345);
+        let initiation_msg_buf =
+            mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
+        let (pph, peer_up_msg_buf) =
+            mk_eor_capable_peer_up_notification_msg("127.0.0.1", 12345);
         let route_mon_msg_buf = mk_route_monitoring_msg(&pph);
         let eor_msg_buf = mk_route_monitoring_end_of_rib_msg(&pph);
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf).await.next_state;
         let res = processor.process_msg(peer_up_msg_buf).await;
 
         // Then there should be one up peer but no pending EoRs
@@ -903,13 +1053,18 @@ mod tests {
         // Given
         let processor = mk_test_processor();
 
-        let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
+        let initiation_msg_buf =
+            mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
         let (pph, peer_up_msg_buf, _) =
-            mk_peer_up_notification_msg_without_rfc4724_support("127.0.0.1", 12345);
+            mk_peer_up_notification_msg_without_rfc4724_support(
+                "127.0.0.1",
+                12345,
+            );
 
-        let announcements =
-            Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32")
-                .unwrap();
+        let announcements = Announcements::from_str(
+            "e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32",
+        )
+        .unwrap();
 
         // The following hex bytes represent the MP_REACH_NLRI attribute, with an invalid AFI.
         //
@@ -932,8 +1087,10 @@ mod tests {
         );
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
-        let processor = processor.process_msg(peer_up_msg_buf).await.next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf).await.next_state;
+        let processor =
+            processor.process_msg(peer_up_msg_buf).await.next_state;
         let res = processor.process_msg(route_mon_msg_buf).await;
 
         // Then
@@ -951,14 +1108,20 @@ mod tests {
     async fn route_monitoring_announce_route() {
         // Given
         let processor = mk_test_processor();
-        let initiation_msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
+        let initiation_msg_buf =
+            mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
         let (pph, peer_up_msg_buf, _) =
-            mk_peer_up_notification_msg_without_rfc4724_support("127.0.0.1", 12345);
+            mk_peer_up_notification_msg_without_rfc4724_support(
+                "127.0.0.1",
+                12345,
+            );
         let route_mon_msg_buf = mk_route_monitoring_msg(&pph);
 
         // When
-        let processor = processor.process_msg(initiation_msg_buf).await.next_state;
-        let processor = processor.process_msg(peer_up_msg_buf).await.next_state;
+        let processor =
+            processor.process_msg(initiation_msg_buf).await.next_state;
+        let processor =
+            processor.process_msg(peer_up_msg_buf).await.next_state;
         let res = processor.process_msg(route_mon_msg_buf).await;
 
         // Then
@@ -980,8 +1143,14 @@ mod tests {
                         route.peer_ip().unwrap(),
                         IpAddr::from_str("127.0.0.1").unwrap()
                     );
-                    assert_eq!(route.peer_asn().unwrap(), Asn::from_u32(12345));
-                    assert_eq!(route.router_id().unwrap().as_str(), TEST_ROUTER_SYS_NAME);
+                    assert_eq!(
+                        route.peer_asn().unwrap(),
+                        Asn::from_u32(12345)
+                    );
+                    assert_eq!(
+                        route.router_id().unwrap().as_str(),
+                        TEST_ROUTER_SYS_NAME
+                    );
                 } else {
                     panic!("Expected a route");
                 }
@@ -1009,11 +1178,14 @@ mod tests {
 
     #[test]
     #[ignore = "to do"]
-    fn full_lifecycle_multiple_peers_no_interleaved_peer_up_and_route_monitoring() {}
+    fn full_lifecycle_multiple_peers_no_interleaved_peer_up_and_route_monitoring(
+    ) {
+    }
 
     #[test]
     #[ignore = "to do"]
-    fn full_lifecycle_multiple_peers_interleaved_peer_up_and_route_monitoring() {
+    fn full_lifecycle_multiple_peers_interleaved_peer_up_and_route_monitoring(
+    ) {
         // From: https://www.rfc-editor.org/rfc/rfc7854.html#section-9
         //
         //   "9.  Using BMP
@@ -1116,14 +1288,22 @@ mod tests {
         (bmp_msg, real_pph)
     }
 
-    fn mk_peer_down_notification_msg(pph: &crate::bgp::encode::PerPeerHeader) -> BmpMsg<Bytes> {
-        BmpMsg::from_octets(crate::bgp::encode::mk_peer_down_notification_msg(pph)).unwrap()
+    fn mk_peer_down_notification_msg(
+        pph: &crate::bgp::encode::PerPeerHeader,
+    ) -> BmpMsg<Bytes> {
+        BmpMsg::from_octets(
+            crate::bgp::encode::mk_peer_down_notification_msg(pph),
+        )
+        .unwrap()
     }
 
-    fn mk_route_monitoring_msg(pph: &crate::bgp::encode::PerPeerHeader) -> BmpMsg<Bytes> {
-        let announcements =
-            Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32")
-                .unwrap();
+    fn mk_route_monitoring_msg(
+        pph: &crate::bgp::encode::PerPeerHeader,
+    ) -> BmpMsg<Bytes> {
+        let announcements = Announcements::from_str(
+            "e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32",
+        )
+        .unwrap();
         BmpMsg::from_octets(crate::bgp::encode::mk_route_monitoring_msg(
             pph,
             &Prefixes::default(),
@@ -1133,7 +1313,9 @@ mod tests {
         .unwrap()
     }
 
-    fn mk_ipv6_route_monitoring_msg(pph: &crate::bgp::encode::PerPeerHeader) -> BmpMsg<Bytes> {
+    fn mk_ipv6_route_monitoring_msg(
+        pph: &crate::bgp::encode::PerPeerHeader,
+    ) -> BmpMsg<Bytes> {
         let announcements = Announcements::from_str(
             "e [123,456,789] 2001:2000:3080:e9c::1 BLACKHOLE,123:44 2001:2000:3080:e9c::2/128",
         )
@@ -1172,13 +1354,24 @@ mod tests {
         .unwrap()
     }
 
-    fn mk_ipv6_route_monitoring_withdrawal_msg(pph: &crate::bgp::encode::PerPeerHeader) -> Bytes {
-        let prefixes = Prefixes::from_str("2001:2000:3080:e9c::2/128").unwrap();
-        crate::bgp::encode::mk_route_monitoring_msg(pph, &prefixes, &Announcements::None, &[])
+    fn mk_ipv6_route_monitoring_withdrawal_msg(
+        pph: &crate::bgp::encode::PerPeerHeader,
+    ) -> Bytes {
+        let prefixes =
+            Prefixes::from_str("2001:2000:3080:e9c::2/128").unwrap();
+        crate::bgp::encode::mk_route_monitoring_msg(
+            pph,
+            &prefixes,
+            &Announcements::None,
+            &[],
+        )
     }
 
-    fn mk_statistics_report_msg(pph: &crate::bgp::encode::PerPeerHeader) -> BmpMsg<Bytes> {
-        BmpMsg::from_octets(crate::bgp::encode::mk_statistics_report_msg(pph)).unwrap()
+    fn mk_statistics_report_msg(
+        pph: &crate::bgp::encode::PerPeerHeader,
+    ) -> BmpMsg<Bytes> {
+        BmpMsg::from_octets(crate::bgp::encode::mk_statistics_report_msg(pph))
+            .unwrap()
     }
 
     fn mk_test_processor() -> BmpStateDetails<Dumping> {
@@ -1195,7 +1388,10 @@ mod tests {
         get_peer_states(processor).num_peer_configs()
     }
 
-    fn get_announced_prefix_count(processor: &BmpState, pph: &PerPeerHeader<Bytes>) -> usize {
+    fn get_announced_prefix_count(
+        processor: &BmpState,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> usize {
         get_peer_states(processor)
             .get_announced_prefixes(pph)
             .unwrap()
@@ -1211,7 +1407,10 @@ mod tests {
     }
 
     fn mk_initiation_msg(sys_name: &str, sys_descr: &str) -> BmpMsg<Bytes> {
-        BmpMsg::from_octets(crate::bgp::encode::mk_initiation_msg(sys_name, sys_descr)).unwrap()
+        BmpMsg::from_octets(crate::bgp::encode::mk_initiation_msg(
+            sys_name, sys_descr,
+        ))
+        .unwrap()
     }
 
     fn mk_termination_msg() -> BmpMsg<Bytes> {

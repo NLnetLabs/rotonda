@@ -61,10 +61,11 @@ pub struct Filters {
 
 impl Filters {
     pub fn new(op: FilterOp, filters: Vec<Filter>) -> Self {
-        let (selects, discards) = filters.into_iter().partition(|filter| match filter.mode() {
-            FilterMode::Select => true,
-            FilterMode::Discard => false,
-        });
+        let (selects, discards) =
+            filters.into_iter().partition(|filter| match filter.mode() {
+                FilterMode::Select => true,
+                FilterMode::Discard => false,
+            });
         Self {
             op,
             selects,

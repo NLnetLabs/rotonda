@@ -6,7 +6,9 @@ use std::sync::{
 use crate::{
     common::frim::FrimMap,
     comms::{Gate, GateMetrics},
-    metrics::{self, util::append_per_router_metric, Metric, MetricType, MetricUnit},
+    metrics::{
+        self, util::append_per_router_metric, Metric, MetricType, MetricUnit,
+    },
     payload::RouterId,
 };
 
@@ -46,7 +48,10 @@ impl BmpInMetrics {
     /// Warning: This fn will create a metric set for the given router id if
     /// it doesn't already exist. Use `contains()` to test if metrics exist
     /// for a given router id.
-    pub fn router_metrics(&self, router_id: Arc<RouterId>) -> Arc<RouterMetrics> {
+    pub fn router_metrics(
+        &self,
+        router_id: Arc<RouterId>,
+    ) -> Arc<RouterMetrics> {
         self.routers
             .entry(router_id)
             .or_insert_with(Default::default)

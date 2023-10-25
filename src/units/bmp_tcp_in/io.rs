@@ -43,7 +43,9 @@ impl FatalError for std::io::Error {
     }
 }
 
-async fn bmp_read<T: AsyncRead + Unpin>(mut rx: T) -> Result<(T, Bytes), (T, std::io::Error)> {
+async fn bmp_read<T: AsyncRead + Unpin>(
+    mut rx: T,
+) -> Result<(T, Bytes), (T, std::io::Error)> {
     let mut msg_buf = BytesMut::new();
     msg_buf.resize(5, 0u8);
     if let Err(err) = rx.read_exact(&mut msg_buf).await {
@@ -62,7 +64,9 @@ async fn bmp_read<T: AsyncRead + Unpin>(mut rx: T) -> Result<(T, Bytes), (T, std
 
     match BmpMsg::from_octets(&msg_buf) {
         Ok(_) => Ok((rx, msg_buf)),
-        Err(err) => Err((rx, std::io::Error::new(ErrorKind::Other, err.to_string()))),
+        Err(err) => {
+            Err((rx, std::io::Error::new(ErrorKind::Other, err.to_string())))
+        }
     }
 }
 
@@ -91,7 +95,9 @@ impl<T: AsyncRead + Unpin> BmpStream<T> {
     ///
     /// This function is NOT cancel safe. If cancelled the stream receiver
     /// will be lost and no further updates can be read from the stream.
-    pub async fn next(&mut self) -> Result<(Option<Bytes>, Option<GateStatus>), std::io::Error> {
+    pub async fn next(
+        &mut self,
+    ) -> Result<(Option<Bytes>, Option<GateStatus>), std::io::Error> {
         let mut saved_gate_status = None;
 
         if let Some(rx) = self.rx.take() {

@@ -75,7 +75,8 @@ unsafe impl<T: Allocator> Allocator for TrackingAllocator<T> {
     fn allocate(
         &self,
         layout: Layout,
-    ) -> Result<std::ptr::NonNull<[u8]>, allocator_api2::alloc::AllocError> {
+    ) -> Result<std::ptr::NonNull<[u8]>, allocator_api2::alloc::AllocError>
+    {
         let p = self.allocator.allocate(layout);
         self.record_alloc(layout);
         p
@@ -121,41 +122,50 @@ mod tests {
 
     use super::TrackingAllocator;
 
-    type TestSet<T> = hashbrown::HashSet<T, DefaultHashBuilder, TrackingAllocator<System>>;
+    type TestSet<T> =
+        hashbrown::HashSet<T, DefaultHashBuilder, TrackingAllocator<System>>;
 
     #[test]
     fn test_allocation_metrics() {
         let allocator = TrackingAllocator::new(System);
-        
-        let mut test_set = TestSet::<usize>::with_capacity_in(0, allocator.clone());
+
+        let mut test_set =
+            TestSet::<usize>::with_capacity_in(0, allocator.clone());
 
         let arc_allocator = Arc::new(allocator); // needed for the calls to `get_num_bytes_allocated_metric_value()`.
 
-        let metric_value_at_start = get_num_bytes_allocated_metric_value(&arc_allocator);
+        let metric_value_at_start =
+            get_num_bytes_allocated_metric_value(&arc_allocator);
         assert_eq!(metric_value_at_start, 0,);
 
         test_set.insert(1);
 
-        let metric_value_after_first_alloc = get_num_bytes_allocated_metric_value(&arc_allocator);
+        let metric_value_after_first_alloc =
+            get_num_bytes_allocated_metric_value(&arc_allocator);
         assert!(metric_value_after_first_alloc > 0);
 
         // Hopefully 1000 is more than the HashSet currently allocated space
         // for so that we trigger another allocation.
         test_set.reserve(1000);
 
-        let metric_value_after_second_alloc = get_num_bytes_allocated_metric_value(&arc_allocator);
-        assert!(metric_value_after_second_alloc > metric_value_after_first_alloc);
+        let metric_value_after_second_alloc =
+            get_num_bytes_allocated_metric_value(&arc_allocator);
+        assert!(
+            metric_value_after_second_alloc > metric_value_after_first_alloc
+        );
 
         // Hopefully the internal capacity management policy of the HashSet
         // will cause this to deallocate some of its pre-allocated space.
         test_set.shrink_to_fit();
 
-        let metric_value_after_shrink = get_num_bytes_allocated_metric_value(&arc_allocator);
+        let metric_value_after_shrink =
+            get_num_bytes_allocated_metric_value(&arc_allocator);
         assert!(metric_value_after_shrink < metric_value_after_second_alloc);
 
         drop(test_set);
 
-        let metric_value_after_drop = get_num_bytes_allocated_metric_value(&arc_allocator);
+        let metric_value_after_drop =
+            get_num_bytes_allocated_metric_value(&arc_allocator);
         assert_eq!(metric_value_after_drop, 0);
     }
 

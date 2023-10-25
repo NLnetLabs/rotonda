@@ -130,19 +130,30 @@ impl MvpConfig {
     /// Update the MVP override configuration from command line arguments.
     ///
     /// This should be called after the configuration file has been loaded.
-    pub fn update_with_arg_matches(&mut self, matches: &ArgMatches) -> Result<(), Terminate> {
+    pub fn update_with_arg_matches(
+        &mut self,
+        matches: &ArgMatches,
+    ) -> Result<(), Terminate> {
         self.apply_mvp_matches(matches)
     }
 
     /// Applies the MVP override command line arguments to the config.
-    fn apply_mvp_matches(&mut self, matches: &ArgMatches) -> Result<(), Terminate> {
-        self.bgp_listen_addr = Self::from_str_value_of(matches, ARG_BGP_LISTEN)?;
-        self.bmp_listen_addr = Self::from_str_value_of(matches, ARG_BMP_LISTEN)?;
+    fn apply_mvp_matches(
+        &mut self,
+        matches: &ArgMatches,
+    ) -> Result<(), Terminate> {
+        self.bgp_listen_addr =
+            Self::from_str_value_of(matches, ARG_BGP_LISTEN)?;
+        self.bmp_listen_addr =
+            Self::from_str_value_of(matches, ARG_BMP_LISTEN)?;
         self.bmp_proxy_destination_addr =
             Self::from_str_value_of(matches, ARG_BMP_PROXY_DESTINATION)?;
-        self.http_listen_addr = Self::from_str_value_of(matches, ARG_HTTP_LISTEN)?;
-        self.mqtt_destination_addr = Self::from_str_value_of(matches, ARG_MQTT_DESTINATION)?;
-        self.print_config_and_exit = matches.get_flag(ARG_PRINT_CONFIG_AND_EXIT);
+        self.http_listen_addr =
+            Self::from_str_value_of(matches, ARG_HTTP_LISTEN)?;
+        self.mqtt_destination_addr =
+            Self::from_str_value_of(matches, ARG_MQTT_DESTINATION)?;
+        self.print_config_and_exit =
+            matches.get_flag(ARG_PRINT_CONFIG_AND_EXIT);
 
         // If a config file is specified it should be valid, but if not specified then we are using an embedded MVP
         // config file that references Roto filters that the user may not have the required .roto files for, e.g.
@@ -158,7 +169,10 @@ impl MvpConfig {
     /// This helper function just changes error handling. Instead of returning
     /// the actual conversion error, it logs it as an invalid value for entry
     /// `key` and returns the standard error.
-    fn from_str_value_of<T>(matches: &ArgMatches, key: &str) -> Result<Option<T>, Terminate>
+    fn from_str_value_of<T>(
+        matches: &ArgMatches,
+        key: &str,
+    ) -> Result<Option<T>, Terminate>
     where
         T: FromStr,
         T::Err: fmt::Display,
@@ -193,9 +207,9 @@ mod tests {
         log::{LogFilter, LogTarget},
         manager::Manager,
         mvp::{
-            CFG_TARGET_BMP_PROXY, CFG_TARGET_MQTT, CFG_TARGET_NULL, CFG_UNIT_BGP_IN,
-            CFG_UNIT_BMP_IN, CFG_UNIT_BMP_IN_FILTER, CFG_UNIT_BMP_TCP_IN, CFG_UNIT_RIB_IN_POST,
-            CFG_UNIT_RIB_IN_PRE,
+            CFG_TARGET_BMP_PROXY, CFG_TARGET_MQTT, CFG_TARGET_NULL,
+            CFG_UNIT_BGP_IN, CFG_UNIT_BMP_IN, CFG_UNIT_BMP_IN_FILTER,
+            CFG_UNIT_BMP_TCP_IN, CFG_UNIT_RIB_IN_POST, CFG_UNIT_RIB_IN_PRE,
         },
         tests::util::internal::enable_logging,
     };
@@ -238,7 +252,8 @@ mod tests {
 
         // when loaded into the manager
         let (config_source, conf) =
-            Config::from_arg_matches(&matches, cur_dir, &mut manager).unwrap();
+            Config::from_arg_matches(&matches, cur_dir, &mut manager)
+                .unwrap();
 
         // then there should be no config file path
         assert!(!config_source.is_path());
@@ -279,7 +294,8 @@ mod tests {
 
         // when loaded into the manager
         let (config_source, conf) =
-            Config::from_arg_matches(&matches, cur_dir, &mut manager).unwrap();
+            Config::from_arg_matches(&matches, cur_dir, &mut manager)
+                .unwrap();
 
         // then there should be no config file path
         assert!(!config_source.is_path());
@@ -309,7 +325,8 @@ mod tests {
     }
 
     #[test]
-    fn mvp_config_with_both_mvp_specific_cmd_line_arg_and_config_file_arg_should_fail() {
+    fn mvp_config_with_both_mvp_specific_cmd_line_arg_and_config_file_arg_should_fail(
+    ) {
         let app = Command::new("test");
         let arg_vec = vec![
             "rotonda",
@@ -319,11 +336,14 @@ mod tests {
             "127.0.0.1:12345",
         ];
         let res = Config::config_args(app).try_get_matches_from(arg_vec);
-        assert!(matches!(res, Err(err) if err.kind() == clap::error::ErrorKind::ArgumentConflict));
+        assert!(
+            matches!(res, Err(err) if err.kind() == clap::error::ErrorKind::ArgumentConflict)
+        );
     }
 
     #[test]
-    fn mvp_config_with_proxy_destination_cmd_line_arg_should_have_proxy_target() {
+    fn mvp_config_with_proxy_destination_cmd_line_arg_should_have_proxy_target(
+    ) {
         let app = Command::new("test");
         let arg_vec = vec![
             "rotonda",
@@ -337,7 +357,9 @@ mod tests {
         let mut manager = Manager::default();
 
         // when loaded into the manager
-        let (_, conf) = Config::from_arg_matches(&matches, cur_dir, &mut manager).unwrap();
+        let (_, conf) =
+            Config::from_arg_matches(&matches, cur_dir, &mut manager)
+                .unwrap();
 
         let targets = conf.targets.targets();
         assert_eq!(targets.len(), 2);
@@ -346,7 +368,8 @@ mod tests {
     }
 
     #[test]
-    fn mvp_config_with_mqtt_destination_cmd_line_arg_should_have_mqtt_target() {
+    fn mvp_config_with_mqtt_destination_cmd_line_arg_should_have_mqtt_target()
+    {
         let app = Command::new("test");
         let arg_vec = vec![
             "rotonda",
@@ -360,7 +383,9 @@ mod tests {
         let mut manager = Manager::default();
 
         // when loaded into the manager
-        let (_, conf) = Config::from_arg_matches(&matches, cur_dir, &mut manager).unwrap();
+        let (_, conf) =
+            Config::from_arg_matches(&matches, cur_dir, &mut manager)
+                .unwrap();
 
         let targets = conf.targets.targets();
         assert_eq!(targets.len(), 2);
@@ -369,7 +394,8 @@ mod tests {
     }
 
     #[test]
-    fn mvp_config_with_proxy_and_mqtt_destination_cmd_line_args_should_have_both_targets() {
+    fn mvp_config_with_proxy_and_mqtt_destination_cmd_line_args_should_have_both_targets(
+    ) {
         enable_logging("trace");
         let app = Command::new("test");
         let arg_vec = vec![
@@ -386,7 +412,9 @@ mod tests {
         let mut manager = Manager::default();
 
         // when loaded into the manager
-        let (_, conf) = Config::from_arg_matches(&matches, cur_dir, &mut manager).unwrap();
+        let (_, conf) =
+            Config::from_arg_matches(&matches, cur_dir, &mut manager)
+                .unwrap();
 
         let targets = conf.targets.targets();
         assert_eq!(targets.len(), 3);

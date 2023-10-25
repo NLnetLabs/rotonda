@@ -8,6 +8,7 @@ use std::{
 };
 
 use arc_swap::ArcSwap;
+use chrono::{DateTime, Utc};
 use futures::{future::select, pin_mut, Future};
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
@@ -320,9 +321,12 @@ impl BmpTcpInRunner {
                         let state_machine =
                             Arc::new(Mutex::new(Some(self.router_connected(&source_id))));
 
-                        let weak_ref = Arc::downgrade(&state_machine);
-                        self.setup_router_specific_api_endpoint(weak_ref, &source_id)
-                            .await;
+                        #[cfg(feature = "router-list")]
+                        let last_msg_at = {
+                            let weak_ref = Arc::downgrade(&state_machine);
+                            self.setup_router_specific_api_endpoint(weak_ref, &source_id)
+                                .await
+                        };
 
                         self.router_states
                             .insert(source_id.clone(), state_machine.clone());
@@ -351,6 +355,8 @@ impl BmpTcpInRunner {
                             self.filter_name.clone(),
                             child_status_reporter,
                             state_machine,
+                            #[cfg(feature = "router-list")]
+                            last_msg_at,
                         );
 
                         crate::tokio::spawn(&child_name, async move {
@@ -473,12 +479,12 @@ impl BmpTcpInRunner {
 
     // TODO: Should we tear these individual API endpoints down when the
     // connection to the monitored router is lost?
+    #[cfg(feature = "router-list")]
     async fn setup_router_specific_api_endpoint(
         &self,
         state_machine: Weak<Mutex<Option<BmpState>>>,
         #[allow(unused_variables)] source_id: &SourceId,
-    ) {
-        #[cfg(feature = "router-list")]
+    ) -> Option<Arc<std::sync::RwLock<DateTime<Utc>>>> {
         match self.router_info.get(source_id) {
             None => {
                 // This should never happen.
@@ -486,11 +492,15 @@ impl BmpTcpInRunner {
                     "Router info for source {} doesn't exist",
                     source_id,
                 ));
+
+                None
             }
 
             Some(mut this_router_info) => {
                 // Setup a REST API endpoint for querying information
                 // about this particular monitored router.
+                let last_msg_at = this_router_info.last_msg_at.clone();
+
                 let processor = RouterInfoApi::new(
                     self.component.read().await.http_resources().clone(),
                     self.http_api_path.clone(),
@@ -498,7 +508,7 @@ impl BmpTcpInRunner {
                     self.bmp_in_metrics.clone(),
                     self.bmp_metrics.clone(),
                     this_router_info.connected_at,
-                    this_router_info.last_msg_at.clone(),
+                    last_msg_at.clone(),
                     state_machine,
                 );
 
@@ -513,6 +523,8 @@ impl BmpTcpInRunner {
                 updatable_router_info.api_processor = Some(processor);
 
                 self.router_info.insert(source_id.clone(), this_router_info);
+
+                Some(last_msg_at)
 
                 // TODO: unregister the processor if the router disconnects? (maybe after a delay so that we can
                 // still inspect the last known state for the monitored router)

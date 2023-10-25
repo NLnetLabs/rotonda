@@ -1,10 +1,11 @@
 //! BMP message stream handler for a single connected BMP publishing client.
 use std::cell::RefCell;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::{net::SocketAddr, ops::ControlFlow};
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 use roto::types::{
     builtin::BuiltinTypeValue, collections::BytesRecord, lazyrecord_types::BmpMessage,
     typevalue::TypeValue,
@@ -37,6 +38,8 @@ pub struct RouterHandler {
     filter_name: Arc<ArcSwap<FilterName>>,
     status_reporter: Arc<BmpTcpInStatusReporter>,
     state_machine: Arc<Mutex<Option<BmpState>>>,
+    #[cfg(feature = "router-list")]
+    last_msg_at: Option<Arc<RwLock<DateTime<Utc>>>>,
 }
 
 impl RouterHandler {
@@ -51,6 +54,7 @@ impl RouterHandler {
         filter_name: Arc<ArcSwap<FilterName>>,
         status_reporter: Arc<BmpTcpInStatusReporter>,
         state_machine: Arc<Mutex<Option<BmpState>>>,
+        #[cfg(feature = "router-list")] last_msg_at: Option<Arc<RwLock<DateTime<Utc>>>>,
     ) -> Self {
         Self {
             gate,
@@ -59,6 +63,8 @@ impl RouterHandler {
             filter_name,
             status_reporter,
             state_machine,
+            #[cfg(feature = "router-list")]
+            last_msg_at,
         }
     }
 
@@ -72,6 +78,8 @@ impl RouterHandler {
             filter_name: Default::default(),
             status_reporter: Default::default(),
             state_machine: Default::default(),
+            #[cfg(feature = "router-list")]
+            last_msg_at: None,
         };
 
         (mock, gate_agent)
@@ -189,7 +197,12 @@ impl RouterHandler {
         // SAFETY: Each connection should always have a state machine.
         let bmp_state = bmp_state_lock.take().unwrap();
 
-        // TODO: Update last_msg_at timestamp
+        #[cfg(feature = "router-list")]
+        if let Some(last_msg_at) = &self.last_msg_at {
+            if let Ok(mut guard) = last_msg_at.write() {
+                *guard = Utc::now();
+            }
+        }
 
         self.status_reporter
             .bmp_message_received(bmp_state.router_id());

@@ -4,7 +4,7 @@ use std::{
     sync::{atomic::Ordering::SeqCst, Arc},
 };
 
-use log::{debug, error, info, trace};
+use log::{debug, error, info, trace, warn};
 
 use crate::{
     common::status_reporter::{sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter},

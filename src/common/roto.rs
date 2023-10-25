@@ -554,7 +554,12 @@ impl RotoScripts {
         let res = stateful_vm
             .vm
             .exec(rx, tx, filter_map_args, &mut stateful_vm.mem)
-            .map_err(|err| RotoError::exec_err(&stateful_vm.filter_name, err))?;
+            .map_err(|err| {
+                if let Some((tracer, trace_id)) = &trace_details {
+                    tracer.note_event(*trace_id, format!("Filtering failed: {err:#?}"));
+                }
+                RotoError::exec_err(&stateful_vm.filter_name, err)
+            })?;
 
         if let Some((tracer, trace_id)) = &trace_details {
             tracer.note_event(*trace_id, format!("Filtering result: {res:#?}"));

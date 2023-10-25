@@ -24,7 +24,6 @@ use crate::{
         unit::UnitActivity,
     },
     comms::{Gate, GateStatus, Terminated},
-    http,
     manager::{Component, WaitPoint},
     payload::SourceId,
     tokio::TokioTaskMetrics,
@@ -40,8 +39,6 @@ use super::{
     types::RouterInfo,
     util::format_source_id,
 };
-
-pub const UNKNOWN_ROUTER_SYSNAME: &str = "unknown";
 
 //--- TCP listener traits ----------------------------------------------------
 //
@@ -243,7 +240,6 @@ impl BmpTcpIn {
         .run(Arc::new(StandardTcpListenerFactory))
         .await?;
 
-        eprintln!("Finished");
         Ok(())
     }
 

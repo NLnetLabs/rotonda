@@ -1,9 +1,6 @@
 use std::{
     fmt::{Debug, Display},
-    sync::{
-        atomic::{self, Ordering::SeqCst},
-        Arc,
-    },
+    sync::{atomic::Ordering::SeqCst, Arc},
     time::Duration,
 };
 

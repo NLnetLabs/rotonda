@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::payload::SourceId;
 
 #[cfg(feature = "router-list")]

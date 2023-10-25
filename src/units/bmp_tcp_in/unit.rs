@@ -531,26 +531,12 @@ mod tests {
     use super::BmpTcpIn;
 
     #[test]
-    fn sources_are_required() {
+    fn listen_is_required() {
         // suppress the panic backtrace as we expect the panic
         std::panic::set_hook(Box::new(|_| {}));
 
         // parse and panic due to missing 'sources' field
         assert!(mk_config_from_toml("").is_err());
-    }
-
-    #[test]
-    fn sources_must_be_non_empty() {
-        assert!(mk_config_from_toml("sources = []").is_err());
-    }
-
-    #[test]
-    fn okay_with_one_source() {
-        let toml = r#"
-        sources = ["some source"]
-        "#;
-
-        mk_config_from_toml(toml).unwrap();
     }
 
     // --- Test helpers ------------------------------------------------------

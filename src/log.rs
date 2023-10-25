@@ -9,7 +9,6 @@
 use crate::config::ConfigPath;
 use chrono::{DateTime, Utc};
 use clap::{Arg, ArgAction, ArgMatches, Command};
-use crossbeam_utils::atomic::AtomicCell;
 use log::{error, LevelFilter, Log};
 use serde::Deserialize;
 use std::convert::TryFrom;

@@ -9,7 +9,9 @@ use std::{
     sync::Arc,
 };
 
-use super::{metrics::BmpFsOutMetrics, status_reporter::BmpFsOutStatusReporter};
+use super::{
+    metrics::BmpFsOutMetrics, status_reporter::BmpFsOutStatusReporter,
+};
 
 use crate::{
     common::{
@@ -26,7 +28,9 @@ use crate::{
 use async_trait::async_trait;
 use chrono::Utc;
 use non_empty_vec::NonEmpty;
-use roto::types::{builtin::BuiltinTypeValue, collections::BytesRecord, typevalue::TypeValue};
+use roto::types::{
+    builtin::BuiltinTypeValue, collections::BytesRecord, typevalue::TypeValue,
+};
 use routecore::{
     bgp::message::{
         open::CapabilityType,
@@ -117,7 +121,8 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
 
         let metrics = Arc::new(BmpFsOutMetrics::new());
 
-        let _status_reporter = Arc::new(BmpFsOutStatusReporter::new(component.name(), metrics));
+        let _status_reporter =
+            Arc::new(BmpFsOutStatusReporter::new(component.name(), metrics));
 
         Self {
             component,
@@ -195,7 +200,10 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
         tx
     }
 
-    fn build_file_writer<G: Display>(&self, source_id: G) -> tokio::io::BufWriter<tokio::fs::File> {
+    fn build_file_writer<G: Display>(
+        &self,
+        source_id: G,
+    ) -> tokio::io::BufWriter<tokio::fs::File> {
         let file_path = match self.config.mode {
             Mode::Merge => {
                 // Merge all router messages into a single file at the given
@@ -232,7 +240,8 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
         mut file: tokio::io::BufWriter<tokio::fs::File>,
     ) {
         let mut router_ids = HashMap::new();
-        let mut peer_configs: HashMap<u64, (SessionConfig, bool)> = HashMap::new();
+        let mut peer_configs: HashMap<u64, (SessionConfig, bool)> =
+            HashMap::new();
 
         while let Some(Payload {
             source_id,
@@ -248,50 +257,74 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                         BmpMsg::InitiationMessage(msg) => {
                             let sys_name = msg
                                 .information_tlvs()
-                                .filter(|tlv| tlv.typ() == InformationTlvType::SysName)
-                                .map(|tlv| String::from_utf8_lossy(tlv.value()).into_owned())
+                                .filter(|tlv| {
+                                    tlv.typ() == InformationTlvType::SysName
+                                })
+                                .map(|tlv| {
+                                    String::from_utf8_lossy(tlv.value())
+                                        .into_owned()
+                                })
                                 .collect::<Vec<_>>()
                                 .join("|");
 
                             let sys_descr = msg
                                 .information_tlvs()
-                                .filter(|tlv| tlv.typ() == InformationTlvType::SysDesc)
-                                .map(|tlv| String::from_utf8_lossy(tlv.value()).into_owned())
+                                .filter(|tlv| {
+                                    tlv.typ() == InformationTlvType::SysDesc
+                                })
+                                .map(|tlv| {
+                                    String::from_utf8_lossy(tlv.value())
+                                        .into_owned()
+                                })
                                 .collect::<Vec<_>>()
                                 .join("|");
 
-                            let router_id = format!("{source_id} [{sys_name}]");
+                            let router_id =
+                                format!("{source_id} [{sys_name}]");
                             router_ids.insert(source_id.clone(), router_id);
 
                             (
                                 "initiation message",
-                                format!(": sysName={}, sysDescr={}", sys_name, sys_descr),
+                                format!(
+                                    ": sysName={}, sysDescr={}",
+                                    sys_name, sys_descr
+                                ),
                             )
                         }
 
                         BmpMsg::RouteMonitoring(msg) => {
-                            let mut tried_peer_configs = SmallVec::<[SessionConfig; 4]>::new();
+                            let mut tried_peer_configs =
+                                SmallVec::<[SessionConfig; 4]>::new();
                             let pph_hash = mk_hash(&msg.per_peer_header());
-                            let (known_peer, (chosen_peer_config, has_gr_cap)) =
-                                peer_configs.get(&pph_hash).map_or_else(
-                                    || {
-                                        // TODO: use SessionConfig::modern() when it is const
-                                        static FALLBACK_CONFIG: SessionConfig = SessionConfig {
-                                            four_octet_asn: FourOctetAsn::Enabled,
+                            let (
+                                known_peer,
+                                (chosen_peer_config, has_gr_cap),
+                            ) = peer_configs.get(&pph_hash).map_or_else(
+                                || {
+                                    // TODO: use SessionConfig::modern() when it is const
+                                    static FALLBACK_CONFIG: SessionConfig =
+                                        SessionConfig {
+                                            four_octet_asn:
+                                                FourOctetAsn::Enabled,
                                             add_path: AddPath::Disabled,
                                         };
-                                        (false, (&FALLBACK_CONFIG, false))
-                                    },
-                                    |(config, has_gr_cap)| (true, (config, *has_gr_cap)),
-                                );
+                                    (false, (&FALLBACK_CONFIG, false))
+                                },
+                                |(config, has_gr_cap)| {
+                                    (true, (config, *has_gr_cap))
+                                },
+                            );
 
                             let mut chosen_peer_config = *chosen_peer_config;
                             let mut retry_count = 0;
                             let extra = loop {
                                 match msg.bgp_update(chosen_peer_config) {
                                     Ok(update) => {
-                                        let num_withdrawals = update.withdrawn_routes_len();
-                                        let wit_s_afis = match num_withdrawals > 0 {
+                                        let num_withdrawals =
+                                            update.withdrawn_routes_len();
+                                        let wit_s_afis = match num_withdrawals
+                                            > 0
+                                        {
                                             true => format!(
                                                 "[{}, {}]",
                                                 update.withdrawals().afi(),
@@ -300,17 +333,21 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                                             false => String::new(),
                                         };
 
-                                        let num_announcements = update.nlris().iter().count();
-                                        let ann_s_afis = match num_announcements > 0 {
-                                            true => format!(
-                                                "[{}, {}]",
-                                                update.nlris().afi(),
-                                                update.nlris().safi()
-                                            ),
-                                            false => String::new(),
-                                        };
+                                        let num_announcements =
+                                            update.nlris().iter().count();
+                                        let ann_s_afis =
+                                            match num_announcements > 0 {
+                                                true => format!(
+                                                    "[{}, {}]",
+                                                    update.nlris().afi(),
+                                                    update.nlris().safi()
+                                                ),
+                                                false => String::new(),
+                                            };
 
-                                        if let Some((afi, safi)) = update.is_eor() {
+                                        if let Some((afi, safi)) =
+                                            update.is_eor()
+                                        {
                                             break format!(" [peer: {}, peer up seen: {}] EOR<{}, {}>, caps[GR: {}]", msg.per_peer_header(), known_peer, afi, safi, has_gr_cap);
                                         } else {
                                             break format!(" [peer: {}, peer up seen: {}] # withdrawals: {}{}, # announcements: {}{}",
@@ -321,12 +358,18 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                                     }
 
                                     Err(err) => {
-                                        tried_peer_configs.push(chosen_peer_config);
+                                        tried_peer_configs
+                                            .push(chosen_peer_config);
                                         if let Some(alt_config) =
-                                            generate_alternate_config(&chosen_peer_config)
+                                            generate_alternate_config(
+                                                &chosen_peer_config,
+                                            )
                                         {
-                                            if !tried_peer_configs.contains(&alt_config) {
-                                                chosen_peer_config = alt_config;
+                                            if !tried_peer_configs
+                                                .contains(&alt_config)
+                                            {
+                                                chosen_peer_config =
+                                                    alt_config;
                                                 retry_count += 1;
                                                 continue;
                                             }
@@ -360,8 +403,14 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                             let has_gr_cap = msg
                                 .bgp_open_rcvd()
                                 .capabilities()
-                                .any(|cap| cap.typ() == CapabilityType::GracefulRestart);
-                            peer_configs.insert(pph_hash, (msg.session_config(), has_gr_cap));
+                                .any(|cap| {
+                                    cap.typ()
+                                        == CapabilityType::GracefulRestart
+                                });
+                            peer_configs.insert(
+                                pph_hash,
+                                (msg.session_config(), has_gr_cap),
+                            );
 
                             (
                                 "peer up notification",
@@ -380,7 +429,10 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                                 .collect::<Vec<String>>()
                                 .join("|");
 
-                            ("termination message", format!(" [reason: {}]", reason))
+                            (
+                                "termination message",
+                                format!(" [reason: {}]", reason),
+                            )
                         }
 
                         BmpMsg::RouteMirroring(msg) => (
@@ -423,7 +475,10 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                             .unwrap();
                     }
 
-                    file_io.write_all(&mut file, "\n".as_bytes()).await.unwrap();
+                    file_io
+                        .write_all(&mut file, "\n".as_bytes())
+                        .await
+                        .unwrap();
                 }
 
                 Format::Raw => {
@@ -454,7 +509,9 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
 impl<T: FileIo + Send + Sync + 'static> DirectUpdate for BmpFsOutRunner<T> {
     async fn direct_update(&self, update: Update) {
         match update {
-            Update::UpstreamStatusChange(UpstreamStatus::EndOfStream { source_id }) => {
+            Update::UpstreamStatusChange(UpstreamStatus::EndOfStream {
+                source_id,
+            }) => {
                 if self.config.mode == Mode::Split {
                     // Drop the sender to the writer for this router. Any
                     // queued messages will be written by the writer after
@@ -473,24 +530,29 @@ impl<T: FileIo + Send + Sync + 'static> DirectUpdate for BmpFsOutRunner<T> {
                 // router. Create the writer if it doesn't
                 // exist yet.
                 let source_id = payload.source_id().clone();
-                let tx = self
-                    .senders
-                    .entry(source_id.clone())
-                    .or_insert_with(|| Arc::new(self.spawn_writer(source_id.clone())));
+                let tx =
+                    self.senders.entry(source_id.clone()).or_insert_with(
+                        || Arc::new(self.spawn_writer(source_id.clone())),
+                    );
                 if let Err(err) = tx.send(payload) {
                     self.status_reporter.write_error(source_id, err);
                 }
             }
 
             _ => {
-                self.status_reporter
-                    .input_mismatch("Update::Single(Payload::RawBmp)", update);
+                self.status_reporter.input_mismatch(
+                    "Update::Single(Payload::RawBmp)",
+                    update,
+                );
             }
         }
     }
 }
 
-impl<T: FileIo + Sync + Send + 'static> AnyDirectUpdate for BmpFsOutRunner<T> {}
+impl<T: FileIo + Sync + Send + 'static> AnyDirectUpdate
+    for BmpFsOutRunner<T>
+{
+}
 
 impl<T: FileIo + Send + Sync> std::fmt::Debug for BmpFsOutRunner<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

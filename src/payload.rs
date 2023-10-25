@@ -197,7 +197,9 @@ impl Filterable for SmallVec<[Payload; 8]> {
         let mut out_payloads = smallvec![];
 
         for payload in self {
-            out_payloads.extend(payload.filter(filter_fn.clone(), filtered_fn.clone())?);
+            out_payloads.extend(
+                payload.filter(filter_fn.clone(), filtered_fn.clone())?,
+            );
         }
 
         Ok(out_payloads)

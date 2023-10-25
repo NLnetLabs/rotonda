@@ -4,10 +4,15 @@ use std::{
     time::Instant,
 };
 
-use log::{debug, error, warn, info};
+use log::{debug, error, info, warn};
 
 use crate::{
-    common::{status_reporter::{sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter}, roto::FilterName},
+    common::{
+        roto::FilterName,
+        status_reporter::{
+            sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter,
+        },
+    },
     payload::RouterId,
 };
 
@@ -27,10 +32,18 @@ impl RibUnitStatusReporter {
         }
     }
 
-    pub fn filter_name_changed(&self, old: &FilterName, new: Option<&FilterName>) {
+    pub fn filter_name_changed(
+        &self,
+        old: &FilterName,
+        new: Option<&FilterName>,
+    ) {
         match new {
-            Some(new) => { sr_log!(info: self, "Using Roto filter '{}' instead of '{}'", new, old); }
-            None => { sr_log!(info: self, "No longer using Roto filter '{}'", old); }
+            Some(new) => {
+                sr_log!(info: self, "Using Roto filter '{}' instead of '{}'", new, old);
+            }
+            None => {
+                sr_log!(info: self, "No longer using Roto filter '{}'", old);
+            }
         }
     }
 
@@ -54,7 +67,12 @@ impl RibUnitStatusReporter {
             .last_insert_duration
             .store(insert_delay, Ordering::SeqCst);
 
-        self.insert_or_update(router_id, propagation_delay, num_retries, item_count_delta);
+        self.insert_or_update(
+            router_id,
+            propagation_delay,
+            num_retries,
+            item_count_delta,
+        );
 
         if !is_announcement {
             self.metrics
@@ -75,7 +93,12 @@ impl RibUnitStatusReporter {
             .last_update_duration
             .store(insert_delay, Ordering::SeqCst);
 
-        self.insert_or_update(router_id, propagation_delay, num_retries, item_count_delta);
+        self.insert_or_update(
+            router_id,
+            propagation_delay,
+            num_retries,
+            item_count_delta,
+        );
     }
 
     fn insert_or_update(

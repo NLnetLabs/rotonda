@@ -12,8 +12,8 @@ use crate::{
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use mqtt::{
-    AsyncClient, ClientError, ConnAck, ConnectReturnCode, Event, EventLoop, Incoming, MqttOptions,
-    QoS,
+    AsyncClient, ClientError, ConnAck, ConnectReturnCode, Event, EventLoop,
+    Incoming, MqttOptions, QoS,
 };
 use non_empty_vec::NonEmpty;
 use roto::types::{outputs::OutputStreamMessage, typevalue::TypeValue};
@@ -73,7 +73,8 @@ impl TryFrom<String> for Destination {
         };
 
         if host.is_empty() {
-            Err("Host port of MQTT server address must not be empty".to_string())
+            Err("Host port of MQTT server address must not be empty"
+                .to_string())
         } else {
             Ok(Self { host, port })
         }
@@ -174,7 +175,8 @@ impl MqttRunner {
         let metrics = Arc::new(MqttMetrics::new());
         component.register_metrics(metrics.clone());
 
-        let status_reporter = Arc::new(MqttStatusReporter::new(component.name(), metrics));
+        let status_reporter =
+            Arc::new(MqttStatusReporter::new(component.name(), metrics));
 
         Self {
             component,
@@ -208,7 +210,8 @@ impl MqttRunner {
             arc_self.config.destination.host.clone(),
             arc_self.config.destination.port,
         );
-        create_opts.set_request_channel_capacity(arc_self.config.queue_size.into());
+        create_opts
+            .set_request_channel_capacity(arc_self.config.queue_size.into());
         create_opts.set_clean_session(false);
         create_opts.set_inflight(1000);
         create_opts.set_keep_alive(Duration::from_secs(20));
@@ -216,7 +219,8 @@ impl MqttRunner {
         // Create a client & connect
         arc_self.status_reporter.connecting(&format!(
             "{}:{}",
-            &arc_self.config.destination.host, arc_self.config.destination.port
+            &arc_self.config.destination.host,
+            arc_self.config.destination.port
         ));
         let cap = arc_self.config.queue_size.into();
         let (client, connection) = AsyncClient::new(create_opts, cap);
@@ -258,7 +262,8 @@ impl MqttRunner {
 
                 TargetCommand::ReportLinks { report } => {
                     report.set_sources(&sources);
-                    report.set_graph_status(arc_self.status_reporter.metrics());
+                    report
+                        .set_graph_status(arc_self.status_reporter.metrics());
                 }
 
                 TargetCommand::Terminate => break,
@@ -284,7 +289,10 @@ impl MqttRunner {
         if let Some(mut connection) = connection {
             let status_reporter = status_reporter.clone();
             let connect_retry_secs = config.connect_retry_secs;
-            let server_uri = format!("{}:{}", config.destination.host, config.destination.port);
+            let server_uri = format!(
+                "{}:{}",
+                config.destination.host, config.destination.port
+            );
 
             crate::tokio::spawn("MQTT connection", async move {
                 let mut interval = interval(connect_retry_secs);
@@ -295,18 +303,23 @@ impl MqttRunner {
                     status_reporter.connecting(&server_uri);
                     loop {
                         match connection.poll().await {
-                            Ok(Event::Incoming(Incoming::ConnAck(ConnAck {
-                                code: ConnectReturnCode::Success,
-                                ..
-                            }))) => {
+                            Ok(Event::Incoming(Incoming::ConnAck(
+                                ConnAck {
+                                    code: ConnectReturnCode::Success,
+                                    ..
+                                },
+                            ))) => {
                                 status_reporter.connected(&server_uri);
                             }
 
-                            Ok(_) => { /* No other events are handled specially at this time */ }
+                            Ok(_) => { /* No other events are handled specially at this time */
+                            }
 
                             Err(err) => {
-                                status_reporter
-                                    .connection_error(err.to_string(), connect_retry_secs);
+                                status_reporter.connection_error(
+                                    err.to_string(),
+                                    connect_retry_secs,
+                                );
                                 interval.tick().await;
                                 break;
                             }
@@ -356,7 +369,16 @@ impl MqttRunner {
     {
         status_reporter.publishing(&topic, &content);
 
-        match Self::do_publish(client, &topic, content, qos, duration, test_publish).await {
+        match Self::do_publish(
+            client,
+            &topic,
+            content,
+            qos,
+            duration,
+            test_publish,
+        )
+        .await
+        {
             Ok(_) => {
                 status_reporter.publish_ok(topic, received);
             }
@@ -385,7 +407,12 @@ impl MqttRunner {
         };
 
         if let Some(client) = client {
-            match timeout(duration, client.publish(topic, qos, false, content)).await {
+            match timeout(
+                duration,
+                client.publish(topic, qos, false, content),
+            )
+            .await
+            {
                 Err(_) => Err(MqttError::Timeout),
                 Ok(Ok(())) => Ok(()),
                 Ok(Err(err)) => Err(MqttError::Error(err)),
@@ -399,11 +426,17 @@ impl MqttRunner {
         }
     }
 
-    fn output_stream_message_to_msg(&self, osm: Arc<OutputStreamMessage>) -> Option<SenderMsg> {
+    fn output_stream_message_to_msg(
+        &self,
+        osm: Arc<OutputStreamMessage>,
+    ) -> Option<SenderMsg> {
         if osm.get_name() == self.component.name() {
             match serde_json::to_string(osm.get_record()) {
                 Ok(content) => {
-                    let topic = self.config.topic_template.replace("{id}", osm.get_topic());
+                    let topic = self
+                        .config
+                        .topic_template
+                        .replace("{id}", osm.get_topic());
                     return Some(SenderMsg {
                         received: Utc::now(),
                         content,
@@ -424,7 +457,9 @@ impl MqttRunner {
 impl DirectUpdate for MqttRunner {
     async fn direct_update(&self, update: Update) {
         match update {
-            Update::UpstreamStatusChange(UpstreamStatus::EndOfStream { .. }) => {
+            Update::UpstreamStatusChange(UpstreamStatus::EndOfStream {
+                ..
+            }) => {
                 // Nothing to do
             }
 
@@ -433,7 +468,8 @@ impl DirectUpdate for MqttRunner {
                 ..
             }) => {
                 if let Some(msg) = self.output_stream_message_to_msg(osm) {
-                    if let Err(_err) = self.sender.as_ref().unwrap().send(msg) {
+                    if let Err(_err) = self.sender.as_ref().unwrap().send(msg)
+                    {
                         // TODO
                     }
                 }
@@ -446,8 +482,12 @@ impl DirectUpdate for MqttRunner {
                         ..
                     } = payload
                     {
-                        if let Some(msg) = self.output_stream_message_to_msg(osm) {
-                            if let Err(_err) = self.sender.as_ref().unwrap().send(msg) {
+                        if let Some(msg) =
+                            self.output_stream_message_to_msg(osm)
+                        {
+                            if let Err(_err) =
+                                self.sender.as_ref().unwrap().send(msg)
+                            {
                                 // TODO
                             }
                         }
@@ -485,8 +525,8 @@ mod tests {
     use bytes::Bytes;
     use roto::types::{
         builtin::{
-            BgpUpdateMessage, BuiltinTypeValue, RawRouteWithDeltas, RotondaId, RouteStatus,
-            UpdateMessage,
+            BgpUpdateMessage, BuiltinTypeValue, RawRouteWithDeltas,
+            RotondaId, RouteStatus, UpdateMessage,
         },
         collections::{BytesRecord, Record},
         typedef::TypeDef,
@@ -502,8 +542,8 @@ mod tests {
 
     use crate::{
         bgp::encode::{
-            mk_bgp_update, mk_initiation_msg, mk_route_monitoring_msg, Announcements, MyPeerType,
-            PerPeerHeader, Prefixes,
+            mk_bgp_update, mk_initiation_msg, mk_route_monitoring_msg,
+            Announcements, MyPeerType, PerPeerHeader, Prefixes,
         },
         payload::SourceId,
         tests::util::assert_json_eq,
@@ -516,18 +556,22 @@ mod tests {
         let empty = r#""#;
         let empty_destination = r#"destination = """#;
         let destination_with_host_only = r#"destination = "some_host_name""#;
-        let destination_with_host_and_invalid_port = r#"destination = "some_host_name:invalid_port""#;
-        let destination_with_host_and_port = r#"destination = "some_host_name:12345""#;
+        let destination_with_host_and_invalid_port =
+            r#"destination = "some_host_name:invalid_port""#;
+        let destination_with_host_and_port =
+            r#"destination = "some_host_name:12345""#;
 
         assert!(mk_config_from_toml(empty).is_err());
         assert!(mk_config_from_toml(empty_destination).is_err());
         assert!(mk_config_from_toml(destination_with_host_only).is_ok());
-        assert!(mk_config_from_toml(destination_with_host_and_invalid_port).is_err());
+        assert!(mk_config_from_toml(destination_with_host_and_invalid_port)
+            .is_err());
         assert!(mk_config_from_toml(destination_with_host_and_port).is_ok());
     }
 
     #[test]
-    fn generate_correct_json_for_publishing_from_output_stream_roto_type_value() {
+    fn generate_correct_json_for_publishing_from_output_stream_roto_type_value(
+    ) {
         // Given an MQTT target runner
         let runner = mk_mqtt_runner();
 
@@ -566,7 +610,8 @@ mod tests {
     }
 
     fn mk_raw_bmp_payload(bmp_bytes: Bytes) -> Payload {
-        let source_id = SourceId::SocketAddr("10.0.0.1:1818".parse().unwrap());
+        let source_id =
+            SourceId::SocketAddr("10.0.0.1:1818".parse().unwrap());
         let bmp_msg = BmpMsg::from_octets(bmp_bytes).unwrap();
         let bmp_msg = Arc::new(BytesRecord(bmp_msg));
         let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
@@ -577,7 +622,8 @@ mod tests {
         let bytes = bgp_route_announce(prefix);
         let update_msg = UpdateMessage::new(bytes, SessionConfig::modern());
         let delta_id = (RotondaId(0), 0);
-        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, update_msg));
+        let bgp_update_msg =
+            Arc::new(BgpUpdateMessage::new(delta_id, update_msg));
         let route = RawRouteWithDeltas::new_with_message_ref(
             (RotondaId(0), 0),
             prefix.into(),
@@ -607,7 +653,8 @@ mod tests {
             ("some-str", "some-value".into()),
             ("some-asn", routecore::asn::Asn::from_u32(1818).into()),
         ];
-        let record = Record::create_instance_with_sort(&typedef, fields).unwrap();
+        let record =
+            Record::create_instance_with_sort(&typedef, fields).unwrap();
         Arc::new(OutputStreamMessage::from(record))
     }
 
@@ -631,7 +678,9 @@ mod tests {
     }
 
     fn bmp_peer_down_notification() -> Bytes {
-        crate::bgp::encode::mk_peer_down_notification_msg(&mk_per_peer_header())
+        crate::bgp::encode::mk_peer_down_notification_msg(
+            &mk_per_peer_header(),
+        )
     }
 
     fn bmp_route_announce(prefix: Prefix) -> Bytes {
@@ -643,7 +692,12 @@ mod tests {
         ))
         .unwrap();
 
-        mk_route_monitoring_msg(&per_peer_header, &withdrawals, &announcements, &[])
+        mk_route_monitoring_msg(
+            &per_peer_header,
+            &withdrawals,
+            &announcements,
+            &[],
+        )
     }
 
     fn bgp_route_announce(prefix: Prefix) -> Bytes {

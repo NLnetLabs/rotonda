@@ -23,7 +23,8 @@ where
     TSR: TargetStatusReporter,
 {
     match either {
-        Either::Left((None, _)) | Either::Left((Some(TargetCommand::Terminate), _)) => {
+        Either::Left((None, _))
+        | Either::Left((Some(TargetCommand::Terminate), _)) => {
             // If None, the sender dropped, which in this case is the
             // manager. Probably a good time to terminate.
             status_reporter.terminated();
@@ -41,11 +42,17 @@ where
     }
 }
 
-impl<O, E, F, Z, TSR> From<(&Arc<TSR>, SelectResult<Result<O, E>, F, Z>)> for TargetActivity<E, O>
+impl<O, E, F, Z, TSR> From<(&Arc<TSR>, SelectResult<Result<O, E>, F, Z>)>
+    for TargetActivity<E, O>
 where
     TSR: TargetStatusReporter,
 {
-    fn from((status_reporter, either): (&Arc<TSR>, SelectResult<Result<O, E>, F, Z>)) -> Self {
+    fn from(
+        (status_reporter, either): (
+            &Arc<TSR>,
+            SelectResult<Result<O, E>, F, Z>,
+        ),
+    ) -> Self {
         wait_for_activity(status_reporter, either)
     }
 }

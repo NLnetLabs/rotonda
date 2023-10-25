@@ -9,7 +9,9 @@ use std::{
 use crate::{
     common::frim::FrimMap,
     comms::{Gate, GateMetrics, GraphStatus},
-    metrics::{self, util::append_per_router_metric, Metric, MetricType, MetricUnit},
+    metrics::{
+        self, util::append_per_router_metric, Metric, MetricType, MetricUnit,
+    },
 };
 
 #[derive(Debug, Default)]
@@ -23,8 +25,9 @@ pub struct BmpTcpInMetrics {
 
 impl GraphStatus for BmpTcpInMetrics {
     fn status_text(&self) -> String {
-        let num_clients = self.connection_accepted_count.load(Ordering::SeqCst)
-            - self.connection_lost_count.load(Ordering::SeqCst);
+        let num_clients =
+            self.connection_accepted_count.load(Ordering::SeqCst)
+                - self.connection_lost_count.load(Ordering::SeqCst);
         let num_msgs_out = self
             .gate
             .as_ref()
@@ -34,10 +37,13 @@ impl GraphStatus for BmpTcpInMetrics {
     }
 
     fn okay(&self) -> Option<bool> {
-        let connection_accepted_count = self.connection_accepted_count.load(Ordering::SeqCst);
+        let connection_accepted_count =
+            self.connection_accepted_count.load(Ordering::SeqCst);
         if connection_accepted_count > 0 {
-            let connection_lost_count = self.connection_lost_count.load(Ordering::SeqCst);
-            let num_clients = connection_accepted_count - connection_lost_count;
+            let connection_lost_count =
+                self.connection_lost_count.load(Ordering::SeqCst);
+            let num_clients =
+                connection_accepted_count - connection_lost_count;
             Some(num_clients > 0)
         } else {
             None
@@ -46,7 +52,10 @@ impl GraphStatus for BmpTcpInMetrics {
 }
 
 impl BmpTcpInMetrics {
-    pub fn router_metrics(&self, socket_addr: SocketAddr) -> Arc<RouterMetrics> {
+    pub fn router_metrics(
+        &self,
+        socket_addr: SocketAddr,
+    ) -> Arc<RouterMetrics> {
         self.routers
             .entry(Arc::new(socket_addr))
             .or_insert_with(Default::default)

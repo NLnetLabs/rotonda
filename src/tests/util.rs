@@ -11,23 +11,32 @@ pub(crate) mod internal {
     /// Accepts a log level name as a string, e.g. "trace".
     #[allow(dead_code)]
     pub(crate) fn enable_logging(log_level: &str) {
-        let _ = env_logger::Builder::from_env(Env::default().default_filter_or(log_level))
-            .is_test(true)
-            .try_init();
+        let _ = env_logger::Builder::from_env(
+            Env::default().default_filter_or(log_level),
+        )
+        .is_test(true)
+        .try_init();
     }
 
-    pub(crate) fn get_testable_metrics_snapshot(metrics: &Arc<impl metrics::Source + ?Sized>) -> Target {
+    pub(crate) fn get_testable_metrics_snapshot(
+        metrics: &Arc<impl metrics::Source + ?Sized>,
+    ) -> Target {
         let mut target = Target::new(OutputFormat::Test);
         metrics.append("testunit", &mut target);
         target
     }
 }
 
-pub fn assert_json_eq(actual_json: serde_json::Value, expected_json: serde_json::Value) {
+pub fn assert_json_eq(
+    actual_json: serde_json::Value,
+    expected_json: serde_json::Value,
+) {
     use assert_json_diff::{assert_json_matches_no_panic, CompareMode};
 
     let config = assert_json_diff::Config::new(CompareMode::Strict);
-    if let Err(err) = assert_json_matches_no_panic(&actual_json, &expected_json, config) {
+    if let Err(err) =
+        assert_json_matches_no_panic(&actual_json, &expected_json, config)
+    {
         eprintln!(
             "Actual JSON: {}",
             serde_json::to_string_pretty(&actual_json).unwrap()
@@ -46,7 +55,8 @@ pub mod bgp {
             pub mod standard {
                 use routecore::bgp::communities::StandardCommunity;
 
-                pub fn sample_reserved_standard_community() -> StandardCommunity {
+                pub fn sample_reserved_standard_community(
+                ) -> StandardCommunity {
                     [0x00, 0x00, 0x00, 0x00].into()
                 }
 
@@ -54,15 +64,18 @@ pub mod bgp {
                     [0x00, 0x01, 0x00, 0x00].into()
                 }
 
-                pub fn well_known_rfc1997_no_export_community() -> StandardCommunity {
+                pub fn well_known_rfc1997_no_export_community(
+                ) -> StandardCommunity {
                     [0xFF, 0xFF, 0xFF, 0x01].into()
                 }
 
-                pub fn well_known_rfc7999_blackhole_community() -> StandardCommunity {
+                pub fn well_known_rfc7999_blackhole_community(
+                ) -> StandardCommunity {
                     [0xFF, 0xFF, 0x02, 0x9A].into()
                 }
 
-                pub fn well_known_rfc8326_graceful_shutdown_community() -> StandardCommunity {
+                pub fn well_known_rfc8326_graceful_shutdown_community(
+                ) -> StandardCommunity {
                     [0xFF, 0xFF, 0x00, 0x00].into()
                 }
             }
@@ -70,17 +83,25 @@ pub mod bgp {
             pub mod extended {
                 use routecore::bgp::communities::ExtendedCommunity;
 
-                pub fn sample_as2_specific_route_target_extended_community() -> ExtendedCommunity {
-                    ExtendedCommunity::from_raw([0x00, 0x02, 0x00, 0x22, 0x00, 0x00, 0xD5, 0x08])
+                pub fn sample_as2_specific_route_target_extended_community(
+                ) -> ExtendedCommunity {
+                    ExtendedCommunity::from_raw([
+                        0x00, 0x02, 0x00, 0x22, 0x00, 0x00, 0xD5, 0x08,
+                    ])
                 }
 
                 pub fn sample_ipv4_address_specific_route_target_extended_community(
                 ) -> ExtendedCommunity {
-                    ExtendedCommunity::from_raw([0x01, 0x02, 0xC1, 0x2A, 0x00, 0x0A, 0xD5, 0x08])
+                    ExtendedCommunity::from_raw([
+                        0x01, 0x02, 0xC1, 0x2A, 0x00, 0x0A, 0xD5, 0x08,
+                    ])
                 }
 
-                pub fn sample_unrecgonised_extended_community() -> ExtendedCommunity {
-                    ExtendedCommunity::from_raw([0x02, 0x02, 0x00, 0x22, 0x00, 0x00, 0xD5, 0x08])
+                pub fn sample_unrecgonised_extended_community(
+                ) -> ExtendedCommunity {
+                    ExtendedCommunity::from_raw([
+                        0x02, 0x02, 0x00, 0x22, 0x00, 0x00, 0xD5, 0x08,
+                    ])
                 }
             }
 
@@ -89,7 +110,8 @@ pub mod bgp {
 
                 pub fn sample_large_community() -> LargeCommunity {
                     LargeCommunity::from_raw([
-                        0x00, 0x00, 0x00, 0x22, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0x00,
+                        0x00, 0x00, 0x00, 0x22, 0x00, 0x00, 0x01, 0x00, 0x00,
+                        0x00, 0x02, 0x00,
                     ])
                 }
             }
@@ -106,7 +128,9 @@ pub mod bgp {
         use routecore::asn::Asn;
         use routecore::bgp::aspath::HopPath;
         use routecore::bgp::communities::Community;
-        use routecore::bgp::types::{NextHop, OriginType, PathAttributeType, AFI, SAFI};
+        use routecore::bgp::types::{
+            NextHop, OriginType, PathAttributeType, AFI, SAFI,
+        };
         use routecore::bmp::message::{
             InformationTlvType, MessageType, PeerType, TerminationInformation,
         };
@@ -138,14 +162,23 @@ pub mod bgp {
             //
             // From: https://www.rfc-editor.org/rfc/rfc7854.html#section-4.4
 
-            push_bmp_information_tlv(&mut buf, InformationTlvType::SysName, sys_name.as_bytes());
-            push_bmp_information_tlv(&mut buf, InformationTlvType::SysDesc, sys_descr.as_bytes());
+            push_bmp_information_tlv(
+                &mut buf,
+                InformationTlvType::SysName,
+                sys_name.as_bytes(),
+            );
+            push_bmp_information_tlv(
+                &mut buf,
+                InformationTlvType::SysDesc,
+                sys_descr.as_bytes(),
+            );
 
             finalize_bmp_msg_len(&mut buf);
             buf.freeze()
         }
 
-        pub fn mk_invalid_initiation_message_that_lacks_information_tlvs() -> Bytes {
+        pub fn mk_invalid_initiation_message_that_lacks_information_tlvs(
+        ) -> Bytes {
             let mut buf = BytesMut::new();
             push_bmp_common_header(&mut buf, MessageType::InitiationMessage);
 
@@ -276,7 +309,8 @@ pub mod bgp {
             // Other fields
             bgp_msg_buf.extend_from_slice(&received_open_asn.to_be_bytes());
             bgp_msg_buf.extend_from_slice(&0u16.to_be_bytes()); // 0 hold time - disables keep alive
-            bgp_msg_buf.extend_from_slice(&received_bgp_identifier.to_be_bytes());
+            bgp_msg_buf
+                .extend_from_slice(&received_bgp_identifier.to_be_bytes());
 
             if !eor_capable {
                 bgp_msg_buf.extend_from_slice(&0u8.to_be_bytes()); // 0 optional parameter bytes
@@ -511,7 +545,11 @@ pub mod bgp {
             announcements: &Announcements,
             extra_path_attributes: &[u8],
         ) -> Bytes {
-            let bgp_msg_buf = mk_bgp_update(withdrawals, announcements, extra_path_attributes);
+            let bgp_msg_buf = mk_bgp_update(
+                withdrawals,
+                announcements,
+                extra_path_attributes,
+            );
             mk_raw_route_monitoring_msg(per_peer_header, bgp_msg_buf)
         }
 
@@ -623,25 +661,32 @@ pub mod bgp {
                         withdrawn_routes.extend_from_slice(&[len]);
                         if len > 0 {
                             let min_bytes = div_ceil(len, 8) as usize;
-                            withdrawn_routes.extend_from_slice(&addr.octets()[..min_bytes]);
+                            withdrawn_routes.extend_from_slice(
+                                &addr.octets()[..min_bytes],
+                            );
                         }
                     }
                     IpAddr::V6(addr) => {
                         // https://datatracker.ietf.org/doc/html/rfc4760#section-4
                         if mp_unreach_nlri.is_empty() {
                             mp_unreach_nlri.put_u16(AFI::Ipv6.into());
-                            mp_unreach_nlri
-                                .put_u8(u8::from(SAFI::Unicast) | u8::from(SAFI::Multicast));
+                            mp_unreach_nlri.put_u8(
+                                u8::from(SAFI::Unicast)
+                                    | u8::from(SAFI::Multicast),
+                            );
                         }
                         mp_unreach_nlri.extend_from_slice(&[len]);
                         if len > 0 {
                             let min_bytes = div_ceil(len, 8) as usize;
-                            mp_unreach_nlri.extend_from_slice(&addr.octets()[..min_bytes]);
+                            mp_unreach_nlri.extend_from_slice(
+                                &addr.octets()[..min_bytes],
+                            );
                         }
                     }
                 }
             }
-            let num_withdrawn_route_bytes = u16::try_from(withdrawn_routes.len()).unwrap();
+            let num_withdrawn_route_bytes =
+                u16::try_from(withdrawn_routes.len()).unwrap();
             buf.extend_from_slice(&num_withdrawn_route_bytes.to_be_bytes());
             // N withdrawn route bytes
             if num_withdrawn_route_bytes > 0 {
@@ -744,11 +789,15 @@ pub mod bgp {
                         let (optional, transitive, complete) = match r#type {
                             PathAttributeType::AsPath
                             | PathAttributeType::NextHop
-                            | PathAttributeType::Origin => (false, true, true),
+                            | PathAttributeType::Origin => {
+                                (false, true, true)
+                            }
                             PathAttributeType::Communities
                             | PathAttributeType::ExtendedCommunities
                             | PathAttributeType::LargeCommunities
-                            | PathAttributeType::MpReachNlri => (true, false, true),
+                            | PathAttributeType::MpReachNlri => {
+                                (true, false, true)
+                            }
                             _ => todo!(),
                         };
 
@@ -804,8 +853,12 @@ pub mod bgp {
                     let mut as_path_attr_value_bytes = Vec::<u8>::new();
 
                     // sequence of AS path segments [(seg. type, seg. len, seg. val), ...]
-                    for segment in as_path.to_as_path::<Vec<u8>>().unwrap().segments() {
-                        segment.compose(&mut as_path_attr_value_bytes).unwrap();
+                    for segment in
+                        as_path.to_as_path::<Vec<u8>>().unwrap().segments()
+                    {
+                        segment
+                            .compose(&mut as_path_attr_value_bytes)
+                            .unwrap();
                     }
 
                     push_attributes(
@@ -858,21 +911,27 @@ pub mod bgp {
                     //
                     // From: https://www.rfc-editor.org/rfc/rfc1997.html
                     if !communities.is_empty() {
-                        let mut communities_attribute_bytes = Vec::<u8>::new();
-                        let mut extended_communities_attribute_bytes = Vec::<u8>::new();
-                        let mut large_communities_attribute_bytes = Vec::<u8>::new();
+                        let mut communities_attribute_bytes =
+                            Vec::<u8>::new();
+                        let mut extended_communities_attribute_bytes =
+                            Vec::<u8>::new();
+                        let mut large_communities_attribute_bytes =
+                            Vec::<u8>::new();
 
                         for community in communities.deref() {
                             match community {
                                 Community::Standard(c) => {
-                                    communities_attribute_bytes.extend_from_slice(&c.to_raw())
+                                    communities_attribute_bytes
+                                        .extend_from_slice(&c.to_raw())
                                 }
                                 Community::Extended(c) => {
-                                    extended_communities_attribute_bytes.extend_from_slice(&c.to_raw())
+                                    extended_communities_attribute_bytes
+                                        .extend_from_slice(&c.to_raw())
                                 }
                                 Community::Ipv6Extended(_) => todo!(),
                                 Community::Large(c) => {
-                                    large_communities_attribute_bytes.extend_from_slice(&c.to_raw())
+                                    large_communities_attribute_bytes
+                                        .extend_from_slice(&c.to_raw())
                                 }
                             }
                         }
@@ -913,17 +972,22 @@ pub mod bgp {
                                 announced_routes.extend_from_slice(&[len]);
                                 if len > 0 {
                                     let min_bytes = div_ceil(len, 8) as usize;
-                                    announced_routes.extend_from_slice(&addr.octets()[..min_bytes]);
+                                    announced_routes.extend_from_slice(
+                                        &addr.octets()[..min_bytes],
+                                    );
                                 }
                             }
                             IpAddr::V6(addr) => {
                                 // https://datatracker.ietf.org/doc/html/rfc4760#section-3
                                 if mp_reach_nlri.is_empty() {
                                     mp_reach_nlri.put_u16(AFI::Ipv6.into());
-                                    mp_reach_nlri.put_u8(u8::from(SAFI::Unicast));
+                                    mp_reach_nlri
+                                        .put_u8(u8::from(SAFI::Unicast));
                                     if let NextHop::Ipv6(addr) = next_hop.0 {
                                         mp_reach_nlri.put_u8(addr.octets().len() as u8);
-                                        mp_reach_nlri.extend_from_slice(&addr.octets());
+                                        mp_reach_nlri.extend_from_slice(
+                                            &addr.octets(),
+                                        );
                                     } else {
                                         unreachable!();
                                     }
@@ -932,7 +996,9 @@ pub mod bgp {
                                 mp_reach_nlri.extend_from_slice(&[len]);
                                 if len > 0 {
                                     let min_bytes = div_ceil(len, 8) as usize;
-                                    mp_reach_nlri.extend_from_slice(&addr.octets()[..min_bytes]);
+                                    mp_reach_nlri.extend_from_slice(
+                                        &addr.octets()[..min_bytes],
+                                    );
                                 }
                             }
                         }
@@ -946,9 +1012,13 @@ pub mod bgp {
                         );
                     }
 
-                    let num_path_attribute_bytes =
-                        u16::try_from(path_attributes.len() + extra_path_attributes.len()).unwrap();
-                    buf.extend_from_slice(&num_path_attribute_bytes.to_be_bytes()); // N path attribute bytes
+                    let num_path_attribute_bytes = u16::try_from(
+                        path_attributes.len() + extra_path_attributes.len(),
+                    )
+                    .unwrap();
+                    buf.extend_from_slice(
+                        &num_path_attribute_bytes.to_be_bytes(),
+                    ); // N path attribute bytes
                     buf.extend_from_slice(&path_attributes);
                     buf.extend_from_slice(extra_path_attributes);
 
@@ -963,9 +1033,14 @@ pub mod bgp {
             buf.freeze()
         }
 
-        pub fn mk_peer_down_notification_msg(per_peer_header: &PerPeerHeader) -> Bytes {
+        pub fn mk_peer_down_notification_msg(
+            per_peer_header: &PerPeerHeader,
+        ) -> Bytes {
             let mut buf = BytesMut::new();
-            push_bmp_common_header(&mut buf, MessageType::PeerDownNotification);
+            push_bmp_common_header(
+                &mut buf,
+                MessageType::PeerDownNotification,
+            );
             push_bmp_per_peer_header(&mut buf, per_peer_header);
 
             // 4.9.  Peer Down Notification
@@ -987,7 +1062,9 @@ pub mod bgp {
             buf.freeze()
         }
 
-        pub fn mk_statistics_report_msg(per_peer_header: &PerPeerHeader) -> Bytes {
+        pub fn mk_statistics_report_msg(
+            per_peer_header: &PerPeerHeader,
+        ) -> Bytes {
             // 4.8.  Stats Reports
             //
             // "Following the common BMP header and per-peer header is a 4-byte field
@@ -1053,7 +1130,11 @@ pub mod bgp {
             //
             // From: https://www.rfc-editor.org/rfc/rfc7854.html#section-4.4
 
-            push_bmp_termination_tlv(&mut buf, TerminationInformation::AdminClose, &[0u8, 0u8]);
+            push_bmp_termination_tlv(
+                &mut buf,
+                TerminationInformation::AdminClose,
+                &[0u8, 0u8],
+            );
 
             finalize_bmp_msg_len(&mut buf);
             buf.freeze()
@@ -1113,7 +1194,10 @@ pub mod bgp {
             }
         }
 
-        pub fn mk_per_peer_header(peer_ip: &str, peer_as: u32) -> PerPeerHeader {
+        pub fn mk_per_peer_header(
+            peer_ip: &str,
+            peer_as: u32,
+        ) -> PerPeerHeader {
             PerPeerHeader {
                 peer_type: PeerType::GlobalInstance.into(),
                 peer_flags: 0,
@@ -1123,7 +1207,7 @@ pub mod bgp {
                 peer_bgp_id: [1u8, 2u8, 3u8, 4u8],
             }
         }
-    
+
         fn push_bmp_per_peer_header(buf: &mut BytesMut, pph: &PerPeerHeader) {
             //  0                   1                   2                   3
             //  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -1200,7 +1284,9 @@ pub mod bgp {
             // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
             //
             // From: https://www.rfc-editor.org/rfc/rfc7854.html#section-4.4
-            buf.extend_from_slice(&information_tlv_type_to_be_bytes(tlv_type));
+            buf.extend_from_slice(&information_tlv_type_to_be_bytes(
+                tlv_type,
+            ));
             buf.extend_from_slice(&(tlv_value.len() as u16).to_be_bytes());
             buf.extend_from_slice(tlv_value);
         }
@@ -1220,12 +1306,16 @@ pub mod bgp {
             // +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
             //
             // From: https://www.rfc-editor.org/rfc/rfc7854.html#section-4.4
-            buf.extend_from_slice(&termination_tlv_type_to_be_bytes(tlv_type));
+            buf.extend_from_slice(&termination_tlv_type_to_be_bytes(
+                tlv_type,
+            ));
             buf.extend_from_slice(&(tlv_value.len() as u16).to_be_bytes());
             buf.extend_from_slice(tlv_value);
         }
 
-        fn information_tlv_type_to_be_bytes(typ: InformationTlvType) -> [u8; 2] {
+        fn information_tlv_type_to_be_bytes(
+            typ: InformationTlvType,
+        ) -> [u8; 2] {
             match typ {
                 InformationTlvType::String => 0u16.to_be_bytes(),
                 InformationTlvType::SysDesc => 1u16.to_be_bytes(),
@@ -1234,14 +1324,18 @@ pub mod bgp {
             }
         }
 
-        fn termination_tlv_type_to_be_bytes(typ: TerminationInformation) -> [u8; 2] {
+        fn termination_tlv_type_to_be_bytes(
+            typ: TerminationInformation,
+        ) -> [u8; 2] {
             match typ {
                 TerminationInformation::CustomString(_) => 0u16.to_be_bytes(),
                 TerminationInformation::AdminClose
                 | TerminationInformation::Unspecified
                 | TerminationInformation::OutOfResources
                 | TerminationInformation::RedundantConnection
-                | TerminationInformation::PermAdminClose => 1u16.to_be_bytes(),
+                | TerminationInformation::PermAdminClose => {
+                    1u16.to_be_bytes()
+                }
                 TerminationInformation::Undefined(_) => unreachable!(),
             }
         }

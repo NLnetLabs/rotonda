@@ -331,10 +331,10 @@ impl Processor {
         // live_sessions set.
         if !rejected {
             if let Some(negotiated) = session.negotiated() {
-                live_sessions
-                    .lock()
-                    .unwrap()
-                    .remove(&(negotiated.remote_addr(), negotiated.remote_asn()));
+                live_sessions.lock().unwrap().remove(&(
+                    negotiated.remote_addr(),
+                    negotiated.remote_asn(),
+                ));
                 debug!(
                     "removed {}@{} from live_sessions (current count: {})",
                     negotiated.remote_asn(),
@@ -446,7 +446,14 @@ impl Processor {
                 .inspect(|prefix| {
                     self.observed_prefixes.insert(*prefix);
                 })
-                .map(|prefix| mk_payload(prefix, &msg, &source_id, RouteStatus::InConvergence)),
+                .map(|prefix| {
+                    mk_payload(
+                        prefix,
+                        &msg,
+                        &source_id,
+                        RouteStatus::InConvergence,
+                    )
+                }),
         );
 
         payloads.extend(
@@ -462,7 +469,14 @@ impl Processor {
                 .inspect(|prefix| {
                     self.observed_prefixes.remove(prefix);
                 })
-                .map(|prefix| mk_payload(prefix, &msg, &source_id, RouteStatus::Withdrawn)),
+                .map(|prefix| {
+                    mk_payload(
+                        prefix,
+                        &msg,
+                        &source_id,
+                        RouteStatus::Withdrawn,
+                    )
+                }),
         );
 
         payloads.into()
@@ -511,7 +525,8 @@ pub async fn handle_connection(
         delay_open
     );
 
-    let mut session = Session::new(candidate_config, tcp_stream, sess_tx, cmds_rx);
+    let mut session =
+        Session::new(candidate_config, tcp_stream, sess_tx, cmds_rx);
 
     if delay_open {
         session.enable_delay_open();
@@ -519,7 +534,13 @@ pub async fn handle_connection(
     session.manual_start().await;
     session.connection_established().await;
 
-    let mut p = Processor::new(roto_scripts, gate, unit_config, cmds_tx, status_reporter);
+    let mut p = Processor::new(
+        roto_scripts,
+        gate,
+        unit_config,
+        cmds_tx,
+        status_reporter,
+    );
     p.process(session, sess_rx, live_sessions).await;
 }
 
@@ -538,7 +559,9 @@ mod tests {
     use crate::{
         common::status_reporter::AnyStatusReporter,
         comms::GateAgent,
-        tests::util::internal::{get_testable_metrics_snapshot, enable_logging},
+        tests::util::internal::{
+            enable_logging, get_testable_metrics_snapshot,
+        },
         units::bgp_tcp_in::{
             peer_config::{CombinedConfig, PeerConfig, PrefixOrExact},
             router_handler::Processor,
@@ -552,7 +575,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn processor_should_abort_on_unit_termination() {
         enable_logging("trace");
-        let (join_handle, status_reporter, gate_agent, sess_tx) = setup_test();
+        let (join_handle, status_reporter, gate_agent, sess_tx) =
+            setup_test();
 
         gate_agent.terminate().await;
 
@@ -570,7 +594,9 @@ mod tests {
         // Wait for the termination command to be handled:
         let mut count = 0;
         while count < 1 {
-            let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
+            let metrics = get_testable_metrics_snapshot(
+                &status_reporter.metrics().unwrap(),
+            );
             count = metrics.with_name::<usize>("bgp_tcp_in_disconnect_count");
         }
 
@@ -582,24 +608,32 @@ mod tests {
         // Now it's safe to wait for the processor to abort.
         join_handle.await.unwrap();
 
-        let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
+        let metrics = get_testable_metrics_snapshot(
+            &status_reporter.metrics().unwrap(),
+        );
         assert_eq!(
             metrics.with_name::<usize>("bgp_tcp_in_connection_lost_count"),
             1
         );
-        assert_eq!(metrics.with_name::<usize>("bgp_tcp_in_disconnect_count"), 1);
+        assert_eq!(
+            metrics.with_name::<usize>("bgp_tcp_in_disconnect_count"),
+            1
+        );
     }
 
     #[tokio::test]
     async fn processor_should_abort_on_connection_lost() {
-        let (join_handle, status_reporter, _gate_agent, sess_tx) = setup_test();
+        let (join_handle, status_reporter, _gate_agent, sess_tx) =
+            setup_test();
 
         let msg = Message::ConnectionLost("10.0.0.2:12345".parse().unwrap());
         let _ = sess_tx.send(msg).await;
 
         join_handle.await.unwrap();
 
-        let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
+        let metrics = get_testable_metrics_snapshot(
+            &status_reporter.metrics().unwrap(),
+        );
         assert_eq!(
             metrics.with_name::<usize>("bgp_tcp_in_connection_lost_count"),
             1
@@ -614,19 +648,25 @@ mod tests {
         GateAgent,
         mpsc::Sender<Message>,
     ) {
-        let unit_settings = BgpTcpIn::mock("dummy-listen-address", Asn::from_u32(12345));
+        let unit_settings =
+            BgpTcpIn::mock("dummy-listen-address", Asn::from_u32(12345));
         let peer_config = PeerConfig::mock();
         let remote_net = PrefixOrExact::Exact("10.0.0.1".parse().unwrap());
-        let config = CombinedConfig::new(unit_settings.clone(), peer_config, remote_net);
+        let config = CombinedConfig::new(
+            unit_settings.clone(),
+            peer_config,
+            remote_net,
+        );
         let session = MockBgpSession(config);
         let (mut p, gate_agent) = Processor::mock(unit_settings);
         let (sess_tx, sess_rx) = mpsc::channel::<Message>(100);
         let live_sessions = Arc::new(Mutex::new(HashMap::new()));
         let status_reporter = p.status_reporter.clone();
 
-        let join_handle = crate::tokio::spawn("mock_bgp_tcp_in_processor", async move {
-            p.process(session, sess_rx, live_sessions).await
-        });
+        let join_handle =
+            crate::tokio::spawn("mock_bgp_tcp_in_processor", async move {
+                p.process(session, sess_rx, live_sessions).await
+            });
 
         (join_handle, status_reporter, gate_agent, sess_tx)
     }
@@ -658,7 +698,8 @@ mod tests {
         async fn tick(&mut self) -> Result<(), session::Error> {
             // Don't tick too fast otherwise process() spends all its time
             // handling ticks and won't do anything else.
-            Ok(tokio::time::sleep(std::time::Duration::from_millis(100)).await)
+            Ok(tokio::time::sleep(std::time::Duration::from_millis(100))
+                .await)
         }
     }
 }

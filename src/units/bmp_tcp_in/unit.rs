@@ -51,7 +51,10 @@ struct StandardTcpListenerFactory;
 
 #[async_trait::async_trait]
 impl TcpListenerFactory<StandardTcpListener> for StandardTcpListenerFactory {
-    async fn bind(&self, addr: String) -> std::io::Result<StandardTcpListener> {
+    async fn bind(
+        &self,
+        addr: String,
+    ) -> std::io::Result<StandardTcpListener> {
         let listener = ::tokio::net::TcpListener::bind(addr).await?;
         Ok(StandardTcpListener(listener))
     }
@@ -102,7 +105,10 @@ impl BmpTcpIn {
         component.register_metrics(metrics.clone());
 
         // Setup status reporting
-        let status_reporter = Arc::new(BmpTcpInStatusReporter::new(&unit_name, metrics.clone()));
+        let status_reporter = Arc::new(BmpTcpInStatusReporter::new(
+            &unit_name,
+            metrics.clone(),
+        ));
 
         // Wait for other components to be, and signal to other components that we are, ready to start. All units and
         // targets start together, otherwise data passed from one component to another may be lost if the receiving
@@ -141,7 +147,10 @@ impl BmpTcpInRunner {
         }
     }
 
-    async fn run<T, U>(mut self, listener_factory: Arc<T>) -> Result<(), crate::comms::Terminated>
+    async fn run<T, U>(
+        mut self,
+        listener_factory: Arc<T>,
+    ) -> Result<(), crate::comms::Terminated>
     where
         T: TcpListenerFactory<U>,
         U: TcpListener,
@@ -158,7 +167,9 @@ impl BmpTcpInRunner {
                 loop {
                     match listener_factory.bind(listen_addr.clone()).await {
                         Err(err) => {
-                            let err = format!("{err}: Will retry in {wait} seconds.");
+                            let err = format!(
+                                "{err}: Will retry in {wait} seconds."
+                            );
                             status_reporter.bind_error(&listen_addr, &err);
                             sleep(Duration::from_secs(wait)).await;
                             wait *= 2;
@@ -168,7 +179,8 @@ impl BmpTcpInRunner {
                 }
             };
 
-            let listener = match self.process_until(bind_with_backoff()).await {
+            let listener = match self.process_until(bind_with_backoff()).await
+            {
                 ControlFlow::Continue(Ok(res)) => res,
                 ControlFlow::Continue(Err(_err)) => continue,
                 ControlFlow::Break(Terminated) => return Err(Terminated),
@@ -179,22 +191,27 @@ impl BmpTcpInRunner {
             'inner: loop {
                 match self.process_until(listener.accept()).await {
                     ControlFlow::Continue(Ok((tcp_stream, client_addr))) => {
-                        status_reporter.listener_connection_accepted(client_addr);
+                        status_reporter
+                            .listener_connection_accepted(client_addr);
 
                         // Spawn a task to handle the newly connected routers BMP
                         // message stream.
 
                         // Choose a name to be reported in application logs.
-                        let child_name =
-                            format!("router[{}:{}]", client_addr.ip(), client_addr.port());
+                        let child_name = format!(
+                            "router[{}:{}]",
+                            client_addr.ip(),
+                            client_addr.port()
+                        );
 
                         // Create a status reporter whose name in output will be
                         // a combination of ours as parent and the newly chosen
                         // child name, enabling logged messages relating to this
                         // newly connected router to be distinguished from logged
                         // messages relating to other connected routers.
-                        let child_status_reporter =
-                            Arc::new(self.status_reporter.add_child(&child_name));
+                        let child_status_reporter = Arc::new(
+                            self.status_reporter.add_child(&child_name),
+                        );
 
                         crate::tokio::spawn(
                             &child_name,
@@ -248,7 +265,9 @@ impl BmpTcpInRunner {
                             if rebind {
                                 // Trigger re-binding to the new listen port.
                                 let err = std::io::ErrorKind::Other;
-                                return ControlFlow::Continue(Err(err.into()));
+                                return ControlFlow::Continue(
+                                    Err(err.into()),
+                                );
                             }
                         }
 
@@ -292,8 +311,11 @@ mod tests {
     use tokio::{net::TcpStream, time::timeout};
 
     use crate::{
+        common::status_reporter::AnyStatusReporter,
         comms::{Gate, GateAgent},
-        tests::util::internal::{enable_logging, get_testable_metrics_snapshot},
+        tests::util::internal::{
+            enable_logging, get_testable_metrics_snapshot,
+        },
         units::{
             bmp_tcp_in::{
                 metrics::BmpTcpInMetrics,
@@ -301,7 +323,7 @@ mod tests {
                 unit::{BmpTcpInRunner, TcpListener, TcpListenerFactory},
             },
             Unit,
-        }, common::status_reporter::AnyStatusReporter,
+        },
     };
 
     use super::BmpTcpIn;
@@ -333,7 +355,10 @@ mod tests {
     where
         T: Fn(String) -> std::io::Result<()> + Sync,
     {
-        async fn bind(&self, addr: String) -> std::io::Result<MockTcpListener> {
+        async fn bind(
+            &self,
+            addr: String,
+        ) -> std::io::Result<MockTcpListener> {
             (self.bind_cb)(addr.clone())?;
             self.binds.lock().unwrap().push(addr);
             Ok(MockTcpListener)
@@ -354,7 +379,8 @@ mod tests {
         // listen for incoming connections on "localhost:8080":
         let (runner, agent) = setup_test("localhost:8080");
         let status_reporter = runner.status_reporter.clone();
-        let mock_listener_factory = Arc::new(MockTcpListenerFactory::new(|_| Ok(())));
+        let mock_listener_factory =
+            Arc::new(MockTcpListenerFactory::new(|_| Ok(())));
         let task = runner.run(mock_listener_factory.clone());
         let join_handle = tokio::task::spawn(task);
 
@@ -387,10 +413,22 @@ mod tests {
         assert_eq!(binds[0], "localhost:8080");
         assert_eq!(binds[1], "otherhost:8081");
 
-        let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
-        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_listener_bound_count"), 2);
-        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_connection_accepted_count"), 0);
-        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_connection_lost_count"), 0);
+        let metrics = get_testable_metrics_snapshot(
+            &status_reporter.metrics().unwrap(),
+        );
+        assert_eq!(
+            metrics.with_name::<usize>("bmp_tcp_in_listener_bound_count"),
+            2
+        );
+        assert_eq!(
+            metrics
+                .with_name::<usize>("bmp_tcp_in_connection_accepted_count"),
+            0
+        );
+        assert_eq!(
+            metrics.with_name::<usize>("bmp_tcp_in_connection_lost_count"),
+            0
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -399,7 +437,8 @@ mod tests {
         // listen for incoming connections on "localhost:8080":
         let (runner, agent) = setup_test("localhost:8080");
         let status_reporter = runner.status_reporter.clone();
-        let mock_listener_factory = Arc::new(MockTcpListenerFactory::new(|_| Ok(())));
+        let mock_listener_factory =
+            Arc::new(MockTcpListenerFactory::new(|_| Ok(())));
         let task = runner.run(mock_listener_factory.clone());
         let join_handle = tokio::task::spawn(task);
 
@@ -430,11 +469,22 @@ mod tests {
         assert_eq!(binds.len(), 1);
         assert_eq!(binds[0], "localhost:8080");
 
-        let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
-        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_listener_bound_count"), 1);
-        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_connection_accepted_count"), 0);
-        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_connection_lost_count"), 0);
-
+        let metrics = get_testable_metrics_snapshot(
+            &status_reporter.metrics().unwrap(),
+        );
+        assert_eq!(
+            metrics.with_name::<usize>("bmp_tcp_in_listener_bound_count"),
+            1
+        );
+        assert_eq!(
+            metrics
+                .with_name::<usize>("bmp_tcp_in_connection_accepted_count"),
+            0
+        );
+        assert_eq!(
+            metrics.with_name::<usize>("bmp_tcp_in_connection_lost_count"),
+            0
+        );
     }
 
     #[tokio::test(start_paused = true)]
@@ -450,7 +500,8 @@ mod tests {
         };
         let (runner, agent) = setup_test("idontexist:-1");
         let status_reporter = runner.status_reporter.clone();
-        let mock_listener_factory = Arc::new(MockTcpListenerFactory::new(fail_on_bad_addr));
+        let mock_listener_factory =
+            Arc::new(MockTcpListenerFactory::new(fail_on_bad_addr));
         let task = runner.run(mock_listener_factory.clone());
         let join_handle = tokio::task::spawn(task);
 
@@ -481,10 +532,22 @@ mod tests {
         assert_eq!(binds.len(), 1);
         assert_eq!(binds[0], "localhost:8080");
 
-        let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
-        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_listener_bound_count"), 1);
-        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_connection_accepted_count"), 0);
-        assert_eq!(metrics.with_name::<usize>("bmp_tcp_in_connection_lost_count"), 0);
+        let metrics = get_testable_metrics_snapshot(
+            &status_reporter.metrics().unwrap(),
+        );
+        assert_eq!(
+            metrics.with_name::<usize>("bmp_tcp_in_listener_bound_count"),
+            1
+        );
+        assert_eq!(
+            metrics
+                .with_name::<usize>("bmp_tcp_in_connection_accepted_count"),
+            0
+        );
+        assert_eq!(
+            metrics.with_name::<usize>("bmp_tcp_in_connection_lost_count"),
+            0
+        );
     }
 
     //-------- Test helpers --------------------------------------------------

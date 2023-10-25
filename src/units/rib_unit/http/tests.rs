@@ -3,13 +3,16 @@ use std::{str::FromStr, sync::Arc};
 use arc_swap::ArcSwap;
 use assert_json_diff::{assert_json_matches_no_panic, CompareMode, Config};
 use hyper::{body::Bytes, Body, Request, StatusCode};
-use roto::types::builtin::{BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus};
+use roto::types::builtin::{
+    BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus,
+};
 use routecore::{
     addr::Prefix,
     asn::Asn,
     bgp::{
         communities::{
-            Community, ExtendedCommunity, LargeCommunity, ParseError, StandardCommunity, Wellknown,
+            Community, ExtendedCommunity, LargeCommunity, ParseError,
+            StandardCommunity, Wellknown,
         },
         message::SessionConfig,
     },
@@ -478,7 +481,12 @@ async fn select_and_discard() {
     // Populate the RIB
     let rib = mk_rib();
 
-    insert_announcement_helper(rib.clone(), 1, &[19, 20, 21], Some(Wellknown::Blackhole));
+    insert_announcement_helper(
+        rib.clone(),
+        1,
+        &[19, 20, 21],
+        Some(Wellknown::Blackhole),
+    );
     insert_announcement_helper(
         rib.clone(),
         2,
@@ -491,8 +499,18 @@ async fn select_and_discard() {
         &[20, 21, 22],
         Option::<StandardCommunity>::None,
     );
-    insert_announcement_helper(rib.clone(), 2, &[1, 2, 3], Some(Wellknown::NoExport));
-    insert_announcement_helper(rib.clone(), 3, &[21, 22, 23], Some(Wellknown::Blackhole));
+    insert_announcement_helper(
+        rib.clone(),
+        2,
+        &[1, 2, 3],
+        Some(Wellknown::NoExport),
+    );
+    insert_announcement_helper(
+        rib.clone(),
+        3,
+        &[21, 22, 23],
+        Some(Wellknown::Blackhole),
+    );
 
     let blackhole_json = json!([
         {
@@ -671,7 +689,8 @@ async fn do_query(
     expected_body: Option<Value>,
 ) -> Result<Bytes, (String, Bytes, StatusCode)> {
     let http_api_path = Arc::new("/prefixes/".to_string());
-    let query_limits = Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
+    let query_limits =
+        Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
     let proc = PrefixesApi::new(
         rib,
         http_api_path,
@@ -690,7 +709,11 @@ async fn do_query(
     let res = proc.process_request(&request).await;
     if res.is_none() {
         let err = "The HTTP processor did not accept the request";
-        return Err((err.to_string(), Bytes::default(), StatusCode::default()));
+        return Err((
+            err.to_string(),
+            Bytes::default(),
+            StatusCode::default(),
+        ));
     }
 
     let res = res.unwrap();
@@ -753,8 +776,13 @@ fn mk_rib() -> Arc<ArcSwap<HashedRib>> {
     Arc::new(ArcSwap::from_pointee(physical_rib))
 }
 
-fn insert_routes(rib: Arc<ArcSwap<HashedRib>>, n: u8, announcements: Announcements) {
-    let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
+fn insert_routes(
+    rib: Arc<ArcSwap<HashedRib>>,
+    n: u8,
+    announcements: Announcements,
+) {
+    let bgp_update_bytes =
+        mk_bgp_update(&Prefixes::default(), &announcements, &[]);
     let delta_id = (RotondaId(0), 0); // TODO
     if let Announcements::Some {
         origin: _,
@@ -771,7 +799,8 @@ fn insert_routes(rib: Arc<ArcSwap<HashedRib>>, n: u8, announcements: Announcemen
                 bgp_update_bytes.clone(),
                 SessionConfig::modern(),
             );
-            let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+            let bgp_update_msg =
+                Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
             let raw_route = RawRouteWithDeltas::new_with_message_ref(
                 delta_id,
                 (*prefix).into(),
@@ -787,7 +816,11 @@ fn insert_routes(rib: Arc<ArcSwap<HashedRib>>, n: u8, announcements: Announcemen
     }
 }
 
-fn insert_announcement(rib: Arc<ArcSwap<HashedRib>>, prefix_str: &str, n: u8) {
+fn insert_announcement(
+    rib: Arc<ArcSwap<HashedRib>>,
+    prefix_str: &str,
+    n: u8,
+) {
     let next_hop = get_localhost_next_hop_for_prefix(prefix_str).0;
     insert_announcement_full(
         rib,
@@ -837,8 +870,11 @@ fn insert_announcement_full<C: Into<Community> + Copy>(
     insert_routes(
         rib,
         n,
-        Announcements::from_str(&format!("e {} {next_hop} {communities} {prefix}", as_path))
-            .unwrap(),
+        Announcements::from_str(&format!(
+            "e {} {next_hop} {communities} {prefix}",
+            as_path
+        ))
+        .unwrap(),
     );
 }
 

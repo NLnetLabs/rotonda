@@ -104,7 +104,11 @@ impl Collection {
             }
         }
         let assemble_ms = (Utc::now() - start_time).num_milliseconds();
-        target.append_simple(&Self::ASSEMBLE_TIME_MS_METRIC, None, assemble_ms);
+        target.append_simple(
+            &Self::ASSEMBLE_TIME_MS_METRIC,
+            None,
+            assemble_ms,
+        );
         target.into_string()
     }
 }
@@ -190,7 +194,11 @@ pub struct RawMetricKey {
 
 #[cfg(test)]
 impl RawMetricKey {
-    pub fn named(name: String, unit: MetricUnit, suffix: Option<String>) -> Self {
+    pub fn named(
+        name: String,
+        unit: MetricUnit,
+        suffix: Option<String>,
+    ) -> Self {
         Self {
             name,
             unit,
@@ -225,11 +233,11 @@ impl PartialOrd for RawMetricKey {
 impl Ord for RawMetricKey {
     fn cmp(&self, other: &Self) -> Ordering {
         match self.name.cmp(&other.name) {
-            Ordering::Equal => {},
+            Ordering::Equal => {}
             ord => return ord,
         }
         match self.suffix.cmp(&other.suffix) {
-            Ordering::Equal => {},
+            Ordering::Equal => {}
             ord => return ord,
         }
         self.label.cmp(&other.label)
@@ -342,7 +350,9 @@ impl Target {
                 k.name == name
                     && k.label
                         .as_ref()
-                        .filter(|(lk, lv)| (lk.as_str(), lv.as_str()) == label)
+                        .filter(|(lk, lv)| {
+                            (lk.as_str(), lv.as_str()) == label
+                        })
                         .is_some()
             })
             .map(|(_k, v)| v.clone())
@@ -432,7 +442,8 @@ impl Target {
             },
             OutputFormat::Plain => match unit_name {
                 Some(unit) => {
-                    write!(&mut self.target, "{} {}", unit, metric.name).unwrap();
+                    write!(&mut self.target, "{} {}", unit, metric.name)
+                        .unwrap();
                 }
                 None => {
                     write!(&mut self.target, "{}", metric.name).unwrap();
@@ -472,19 +483,34 @@ impl<'b, 'a: 'b> Records<'a> {
         self.suffixed_value(value, None)
     }
 
-    pub fn suffixed_value(&mut self, value: impl fmt::Display, suffix: Option<&str>) {
+    pub fn suffixed_value(
+        &mut self,
+        value: impl fmt::Display,
+        suffix: Option<&str>,
+    ) {
         match self.target.format {
             OutputFormat::Prometheus => {
-                self.target
-                    .append_metric_name(self.metric, self.unit_name, suffix);
+                self.target.append_metric_name(
+                    self.metric,
+                    self.unit_name,
+                    suffix,
+                );
                 if let Some(unit_name) = self.unit_name {
-                    write!(&mut self.target.target, "{{component=\"{}\"}}", unit_name).unwrap();
+                    write!(
+                        &mut self.target.target,
+                        "{{component=\"{}\"}}",
+                        unit_name
+                    )
+                    .unwrap();
                 }
                 writeln!(&mut self.target.target, " {}", value).unwrap()
             }
             OutputFormat::Plain => {
-                self.target
-                    .append_metric_name(self.metric, self.unit_name, suffix);
+                self.target.append_metric_name(
+                    self.metric,
+                    self.unit_name,
+                    suffix,
+                );
                 writeln!(&mut self.target.target, ": {}", value).unwrap()
             }
             #[cfg(test)]
@@ -507,7 +533,11 @@ impl<'b, 'a: 'b> Records<'a> {
     /// The labels are a slice of pairs of strings with the first element the
     /// name of the label and the second the label value. The metrics value
     /// is simply printed via the `Display` trait.
-    pub fn label_value(&mut self, labels: &[(&str, &str)], value: impl fmt::Display + Clone) {
+    pub fn label_value(
+        &mut self,
+        labels: &[(&str, &str)],
+        value: impl fmt::Display + Clone,
+    ) {
         self.suffixed_label_value(labels, value, None)
     }
 
@@ -519,29 +549,51 @@ impl<'b, 'a: 'b> Records<'a> {
     ) {
         match self.target.format {
             OutputFormat::Prometheus => {
-                self.target
-                    .append_metric_name(self.metric, self.unit_name, suffix);
+                self.target.append_metric_name(
+                    self.metric,
+                    self.unit_name,
+                    suffix,
+                );
                 self.target.target.push('{');
                 let mut comma = false;
                 if let Some(unit_name) = self.unit_name {
-                    write!(&mut self.target.target, "component=\"{}\"", unit_name).unwrap();
+                    write!(
+                        &mut self.target.target,
+                        "component=\"{}\"",
+                        unit_name
+                    )
+                    .unwrap();
                     comma = true;
                 }
                 for (name, value) in labels {
                     if comma {
-                        write!(&mut self.target.target, ",{}=\"{}\"", name, value).unwrap();
+                        write!(
+                            &mut self.target.target,
+                            ",{}=\"{}\"",
+                            name, value
+                        )
+                        .unwrap();
                     } else {
-                        write!(&mut self.target.target, "{}=\"{}\"", name, value).unwrap();
+                        write!(
+                            &mut self.target.target,
+                            "{}=\"{}\"",
+                            name, value
+                        )
+                        .unwrap();
                         comma = true;
                     }
                 }
                 writeln!(&mut self.target.target, "}} {}", value).unwrap()
             }
             OutputFormat::Plain => {
-                self.target
-                    .append_metric_name(self.metric, self.unit_name, suffix);
+                self.target.append_metric_name(
+                    self.metric,
+                    self.unit_name,
+                    suffix,
+                );
                 for (name, value) in labels {
-                    write!(&mut self.target.target, " {}={}", name, value).unwrap();
+                    write!(&mut self.target.target, " {}={}", name, value)
+                        .unwrap();
                 }
                 writeln!(&mut self.target.target, ": {}", value).unwrap()
             }
@@ -556,9 +608,10 @@ impl<'b, 'a: 'b> Records<'a> {
                         label_name,
                         label_value
                     );
-                    self.target
-                        .raw
-                        .insert(key.try_into().unwrap(), value.clone().into());
+                    self.target.raw.insert(
+                        key.try_into().unwrap(),
+                        value.clone().into(),
+                    );
                 }
             }
         }
@@ -731,8 +784,12 @@ impl TryFrom<&str> for MetricUnit {
     fn try_from(unit: &str) -> Result<Self, Self::Error> {
         match unit.to_lowercase().as_str() {
             "s" | "second" | "seconds" => Ok(MetricUnit::Second),
-            "ms" | "millisecond" | "milliseconds" => Ok(MetricUnit::Millisecond),
-            "µs" | "microsecond" | "microseconds" => Ok(MetricUnit::Microsecond),
+            "ms" | "millisecond" | "milliseconds" => {
+                Ok(MetricUnit::Millisecond)
+            }
+            "µs" | "microsecond" | "microseconds" => {
+                Ok(MetricUnit::Microsecond)
+            }
             "byte" | "bytes" => Ok(MetricUnit::Byte),
             "total" => Ok(MetricUnit::Total),
             "info" => Ok(MetricUnit::Info),
@@ -757,7 +814,8 @@ pub mod util {
         metric_value: V,
     ) {
         target.append(&metric, Some(unit_name), |records| {
-            records.label_value(&[("router", router_id.as_ref())], metric_value)
+            records
+                .label_value(&[("router", router_id.as_ref())], metric_value)
         });
     }
 }

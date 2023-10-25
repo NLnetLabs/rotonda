@@ -54,7 +54,10 @@ struct StandardTcpListenerFactory;
 
 #[async_trait::async_trait]
 impl TcpListenerFactory<StandardTcpListener> for StandardTcpListenerFactory {
-    async fn bind(&self, addr: String) -> std::io::Result<StandardTcpListener> {
+    async fn bind(
+        &self,
+        addr: String,
+    ) -> std::io::Result<StandardTcpListener> {
         let listener = tokio::net::TcpListener::bind(addr).await?;
         Ok(StandardTcpListener(listener))
     }
@@ -65,7 +68,9 @@ struct StandardTcpListener(::tokio::net::TcpListener);
 /// A thin wrapper around the real Tokio TcpListener bind call.
 #[async_trait::async_trait]
 impl TcpListener<StandardTcpStream> for StandardTcpListener {
-    async fn accept(&self) -> std::io::Result<(StandardTcpStream, SocketAddr)> {
+    async fn accept(
+        &self,
+    ) -> std::io::Result<(StandardTcpStream, SocketAddr)> {
         let (stream, addr) = self.0.accept().await?;
         Ok((StandardTcpStream(stream), addr))
     }
@@ -131,7 +136,10 @@ impl BgpTcpIn {
         component.register_metrics(metrics.clone());
 
         // Setup status reporting
-        let status_reporter = Arc::new(BgpTcpInStatusReporter::new(&unit_name, metrics.clone()));
+        let status_reporter = Arc::new(BgpTcpInStatusReporter::new(
+            &unit_name,
+            metrics.clone(),
+        ));
 
         let roto_scripts = component.roto_scripts().clone();
 
@@ -147,9 +155,17 @@ impl BgpTcpIn {
         // them.
         waitpoint.running().await;
 
-        BgpTcpInRunner::new(self, gate, metrics, status_reporter, roto_scripts)
-            .run::<_, _, StandardTcpStream, BgpTcpInRunner>(Arc::new(StandardTcpListenerFactory))
-            .await
+        BgpTcpInRunner::new(
+            self,
+            gate,
+            metrics,
+            status_reporter,
+            roto_scripts,
+        )
+        .run::<_, _, StandardTcpStream, BgpTcpInRunner>(Arc::new(
+            StandardTcpListenerFactory,
+        ))
+        .await
     }
 }
 
@@ -219,7 +235,10 @@ impl BgpTcpInRunner {
         (runner, gate_agent)
     }
 
-    async fn run<T, U, V, F>(mut self, listener_factory: Arc<T>) -> Result<(), Terminated>
+    async fn run<T, U, V, F>(
+        mut self,
+        listener_factory: Arc<T>,
+    ) -> Result<(), Terminated>
     where
         T: TcpListenerFactory<U>,
         U: TcpListener<V>,
@@ -238,7 +257,9 @@ impl BgpTcpInRunner {
                 loop {
                     match listener_factory.bind(listen_addr.clone()).await {
                         Err(err) => {
-                            let err = format!("{err}: Will retry in {wait} seconds.");
+                            let err = format!(
+                                "{err}: Will retry in {wait} seconds."
+                            );
                             status_reporter.bind_error(&listen_addr, &err);
                             sleep(Duration::from_secs(wait)).await;
                             wait *= 2;
@@ -248,7 +269,8 @@ impl BgpTcpInRunner {
                 }
             };
 
-            let listener = match self.process_until(bind_with_backoff()).await {
+            let listener = match self.process_until(bind_with_backoff()).await
+            {
                 ControlFlow::Continue(Ok(res)) => res,
                 ControlFlow::Continue(Err(_err)) => continue,
                 ControlFlow::Break(Terminated) => return Err(Terminated),
@@ -259,7 +281,8 @@ impl BgpTcpInRunner {
             'inner: loop {
                 match self.process_until(listener.accept()).await {
                     ControlFlow::Continue(Ok((tcp_stream, peer_addr))) => {
-                        status_reporter.listener_connection_accepted(peer_addr);
+                        status_reporter
+                            .listener_connection_accepted(peer_addr);
 
                         // Now:
                         // check for the peer_addr.ip() in the new PeerConfig
@@ -269,12 +292,22 @@ impl BgpTcpInRunner {
                         // IP, from which entries will be removed once the OPENs
                         // are exchanged and we know the remote ASN.
 
-                        if let Some((remote_net, cfg)) = self.bgp.peer_configs.get(peer_addr.ip()) {
-                            let child_name =
-                                format!("bgp[{}:{}]", peer_addr.ip(), peer_addr.port());
-                            let child_status_reporter =
-                                Arc::new(status_reporter.add_child(&child_name));
-                            debug!("[{}] config matched: {}", peer_addr.ip(), cfg.name());
+                        if let Some((remote_net, cfg)) =
+                            self.bgp.peer_configs.get(peer_addr.ip())
+                        {
+                            let child_name = format!(
+                                "bgp[{}:{}]",
+                                peer_addr.ip(),
+                                peer_addr.port()
+                            );
+                            let child_status_reporter = Arc::new(
+                                status_reporter.add_child(&child_name),
+                            );
+                            debug!(
+                                "[{}] config matched: {}",
+                                peer_addr.ip(),
+                                cfg.name()
+                            );
                             F::accept_config(
                                 child_name,
                                 &self.roto_scripts,
@@ -337,7 +370,9 @@ impl BgpTcpInRunner {
                             if rebind {
                                 // Trigger re-binding to the new listen port.
                                 let err = std::io::ErrorKind::Other;
-                                return ControlFlow::Continue(Err(err.into()));
+                                return ControlFlow::Continue(
+                                    Err(err.into()),
+                                );
                             }
                         }
 
@@ -436,12 +471,17 @@ mod tests {
             }))
         };
 
-        let (runner_fut, gate_agent, status_reporter) = setup_test(mock_listener_factory_cb);
-        let join_handle = crate::tokio::spawn("mock_bgp_tcp_in_runner", runner_fut);
+        let (runner_fut, gate_agent, status_reporter) =
+            setup_test(mock_listener_factory_cb);
+        let join_handle =
+            crate::tokio::spawn("mock_bgp_tcp_in_runner", runner_fut);
 
         loop {
-            let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
-            let count = metrics.with_name::<usize>("bgp_tcp_in_listener_bound_count");
+            let metrics = get_testable_metrics_snapshot(
+                &status_reporter.metrics().unwrap(),
+            );
+            let count =
+                metrics.with_name::<usize>("bgp_tcp_in_listener_bound_count");
             if count > 0 {
                 break;
             }
@@ -470,12 +510,17 @@ mod tests {
             }
         };
 
-        let (runner_fut, gate_agent, status_reporter) = setup_test(mock_listener_factory_cb);
-        let join_handle = crate::tokio::spawn("mock_bgp_tcp_in_runner", runner_fut);
+        let (runner_fut, gate_agent, status_reporter) =
+            setup_test(mock_listener_factory_cb);
+        let join_handle =
+            crate::tokio::spawn("mock_bgp_tcp_in_runner", runner_fut);
 
         loop {
-            let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
-            let count = metrics.with_name::<usize>("bgp_tcp_in_connection_accepted_count");
+            let metrics = get_testable_metrics_snapshot(
+                &status_reporter.metrics().unwrap(),
+            );
+            let count = metrics
+                .with_name::<usize>("bgp_tcp_in_connection_accepted_count");
             if count > 0 {
                 break;
             }
@@ -497,7 +542,10 @@ mod tests {
                 Ok(MockTcpListener::new(move || {
                     let old_count = conn_count.fetch_add(1, Ordering::SeqCst);
                     if old_count < 1 {
-                        Ok((MockTcpStreamWrapper, "1.2.3.4:5".parse().unwrap()))
+                        Ok((
+                            MockTcpStreamWrapper,
+                            "1.2.3.4:5".parse().unwrap(),
+                        ))
                     } else {
                         Err(std::io::ErrorKind::PermissionDenied.into())
                     }
@@ -505,13 +553,18 @@ mod tests {
             }
         };
 
-        let (runner_fut, gate_agent, status_reporter) = setup_test(mock_listener_factory_cb);
-        let join_handle = crate::tokio::spawn("mock_bgp_tcp_in_runner", runner_fut);
+        let (runner_fut, gate_agent, status_reporter) =
+            setup_test(mock_listener_factory_cb);
+        let join_handle =
+            crate::tokio::spawn("mock_bgp_tcp_in_runner", runner_fut);
 
         let mut count = 0;
         while count != 1 {
-            let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
-            count = metrics.with_name::<usize>("bgp_tcp_in_connection_accepted_count");
+            let metrics = get_testable_metrics_snapshot(
+                &status_reporter.metrics().unwrap(),
+            );
+            count = metrics
+                .with_name::<usize>("bgp_tcp_in_connection_accepted_count");
         }
 
         gate_agent.terminate().await;
@@ -531,17 +584,21 @@ mod tests {
     )
     where
         T: Fn() -> std::io::Result<MockTcpListener<U>> + std::marker::Sync,
-        U: Fn() -> std::io::Result<(MockTcpStreamWrapper, SocketAddr)> + std::marker::Sync,
+        U: Fn() -> std::io::Result<(MockTcpStreamWrapper, SocketAddr)>
+            + std::marker::Sync,
     {
-        let mock_listener_factory = MockTcpListenerFactory::new(mock_listener_factory_cb);
+        let mock_listener_factory =
+            MockTcpListenerFactory::new(mock_listener_factory_cb);
 
-        let unit_settings = BgpTcpIn::mock("dummy-listen-address", Asn::from_u32(12345));
+        let unit_settings =
+            BgpTcpIn::mock("dummy-listen-address", Asn::from_u32(12345));
 
         let (runner, gate_agent) = BgpTcpInRunner::mock(unit_settings);
 
         let status_reporter = runner.status_reporter.clone();
 
-        let runner_fut = runner.run::<_, _, _, NoOpConfigAcceptor>(mock_listener_factory.into());
+        let runner_fut = runner
+            .run::<_, _, _, NoOpConfigAcceptor>(mock_listener_factory.into());
 
         (runner_fut, gate_agent, status_reporter)
     }
@@ -585,12 +642,16 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl<T, U> TcpListenerFactory<MockTcpListener<U>> for MockTcpListenerFactory<T, U>
+    impl<T, U> TcpListenerFactory<MockTcpListener<U>>
+        for MockTcpListenerFactory<T, U>
     where
         T: Fn() -> std::io::Result<MockTcpListener<U>> + std::marker::Sync,
         U: Fn() -> std::io::Result<(MockTcpStreamWrapper, SocketAddr)>,
     {
-        async fn bind(&self, _addr: String) -> std::io::Result<MockTcpListener<U>> {
+        async fn bind(
+            &self,
+            _addr: String,
+        ) -> std::io::Result<MockTcpListener<U>> {
             self.0()
         }
     }
@@ -615,9 +676,12 @@ mod tests {
     #[async_trait::async_trait]
     impl<T> TcpListener<MockTcpStreamWrapper> for MockTcpListener<T>
     where
-        T: Fn() -> std::io::Result<(MockTcpStreamWrapper, SocketAddr)> + std::marker::Sync,
+        T: Fn() -> std::io::Result<(MockTcpStreamWrapper, SocketAddr)>
+            + std::marker::Sync,
     {
-        async fn accept(&self) -> std::io::Result<(MockTcpStreamWrapper, SocketAddr)> {
+        async fn accept(
+            &self,
+        ) -> std::io::Result<(MockTcpStreamWrapper, SocketAddr)> {
             self.0()
         }
     }

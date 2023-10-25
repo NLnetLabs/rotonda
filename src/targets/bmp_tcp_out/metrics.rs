@@ -8,7 +8,9 @@ use std::{
 
 use crate::{
     common::frim::FrimMap,
-    metrics::{self, util::append_per_router_metric, Metric, MetricType, MetricUnit},
+    metrics::{
+        self, util::append_per_router_metric, Metric, MetricType, MetricUnit,
+    },
 };
 
 use super::proxy::AtomicProxyState;
@@ -19,7 +21,10 @@ pub struct BmpProxyMetrics {
 }
 
 impl BmpProxyMetrics {
-    pub fn proxy_metrics(&self, socket_addr: SocketAddr) -> Arc<ProxyMetrics> {
+    pub fn proxy_metrics(
+        &self,
+        socket_addr: SocketAddr,
+    ) -> Arc<ProxyMetrics> {
         self.proxies.get(&Arc::new(socket_addr)).unwrap()
     }
 }

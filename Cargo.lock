@@ -1657,7 +1657,7 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0"
-source = "git+https://github.com/NLnetLabs/roto.git?branch=main#c1f1aa2a86928b195e45f44cad816a1e931a9034"
+source = "git+https://github.com/NLnetLabs/roto.git?branch=main#0f3a968a66d4181b9d906459d811ee83ae91d819"
 dependencies = [
  "arc-swap",
  "bytes",

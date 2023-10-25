@@ -1,4 +1,4 @@
-use clap::{crate_authors, crate_version, Command};
+use clap::{crate_authors, crate_version, error::ErrorKind, Command};
 use futures::{
     future::{select, Either},
     pin_mut,
@@ -28,7 +28,10 @@ fn run_with_cmdline_args() -> Result<(), Terminate> {
     let config_args = Config::config_args(app);
     let matches = config_args.try_get_matches().map_err(|err| {
         let _ = err.print();
-        Terminate::other(2)
+        match err.kind() {
+            ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => Terminate::normal(),
+            _ => Terminate::other(2),
+        }
     })?;
 
     let cur_dir = current_dir().map_err(|err| {

@@ -1,8 +1,12 @@
 //! Controlling the entire operation.
 
 use crate::common::file_io::{FileIo, TheFileIo};
-use crate::common::roto::{FilterName, LoadErrorKind, RotoError, RotoScriptOrigin, RotoScripts};
-use crate::comms::{DirectLink, Gate, GateAgent, GraphStatus, Link, UPDATE_QUEUE_LEN};
+use crate::common::roto::{
+    FilterName, LoadErrorKind, RotoError, RotoScriptOrigin, RotoScripts,
+};
+use crate::comms::{
+    DirectLink, Gate, GateAgent, GraphStatus, Link, UPDATE_QUEUE_LEN,
+};
 use crate::config::{Config, ConfigFile, Marked};
 use crate::log::Terminate;
 use crate::targets::Target;
@@ -262,7 +266,13 @@ impl LinkReport {
                         None => "black",
                     };
 
-                    let style_attr = StyleAttr::new(Color::fast(line_colour), 2, None, 0, 15);
+                    let style_attr = StyleAttr::new(
+                        Color::fast(line_colour),
+                        2,
+                        None,
+                        0,
+                        15,
+                    );
 
                     (shape_kind, style_attr)
                 }
@@ -299,7 +309,11 @@ impl LinkReport {
 
                 let to_node = nodes.get(unit_or_target_name).unwrap();
                 if let Some(from_node) = nodes.get(gate_name) {
-                    vg.add_edge(Arrow::simple(link_type), *from_node, *to_node);
+                    vg.add_edge(
+                        Arrow::simple(link_type),
+                        *from_node,
+                        *to_node,
+                    );
                 } else {
                     // This can happen if a unit or target didn't honor a new set of sources announced to it via
                     // a reconfigure message.
@@ -379,7 +393,8 @@ impl UpstreamLinkReport {
     }
 
     pub fn set_graph_status(&self, graph_status: Arc<dyn GraphStatus>) {
-        *self.graph_status.lock().unwrap() = Some(Arc::downgrade(&graph_status));
+        *self.graph_status.lock().unwrap() =
+            Some(Arc::downgrade(&graph_status));
     }
 
     pub fn graph_status(&self) -> Option<Weak<dyn GraphStatus>> {
@@ -422,7 +437,8 @@ pub struct Manager {
     running_units: HashMap<String, (Discriminant<Unit>, GateAgent)>,
 
     /// The currently active targets represented by their command senders.
-    running_targets: HashMap<String, (Discriminant<Target>, mpsc::Sender<TargetCommand>)>,
+    running_targets:
+        HashMap<String, (Discriminant<Target>, mpsc::Sender<TargetCommand>)>,
 
     /// Gates for newly loaded, not yet spawned units.
     pending_gates: HashMap<String, (Gate, GateAgent)>,
@@ -456,13 +472,19 @@ impl Default for Manager {
 impl Manager {
     /// Creates a new manager.
     pub fn new() -> Self {
-        let graph_svg_data = Arc::new(ArcSwap::from_pointee((Instant::now(), LinkReport::new())));
+        let graph_svg_data = Arc::new(ArcSwap::from_pointee((
+            Instant::now(),
+            LinkReport::new(),
+        )));
 
         #[cfg(feature = "config-graph")]
         let (graph_svg_processor, rel_base_url) =
             Self::mk_svg_http_processor(graph_svg_data.clone());
 
-        #[allow(clippy::let_and_return, clippy::default_constructed_unit_structs)]
+        #[allow(
+            clippy::let_and_return,
+            clippy::default_constructed_unit_structs
+        )]
         let manager = Manager {
             running_units: Default::default(),
             running_targets: Default::default(),
@@ -638,7 +660,11 @@ impl Manager {
     /// Primarily intended for testing purposes, allowing the prepare phase of
     /// the load -> prepare -> spawn pipeline to be tested independently of the
     /// other phases.
-    pub fn prepare(&mut self, config: &Config, file: &ConfigFile) -> Result<(), Terminate> {
+    pub fn prepare(
+        &mut self,
+        config: &Config,
+        file: &ConfigFile,
+    ) -> Result<(), Terminate> {
         let mut res = Ok(());
 
         // Load any .roto script files that exist (and unload any that no longer exist)
@@ -657,7 +683,9 @@ impl Manager {
 
         // Drain the singleton static ROTO_FILTER_NAMES contents to a local variable.
         let config_filter_names = ROTO_FILTER_NAMES
-            .with(|filter_names| filter_names.replace(Some(Default::default())))
+            .with(|filter_names| {
+                filter_names.replace(Some(Default::default()))
+            })
             .unwrap();
 
         // Check if all filter names exist in the loaded filter set
@@ -713,11 +741,15 @@ impl Manager {
                         link.resolve_config(file);
                         error!(
                             "{}",
-                            link.mark(format!("unresolved link to unit '{}'", name))
+                            link.mark(format!(
+                                "unresolved link to unit '{}'",
+                                name
+                            ))
                         );
                     }
                 } else {
-                    self.pending_gates.insert(name.clone(), (gate, load.agent));
+                    self.pending_gates
+                        .insert(name.clone(), (gate, load.agent));
                 }
             }
         }
@@ -734,24 +766,31 @@ impl Manager {
     // TODO: Use Marked for returned error so that the location in the config file in question can be reported to the
     // user.
     // TODO: Don't load .roto script files that are not referenced by any units or targets?
-    fn load_roto_scripts(&mut self, config: &Config) -> Result<(), RotoError> {
+    fn load_roto_scripts(
+        &mut self,
+        config: &Config,
+    ) -> Result<(), RotoError> {
         let mut new_origins = HashSet::<RotoScriptOrigin>::new();
 
         if let Some(roto_scripts_path) = &config.roto_scripts_path {
-            let entries = self
-                .file_io
-                .read_dir(roto_scripts_path)
-                .map_err(|err| LoadErrorKind::read_dir_err(roto_scripts_path, err))?;
+            let entries =
+                self.file_io.read_dir(roto_scripts_path).map_err(|err| {
+                    LoadErrorKind::read_dir_err(roto_scripts_path, err)
+                })?;
 
             for entry in entries {
-                let entry = entry
-                    .map_err(|err| LoadErrorKind::read_dir_entry_err(roto_scripts_path, err))?;
+                let entry = entry.map_err(|err| {
+                    LoadErrorKind::read_dir_entry_err(roto_scripts_path, err)
+                })?;
 
-                if matches!(entry.path().extension(), Some(ext) if ext == OsStr::new("roto")) {
+                if matches!(entry.path().extension(), Some(ext) if ext == OsStr::new("roto"))
+                {
                     let roto_script = self
                         .file_io
                         .read_to_string(entry.path())
-                        .map_err(|err| LoadErrorKind::read_file_err(entry.path(), err))?;
+                        .map_err(|err| {
+                            LoadErrorKind::read_file_err(entry.path(), err)
+                        })?;
 
                     let origin = RotoScriptOrigin::Path(entry.path());
                     self.roto_scripts
@@ -923,7 +962,14 @@ impl Manager {
     /// detect the missing config and send a Terminate command to the orphaned
     /// unit/target.
     #[allow(clippy::too_many_arguments)]
-    fn spawn_internal<SpawnUnit, SpawnTarget, ReconfUnit, ReconfTarget, TermUnit, TermTarget>(
+    fn spawn_internal<
+        SpawnUnit,
+        SpawnTarget,
+        ReconfUnit,
+        ReconfTarget,
+        TermUnit,
+        TermTarget,
+    >(
         &mut self,
         config: &mut Config,
         spawn_unit: SpawnUnit,
@@ -934,7 +980,8 @@ impl Manager {
         terminate_target: TermTarget,
     ) where
         SpawnUnit: Fn(Component, Unit, Gate, WaitPoint),
-        SpawnTarget: Fn(Component, Target, Receiver<TargetCommand>, WaitPoint),
+        SpawnTarget:
+            Fn(Component, Target, Receiver<TargetCommand>, WaitPoint),
         ReconfUnit: Fn(&str, GateAgent, Unit, Gate),
         ReconfTarget: Fn(&str, Sender<TargetCommand>, Target),
         TermUnit: Fn(&str, Arc<GateAgent>),
@@ -956,15 +1003,23 @@ impl Manager {
         // Spawn, reconfigure and terminate targets according to the config
         for (name, new_target) in config.targets.targets.drain() {
             if let Some(running_target) = self.running_targets.remove(&name) {
-                let (running_target_type, running_target_sender) = running_target;
+                let (running_target_type, running_target_sender) =
+                    running_target;
                 let new_target_type = std::mem::discriminant(&new_target);
                 if new_target_type != running_target_type {
                     // Terminate the current target. The new one replacing it
                     // will be spawned below.
                     terminate_target(&name, running_target_sender.into());
                 } else {
-                    reconfigure_target(&name, running_target_sender.clone(), new_target);
-                    new_running_targets.insert(name, (running_target_type, running_target_sender));
+                    reconfigure_target(
+                        &name,
+                        running_target_sender.clone(),
+                        new_target,
+                    );
+                    new_running_targets.insert(
+                        name,
+                        (running_target_type, running_target_sender),
+                    );
                     // Skip spawning a new target.
                     continue;
                 }
@@ -993,19 +1048,28 @@ impl Manager {
 
         // Spawn, reconfigure and terminate units according to the config
         for (name, new_unit) in config.units.units.drain() {
-            let (mut new_gate, new_agent) = match self.pending_gates.remove(&name) {
-                Some((gate, agent)) => (gate, agent),
-                None => {
-                    if let Some(running_unit) = self.running_units.remove(&name) {
-                        warn!("Unit '{}' is unused and will be stopped.", name);
-                        let running_unit_agent = running_unit.1;
-                        terminate_unit(&name, running_unit_agent.into());
-                    } else {
-                        error!("Unit {} is unused and will not be started.", name);
+            let (mut new_gate, new_agent) =
+                match self.pending_gates.remove(&name) {
+                    Some((gate, agent)) => (gate, agent),
+                    None => {
+                        if let Some(running_unit) =
+                            self.running_units.remove(&name)
+                        {
+                            warn!(
+                                "Unit '{}' is unused and will be stopped.",
+                                name
+                            );
+                            let running_unit_agent = running_unit.1;
+                            terminate_unit(&name, running_unit_agent.into());
+                        } else {
+                            error!(
+                                "Unit {} is unused and will not be started.",
+                                name
+                            );
+                        }
+                        continue;
                     }
-                    continue;
-                }
-            };
+                };
 
             new_gate.set_name(&name);
 
@@ -1025,8 +1089,14 @@ impl Manager {
                     // will be launched below.
                     terminate_unit(&name, running_unit_agent.into());
                 } else {
-                    reconfigure_unit(&name, running_unit_agent, new_unit, new_gate);
-                    new_running_units.insert(name, (new_unit_type, new_agent));
+                    reconfigure_unit(
+                        &name,
+                        running_unit_agent,
+                        new_unit,
+                        new_gate,
+                    );
+                    new_running_units
+                        .insert(name, (new_unit_type, new_agent));
                     continue;
                 }
             }
@@ -1069,7 +1139,10 @@ impl Manager {
         self.coordinate_and_track_startup(coordinator);
     }
 
-    fn coordinate_and_track_startup(&mut self, coordinator: Arc<Coordinator>) {
+    fn coordinate_and_track_startup(
+        &mut self,
+        coordinator: Arc<Coordinator>,
+    ) {
         let mut reports = LinkReport::new();
         let mut agent_cmd_futures = vec![];
         let mut target_cmd_futures = vec![];
@@ -1179,7 +1252,12 @@ impl Manager {
         }
     }
 
-    fn spawn_unit(component: Component, new_unit: Unit, new_gate: Gate, waitpoint: WaitPoint) {
+    fn spawn_unit(
+        component: Component,
+        new_unit: Unit,
+        new_gate: Gate,
+        waitpoint: WaitPoint,
+    ) {
         info!("Starting unit '{}'", component.name);
         crate::tokio::spawn(
             &format!("unit[{}]", component.name),
@@ -1200,7 +1278,12 @@ impl Manager {
         );
     }
 
-    fn reconfigure_unit(name: &str, agent: GateAgent, new_config: Unit, new_gate: Gate) {
+    fn reconfigure_unit(
+        name: &str,
+        agent: GateAgent,
+        new_config: Unit,
+        new_gate: Gate,
+    ) {
         info!("Reconfiguring unit '{}'", name);
         let name = name.to_owned();
         crate::tokio::spawn("unit-reconfigurer", async move {
@@ -1213,11 +1296,17 @@ impl Manager {
         });
     }
 
-    fn reconfigure_target(name: &str, sender: Sender<TargetCommand>, new_config: Target) {
+    fn reconfigure_target(
+        name: &str,
+        sender: Sender<TargetCommand>,
+        new_config: Target,
+    ) {
         info!("Reconfiguring target '{}'", name);
         let name = name.to_owned();
         crate::tokio::spawn("target-reconfigurer", async move {
-            if let Err(err) = sender.send(TargetCommand::Reconfigure { new_config }).await {
+            if let Err(err) =
+                sender.send(TargetCommand::Reconfigure { new_config }).await
+            {
                 error!(
                     "Internal error: reconfigure command could not be sent to target '{}': {}",
                     name, err
@@ -1316,7 +1405,8 @@ pub struct Coordinator {
 }
 
 impl Coordinator {
-    pub const SLOW_COMPONENT_ALARM_DURATION: Duration = Duration::from_secs(60);
+    pub const SLOW_COMPONENT_ALARM_DURATION: Duration =
+        Duration::from_secs(60);
 
     pub fn new(max_components: usize) -> Arc<Self> {
         let barrier = Barrier::new(max_components + 1);
@@ -1331,7 +1421,9 @@ impl Coordinator {
     pub fn track(self: Arc<Self>, name: String) -> WaitPoint {
         if self.pending.write().unwrap().insert(name.clone()) {
             if self.pending.read().unwrap().len() > self.max_components {
-                panic!("Coordinator::track() called more times than expected");
+                panic!(
+                    "Coordinator::track() called more times than expected"
+                );
             }
             WaitPoint::new(self, name)
         } else {
@@ -1367,16 +1459,21 @@ impl Coordinator {
         self.wait_internal(&mut alarm, "running").await;
     }
 
-    pub async fn wait_internal<T>(self: Arc<Self>, alarm: &mut T, status: &str)
-    where
+    pub async fn wait_internal<T>(
+        self: Arc<Self>,
+        alarm: &mut T,
+        status: &str,
+    ) where
         T: FnMut(Vec<String>, &str),
     {
         debug!("Waiting for all components to become {}...", status);
-        let num_unused_barriers = self.max_components - self.pending.read().unwrap().len() + 1;
+        let num_unused_barriers =
+            self.max_components - self.pending.read().unwrap().len() + 1;
         let unused_barriers: Vec<_> = (0..num_unused_barriers)
             .map(|_| self.barrier.wait())
             .collect();
-        let slow_startup_alarm = Box::pin(tokio::time::sleep(Self::SLOW_COMPONENT_ALARM_DURATION));
+        let slow_startup_alarm =
+            Box::pin(tokio::time::sleep(Self::SLOW_COMPONENT_ALARM_DURATION));
         match select(join_all(unused_barriers), slow_startup_alarm).await {
             Either::Left(_) => {}
             Either::Right((_, incomplete_join_all)) => {
@@ -1521,7 +1618,9 @@ pub fn load_link(link_id: Marked<String>) -> Link {
 /// richer more meaningful configuration syntax for configuring the queue
 /// size.
 fn get_queue_size_for_link(link_id: String) -> (String, usize) {
-    let (name, queue_size) = if let Some((name, options)) = link_id.split_once(':') {
+    let (name, queue_size) = if let Some((name, options)) =
+        link_id.split_once(':')
+    {
         let queue_len = options.parse::<usize>().unwrap_or_else(|err| {
             warn!(
                 "Invalid queue length '{}' for '{}', falling back to the default ({}): {}",
@@ -1691,7 +1790,8 @@ mod tests {
 
         // when loaded into the manager and spawned
         let mut manager = init_manager();
-        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
+        let (_source, config) =
+            Config::from_config_file(config_file, &mut manager)?;
         spawn(&mut manager, config);
 
         // then it should spawn the unit and target
@@ -1703,7 +1803,8 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn config_reload_should_trigger_reconfigure() -> Result<(), Terminate> {
+    async fn config_reload_should_trigger_reconfigure(
+    ) -> Result<(), Terminate> {
         // given a config with only a single target with a link to a missing unit
         let toml = r#"
         http_listen = []
@@ -1720,7 +1821,8 @@ mod tests {
 
         // when loaded into the manager and spawned
         let mut manager = init_manager();
-        let (_source, config) = Config::from_config_file(config_file.clone(), &mut manager)?;
+        let (_source, config) =
+            Config::from_config_file(config_file.clone(), &mut manager)?;
         spawn(&mut manager, config);
 
         // then it should spawn the unit and target
@@ -1730,7 +1832,8 @@ mod tests {
         assert_log_contains(&log, "null", SpawnAction::SpawnTarget);
 
         // and when re-loaded
-        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
+        let (_source, config) =
+            Config::from_config_file(config_file, &mut manager)?;
         spawn(&mut manager, config);
 
         // it should cause reconfiguration
@@ -1763,7 +1866,8 @@ mod tests {
 
         // when loaded into the manager and spawned
         let mut manager = init_manager();
-        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
+        let (_source, config) =
+            Config::from_config_file(config_file, &mut manager)?;
         spawn(&mut manager, config);
 
         // then it should spawn the unit and target
@@ -1792,7 +1896,8 @@ mod tests {
 
         // when loaded into the manager and spawned
         let mut manager = init_manager();
-        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
+        let (_source, config) =
+            Config::from_config_file(config_file, &mut manager)?;
         spawn(&mut manager, config);
 
         // then it should spawn the unit and target
@@ -1820,7 +1925,8 @@ mod tests {
         let config_file = mk_config_from_toml(toml);
 
         // when loaded into the manager and spawned
-        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
+        let (_source, config) =
+            Config::from_config_file(config_file, &mut manager)?;
         spawn(&mut manager, config);
 
         // then it should spawn the added target
@@ -1854,7 +1960,8 @@ mod tests {
 
         // when loaded into the manager and spawned
         let mut manager = init_manager();
-        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
+        let (_source, config) =
+            Config::from_config_file(config_file, &mut manager)?;
         spawn(&mut manager, config);
 
         // then it should spawn the unit and target
@@ -1883,7 +1990,8 @@ mod tests {
         let config_file = mk_config_from_toml(toml);
 
         // when loaded into the manager and spawned
-        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
+        let (_source, config) =
+            Config::from_config_file(config_file, &mut manager)?;
         spawn(&mut manager, config);
 
         // then it should terminate the removed target
@@ -1901,7 +2009,8 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn modified_settings_are_correctly_announced() -> Result<(), Terminate> {
+    async fn modified_settings_are_correctly_announced(
+    ) -> Result<(), Terminate> {
         // given a config with only a single target with a link to a missing unit
         let toml = r#"
         http_listen = []
@@ -1918,7 +2027,8 @@ mod tests {
 
         // when loaded into the manager and spawned
         let mut manager = init_manager();
-        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
+        let (_source, config) =
+            Config::from_config_file(config_file, &mut manager)?;
         spawn(&mut manager, config);
 
         // then it should spawn the unit and target
@@ -1942,7 +2052,8 @@ mod tests {
         let config_file = mk_config_from_toml(toml);
 
         // when loaded into the manager and spawned
-        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
+        let (_source, config) =
+            Config::from_config_file(config_file, &mut manager)?;
         spawn(&mut manager, config);
 
         // then it should terminate the removed target
@@ -1951,8 +2062,11 @@ mod tests {
         assert_log_contains(&log, "some-unit", SpawnAction::ReconfigureUnit);
         assert_log_contains(&log, "null", SpawnAction::ReconfigureTarget);
 
-        let item = get_log_item(&log, "some-unit", SpawnAction::ReconfigureUnit);
-        if let UnitOrTargetConfig::UnitConfig(Unit::BmpTcpIn(config)) = &item.config {
+        let item =
+            get_log_item(&log, "some-unit", SpawnAction::ReconfigureUnit);
+        if let UnitOrTargetConfig::UnitConfig(Unit::BmpTcpIn(config)) =
+            &item.config
+        {
             assert_eq!(config.listen.to_string(), "5.6.7.8:1818");
         } else {
             unreachable!();
@@ -1995,7 +2109,8 @@ mod tests {
     async fn coordinator_with_one_ready_component_should_not_raise_alarm() {
         let coordinator = Coordinator::new(1);
         let mut alarm_fired = false;
-        let wait_point = coordinator.clone().track(SOME_COMPONENT.to_string());
+        let wait_point =
+            coordinator.clone().track(SOME_COMPONENT.to_string());
         let join_handle = tokio::task::spawn(wait_point.running());
         assert!(!join_handle.is_finished());
         coordinator.wait(|_, _| alarm_fired = true).await;
@@ -2007,8 +2122,10 @@ mod tests {
     async fn coordinator_with_two_ready_components_should_not_raise_alarm() {
         let coordinator = Coordinator::new(2);
         let mut alarm_fired = false;
-        let wait_point1 = coordinator.clone().track(SOME_COMPONENT.to_string());
-        let wait_point2 = coordinator.clone().track(OTHER_COMPONENT.to_string());
+        let wait_point1 =
+            coordinator.clone().track(SOME_COMPONENT.to_string());
+        let wait_point2 =
+            coordinator.clone().track(OTHER_COMPONENT.to_string());
         let join_handle1 = tokio::task::spawn(wait_point1.running());
         let join_handle2 = tokio::task::spawn(wait_point2.running());
         assert!(!join_handle1.is_finished());
@@ -2020,10 +2137,12 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn coordinator_with_component_with_slow_ready_phase_should_raise_alarm() {
+    async fn coordinator_with_component_with_slow_ready_phase_should_raise_alarm(
+    ) {
         let coordinator = Coordinator::new(1);
         let alarm_fired_count = Arc::new(AtomicU8::new(0));
-        let wait_point = coordinator.clone().track(SOME_COMPONENT.to_string());
+        let wait_point =
+            coordinator.clone().track(SOME_COMPONENT.to_string());
 
         // Deliberately don't call wait_point.ready() or wait_point.running()
         let join_handle = {
@@ -2035,7 +2154,8 @@ mod tests {
 
         // Advance time beyond the maximum time allowed for the 'ready' state to be reached
         let advance_time_by = Coordinator::SLOW_COMPONENT_ALARM_DURATION;
-        let advance_time_by = advance_time_by.checked_add(Duration::from_secs(1)).unwrap();
+        let advance_time_by =
+            advance_time_by.checked_add(Duration::from_secs(1)).unwrap();
         tokio::time::sleep(advance_time_by).await;
 
         // Check that the alarm fired once
@@ -2049,10 +2169,12 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn coordinator_with_component_with_slow_running_phase_should_raise_alarm() {
+    async fn coordinator_with_component_with_slow_running_phase_should_raise_alarm(
+    ) {
         let coordinator = Coordinator::new(1);
         let alarm_fired_count = Arc::new(AtomicU8::new(0));
-        let mut wait_point = coordinator.clone().track(SOME_COMPONENT.to_string());
+        let mut wait_point =
+            coordinator.clone().track(SOME_COMPONENT.to_string());
 
         // Deliberately don't call wait_point.ready() or wait_point.running()
         let join_handle = {
@@ -2064,7 +2186,8 @@ mod tests {
 
         // Advance time beyond the maximum time allowed for the 'ready' state to be reached
         let advance_time_by = Coordinator::SLOW_COMPONENT_ALARM_DURATION;
-        let advance_time_by = advance_time_by.checked_add(Duration::from_secs(1)).unwrap();
+        let advance_time_by =
+            advance_time_by.checked_add(Duration::from_secs(1)).unwrap();
         tokio::time::sleep(advance_time_by).await;
 
         // Check that the alarm fired once
@@ -2075,7 +2198,8 @@ mod tests {
 
         // Advance time beyond the maximum time allowed for the 'running' state to be reached
         let advance_time_by = Coordinator::SLOW_COMPONENT_ALARM_DURATION;
-        let advance_time_by = advance_time_by.checked_add(Duration::from_secs(1)).unwrap();
+        let advance_time_by =
+            advance_time_by.checked_add(Duration::from_secs(1)).unwrap();
         tokio::time::sleep(advance_time_by).await;
 
         // Check that the alarm fired again
@@ -2115,10 +2239,16 @@ mod tests {
             match self {
                 SpawnAction::SpawnUnit => f.write_str("SpawnUnit"),
                 SpawnAction::SpawnTarget => f.write_str("SpawnTarget"),
-                SpawnAction::ReconfigureUnit => f.write_str("ReconfigureUnit"),
-                SpawnAction::ReconfigureTarget => f.write_str("ReconfigureTarget"),
+                SpawnAction::ReconfigureUnit => {
+                    f.write_str("ReconfigureUnit")
+                }
+                SpawnAction::ReconfigureTarget => {
+                    f.write_str("ReconfigureTarget")
+                }
                 SpawnAction::TerminateUnit => f.write_str("TerminateUnit"),
-                SpawnAction::TerminateTarget => f.write_str("TerminateTarget"),
+                SpawnAction::TerminateTarget => {
+                    f.write_str("TerminateTarget")
+                }
             }
         }
     }
@@ -2138,7 +2268,11 @@ mod tests {
     }
 
     impl SpawnLogItem {
-        fn new(name: UnitOrTargetName, action: SpawnAction, _config: UnitOrTargetConfig) -> Self {
+        fn new(
+            name: UnitOrTargetName,
+            action: SpawnAction,
+            _config: UnitOrTargetConfig,
+        ) -> Self {
             Self {
                 name,
                 action,
@@ -2201,7 +2335,11 @@ mod tests {
         );
     }
 
-    fn get_log_item<'a>(log: &'a SpawnLog, name: &str, action: SpawnAction) -> &'a SpawnLogItem {
+    fn get_log_item<'a>(
+        log: &'a SpawnLog,
+        name: &str,
+        action: SpawnAction,
+    ) -> &'a SpawnLogItem {
         let found = log
             .iter()
             .find(|item| item.name == name && item.action == action);
@@ -2217,7 +2355,12 @@ mod tests {
         );
     }
 
-    fn spawn_target(c: Component, t: Target, _: Receiver<TargetCommand>, _: WaitPoint) {
+    fn spawn_target(
+        c: Component,
+        t: Target,
+        _: Receiver<TargetCommand>,
+        _: WaitPoint,
+    ) {
         log_spawn_action(
             c.name.to_string(),
             SpawnAction::SpawnTarget,
@@ -2261,8 +2404,14 @@ mod tests {
         SPAWN_LOG.with(|log| log.borrow_mut().clear());
     }
 
-    fn log_spawn_action(name: String, action: SpawnAction, cfg: UnitOrTargetConfig) {
-        SPAWN_LOG.with(|log| log.borrow_mut().push(SpawnLogItem::new(name, action, cfg)));
+    fn log_spawn_action(
+        name: String,
+        action: SpawnAction,
+        cfg: UnitOrTargetConfig,
+    ) {
+        SPAWN_LOG.with(|log| {
+            log.borrow_mut().push(SpawnLogItem::new(name, action, cfg))
+        });
     }
 
     fn spawn(manager: &mut Manager, mut config: Config) {
@@ -2280,7 +2429,9 @@ mod tests {
 
     fn init_manager() -> Manager {
         GATES.with(|gates| gates.replace(Some(Default::default())));
-        ROTO_FILTER_NAMES.with(|filter_names| filter_names.replace(Some(Default::default())));
+        ROTO_FILTER_NAMES.with(|filter_names| {
+            filter_names.replace(Some(Default::default()))
+        });
         Manager::new()
     }
 }

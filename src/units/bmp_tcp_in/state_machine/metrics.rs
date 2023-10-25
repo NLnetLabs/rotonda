@@ -8,7 +8,9 @@ use chrono::{DateTime, Utc};
 
 use crate::{
     common::frim::FrimMap,
-    metrics::{self, util::append_per_router_metric, Metric, MetricType, MetricUnit},
+    metrics::{
+        self, util::append_per_router_metric, Metric, MetricType, MetricUnit,
+    },
     payload::RouterId,
 };
 
@@ -40,7 +42,8 @@ impl ParseError {
         Self {
             when: Utc::now(),
             msg,
-            pcaptext: bytes.map(|bytes| format!("000000 {:02x}", bytes.plain_hex(true))),
+            pcaptext: bytes
+                .map(|bytes| format!("000000 {:02x}", bytes.plain_hex(true))),
             recoverable,
         }
     }
@@ -73,7 +76,12 @@ impl ParseErrorsRingBuffer {
 
 #[cfg(feature = "router-list")]
 impl ParseErrorsRingBuffer {
-    pub fn push(&self, error: String, bytes: Option<Bytes>, recoverable: bool) {
+    pub fn push(
+        &self,
+        error: String,
+        bytes: Option<Bytes>,
+        recoverable: bool,
+    ) {
         if let Ok(mut locked) = self.errors.write() {
             let next_idx = self.next_idx.load(SeqCst);
             if next_idx + 1 > locked.len() {
@@ -98,7 +106,8 @@ impl ParseErrorsRingBuffer {
                 // never wrapped
                 (locked.clone(), vec![])
             } else {
-                let (start, end) = locked.split_at(self.next_idx.load(SeqCst));
+                let (start, end) =
+                    locked.split_at(self.next_idx.load(SeqCst));
                 (end.to_vec(), start.to_vec())
             }
         } else {
@@ -116,7 +125,10 @@ pub struct BmpMetrics {
 }
 
 impl BmpMetrics {
-    pub fn router_metrics(&self, router_id: Arc<RouterId>) -> Arc<RouterBmpMetrics> {
+    pub fn router_metrics(
+        &self,
+        router_id: Arc<RouterId>,
+    ) -> Arc<RouterBmpMetrics> {
         self.routers.entry(router_id).or_insert_with(|| {
             // We only want to collect metrics about a router based on some sort of name. To permit that to be based on the
             // mandatory sysName information TLV which MUST be provided in the initial "Initiation" BMP message, we take in
@@ -137,10 +149,14 @@ pub struct RouterBmpMetrics {
     pub num_stored_prefixes: Arc<AtomicUsize>,
     pub num_bgp_updates_processed: Arc<AtomicUsize>,
     pub num_bgp_updates_for_unknown_peer: Arc<AtomicUsize>,
-    pub num_bgp_updates_with_recoverable_parsing_failures_for_known_peers: Arc<AtomicUsize>,
-    pub num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers: Arc<AtomicUsize>,
-    pub num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers: Arc<AtomicUsize>,
-    pub num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers: Arc<AtomicUsize>,
+    pub num_bgp_updates_with_recoverable_parsing_failures_for_known_peers:
+        Arc<AtomicUsize>,
+    pub num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers:
+        Arc<AtomicUsize>,
+    pub num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers:
+        Arc<AtomicUsize>,
+    pub num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers:
+        Arc<AtomicUsize>,
     pub num_bgp_updates_filtered: Arc<AtomicUsize>,
     pub num_announcements: Arc<AtomicUsize>,
     pub num_withdrawals: Arc<AtomicUsize>,

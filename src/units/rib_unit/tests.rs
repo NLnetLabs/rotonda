@@ -6,8 +6,8 @@ use crate::{
 };
 use roto::types::{
     builtin::{
-        BgpUpdateMessage, BuiltinTypeValue, RawRouteWithDeltas, RotondaId, RouteStatus,
-        UpdateMessage,
+        BgpUpdateMessage, BuiltinTypeValue, RawRouteWithDeltas, RotondaId,
+        RouteStatus, UpdateMessage,
     },
     typevalue::TypeValue,
 };
@@ -40,21 +40,26 @@ async fn process_update_single_route() {
     let prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32)
         .unwrap()
         .into();
-    let announcements =
-        Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32").unwrap();
-    let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
+    let announcements = Announcements::from_str(
+        "e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32",
+    )
+    .unwrap();
+    let bgp_update_bytes =
+        mk_bgp_update(&Prefixes::default(), &announcements, &[]);
 
-    let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-    let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+    let roto_update_msg =
+        UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+    let bgp_update_msg =
+        Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
     let route = RawRouteWithDeltas::new_with_message_ref(
         delta_id,
         prefix,
         &bgp_update_msg,
         RouteStatus::InConvergence,
     );
-    let update = Update::from(Payload::from(TypeValue::from(BuiltinTypeValue::Route(
-        route,
-    ))));
+    let update = Update::from(Payload::from(TypeValue::from(
+        BuiltinTypeValue::Route(route),
+    )));
 
     // When it is processed by this unit it should not be filtered
     assert!(!is_filtered(&runner, update).await);
@@ -72,21 +77,26 @@ async fn process_update_same_route_twice() {
     let prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32)
         .unwrap()
         .into();
-    let announcements =
-        Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32").unwrap();
-    let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
+    let announcements = Announcements::from_str(
+        "e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32",
+    )
+    .unwrap();
+    let bgp_update_bytes =
+        mk_bgp_update(&Prefixes::default(), &announcements, &[]);
 
-    let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-    let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+    let roto_update_msg =
+        UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+    let bgp_update_msg =
+        Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
     let route = RawRouteWithDeltas::new_with_message_ref(
         delta_id,
         prefix,
         &bgp_update_msg,
         RouteStatus::InConvergence,
     );
-    let update = Update::from(Payload::from(TypeValue::from(BuiltinTypeValue::Route(
-        route,
-    ))));
+    let update = Update::from(Payload::from(TypeValue::from(
+        BuiltinTypeValue::Route(route),
+    )));
 
     // When it is processed by this unit it should not be filtered
     assert!(!is_filtered(&runner, update.clone()).await);
@@ -217,16 +227,24 @@ async fn process_update_two_routes_to_different_prefixes() {
     let prefix1 = raw_prefix1.into();
     let prefix2 = raw_prefix2.into();
     let announcements1 =
-        Announcements::from_str("e [111,222,333] 10.0.0.1 none 127.0.0.1/32").unwrap();
+        Announcements::from_str("e [111,222,333] 10.0.0.1 none 127.0.0.1/32")
+            .unwrap();
     let announcements2 =
-        Announcements::from_str("e [111,444,333] 10.0.0.1 none 127.0.0.2/32").unwrap();
-    let bgp_update_bytes1 = mk_bgp_update(&Prefixes::default(), &announcements1, &[]);
-    let bgp_update_bytes2 = mk_bgp_update(&Prefixes::default(), &announcements2, &[]);
+        Announcements::from_str("e [111,444,333] 10.0.0.1 none 127.0.0.2/32")
+            .unwrap();
+    let bgp_update_bytes1 =
+        mk_bgp_update(&Prefixes::default(), &announcements1, &[]);
+    let bgp_update_bytes2 =
+        mk_bgp_update(&Prefixes::default(), &announcements2, &[]);
 
     // When they are processed by this unit
-    for (prefix, bgp_update_bytes) in [(prefix1, bgp_update_bytes1), (prefix2, bgp_update_bytes2)] {
-        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+    for (prefix, bgp_update_bytes) in
+        [(prefix1, bgp_update_bytes1), (prefix2, bgp_update_bytes2)]
+    {
+        let roto_update_msg =
+            UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        let bgp_update_msg =
+            Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
         let route = RawRouteWithDeltas::new_with_message_ref(
             delta_id,
             prefix,
@@ -235,9 +253,9 @@ async fn process_update_two_routes_to_different_prefixes() {
         );
 
         // When it is processed by this unit it should not be filtered
-        let update = Update::from(Payload::from(TypeValue::from(BuiltinTypeValue::Route(
-            route,
-        ))));
+        let update = Update::from(Payload::from(TypeValue::from(
+            BuiltinTypeValue::Route(route),
+        )));
         assert!(!is_filtered(&runner, update.clone()).await);
     }
 
@@ -253,12 +271,11 @@ async fn process_update_two_routes_to_different_prefixes() {
     };
 
     for prefix in [raw_prefix1, raw_prefix2] {
-        let match_result =
-            runner
-                .rib()
-                .store()
-                .unwrap()
-                .match_prefix(&prefix, &match_options, &epoch::pin());
+        let match_result = runner.rib().store().unwrap().match_prefix(
+            &prefix,
+            &match_options,
+            &epoch::pin(),
+        );
         assert!(matches!(match_result.match_type, MatchType::ExactMatch));
         let rib_value = match_result.prefix_meta.unwrap(); // TODO: Why do we get the actual value out of the store here and not an Arc?
         assert_eq!(rib_value.len(), 1);

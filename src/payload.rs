@@ -106,7 +106,10 @@ pub enum UpstreamStatus {
 //------------ Payload -------------------------------------------------------
 
 pub trait Filterable {
-    fn filter<E, T>(self, filter_fn: T) -> Result<SmallVec<[Payload; 8]>, FilterError>
+    fn filter<E, T>(
+        self,
+        filter_fn: T,
+    ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
         T: Fn(TypeValue) -> FilterResult<E> + Clone,
         FilterError: From<E>;
@@ -162,7 +165,10 @@ impl Payload {
 }
 
 impl Filterable for Payload {
-    fn filter<E, T>(self, filter_fn: T) -> Result<SmallVec<[Payload; 8]>, FilterError>
+    fn filter<E, T>(
+        self,
+        filter_fn: T,
+    ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
         T: Fn(TypeValue) -> FilterResult<E> + Clone,
         FilterError: From<E>,
@@ -179,7 +185,10 @@ impl Filterable for Payload {
 }
 
 impl Filterable for SmallVec<[Payload; 8]> {
-    fn filter<E, T>(self, filter_fn: T) -> Result<SmallVec<[Payload; 8]>, FilterError>
+    fn filter<E, T>(
+        self,
+        filter_fn: T,
+    ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
         T: Fn(TypeValue) -> FilterResult<E> + Clone,
         FilterError: From<E>,

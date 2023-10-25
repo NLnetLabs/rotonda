@@ -36,8 +36,9 @@ use routecore::{
         types::{AFI, SAFI},
     },
     bmp::message::{
-        InformationTlvType, InitiationMessage, Message as BmpMsg, PeerDownNotification,
-        PeerUpNotification, PerPeerHeader, RibType, RouteMonitoring, TerminationMessage,
+        InformationTlvType, InitiationMessage, Message as BmpMsg,
+        PeerDownNotification, PeerUpNotification, PerPeerHeader, RibType,
+        RouteMonitoring, TerminationMessage,
     },
 };
 use smallvec::SmallVec;
@@ -63,7 +64,8 @@ use super::{
     metrics::BmpMetrics,
     processing::{MessageType, ProcessingResult},
     states::{
-        dumping::Dumping, initiating::Initiating, terminated::Terminated, updating::Updating,
+        dumping::Dumping, initiating::Initiating, terminated::Terminated,
+        updating::Updating,
     },
     status_reporter::BmpTcpInStatusReporter,
 };
@@ -80,7 +82,11 @@ pub struct EoRProperties {
 }
 
 impl EoRProperties {
-    pub fn new<T: AsRef<[u8]>>(pph: &PerPeerHeader<T>, afi: AFI, safi: SAFI) -> Self {
+    pub fn new<T: AsRef<[u8]>>(
+        pph: &PerPeerHeader<T>,
+        afi: AFI,
+        safi: SAFI,
+    ) -> Self {
         EoRProperties {
             afi,
             safi,
@@ -151,7 +157,7 @@ pub enum BmpState {
     Dumping(BmpStateDetails<Dumping>),
     Updating(BmpStateDetails<Updating>),
     Terminated(BmpStateDetails<Terminated>),
-    Aborted(SourceId, Arc<RouterId>), 
+    Aborted(SourceId, Arc<RouterId>),
 }
 
 // Rust enums with fields cannot have custom discriminant values assigned to them so we have to use separate
@@ -275,25 +281,41 @@ where
         ProcessingResult::new(MessageType::Other, self.into())
     }
 
-    pub fn mk_routing_update_result(self, update: Update) -> ProcessingResult {
-        ProcessingResult::new(MessageType::RoutingUpdate { update }, self.into())
+    pub fn mk_routing_update_result(
+        self,
+        update: Update,
+    ) -> ProcessingResult {
+        ProcessingResult::new(
+            MessageType::RoutingUpdate { update },
+            self.into(),
+        )
     }
 
     pub fn mk_final_routing_update_result(
         next_state: BmpState,
         update: Update,
     ) -> ProcessingResult {
-        ProcessingResult::new(MessageType::RoutingUpdate { update }, next_state)
+        ProcessingResult::new(
+            MessageType::RoutingUpdate { update },
+            next_state,
+        )
     }
 
-    pub fn mk_state_transition_result(next_state: BmpState) -> ProcessingResult {
+    pub fn mk_state_transition_result(
+        next_state: BmpState,
+    ) -> ProcessingResult {
         ProcessingResult::new(MessageType::StateTransition, next_state)
     }
 }
 
 pub trait Initiable {
     /// Set the initiating's sys name.
-    fn set_information_tlvs(&mut self, sys_name: String, sys_desc: String, sys_extra: Vec<String>);
+    fn set_information_tlvs(
+        &mut self,
+        sys_name: String,
+        sys_desc: String,
+        sys_extra: Vec<String>,
+    );
 
     fn sys_name(&self) -> Option<&str>;
 }
@@ -303,7 +325,10 @@ where
     T: Initiable,
     BmpState: From<BmpStateDetails<T>>,
 {
-    pub fn initiate<Octs: Octets>(mut self, msg: InitiationMessage<Octs>) -> ProcessingResult {
+    pub fn initiate<Octs: Octets>(
+        mut self,
+        msg: InitiationMessage<Octs>,
+    ) -> ProcessingResult {
         // https://datatracker.ietf.org/doc/html/rfc7854#section-4.3
         //    "The initiation message consists of the common
         //     BMP header followed by two or more Information
@@ -368,28 +393,54 @@ pub trait PeerAware {
     /// is not known.
     fn remove_peer(&mut self, pph: &PerPeerHeader<Bytes>) -> bool;
 
-    fn update_peer_config(&mut self, pph: &PerPeerHeader<Bytes>, config: SessionConfig) -> bool;
+    fn update_peer_config(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        config: SessionConfig,
+    ) -> bool;
 
     /// Get a reference to a previously inserted configuration.
-    fn get_peer_config(&self, pph: &PerPeerHeader<Bytes>) -> Option<&SessionConfig>;
+    fn get_peer_config(
+        &self,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> Option<&SessionConfig>;
 
     fn num_peer_configs(&self) -> usize;
 
-    fn is_peer_eor_capable(&self, pph: &PerPeerHeader<Bytes>) -> Option<bool>;
+    fn is_peer_eor_capable(&self, pph: &PerPeerHeader<Bytes>)
+        -> Option<bool>;
 
-    fn add_pending_eor(&mut self, pph: &PerPeerHeader<Bytes>, afi: AFI, safi: SAFI);
+    fn add_pending_eor(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        afi: AFI,
+        safi: SAFI,
+    );
 
     /// Remove previously recorded pending End-of-RIB note for a peer.
     ///
     /// Returns true if the configuration removed was the last one, i.e. this
     /// is the end of the initial table dump, false otherwise.
-    fn remove_pending_eor(&mut self, pph: &PerPeerHeader<Bytes>, afi: AFI, safi: SAFI) -> bool;
+    fn remove_pending_eor(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        afi: AFI,
+        safi: SAFI,
+    ) -> bool;
 
     fn num_pending_eors(&self) -> usize;
 
-    fn add_announced_prefix(&mut self, pph: &PerPeerHeader<Bytes>, prefix: Prefix) -> bool;
+    fn add_announced_prefix(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        prefix: Prefix,
+    ) -> bool;
 
-    fn remove_announced_prefix(&mut self, pph: &PerPeerHeader<Bytes>, prefix: &Prefix);
+    fn remove_announced_prefix(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        prefix: &Prefix,
+    );
 
     fn get_announced_prefixes(
         &self,
@@ -402,7 +453,10 @@ where
     T: PeerAware,
     BmpState: From<BmpStateDetails<T>>,
 {
-    pub fn peer_up(mut self, msg: PeerUpNotification<Bytes>) -> ProcessingResult {
+    pub fn peer_up(
+        mut self,
+        msg: PeerUpNotification<Bytes>,
+    ) -> ProcessingResult {
         let pph = msg.per_peer_header();
         let config = msg.session_config();
 
@@ -436,7 +490,10 @@ where
         self.mk_other_result()
     }
 
-    pub fn peer_down(mut self, msg: PeerDownNotification<Bytes>) -> ProcessingResult {
+    pub fn peer_down(
+        mut self,
+        msg: PeerDownNotification<Bytes>,
+    ) -> ProcessingResult {
         // Compatibility Note: RFC-7854 doesn't seem to indicate that a Peer
         // Down Notification has a Per Peer Header, but if it doesn't how can
         // we know which peer of the remote has gone down? Also, we see the
@@ -552,25 +609,39 @@ where
                         );
 
                         // use this config in future (#128)
-                        self.details.update_peer_config(&pph, chosen_peer_config);
+                        self.details
+                            .update_peer_config(&pph, chosen_peer_config);
                     }
 
-                    let mut saved_self = match do_state_specific_pre_processing(self, &pph, &update)
-                    {
-                        ControlFlow::Break(res) => return res,
-                        ControlFlow::Continue(saved_self) => saved_self,
-                    };
+                    let mut saved_self =
+                        match do_state_specific_pre_processing(
+                            self, &pph, &update,
+                        ) {
+                            ControlFlow::Break(res) => return res,
+                            ControlFlow::Continue(saved_self) => saved_self,
+                        };
 
-                    let (payloads, n_new_prefixes, n_announcements, n_withdrawals) = saved_self
-                        .extract_route_monitoring_routes(pph.clone(), &update, route_status);
+                    let (
+                        payloads,
+                        n_new_prefixes,
+                        n_announcements,
+                        n_withdrawals,
+                    ) = saved_self.extract_route_monitoring_routes(
+                        pph.clone(),
+                        &update,
+                        route_status,
+                    );
 
                     if n_announcements > 0
-                        && saved_self.details.is_peer_eor_capable(&pph) == Some(true)
+                        && saved_self.details.is_peer_eor_capable(&pph)
+                            == Some(true)
                     {
                         let nlris = update.nlris();
-                        saved_self
-                            .details
-                            .add_pending_eor(&pph, nlris.afi(), nlris.safi());
+                        saved_self.details.add_pending_eor(
+                            &pph,
+                            nlris.afi(),
+                            nlris.safi(),
+                        );
                     }
 
                     saved_self.status_reporter.routing_update(
@@ -581,12 +652,15 @@ where
                         0, //self.details.get_stored_routes().prefixes_len(), // TODO
                     );
 
-                    saved_self.mk_routing_update_result(Update::Bulk(payloads))
+                    saved_self
+                        .mk_routing_update_result(Update::Bulk(payloads))
                 }
 
                 Err(err) => {
                     tried_peer_configs.push(chosen_peer_config);
-                    if let Some(alt_config) = generate_alternate_config(&chosen_peer_config) {
+                    if let Some(alt_config) =
+                        generate_alternate_config(&chosen_peer_config)
+                    {
                         if !tried_peer_configs.contains(&alt_config) {
                             chosen_peer_config = alt_config;
                             if retry_due_to_err.is_none() {
@@ -617,7 +691,8 @@ where
         let mut num_new_prefixes = 0;
         let num_announcements: usize = update.nlris().iter().count();
         let mut num_withdrawals: usize = update.withdrawn_routes_len().into();
-        let mut payloads = SmallVec::with_capacity(num_announcements + num_withdrawals);
+        let mut payloads =
+            SmallVec::with_capacity(num_announcements + num_withdrawals);
 
         let nlris = &update.nlris();
 
@@ -679,7 +754,8 @@ where
                         RouteStatus::Withdrawn,
                     );
 
-                    payloads.push(Payload::new(self.source_id.clone(), route));
+                    payloads
+                        .push(Payload::new(self.source_id.clone(), route));
 
                     self.details.remove_announced_prefix(&pph, &prefix);
                 } else {
@@ -705,7 +781,8 @@ impl BmpState {
         metrics: Arc<BmpMetrics>,
     ) -> Self {
         let child_name = parent_status_reporter.link_names("bmp_state");
-        let status_reporter = Arc::new(BmpTcpInStatusReporter::new(child_name, metrics));
+        let status_reporter =
+            Arc::new(BmpTcpInStatusReporter::new(child_name, metrics));
 
         BmpState::Initiating(BmpStateDetails::<Initiating>::new(
             source_id,
@@ -751,7 +828,9 @@ impl BmpState {
         match may_panic_res {
             Ok(process_res) => {
                 if process_res.next_state.state_idx() != saved_state_idx {
-                    if let Some(reporter) = process_res.next_state.status_reporter() {
+                    if let Some(reporter) =
+                        process_res.next_state.status_reporter()
+                    {
                         reporter.change_state(
                             process_res.next_state.router_id(),
                             saved_state_idx,
@@ -763,7 +842,10 @@ impl BmpState {
                 process_res
             }
             Err(err) => {
-                let err = format!("Internal error while processing BMP message: {:?}", err);
+                let err = format!(
+                    "Internal error while processing BMP message: {:?}",
+                    err
+                );
                 // We've lost the bmp state machine and associated state...
                 // including things like detected peer configurations which we
                 // need in order to be able to process subsequent messages.
@@ -812,7 +894,9 @@ impl From<BmpStateDetails<Terminated>> for BmpState {
 
 #[cfg(test)]
 mod tests {
-    use std::{ffi::OsStr, fs::File, io::Read, net::SocketAddr, time::Instant};
+    use std::{
+        ffi::OsStr, fs::File, io::Read, net::SocketAddr, time::Instant,
+    };
 
     use bytes::BytesMut;
     // use chrono::{DateTime, NaiveDateTime};
@@ -831,8 +915,10 @@ mod tests {
     async fn replay_test() {
         const USIZE_BYTES: usize = (usize::BITS as usize) >> 3;
         let bmp_metrics = Arc::new(BmpMetrics::default());
-        let status_reporter =
-            Arc::new(BmpTcpInStatusReporter::new("some reporter", bmp_metrics.clone()));
+        let status_reporter = Arc::new(BmpTcpInStatusReporter::new(
+            "some reporter",
+            bmp_metrics.clone(),
+        ));
 
         let mut inputs = Vec::new();
         for entry in std::fs::read_dir("bmp-dump").unwrap() {
@@ -850,8 +936,15 @@ mod tests {
                 let pieces: Vec<&str> = fname.splitn(3, '-').collect();
                 let ip = pieces[1];
                 let port = pieces[2].split('.').next().unwrap();
-                let client_addr = SocketAddr::new(ip.parse().unwrap(), port.parse().unwrap());
-                let router_id = Arc::new(format!("{}-{}", client_addr.ip(), client_addr.port()));
+                let client_addr = SocketAddr::new(
+                    ip.parse().unwrap(),
+                    port.parse().unwrap(),
+                );
+                let router_id = Arc::new(format!(
+                    "{}-{}",
+                    client_addr.ip(),
+                    client_addr.port()
+                ));
                 let status_reporter = status_reporter.clone();
                 let mut bmp_state = BmpState::new(
                     SourceId::SocketAddr(client_addr),
@@ -863,19 +956,22 @@ mod tests {
                 let handle = tokio::task::spawn(async move {
                     let mut file = File::open(path).unwrap();
                     let mut ts_bytes: [u8; 16] = [0; 16];
-                    let mut num_bmp_bytes: [u8; USIZE_BYTES] = [0; USIZE_BYTES];
+                    let mut num_bmp_bytes: [u8; USIZE_BYTES] =
+                        [0; USIZE_BYTES];
                     let mut last_ts = None;
                     let mut last_push = Instant::now();
 
                     loop {
-                        let mut bmp_bytes = BytesMut::with_capacity(64 * 1024);
+                        let mut bmp_bytes =
+                            BytesMut::with_capacity(64 * 1024);
 
                         // Each line has the form <timestamp:u128><num bytes:usize><bmp bytes>
                         file.read_exact(&mut ts_bytes).unwrap();
                         let ts = u128::from_be_bytes(ts_bytes);
 
                         file.read_exact(&mut num_bmp_bytes).unwrap();
-                        let num_bytes_to_read = usize::from_be_bytes(num_bmp_bytes);
+                        let num_bytes_to_read =
+                            usize::from_be_bytes(num_bmp_bytes);
                         bmp_bytes.resize(num_bytes_to_read, 0);
 
                         file.read_exact(&mut bmp_bytes).unwrap();
@@ -886,15 +982,19 @@ mod tests {
                         // data was seen?
                         if let Some(last_ts) = last_ts {
                             let millis_between_messages = ts - last_ts;
-                            let millis_since_last_push = last_push.elapsed().as_millis();
-                            if millis_since_last_push < millis_between_messages {
-                                let _millis_to_sleep =
-                                    millis_between_messages - millis_since_last_push;
+                            let millis_since_last_push =
+                                last_push.elapsed().as_millis();
+                            if millis_since_last_push
+                                < millis_between_messages
+                            {
+                                let _millis_to_sleep = millis_between_messages
+                                    - millis_since_last_push;
                                 //sleep(Duration::from_millis(_millis_to_sleep.try_into().unwrap()));
                             }
                         }
 
-                        let bmp_msg = BmpMsg::from_octets(bmp_bytes.freeze()).unwrap();
+                        let bmp_msg =
+                            BmpMsg::from_octets(bmp_bytes.freeze()).unwrap();
                         let mut res = bmp_state.process_msg(bmp_msg);
 
                         match res.processing_result {
@@ -907,9 +1007,12 @@ mod tests {
                             }
 
                             MessageType::StateTransition => {
-                                if let BmpState::Dumping(next_state) = &mut res.next_state {
-                                    next_state.router_id =
-                                        Arc::new(next_state.details.sys_name.clone());
+                                if let BmpState::Dumping(next_state) =
+                                    &mut res.next_state
+                                {
+                                    next_state.router_id = Arc::new(
+                                        next_state.details.sys_name.clone(),
+                                    );
 
                                     // This will enable metrics to be stored for the router id.
                                     // status_reporter.router_id_changed(next_state.router_id.clone());
@@ -917,7 +1020,10 @@ mod tests {
                             }
 
                             MessageType::Aborted => {
-                                log::warn!("{}: Aborted", res.next_state.router_id());
+                                log::warn!(
+                                    "{}: Aborted",
+                                    res.next_state.router_id()
+                                );
                                 break;
                             }
 
@@ -937,7 +1043,8 @@ mod tests {
 
         join_all(join_handles).await;
 
-        let mut metrics_target = crate::metrics::Target::new(OutputFormat::Plain);
+        let mut metrics_target =
+            crate::metrics::Target::new(OutputFormat::Plain);
         bmp_metrics.append("test", &mut metrics_target);
         eprintln!("{}", metrics_target.into_string());
 
@@ -999,7 +1106,10 @@ impl PeerAware for PeerStates {
         }
     }
 
-    fn get_peer_config(&self, pph: &PerPeerHeader<Bytes>) -> Option<&SessionConfig> {
+    fn get_peer_config(
+        &self,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> Option<&SessionConfig> {
         self.0.get(pph).map(|peer_state| &peer_state.session_config)
     }
 
@@ -1011,11 +1121,19 @@ impl PeerAware for PeerStates {
         self.0.len()
     }
 
-    fn is_peer_eor_capable(&self, pph: &PerPeerHeader<Bytes>) -> Option<bool> {
+    fn is_peer_eor_capable(
+        &self,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> Option<bool> {
         self.0.get(pph).map(|peer_state| peer_state.eor_capable)
     }
 
-    fn add_pending_eor(&mut self, pph: &PerPeerHeader<Bytes>, afi: AFI, safi: SAFI) {
+    fn add_pending_eor(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        afi: AFI,
+        safi: SAFI,
+    ) {
         if let Some(peer_state) = self.0.get_mut(pph) {
             peer_state
                 .pending_eors
@@ -1023,7 +1141,12 @@ impl PeerAware for PeerStates {
         }
     }
 
-    fn remove_pending_eor(&mut self, pph: &PerPeerHeader<Bytes>, afi: AFI, safi: SAFI) -> bool {
+    fn remove_pending_eor(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        afi: AFI,
+        safi: SAFI,
+    ) -> bool {
         if let Some(peer_state) = self.0.get_mut(pph) {
             peer_state
                 .pending_eors
@@ -1043,7 +1166,11 @@ impl PeerAware for PeerStates {
             .fold(0, |acc, peer_state| acc + peer_state.pending_eors.len())
     }
 
-    fn add_announced_prefix(&mut self, pph: &PerPeerHeader<Bytes>, prefix: Prefix) -> bool {
+    fn add_announced_prefix(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        prefix: Prefix,
+    ) -> bool {
         if let Some(peer_state) = self.0.get_mut(pph) {
             peer_state.announced_prefixes.insert(prefix)
         } else {
@@ -1051,7 +1178,11 @@ impl PeerAware for PeerStates {
         }
     }
 
-    fn remove_announced_prefix(&mut self, pph: &PerPeerHeader<Bytes>, prefix: &Prefix) {
+    fn remove_announced_prefix(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        prefix: &Prefix,
+    ) {
         if let Some(peer_state) = self.0.get_mut(pph) {
             peer_state.announced_prefixes.remove(prefix);
         }

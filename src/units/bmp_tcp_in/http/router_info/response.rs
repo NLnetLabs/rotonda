@@ -46,7 +46,8 @@ impl RouterInfoApi {
         connected_at: &DateTime<Utc>,
         last_message_at: &Arc<RwLock<DateTime<Utc>>>,
     ) -> Response<Body> {
-        let router_conn_metrics = conn_metrics.router_metrics(router_id.clone());
+        let router_conn_metrics =
+            conn_metrics.router_metrics(router_id.clone());
         let mut response_body = Self::build_response_header();
 
         response_body.push_str(&Self::build_response_body(
@@ -115,11 +116,13 @@ impl RouterInfoApi {
         let sys_extra = sys_extra.join("|");
         let connected_at = connected_at.to_rfc3339();
         let last_message_at = last_message_at.read().unwrap().to_rfc3339();
-        let router_bmp_metrics = bmp_metrics.router_metrics(router_id.clone());
+        let router_bmp_metrics =
+            bmp_metrics.router_metrics(router_id.clone());
 
         let state = router_bmp_metrics.bmp_state_machine_state.load(SeqCst);
 
-        let num_msg_issues: usize = router_conn_metrics.num_invalid_bmp_messages.load(SeqCst);
+        let num_msg_issues: usize =
+            router_conn_metrics.num_invalid_bmp_messages.load(SeqCst);
         let num_retried_bgp_updates_known_peer: usize = router_bmp_metrics
             .num_bgp_updates_with_recoverable_parsing_failures_for_known_peers
             .load(SeqCst);
@@ -132,20 +135,26 @@ impl RouterInfoApi {
         let num_unusable_bgp_updates_unknown_peer: usize = router_bmp_metrics
             .num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers
             .load(SeqCst);
-        let num_prefixes: usize = router_bmp_metrics.num_stored_prefixes.load(SeqCst);
-        let num_announce: usize = router_bmp_metrics.num_announcements.load(SeqCst);
-        let num_withdraw: usize = router_bmp_metrics.num_withdrawals.load(SeqCst);
-        let num_peers_up: usize = router_bmp_metrics.num_peers_up.load(SeqCst);
+        let num_prefixes: usize =
+            router_bmp_metrics.num_stored_prefixes.load(SeqCst);
+        let num_announce: usize =
+            router_bmp_metrics.num_announcements.load(SeqCst);
+        let num_withdraw: usize =
+            router_bmp_metrics.num_withdrawals.load(SeqCst);
+        let num_peers_up: usize =
+            router_bmp_metrics.num_peers_up.load(SeqCst);
         let num_peers_up_eor_capable: usize =
             router_bmp_metrics.num_peers_up_eor_capable.load(SeqCst);
-        let num_peers_up_dumping: usize = router_bmp_metrics.num_peers_up_dumping.load(SeqCst);
+        let num_peers_up_dumping: usize =
+            router_bmp_metrics.num_peers_up_dumping.load(SeqCst);
 
         use std::fmt::Write;
 
         let mut error_report = String::new();
         let (start, end) = router_bmp_metrics.parse_errors.get();
         for err in start.iter().chain(end.iter()) {
-            writeln!(error_report, "  When: {}", err.when.to_rfc3339()).unwrap();
+            writeln!(error_report, "  When: {}", err.when.to_rfc3339())
+                .unwrap();
             writeln!(error_report, "  What: {}", err.msg).unwrap();
             writeln!(error_report, "  Soft: {}", err.recoverable).unwrap();
             if let Some(pcaptext) = &err.pcaptext {

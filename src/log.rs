@@ -108,10 +108,16 @@ impl LogConfig {
     /// This is the Unix version that also considers syslog as a valid
     /// target.
     #[cfg(unix)]
-    fn apply_log_matches(&mut self, matches: &ArgMatches, cur_dir: &Path) -> Result<(), Terminate> {
+    fn apply_log_matches(
+        &mut self,
+        matches: &ArgMatches,
+        cur_dir: &Path,
+    ) -> Result<(), Terminate> {
         if matches.get_flag("syslog") {
             self.log_target = LogTarget::Syslog;
-            if let Some(value) = Self::from_str_value_of(matches, "syslog-facility")? {
+            if let Some(value) =
+                Self::from_str_value_of(matches, "syslog-facility")?
+            {
                 self.log_facility = value
             }
         } else if let Some(file) = matches.get_one::<String>("logfile") {
@@ -130,7 +136,11 @@ impl LogConfig {
     /// This is the non-Unix version that does not use syslog.
     #[cfg(not(unix))]
     #[allow(clippy::unnecessary_wraps)]
-    fn apply_log_matches(&mut self, matches: &ArgMatches, cur_dir: &Path) -> Result<(), Terminate> {
+    fn apply_log_matches(
+        &mut self,
+        matches: &ArgMatches,
+        cur_dir: &Path,
+    ) -> Result<(), Terminate> {
         if let Some(file) = matches.value_of("logfile") {
             if file == "-" {
                 self.log_target = LogTarget::Stderr
@@ -148,7 +158,10 @@ impl LogConfig {
     /// the actual conversion error, it logs it as an invalid value for entry
     /// `key` and returns the standard error.
     #[allow(dead_code)] // unused on Windows
-    fn from_str_value_of<T>(matches: &ArgMatches, key: &str) -> Result<Option<T>, Terminate>
+    fn from_str_value_of<T>(
+        matches: &ArgMatches,
+        key: &str,
+    ) -> Result<Option<T>, Terminate>
     where
         T: FromStr,
         T::Err: fmt::Display,
@@ -228,7 +241,9 @@ impl LogConfig {
         let formatter = formatter;
         let logger = syslog::unix(formatter.clone())
             .or_else(|_| syslog::tcp(formatter.clone(), ("127.0.0.1", 601)))
-            .or_else(|_| syslog::udp(formatter, ("127.0.0.1", 0), ("127.0.0.1", 514)));
+            .or_else(|_| {
+                syslog::udp(formatter, ("127.0.0.1", 0), ("127.0.0.1", 514))
+            });
         match logger {
             Ok(logger) => Ok(Box::new(syslog::BasicLogger::new(logger))),
             Err(err) => {
@@ -271,7 +286,8 @@ impl LogConfig {
             Ok(_) => self.log_level.0.min(LevelFilter::Trace),
             Err(_) => self.log_level.0.min(LevelFilter::Warn),
         };
-        let rotonda_store_log_level = match std::env::var("ROTONDA_STORE_LOG") {
+        let rotonda_store_log_level = match std::env::var("ROTONDA_STORE_LOG")
+        {
             Ok(_) => self.log_level.0.min(LevelFilter::Trace),
             Err(_) => self.log_level.0.min(LevelFilter::Warn),
         };
@@ -294,7 +310,8 @@ impl LogConfig {
         if timestamp_and_level {
             res = res.format(move |out, message, record| {
                 let module_path = record.module_path().unwrap_or("");
-                let show_module = debug_enabled || !module_path.starts_with("rotonda");
+                let show_module =
+                    debug_enabled || !module_path.starts_with("rotonda");
                 out.finish(format_args!(
                     "[{}] {:5} {}{}{}",
                     chrono::Local::now().format("%Y-%m-%d %H:%M:%S"),
@@ -307,7 +324,8 @@ impl LogConfig {
         } else {
             res = res.format(move |out, message, record| {
                 let module_path = record.module_path().unwrap_or("");
-                let show_module = debug_enabled || !module_path.starts_with("rotonda");
+                let show_module =
+                    debug_enabled || !module_path.starts_with("rotonda");
                 out.finish(format_args!(
                     "{}{}{}",
                     if show_module { module_path } else { "" },

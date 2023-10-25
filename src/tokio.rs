@@ -146,7 +146,11 @@ impl metrics::Source for TokioTaskMetrics {
             Some(unit_name),
             metrics.instrumented_count,
         );
-        target.append_simple(&Self::DROPPED_COUNT, Some(unit_name), metrics.dropped_count);
+        target.append_simple(
+            &Self::DROPPED_COUNT,
+            Some(unit_name),
+            metrics.dropped_count,
+        );
         target.append_simple(
             &Self::FIRST_POLL_COUNT,
             Some(unit_name),

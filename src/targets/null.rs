@@ -56,7 +56,9 @@ impl Target {
                 }
 
                 TargetCommand::ReportLinks { report } => {
-                    if let Ok(non_empty) = NonEmpty::try_from(self.sources.clone()) {
+                    if let Ok(non_empty) =
+                        NonEmpty::try_from(self.sources.clone())
+                    {
                         report.set_sources(&non_empty);
                     }
                 }

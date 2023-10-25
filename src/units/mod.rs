@@ -51,10 +51,19 @@ pub enum Unit {
 }
 
 impl Unit {
-    pub async fn run(self, component: Component, gate: Gate, waitpoint: WaitPoint) {
+    pub async fn run(
+        self,
+        component: Component,
+        gate: Gate,
+        waitpoint: WaitPoint,
+    ) {
         let _ = match self {
-            Unit::BgpTcpIn(unit) => unit.run(component, gate, waitpoint).await,
-            Unit::BmpTcpIn(unit) => unit.run(component, gate, waitpoint).await,
+            Unit::BgpTcpIn(unit) => {
+                unit.run(component, gate, waitpoint).await
+            }
+            Unit::BmpTcpIn(unit) => {
+                unit.run(component, gate, waitpoint).await
+            }
             Unit::Filter(unit) => unit.run(component, gate, waitpoint).await,
             Unit::RibUnit(unit) => unit.run(component, gate, waitpoint).await,
         };

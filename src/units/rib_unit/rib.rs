@@ -82,8 +82,11 @@ impl HashedRib {
             true => {
                 let store = MultiThreadedStore::<RibValue>::new()
                     .unwrap() // TODO: handle this Err
-                    .with_user_data(StoreEvictionPolicy::UpdateStatusOnWithdraw);
-                let rib = Rib::new("rib-names-are-not-used-yet", ty.clone(), store);
+                    .with_user_data(
+                        StoreEvictionPolicy::UpdateStatusOnWithdraw,
+                    );
+                let rib =
+                    Rib::new("rib-names-are-not-used-yet", ty.clone(), store);
                 Some(rib)
             }
             false => None,
@@ -103,7 +106,9 @@ impl HashedRib {
         state.finish()
     }
 
-    pub fn store(&self) -> Result<&MultiThreadedStore<RibValue>, PrefixStoreError> {
+    pub fn store(
+        &self,
+    ) -> Result<&MultiThreadedStore<RibValue>, PrefixStoreError> {
         self.rib
             .as_ref()
             .map(|rib| &rib.store)
@@ -123,10 +128,14 @@ impl HashedRib {
     }
 
     pub fn key_fields(&self) -> Vec<RouteToken> {
-        let TypeDef::Rib((_td, Some(field_indices))) = &self.type_def_rib else {
+        let TypeDef::Rib((_td, Some(field_indices))) = &self.type_def_rib
+        else {
             unreachable!();
         };
-        field_indices.iter().map(|idx| RouteToken::from(idx[0])).collect()
+        field_indices
+            .iter()
+            .map(|idx| RouteToken::from(idx[0]))
+            .collect()
     }
 }
 
@@ -233,34 +242,42 @@ impl MergeUpdate for RibValue {
         let mut item_count_delta: isize = 0;
 
         // There should only ever be one so unwrap().
-        let in_item: &TypeValue = update_meta.per_prefix_items.iter().next().unwrap();
+        let in_item: &TypeValue =
+            update_meta.per_prefix_items.iter().next().unwrap();
 
         // Clone ourselves, withdrawing matching routes if the given item is a withdrawn route
         let out_items: HashedSet<Arc<PreHashedTypeValue>> = match in_item {
             TypeValue::Builtin(BuiltinTypeValue::Route(new_route))
                 if new_route.status() == RouteStatus::Withdrawn =>
             {
-                let peer_id = PeerId::new(new_route.peer_ip(), new_route.peer_asn());
+                let peer_id =
+                    PeerId::new(new_route.peer_ip(), new_route.peer_asn());
 
                 match eviction_policy {
-                    None | Some(StoreEvictionPolicy::UpdateStatusOnWithdraw) => self
-                        .per_prefix_items
-                        .iter()
-                        .map(|route| {
-                            let (out_route, withdrawn) = route.clone_and_withdraw(peer_id);
-                            if withdrawn {
-                                item_count_delta -= 1;
-                            }
-                            out_route
-                        })
-                        .collect::<_>(),
+                    None
+                    | Some(StoreEvictionPolicy::UpdateStatusOnWithdraw) => {
+                        self.per_prefix_items
+                            .iter()
+                            .map(|route| {
+                                let (out_route, withdrawn) =
+                                    route.clone_and_withdraw(peer_id);
+                                if withdrawn {
+                                    item_count_delta -= 1;
+                                }
+                                out_route
+                            })
+                            .collect::<_>()
+                    }
 
                     Some(StoreEvictionPolicy::RemoveOnWithdraw) => {
-                        let mut out_items: HashedSet<Arc<PreHashedTypeValue>> = self
+                        let mut out_items: HashedSet<
+                            Arc<PreHashedTypeValue>,
+                        > = self
                             .per_prefix_items
                             .iter()
                             .filter(|route| {
-                                !route.is_withdrawn() || route.peer_id() != Some(peer_id)
+                                !route.is_withdrawn()
+                                    || route.peer_id() != Some(peer_id)
                             })
                             .cloned()
                             .collect::<_>();
@@ -310,7 +327,10 @@ impl std::ops::Deref for RibValue {
 
 impl From<PreHashedTypeValue> for RibValue {
     fn from(item: PreHashedTypeValue) -> Self {
-        let mut items = HashedSet::with_capacity_and_hasher(1, HashBuildHasher::default());
+        let mut items = HashedSet::with_capacity_and_hasher(
+            1,
+            HashBuildHasher::default(),
+        );
         items.insert(Arc::new(item));
         Self {
             per_prefix_items: Arc::new(items),
@@ -452,13 +472,15 @@ impl RouteExtra for TypeValue {
 
 #[cfg(test)]
 mod tests {
-    use std::{alloc::System, net::IpAddr, ops::Deref, str::FromStr, sync::Arc};
+    use std::{
+        alloc::System, net::IpAddr, ops::Deref, str::FromStr, sync::Arc,
+    };
 
     use hashbrown::hash_map::DefaultHashBuilder;
     use roto::types::{
         builtin::{
-            BgpUpdateMessage, BuiltinTypeValue, RawRouteWithDeltas, RotondaId, RouteStatus,
-            UpdateMessage,
+            BgpUpdateMessage, BuiltinTypeValue, RawRouteWithDeltas,
+            RotondaId, RouteStatus, UpdateMessage,
         },
         typevalue::TypeValue,
     };
@@ -481,7 +503,8 @@ mod tests {
 
     #[test]
     fn into_new() {
-        let rib_value: RibValue = PreHashedTypeValue::new(123u8.into(), 18).into();
+        let rib_value: RibValue =
+            PreHashedTypeValue::new(123u8.into(), 18).into();
         assert_eq!(rib_value.len(), 1);
         assert_eq!(
             rib_value.iter().next(),
@@ -539,9 +562,12 @@ mod tests {
             Some(Asn::from_u32(456)),
         );
 
-        let peer_one_announcement_one = mk_route_announcement(prefix, "123,456,789", peer_one);
-        let peer_one_announcement_two = mk_route_announcement(prefix, "123,789", peer_one);
-        let peer_two_announcement_one = mk_route_announcement(prefix, "456,789", peer_two);
+        let peer_one_announcement_one =
+            mk_route_announcement(prefix, "123,456,789", peer_one);
+        let peer_one_announcement_two =
+            mk_route_announcement(prefix, "123,789", peer_one);
+        let peer_two_announcement_one =
+            mk_route_announcement(prefix, "456,789", peer_two);
         let peer_one_withdrawal = mk_route_withdrawal(prefix, peer_one);
 
         let peer_one_announcement_one =
@@ -550,7 +576,8 @@ mod tests {
             PreHashedTypeValue::new(peer_one_announcement_two.into(), 2);
         let peer_two_announcement_one =
             PreHashedTypeValue::new(peer_two_announcement_one.into(), 3);
-        let peer_one_withdrawal = PreHashedTypeValue::new(peer_one_withdrawal.into(), 4);
+        let peer_one_withdrawal =
+            PreHashedTypeValue::new(peer_one_withdrawal.into(), 4);
 
         // When merged into a RibValue
         let update_policy = StoreEvictionPolicy::UpdateStatusOnWithdraw;
@@ -558,23 +585,35 @@ mod tests {
 
         // Unique announcements accumulate in the RibValue
         let (rib_value, _user_data) = rib_value
-            .clone_merge_update(&peer_one_announcement_one.into(), Some(&update_policy))
+            .clone_merge_update(
+                &peer_one_announcement_one.into(),
+                Some(&update_policy),
+            )
             .unwrap();
         assert_eq!(rib_value.len(), 1);
 
         let (rib_value, _user_data) = rib_value
-            .clone_merge_update(&peer_one_announcement_two.into(), Some(&update_policy))
+            .clone_merge_update(
+                &peer_one_announcement_two.into(),
+                Some(&update_policy),
+            )
             .unwrap();
         assert_eq!(rib_value.len(), 2);
 
         let (rib_value, _user_data) = rib_value
-            .clone_merge_update(&peer_two_announcement_one.into(), Some(&update_policy))
+            .clone_merge_update(
+                &peer_two_announcement_one.into(),
+                Some(&update_policy),
+            )
             .unwrap();
         assert_eq!(rib_value.len(), 3);
 
         // And a withdrawal by one peer of the prefix which the RibValue represents leaves the RibValue size unchanged
         let (rib_value, _user_data) = rib_value
-            .clone_merge_update(&peer_one_withdrawal.clone().into(), Some(&update_policy))
+            .clone_merge_update(
+                &peer_one_withdrawal.clone().into(),
+                Some(&update_policy),
+            )
             .unwrap();
         assert_eq!(rib_value.len(), 3);
 
@@ -624,7 +663,10 @@ mod tests {
         // policy, causes the two routes from that peer to be removed leaving only one in the RibValue.
         let remove_policy = StoreEvictionPolicy::RemoveOnWithdraw;
         let (rib_value, _user_data) = rib_value
-            .clone_merge_update(&peer_one_withdrawal.into(), Some(&remove_policy))
+            .clone_merge_update(
+                &peer_one_withdrawal.into(),
+                Some(&remove_policy),
+            )
             .unwrap();
         assert_eq!(rib_value.len(), 1);
     }
@@ -635,13 +677,18 @@ mod tests {
         let prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32).unwrap();
         let peer_one = IpAddr::from_str("192.168.0.1").unwrap();
         let peer_two = IpAddr::from_str("192.168.0.2").unwrap();
-        let announcement_one_from_peer_one = mk_route_announcement(prefix, "123,456", peer_one);
-        let announcement_two_from_peer_one = mk_route_announcement(prefix, "789,456", peer_one);
-        let announcement_one_from_peer_two = mk_route_announcement(prefix, "123,456", peer_two);
-        let announcement_two_from_peer_two = mk_route_announcement(prefix, "789,456", peer_two);
+        let announcement_one_from_peer_one =
+            mk_route_announcement(prefix, "123,456", peer_one);
+        let announcement_two_from_peer_one =
+            mk_route_announcement(prefix, "789,456", peer_one);
+        let announcement_one_from_peer_two =
+            mk_route_announcement(prefix, "123,456", peer_two);
+        let announcement_two_from_peer_two =
+            mk_route_announcement(prefix, "789,456", peer_two);
 
-        let hash_code_route_one_peer_one =
-            rib.precompute_hash_code(&announcement_one_from_peer_one.clone().into());
+        let hash_code_route_one_peer_one = rib.precompute_hash_code(
+            &announcement_one_from_peer_one.clone().into(),
+        );
         let hash_code_route_one_peer_one_again =
             rib.precompute_hash_code(&announcement_one_from_peer_one.into());
         let hash_code_route_one_peer_two =
@@ -676,17 +723,33 @@ mod tests {
         );
 
         // Sanity checks
-        assert_eq!(hash_code_route_one_peer_one, hash_code_route_one_peer_one);
-        assert_eq!(hash_code_route_one_peer_two, hash_code_route_one_peer_two);
-        assert_eq!(hash_code_route_two_peer_one, hash_code_route_two_peer_one);
-        assert_eq!(hash_code_route_two_peer_two, hash_code_route_two_peer_two);
+        assert_eq!(
+            hash_code_route_one_peer_one,
+            hash_code_route_one_peer_one
+        );
+        assert_eq!(
+            hash_code_route_one_peer_two,
+            hash_code_route_one_peer_two
+        );
+        assert_eq!(
+            hash_code_route_two_peer_one,
+            hash_code_route_two_peer_one
+        );
+        assert_eq!(
+            hash_code_route_two_peer_two,
+            hash_code_route_two_peer_two
+        );
     }
 
     #[test]
     fn test_merge_update_user_data_in_out() {
         const NUM_TEST_ITEMS: usize = 18;
 
-        type TestMap<T> = hashbrown::HashSet<T, DefaultHashBuilder, TrackingAllocator<System>>;
+        type TestMap<T> = hashbrown::HashSet<
+            T,
+            DefaultHashBuilder,
+            TrackingAllocator<System>,
+        >;
 
         #[derive(Debug)]
         struct MergeUpdateSettings {
@@ -695,7 +758,10 @@ mod tests {
         }
 
         impl MergeUpdateSettings {
-            fn new(allocator: TrackingAllocator<System>, num_items_to_insert: usize) -> Self {
+            fn new(
+                allocator: TrackingAllocator<System>,
+                num_items_to_insert: usize,
+            ) -> Self {
                 Self {
                     allocator,
                     num_items_to_insert,
@@ -715,7 +781,8 @@ mod tests {
                 &mut self,
                 _update_meta: Self,
                 _user_data: Option<&Self::UserDataIn>,
-            ) -> Result<Self::UserDataOut, Box<dyn std::error::Error>> {
+            ) -> Result<Self::UserDataOut, Box<dyn std::error::Error>>
+            {
                 todo!()
             }
 
@@ -729,7 +796,8 @@ mod tests {
             {
                 // Verify that the allocator can actually be used
                 let settings = settings.unwrap();
-                let mut v = TestMap::with_capacity_in(2, settings.allocator.clone());
+                let mut v =
+                    TestMap::with_capacity_in(2, settings.allocator.clone());
                 for n in 0..settings.num_items_to_insert {
                     v.insert(n);
                 }
@@ -774,11 +842,14 @@ mod tests {
             prefix
         ))
         .unwrap();
-        let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
+        let bgp_update_bytes =
+            mk_bgp_update(&Prefixes::default(), &announcements, &[]);
 
         // When it is processed by this unit
-        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        let roto_update_msg =
+            UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        let bgp_update_msg =
+            Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
         let mut route = RawRouteWithDeltas::new_with_message_ref(
             delta_id,
             prefix.into(),
@@ -799,14 +870,22 @@ mod tests {
         route
     }
 
-    fn mk_route_withdrawal(prefix: Prefix, peer_id: PeerId) -> RawRouteWithDeltas {
+    fn mk_route_withdrawal(
+        prefix: Prefix,
+        peer_id: PeerId,
+    ) -> RawRouteWithDeltas {
         let delta_id = (RotondaId(0), 0);
-        let bgp_update_bytes =
-            mk_bgp_update(&Prefixes::new(vec![prefix]), &Announcements::None, &[]);
+        let bgp_update_bytes = mk_bgp_update(
+            &Prefixes::new(vec![prefix]),
+            &Announcements::None,
+            &[],
+        );
 
         // When it is processed by this unit
-        let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        let roto_update_msg =
+            UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        let bgp_update_msg =
+            Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
         let mut route = RawRouteWithDeltas::new_with_message_ref(
             delta_id,
             prefix.into(),

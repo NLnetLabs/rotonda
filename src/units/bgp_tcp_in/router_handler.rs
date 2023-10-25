@@ -276,10 +276,10 @@ impl Processor {
         // live_sessions set.
         if !rejected {
             if let Some(negotiated) = session.negotiated() {
-                live_sessions
-                    .lock()
-                    .unwrap()
-                    .remove(&(negotiated.remote_addr(), negotiated.remote_asn()));
+                live_sessions.lock().unwrap().remove(&(
+                    negotiated.remote_addr(),
+                    negotiated.remote_asn(),
+                ));
                 debug!(
                     "removed {}@{} from live_sessions (current count: {})",
                     negotiated.remote_asn(),
@@ -391,7 +391,14 @@ impl Processor {
                 .inspect(|prefix| {
                     self.observed_prefixes.insert(*prefix);
                 })
-                .map(|prefix| mk_payload(prefix, &msg, &source_id, RouteStatus::InConvergence)),
+                .map(|prefix| {
+                    mk_payload(
+                        prefix,
+                        &msg,
+                        &source_id,
+                        RouteStatus::InConvergence,
+                    )
+                }),
         );
 
         payloads.extend(
@@ -407,7 +414,14 @@ impl Processor {
                 .inspect(|prefix| {
                     self.observed_prefixes.remove(prefix);
                 })
-                .map(|prefix| mk_payload(prefix, &msg, &source_id, RouteStatus::Withdrawn)),
+                .map(|prefix| {
+                    mk_payload(
+                        prefix,
+                        &msg,
+                        &source_id,
+                        RouteStatus::Withdrawn,
+                    )
+                }),
         );
 
         payloads.into()
@@ -456,7 +470,8 @@ pub async fn handle_connection(
         delay_open
     );
 
-    let mut session = BgpSession::new(candidate_config, tcp_stream, sess_tx, cmds_rx);
+    let mut session =
+        BgpSession::new(candidate_config, tcp_stream, sess_tx, cmds_rx);
 
     if delay_open {
         session.enable_delay_open();
@@ -464,6 +479,12 @@ pub async fn handle_connection(
     session.manual_start().await;
     session.connection_established().await;
 
-    let mut p = Processor::new(roto_scripts, gate, unit_config, cmds_tx, status_reporter);
+    let mut p = Processor::new(
+        roto_scripts,
+        gate,
+        unit_config,
+        cmds_tx,
+        status_reporter,
+    );
     p.process(session, sess_rx, live_sessions).await;
 }

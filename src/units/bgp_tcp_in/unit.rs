@@ -48,7 +48,10 @@ struct StandardTcpListenerFactory;
 
 #[async_trait::async_trait]
 impl TcpListenerFactory<StandardTcpListener> for StandardTcpListenerFactory {
-    async fn bind(&self, addr: String) -> std::io::Result<StandardTcpListener> {
+    async fn bind(
+        &self,
+        addr: String,
+    ) -> std::io::Result<StandardTcpListener> {
         let listener = tokio::net::TcpListener::bind(addr).await?;
         Ok(StandardTcpListener(listener))
     }
@@ -103,7 +106,10 @@ impl BgpTcpIn {
         component.register_metrics(metrics.clone());
 
         // Setup status reporting
-        let status_reporter = Arc::new(BgpTcpInStatusReporter::new(&unit_name, metrics.clone()));
+        let status_reporter = Arc::new(BgpTcpInStatusReporter::new(
+            &unit_name,
+            metrics.clone(),
+        ));
 
         let roto_scripts = component.roto_scripts().clone();
 
@@ -119,9 +125,15 @@ impl BgpTcpIn {
         // them.
         waitpoint.running().await;
 
-        BgpTcpInRunner::new(self, gate, metrics, status_reporter, roto_scripts)
-            .run(Arc::new(StandardTcpListenerFactory))
-            .await
+        BgpTcpInRunner::new(
+            self,
+            gate,
+            metrics,
+            status_reporter,
+            roto_scripts,
+        )
+        .run(Arc::new(StandardTcpListenerFactory))
+        .await
     }
 }
 
@@ -161,7 +173,10 @@ impl BgpTcpInRunner {
         }
     }
 
-    async fn run<T, U>(mut self, listener_factory: Arc<T>) -> Result<(), crate::comms::Terminated>
+    async fn run<T, U>(
+        mut self,
+        listener_factory: Arc<T>,
+    ) -> Result<(), crate::comms::Terminated>
     where
         T: TcpListenerFactory<U>,
         U: TcpListener,
@@ -178,7 +193,9 @@ impl BgpTcpInRunner {
                 loop {
                     match listener_factory.bind(listen_addr.clone()).await {
                         Err(err) => {
-                            let err = format!("{err}: Will retry in {wait} seconds.");
+                            let err = format!(
+                                "{err}: Will retry in {wait} seconds."
+                            );
                             status_reporter.bind_error(&listen_addr, &err);
                             sleep(Duration::from_secs(wait)).await;
                             wait *= 2;
@@ -188,7 +205,8 @@ impl BgpTcpInRunner {
                 }
             };
 
-            let listener = match self.process_until(bind_with_backoff()).await {
+            let listener = match self.process_until(bind_with_backoff()).await
+            {
                 ControlFlow::Continue(Ok(res)) => res,
                 ControlFlow::Continue(Err(_err)) => continue,
                 ControlFlow::Break(Terminated) => return Err(Terminated),
@@ -199,7 +217,8 @@ impl BgpTcpInRunner {
             'inner: loop {
                 match self.process_until(listener.accept()).await {
                     ControlFlow::Continue(Ok((tcp_stream, peer_addr))) => {
-                        status_reporter.listener_connection_accepted(peer_addr);
+                        status_reporter
+                            .listener_connection_accepted(peer_addr);
 
                         // Now:
                         // check for the peer_addr.ip() in the new PeerConfig
@@ -209,12 +228,22 @@ impl BgpTcpInRunner {
                         // IP, from which entries will be removed once the OPENs
                         // are exchanged and we know the remote ASN.
 
-                        if let Some((remote_net, cfg)) = self.bgp.peer_configs.get(peer_addr.ip()) {
-                            let child_name =
-                                format!("bgp[{}:{}]", peer_addr.ip(), peer_addr.port());
-                            let child_status_reporter =
-                                Arc::new(status_reporter.add_child(&child_name));
-                            debug!("[{}] config matched: {}", peer_addr.ip(), cfg.name());
+                        if let Some((remote_net, cfg)) =
+                            self.bgp.peer_configs.get(peer_addr.ip())
+                        {
+                            let child_name = format!(
+                                "bgp[{}:{}]",
+                                peer_addr.ip(),
+                                peer_addr.port()
+                            );
+                            let child_status_reporter = Arc::new(
+                                status_reporter.add_child(&child_name),
+                            );
+                            debug!(
+                                "[{}] config matched: {}",
+                                peer_addr.ip(),
+                                cfg.name()
+                            );
                             let (cmds_tx, cmds_rx) = mpsc::channel(16);
                             crate::tokio::spawn(
                                 &child_name,
@@ -224,7 +253,11 @@ impl BgpTcpInRunner {
                                     self.bgp.clone(),
                                     tcp_stream,
                                     //cfg.clone(),
-                                    CombinedConfig::new(self.bgp.clone(), cfg.clone(), remote_net),
+                                    CombinedConfig::new(
+                                        self.bgp.clone(),
+                                        cfg.clone(),
+                                        remote_net,
+                                    ),
                                     cmds_tx.clone(),
                                     cmds_rx,
                                     child_status_reporter,
@@ -282,7 +315,9 @@ impl BgpTcpInRunner {
                             if rebind {
                                 // Trigger re-binding to the new listen port.
                                 let err = std::io::ErrorKind::Other;
-                                return ControlFlow::Continue(Err(err.into()));
+                                return ControlFlow::Continue(
+                                    Err(err.into()),
+                                );
                             }
                         }
 

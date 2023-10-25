@@ -2,7 +2,10 @@ use std::{cmp::Ordering, sync::Arc};
 
 use hyper::{Body, Response};
 
-use roto::types::{builtin::BuiltinTypeValue, collections::ElementTypeValue, typevalue::TypeValue};
+use roto::types::{
+    builtin::BuiltinTypeValue, collections::ElementTypeValue,
+    typevalue::TypeValue,
+};
 use rotonda_store::prelude::Prefix;
 
 use routecore::{
@@ -17,7 +20,9 @@ use crate::{
 };
 
 use super::{
-    types::{Details, Filter, FilterKind, FilterOp, Filters, Includes, SortKey},
+    types::{
+        Details, Filter, FilterKind, FilterOp, Filters, Includes, SortKey,
+    },
     PrefixesApi,
 };
 
@@ -91,7 +96,9 @@ impl PrefixesApi {
 
         Response::builder()
             .header("Content-Type", "application/json")
-            .body(Body::from(serde_json::to_string_pretty(&response).unwrap()))
+            .body(Body::from(
+                serde_json::to_string_pretty(&response).unwrap(),
+            ))
             .unwrap()
     }
 
@@ -119,7 +126,8 @@ impl PrefixesApi {
             SortKey::None => {}
 
             SortKey::Some(json_pointers) => {
-                let json_pointers = json_pointers.split(',').collect::<Vec<_>>();
+                let json_pointers =
+                    json_pointers.split(',').collect::<Vec<_>>();
                 sortable_results.sort_by(|a, b| {
                     let mut last_res = Ordering::Equal;
 
@@ -184,11 +192,15 @@ impl PrefixesApi {
                             (None, None) => return Ordering::Equal,
                             (None, Some(_)) => return Ordering::Less,
                             (Some(_), None) => return Ordering::Greater,
-                            (Some(lhs), Some(rhs)) => match Self::cmp_json_values(lhs, rhs) {
-                                Ordering::Less => return Ordering::Less,
-                                Ordering::Greater => return Ordering::Greater,
-                                Ordering::Equal => continue,
-                            },
+                            (Some(lhs), Some(rhs)) => {
+                                match Self::cmp_json_values(lhs, rhs) {
+                                    Ordering::Less => return Ordering::Less,
+                                    Ordering::Greater => {
+                                        return Ordering::Greater
+                                    }
+                                    Ordering::Equal => continue,
+                                }
+                            }
                         }
                     }
                 }
@@ -206,7 +218,10 @@ impl PrefixesApi {
         serde_json::to_value(route).unwrap()
     }
 
-    fn include_item_in_results(filter_cfg: &Filters, item: &Arc<PreHashedTypeValue>) -> bool {
+    fn include_item_in_results(
+        filter_cfg: &Filters,
+        item: &Arc<PreHashedTypeValue>,
+    ) -> bool {
         let no_selects = filter_cfg.selects().is_empty();
         let no_discards = filter_cfg.discards().is_empty();
 
@@ -215,9 +230,13 @@ impl PrefixesApi {
         }
 
         let matches = |filter: &Filter| match filter.kind() {
-            FilterKind::AsPath(filter_as_path) => Self::match_as_path(item, filter_as_path),
+            FilterKind::AsPath(filter_as_path) => {
+                Self::match_as_path(item, filter_as_path)
+            }
 
-            FilterKind::Community(community) => Self::match_community(item, community),
+            FilterKind::Community(community) => {
+                Self::match_community(item, community)
+            }
 
             FilterKind::PeerAs(peer_as) => Self::match_peer_as(item, peer_as),
         };
@@ -227,15 +246,20 @@ impl PrefixesApi {
 
         match filter_cfg.op() {
             FilterOp::Any => {
-                (no_selects || selects.any(matches)) && (no_discards || !discards.any(matches))
+                (no_selects || selects.any(matches))
+                    && (no_discards || !discards.any(matches))
             }
             FilterOp::All => {
-                (no_selects || selects.all(matches)) && (no_discards || !discards.all(matches))
+                (no_selects || selects.all(matches))
+                    && (no_discards || !discards.all(matches))
             }
         }
     }
 
-    fn match_as_path(item: &Arc<PreHashedTypeValue>, filter_as_path: &[Asn]) -> bool {
+    fn match_as_path(
+        item: &Arc<PreHashedTypeValue>,
+        filter_as_path: &[Asn],
+    ) -> bool {
         match ***item {
             TypeValue::Builtin(BuiltinTypeValue::Route(ref route)) => {
                 let mut route = route.clone();
@@ -262,7 +286,10 @@ impl PrefixesApi {
         }
     }
 
-    fn match_community(item: &Arc<PreHashedTypeValue>, community: &Community) -> bool {
+    fn match_community(
+        item: &Arc<PreHashedTypeValue>,
+        community: &Community,
+    ) -> bool {
         let wanted_c = BuiltinTypeValue::try_from(*community).unwrap();
         match ***item {
             TypeValue::Builtin(BuiltinTypeValue::Route(ref route)) => {
@@ -293,7 +320,9 @@ impl PrefixesApi {
 mod test {
     use std::str::FromStr;
 
-    use roto::types::builtin::{BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus};
+    use roto::types::builtin::{
+        BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus,
+    };
     use routecore::bgp::message::SessionConfig;
 
     use crate::bgp::encode::{mk_bgp_update, Announcements, Prefixes};
@@ -302,16 +331,22 @@ mod test {
 
     #[test]
     fn test_mk_result() {
-        let announcements =
-            Announcements::from_str("e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32")
-                .unwrap();
-        let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
+        let announcements = Announcements::from_str(
+            "e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32",
+        )
+        .unwrap();
+        let bgp_update_bytes =
+            mk_bgp_update(&Prefixes::default(), &announcements, &[]);
 
         let delta_id = (RotondaId(0), 0); // TODO
-        let prefix = routecore::addr::Prefix::from_str("192.168.0.1/32").unwrap();
-        let roto_update_msg =
-            roto::types::builtin::UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
-        let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        let prefix =
+            routecore::addr::Prefix::from_str("192.168.0.1/32").unwrap();
+        let roto_update_msg = roto::types::builtin::UpdateMessage::new(
+            bgp_update_bytes,
+            SessionConfig::modern(),
+        );
+        let bgp_update_msg =
+            Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
         let raw_route = RawRouteWithDeltas::new_with_message_ref(
             delta_id,
             prefix.into(),
@@ -321,7 +356,8 @@ mod test {
 
         let details = Details::default();
         let route = PreHashedTypeValue::new(raw_route.into(), 1);
-        let json_out = PrefixesApi::mk_result(&prefix, &Arc::new(route), &details);
+        let json_out =
+            PrefixesApi::mk_result(&prefix, &Arc::new(route), &details);
         println!("{}", json_out);
     }
 }

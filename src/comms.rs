@@ -244,7 +244,9 @@ impl Gate {
     /// Can't be done manually via destructuring due to the existence of the Drop impl for Gate.
     ///
     /// For internal use only, hence not public.
-    fn take(self) -> (mpsc::Receiver<GateCommand>, FrimMap<Uuid, UpdateSender>) {
+    fn take(
+        self,
+    ) -> (mpsc::Receiver<GateCommand>, FrimMap<Uuid, UpdateSender>) {
         let commands = self.commands.clone();
         let updates = self.updates.clone();
         drop(self);
@@ -265,7 +267,8 @@ impl Gate {
     }
 
     fn clone_id(&self) -> Uuid {
-        let GateState::Clone(CloneGateState { clone_id, .. }) = self.state else {
+        let GateState::Clone(CloneGateState { clone_id, .. }) = self.state
+        else {
             unreachable!()
         };
         clone_id
@@ -287,7 +290,12 @@ impl Gate {
         {
             if log_enabled!(Level::Trace) {
                 let clone_txt = format!("{clone_id} clone of ");
-                trace!("Gate[{} ({}{})]: Detach", self.name, clone_txt, self.id());
+                trace!(
+                    "Gate[{} ({}{})]: Detach",
+                    self.name,
+                    clone_txt,
+                    self.id()
+                );
             }
             if let Err(_err) = parent_command_sender
                 .send(GateCommand::DetachClone {
@@ -322,9 +330,11 @@ impl Gate {
                     self.id()
                 );
             }
-            if let Err(_err) = parent_command_sender.blocking_send(GateCommand::DetachClone {
-                clone_id: *clone_id,
-            }) {
+            if let Err(_err) = parent_command_sender.blocking_send(
+                GateCommand::DetachClone {
+                    clone_id: *clone_id,
+                },
+            ) {
                 // TODO
             }
         } else {
@@ -393,12 +403,14 @@ impl Gate {
             }
 
             match command {
-                GateCommand::AttachClone { clone_id, tx } => match &self.state {
-                    GateState::Normal(state) => {
-                        let _ = state.clone_senders.insert(clone_id, tx);
+                GateCommand::AttachClone { clone_id, tx } => {
+                    match &self.state {
+                        GateState::Normal(state) => {
+                            let _ = state.clone_senders.insert(clone_id, tx);
+                        }
+                        GateState::Clone(_) => unreachable!(),
                     }
-                    GateState::Clone(_) => unreachable!(),
-                },
+                }
 
                 GateCommand::DetachClone { clone_id } => match &self.state {
                     GateState::Normal(state) => {
@@ -407,7 +419,9 @@ impl Gate {
                     GateState::Clone(_) => self.detach().await,
                 },
 
-                GateCommand::Suspension { slot, suspend } => self.suspension(slot, suspend),
+                GateCommand::Suspension { slot, suspend } => {
+                    self.suspension(slot, suspend)
+                }
 
                 GateCommand::Subscribe {
                     suspended,
@@ -502,8 +516,10 @@ impl Gate {
                 }
 
                 GateCommand::Trigger { data } => {
-                    self.notify_clones(GateCommand::Trigger { data: data.clone() })
-                        .await;
+                    self.notify_clones(GateCommand::Trigger {
+                        data: data.clone(),
+                    })
+                    .await;
                     return Ok(GateStatus::Triggered { data });
                 }
 
@@ -521,7 +537,9 @@ impl Gate {
     }
 
     async fn notify_clones(&self, cmd: GateCommand) {
-        if let GateState::Normal(NormalGateState { clone_senders, .. }) = &self.state {
+        if let GateState::Normal(NormalGateState { clone_senders, .. }) =
+            &self.state
+        {
             let mut closed_sender_found = false;
             for (uuid, sender) in clone_senders.guard().iter() {
                 if !sender.is_closed() {
@@ -540,10 +558,9 @@ impl Gate {
                             cmd
                         );
                     }
-                    sender
-                        .send(cmd.clone())
-                        .await
-                        .expect("Internal error: failed to notify cloned gate");
+                    sender.send(cmd.clone()).await.expect(
+                        "Internal error: failed to notify cloned gate",
+                    );
                 } else {
                     if log_enabled!(Level::Trace) {
                         let clone_txt = if self.is_clone() {
@@ -570,7 +587,10 @@ impl Gate {
     /// # Panics
     ///
     /// See [process()](Self::process).
-    pub async fn process_until<Fut: Future>(&self, fut: Fut) -> Result<Fut::Output, Terminated> {
+    pub async fn process_until<Fut: Future>(
+        &self,
+        fut: Fut,
+    ) -> Result<Fut::Output, Terminated> {
         pin_mut!(fut);
 
         loop {
@@ -694,8 +714,11 @@ impl Gate {
         //     self.updates_len.store(updates.len(), SeqCst);
         // }
 
-        self.metrics
-            .update(&update, self.updates.clone(), sent_at_least_once);
+        self.metrics.update(
+            &update,
+            self.updates.clone(),
+            sent_at_least_once,
+        );
     }
 
     /// Updates the unit status.
@@ -757,20 +780,21 @@ impl Gate {
         response: oneshot::Sender<SubscribeResponse>,
         direct_update: Option<Weak<dyn AnyDirectUpdate>>,
     ) {
-        let (update_sender, receiver) = if let Some(direct_update) = direct_update {
-            let update_sender = UpdateSender {
-                queue: None,
-                direct: Some(direct_update),
+        let (update_sender, receiver) =
+            if let Some(direct_update) = direct_update {
+                let update_sender = UpdateSender {
+                    queue: None,
+                    direct: Some(direct_update),
+                };
+                (update_sender, None)
+            } else {
+                let (tx, receiver) = mpsc::channel(self.queue_size);
+                let update_sender = UpdateSender {
+                    queue: Some(tx),
+                    direct: None,
+                };
+                (update_sender, Some(receiver))
             };
-            (update_sender, None)
-        } else {
-            let (tx, receiver) = mpsc::channel(self.queue_size);
-            let update_sender = UpdateSender {
-                queue: Some(tx),
-                direct: None,
-            };
-            (update_sender, Some(receiver))
-        };
 
         let slot = Uuid::new_v4();
         if suspended {
@@ -923,7 +947,11 @@ impl GateAgent {
         self.commands.is_closed()
     }
 
-    pub async fn reconfigure(&self, new_config: Unit, new_gate: Gate) -> Result<(), String> {
+    pub async fn reconfigure(
+        &self,
+        new_config: Unit,
+        new_gate: Gate,
+    ) -> Result<(), String> {
         self.commands
             .send(GateCommand::Reconfigure {
                 new_config,
@@ -933,7 +961,10 @@ impl GateAgent {
             .map_err(|err| format!("{}", err))
     }
 
-    pub async fn report_links(&self, report: UpstreamLinkReport) -> Result<(), String> {
+    pub async fn report_links(
+        &self,
+        report: UpstreamLinkReport,
+    ) -> Result<(), String> {
         self.commands
             .send(GateCommand::ReportLinks { report })
             .await
@@ -1107,7 +1138,11 @@ impl metrics::Source for GateMetrics {
     /// The name of the unit these metrics are associated with is given via
     /// `unit_name`.
     fn append(&self, unit_name: &str, target: &mut metrics::Target) {
-        target.append_simple(&Self::STATUS_METRIC, Some(unit_name), self.status.load());
+        target.append_simple(
+            &Self::STATUS_METRIC,
+            Some(unit_name),
+            self.status.load(),
+        );
 
         target.append_simple(
             &Self::NUM_UPDATES_METRIC,
@@ -1123,10 +1158,18 @@ impl metrics::Source for GateMetrics {
 
         match self.update.load() {
             Some(update) => {
-                target.append_simple(&Self::UPDATE_WHEN_METRIC, Some(unit_name), update);
+                target.append_simple(
+                    &Self::UPDATE_WHEN_METRIC,
+                    Some(unit_name),
+                    update,
+                );
                 let ago = Utc::now().signed_duration_since(update);
                 let ago = (ago.num_milliseconds() as f64) / 1000.;
-                target.append_simple(&Self::UPDATE_AGO_METRIC, Some(unit_name), ago);
+                target.append_simple(
+                    &Self::UPDATE_AGO_METRIC,
+                    Some(unit_name),
+                    ago,
+                );
 
                 target.append_simple(
                     &Self::UPDATE_SET_SIZE_METRIC,
@@ -1135,8 +1178,16 @@ impl metrics::Source for GateMetrics {
                 );
             }
             None => {
-                target.append_simple(&Self::UPDATE_WHEN_METRIC, Some(unit_name), "N/A");
-                target.append_simple(&Self::UPDATE_AGO_METRIC, Some(unit_name), -1);
+                target.append_simple(
+                    &Self::UPDATE_WHEN_METRIC,
+                    Some(unit_name),
+                    "N/A",
+                );
+                target.append_simple(
+                    &Self::UPDATE_AGO_METRIC,
+                    Some(unit_name),
+                    -1,
+                );
             }
         }
 
@@ -1306,7 +1357,10 @@ impl std::fmt::Debug for Link {
             .field("connection", &self.connected_gate_slot())
             .field("unit_status", &self.unit_status)
             .field("suspended", &self.suspended)
-            .field("direct_update_target", &self.direct_update_target.is_some())
+            .field(
+                "direct_update_target",
+                &self.direct_update_target.is_some(),
+            )
             .finish()
     }
 }
@@ -1465,7 +1519,10 @@ impl Link {
     }
 
     /// Connects the link to the gate.
-    pub async fn connect(&mut self, suspended: bool) -> Result<(), UnitStatus> {
+    pub async fn connect(
+        &mut self,
+        suspended: bool,
+    ) -> Result<(), UnitStatus> {
         if self.connection.is_some() {
             return Ok(());
         }
@@ -1499,7 +1556,11 @@ impl Link {
             updates: sub.receiver,
         });
         if log_enabled!(log::Level::Trace) {
-            trace!("Link[{}]: connected to gate slot {}", self.id(), sub.slot);
+            trace!(
+                "Link[{}]: connected to gate slot {}",
+                self.id(),
+                sub.slot
+            );
         }
         self.unit_status = sub.unit_status;
         self.suspended = suspended;
@@ -1539,8 +1600,12 @@ impl Link {
     }
 
     /// See [DirectLink].
-    pub fn set_direct_update_target(&mut self, direct_update_target: Arc<dyn AnyDirectUpdate>) {
-        self.direct_update_target = Some(Arc::downgrade(&direct_update_target));
+    pub fn set_direct_update_target(
+        &mut self,
+        direct_update_target: Arc<dyn AnyDirectUpdate>,
+    ) {
+        self.direct_update_target =
+            Some(Arc::downgrade(&direct_update_target));
     }
 }
 
@@ -1553,7 +1618,11 @@ impl Drop for Link {
             crate::tokio::spawn("drop-link", async move {
                 let _ = tx.send(GateCommand::Unsubscribe { slot }).await;
                 if log_enabled!(log::Level::Trace) {
-                    trace!("Link[{}]: disconnected from gate slot {} on drop", id, slot);
+                    trace!(
+                        "Link[{}]: disconnected from gate slot {} on drop",
+                        id,
+                        slot
+                    );
                 }
             });
         }
@@ -1760,10 +1829,14 @@ impl Clone for GateCommand {
                 slot: *slot,
                 update_sender: update_sender.clone(),
             },
-            Self::FollowUnsubscribe { slot } => Self::FollowUnsubscribe { slot: *slot },
-            Self::FollowReconfigure { new_config } => Self::FollowReconfigure {
-                new_config: new_config.clone(),
-            },
+            Self::FollowUnsubscribe { slot } => {
+                Self::FollowUnsubscribe { slot: *slot }
+            }
+            Self::FollowReconfigure { new_config } => {
+                Self::FollowReconfigure {
+                    new_config: new_config.clone(),
+                }
+            }
             Self::Terminate => Self::Terminate,
             Self::ReportLinks { report } => Self::ReportLinks {
                 report: report.clone(),
@@ -1780,10 +1853,16 @@ impl Display for GateCommand {
             GateCommand::Suspension { .. } => f.write_str("Suspension"),
             GateCommand::Subscribe { .. } => f.write_str("Subscribe"),
             GateCommand::Unsubscribe { .. } => f.write_str("Unsubscribe"),
-            GateCommand::FollowSubscribe { .. } => f.write_str("FollowSubscribe"),
-            GateCommand::FollowUnsubscribe { .. } => f.write_str("FollowUnsubscribe"),
+            GateCommand::FollowSubscribe { .. } => {
+                f.write_str("FollowSubscribe")
+            }
+            GateCommand::FollowUnsubscribe { .. } => {
+                f.write_str("FollowUnsubscribe")
+            }
             GateCommand::Reconfigure { .. } => f.write_str("Reconfigure"),
-            GateCommand::FollowReconfigure { .. } => f.write_str("FollowReconfigure"),
+            GateCommand::FollowReconfigure { .. } => {
+                f.write_str("FollowReconfigure")
+            }
             GateCommand::Trigger { .. } => f.write_str("Trigger"),
             GateCommand::Terminate => f.write_str("Terminate"),
             GateCommand::AttachClone { .. } => f.write_str("AttachClone"),
@@ -1982,7 +2061,9 @@ mod tests {
 
         // Give the parent gate a chance to process the AttachClone command
         // that will be sent by the new clone.
-        let _ = gate.process_until(tokio::time::sleep(Duration::from_secs(1))).await;
+        let _ = gate
+            .process_until(tokio::time::sleep(Duration::from_secs(1)))
+            .await;
 
         eprintln!("CHECKING GATE HAS CLONE SENDER");
         assert!(
@@ -2023,7 +2104,9 @@ mod tests {
 
         // Give the parent gate a chance to process the AttachClone command
         // that will be sent by the new clone.
-        let _ = gate.process_until(tokio::time::sleep(Duration::from_secs(1))).await;
+        let _ = gate
+            .process_until(tokio::time::sleep(Duration::from_secs(1)))
+            .await;
 
         eprintln!("CHECKING GATE HAS CLONE SENDER");
         assert!(
@@ -2054,7 +2137,9 @@ mod tests {
 
         // Give the parent gate a chance to process the AttachClone command
         // that will be sent by the new clone.
-        let _ = gate.process_until(tokio::time::sleep(Duration::from_secs(1))).await;
+        let _ = gate
+            .process_until(tokio::time::sleep(Duration::from_secs(1)))
+            .await;
 
         eprintln!("CHECKING GATE HAS CLONE SENDER");
         assert!(

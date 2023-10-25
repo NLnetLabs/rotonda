@@ -73,7 +73,9 @@ impl BmpStateDetails<Initiating> {
                             let next_state = BmpState::Dumping(state.into());
                             Self::mk_state_transition_result(next_state)
                         } else {
-                            unreachable!("We should still be in state Initiating")
+                            unreachable!(
+                                "We should still be in state Initiating"
+                            )
                         }
                     }
                 }
@@ -95,14 +97,22 @@ impl BmpStateDetails<Initiating> {
         }
     }
 
-    pub fn terminate(self, _msg: Option<TerminationMessage<Bytes>>) -> ProcessingResult {
+    pub fn terminate(
+        self,
+        _msg: Option<TerminationMessage<Bytes>>,
+    ) -> ProcessingResult {
         let next_state = BmpState::Terminated(self.into());
         Self::mk_state_transition_result(next_state)
     }
 }
 
 impl Initiable for Initiating {
-    fn set_information_tlvs(&mut self, sys_name: String, sys_desc: String, sys_extra: Vec<String>) {
+    fn set_information_tlvs(
+        &mut self,
+        sys_name: String,
+        sys_desc: String,
+        sys_extra: Vec<String>,
+    ) {
         self.sys_name = Some(sys_name);
         self.sys_desc = Some(sys_desc);
         self.sys_extra = sys_extra;
@@ -122,7 +132,8 @@ mod tests {
 
     use crate::{
         bgp::encode::{
-            mk_initiation_msg, mk_invalid_initiation_message_that_lacks_information_tlvs,
+            mk_initiation_msg,
+            mk_invalid_initiation_message_that_lacks_information_tlvs,
         },
         units::bmp_tcp_in::state_machine::states::dumping::Dumping,
     };
@@ -164,7 +175,8 @@ mod tests {
     fn sysname_should_be_correctly_extracted() {
         // Given
         let processor = mk_test_processor();
-        let msg_buf = mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
+        let msg_buf =
+            mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
         let bmp_msg = BmpMsg::from_octets(msg_buf).unwrap();
 
         // When
@@ -195,7 +207,8 @@ mod tests {
     fn missing_sysname_should_result_in_invalid_message() {
         // Given
         let processor = mk_test_processor();
-        let msg_buf = mk_invalid_initiation_message_that_lacks_information_tlvs();
+        let msg_buf =
+            mk_invalid_initiation_message_that_lacks_information_tlvs();
         let bmp_msg = BmpMsg::from_octets(msg_buf).unwrap();
 
         // When
@@ -207,7 +220,8 @@ mod tests {
             MessageType::InvalidMessage { .. }
         ));
         assert!(matches!(res.next_state, BmpState::Initiating(_)));
-        if let MessageType::InvalidMessage { err, .. } = res.processing_result {
+        if let MessageType::InvalidMessage { err, .. } = res.processing_result
+        {
             assert_eq!(
                 err,
                 "Invalid BMP InitiationMessage: Missing or empty sysName Information TLV"
@@ -231,7 +245,8 @@ mod tests {
             MessageType::InvalidMessage { .. }
         ));
         assert!(matches!(res.next_state, BmpState::Initiating(_)));
-        if let MessageType::InvalidMessage { err, .. } = res.processing_result {
+        if let MessageType::InvalidMessage { err, .. } = res.processing_result
+        {
             assert_eq!(err, "RFC 7854 4.3 violation: Expected BMP Initiation Message but received: PeerUpNotification");
         }
     }
@@ -240,6 +255,10 @@ mod tests {
         let router_addr = "127.0.0.1:1818".parse().unwrap();
         let source_id = SourceId::SocketAddr(router_addr);
         let router_id = Arc::new(TEST_ROUTER_ID.to_string());
-        BmpStateDetails::<Initiating>::new(source_id, router_id, Arc::default())
+        BmpStateDetails::<Initiating>::new(
+            source_id,
+            router_id,
+            Arc::default(),
+        )
     }
 }

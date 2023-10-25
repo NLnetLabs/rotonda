@@ -29,7 +29,9 @@ fn run_with_cmdline_args() -> Result<(), Terminate> {
     let matches = config_args.try_get_matches().map_err(|err| {
         let _ = err.print();
         match err.kind() {
-            ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => Terminate::normal(),
+            ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {
+                Terminate::normal()
+            }
             _ => Terminate::other(2),
         }
     })?;
@@ -48,13 +50,17 @@ fn run_with_cmdline_args() -> Result<(), Terminate> {
     //   - https://github.com/NLnetLabs/routinator/blob/main/src/process.rs#L363
 
     let mut manager = Manager::new();
-    let (config_source, config) = Config::from_arg_matches(&matches, &cur_dir, &mut manager)?;
+    let (config_source, config) =
+        Config::from_arg_matches(&matches, &cur_dir, &mut manager)?;
     let runtime = run_with_config(&mut manager, config)?;
     runtime.block_on(handle_signals(config_source, manager))?;
     Ok(())
 }
 
-async fn handle_signals(config_source: Source, mut manager: Manager) -> Result<(), ExitError> {
+async fn handle_signals(
+    config_source: Source,
+    mut manager: Manager,
+) -> Result<(), ExitError> {
     let mut hup_signals = signal(SignalKind::hangup()).map_err(|err| {
         error!("Fatal: cannot listen for HUP signals ({}). Aborting.", err);
         ExitError
@@ -69,7 +75,9 @@ async fn handle_signals(config_source: Source, mut manager: Manager) -> Result<(
 
         match select(hup, ctrl_c).await {
             Either::Left((None, _)) => {
-                error!("Fatal: listening for SIGHUP signals failed. Aborting.");
+                error!(
+                    "Fatal: listening for SIGHUP signals failed. Aborting."
+                );
                 manager.terminate();
                 return Err(ExitError);
             }
@@ -82,7 +90,10 @@ async fn handle_signals(config_source: Source, mut manager: Manager) -> Result<(
                     );
                     match ConfigFile::load(&config_path) {
                         Ok(config_file) => {
-                            match Config::from_config_file(config_file, &mut manager) {
+                            match Config::from_config_file(
+                                config_file,
+                                &mut manager,
+                            ) {
                                 Err(_) => {
                                     error!(
                                         "Failed to re-read config file '{}'",
@@ -128,7 +139,10 @@ async fn handle_signals(config_source: Source, mut manager: Manager) -> Result<(
     }
 }
 
-fn run_with_config(manager: &mut Manager, mut config: Config) -> Result<Runtime, ExitError> {
+fn run_with_config(
+    manager: &mut Manager,
+    mut config: Config,
+) -> Result<Runtime, ExitError> {
     let runtime = runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
@@ -172,8 +186,9 @@ mod tests {
     use prometheus_parse::Value;
     use rotonda::{
         bgp::encode::{
-            mk_initiation_msg, mk_peer_up_notification_msg, mk_route_monitoring_msg, Announcements,
-            MyPeerType, PerPeerHeader, Prefixes,
+            mk_initiation_msg, mk_peer_up_notification_msg,
+            mk_route_monitoring_msg, Announcements, MyPeerType,
+            PerPeerHeader, Prefixes,
         },
         config::Source,
         metrics::{self, OutputFormat},
@@ -241,13 +256,18 @@ mod tests {
         let test_prefix2 = Prefix::from_str("127.0.0.2/32").unwrap();
         let mut config_bytes = base_config_toml.as_bytes().to_vec();
         config_bytes.extend_from_slice(null_target_toml.as_bytes());
-        let config_file = ConfigFile::new(config_bytes, Source::default(), Default::default());
+        let config_file = ConfigFile::new(
+            config_bytes,
+            Source::default(),
+            Default::default(),
+        );
 
         let mut manager = Manager::new();
-        let (_conf_source, config) = Config::from_config_file(config_file, &mut manager)
-            .expect("The supplied config is invalid");
-        let runtime =
-            run_with_config(&mut manager, config).expect("The application failed to start");
+        let (_conf_source, config) =
+            Config::from_config_file(config_file, &mut manager)
+                .expect("The supplied config is invalid");
+        let runtime = run_with_config(&mut manager, config)
+            .expect("The application failed to start");
 
         // ---
 
@@ -292,7 +312,8 @@ mod tests {
         listen = "127.0.0.1:3030"
         "#;
 
-        let config: rumqttd::Config = toml::de::from_str(mqttd_config).unwrap();
+        let config: rumqttd::Config =
+            toml::de::from_str(mqttd_config).unwrap();
         let mut broker = Broker::new(config);
         let (mut link_tx, mut link_rx) = broker.link("localclient").unwrap();
 
@@ -399,7 +420,11 @@ mod tests {
             eprintln!("Reconfiguring...");
             let mut config_bytes = base_config_toml.as_bytes().to_vec();
             config_bytes.extend_from_slice(mqtt_target_toml.as_bytes());
-            let config_file = ConfigFile::new(config_bytes, Source::default(), Default::default());
+            let config_file = ConfigFile::new(
+                config_bytes,
+                Source::default(),
+                Default::default(),
+            );
             let (_source, mut config) =
                 Config::from_config_file(config_file, &mut manager).unwrap();
             manager.spawn(&mut config);
@@ -580,7 +605,8 @@ mod tests {
                         "message": "🤭 I encountered 1818"
                     });
                     let actual_json: serde_json::Value =
-                        serde_json::from_slice(&forward.publish.payload).unwrap();
+                        serde_json::from_slice(&forward.publish.payload)
+                            .unwrap();
                     assert_json_eq(actual_json, expected_json);
                 } else {
                     unreachable!();
@@ -632,7 +658,13 @@ mod tests {
         #[allow(clippy::collapsible_if)]
         if tokio::time::timeout(
             duration,
-            wait_for_metric(&metrics, metric_name, label, wanted_v, result.clone()),
+            wait_for_metric(
+                &metrics,
+                metric_name,
+                label,
+                wanted_v,
+                result.clone(),
+            ),
         )
         .await
         .is_err()
@@ -663,7 +695,13 @@ mod tests {
         #[allow(clippy::collapsible_if)]
         if tokio::time::timeout(
             duration,
-            wait_for_metric(&metrics, metric_name, label, wanted_v, result.clone()),
+            wait_for_metric(
+                &metrics,
+                metric_name,
+                label,
+                wanted_v,
+                result.clone(),
+            ),
         )
         .await
         .is_ok()
@@ -691,7 +729,11 @@ mod tests {
     ) {
         let full_metric_name = format!("{}{}", METRIC_PREFIX, metric_name);
         loop {
-            if get_metrics(metrics).get(&full_metric_name, label, result.clone()) == Some(wanted_v)
+            if get_metrics(metrics).get(
+                &full_metric_name,
+                label,
+                result.clone(),
+            ) == Some(wanted_v)
             {
                 result.store(MetricLookupResult::Ok, SeqCst);
                 break;
@@ -701,17 +743,24 @@ mod tests {
         }
     }
 
-    fn get_metrics(metrics: &metrics::Collection) -> prometheus_parse::Scrape {
+    fn get_metrics(
+        metrics: &metrics::Collection,
+    ) -> prometheus_parse::Scrape {
         let prom_txt = metrics.assemble(OutputFormat::Prometheus);
-        let lines: Vec<_> = prom_txt.lines().map(|s| Ok(s.to_owned())).collect();
-        prometheus_parse::Scrape::parse(lines.into_iter()).expect("Error while querying metrics")
+        let lines: Vec<_> =
+            prom_txt.lines().map(|s| Ok(s.to_owned())).collect();
+        prometheus_parse::Scrape::parse(lines.into_iter())
+            .expect("Error while querying metrics")
     }
 
     async fn wait_for_bmp_connect() -> TcpStream {
         loop {
             match bmp_connect().await {
                 Ok(stream) => return stream,
-                Err(err) => eprintln!("Error connecting to BMP server: {}, retrying..", err),
+                Err(err) => eprintln!(
+                    "Error connecting to BMP server: {}, retrying..",
+                    err
+                ),
             }
 
             sleep(Duration::from_secs(1)).await;
@@ -772,7 +821,12 @@ mod tests {
         ))
         .unwrap();
 
-        let msg_buf = mk_route_monitoring_msg(&per_peer_header, &withdrawals, &announcements, &[]);
+        let msg_buf = mk_route_monitoring_msg(
+            &per_peer_header,
+            &withdrawals,
+            &announcements,
+            &[],
+        );
         stream
             .write_all(&msg_buf)
             .await
@@ -819,8 +873,12 @@ mod tests {
             match self {
                 MetricLookupResult::NotQueried => write!(f, "NotQueried"),
                 MetricLookupResult::NameNotFound => write!(f, "NameNotFound"),
-                MetricLookupResult::LabelNotFound => write!(f, "LabelNotFound"),
-                MetricLookupResult::ValueNotMatched => write!(f, "ValueNotMatched"),
+                MetricLookupResult::LabelNotFound => {
+                    write!(f, "LabelNotFound")
+                }
+                MetricLookupResult::ValueNotMatched => {
+                    write!(f, "ValueNotMatched")
+                }
                 MetricLookupResult::Ok => write!(f, "Ok"),
             }
         }
@@ -855,10 +913,16 @@ mod tests {
                                 result.store(MetricLookupResult::Ok, SeqCst);
                                 return true;
                             } else {
-                                result.store(MetricLookupResult::ValueNotMatched, SeqCst);
+                                result.store(
+                                    MetricLookupResult::ValueNotMatched,
+                                    SeqCst,
+                                );
                             }
                         } else {
-                            result.store(MetricLookupResult::LabelNotFound, SeqCst);
+                            result.store(
+                                MetricLookupResult::LabelNotFound,
+                                SeqCst,
+                            );
                         }
                     } else {
                         result.store(MetricLookupResult::Ok, SeqCst);
@@ -873,14 +937,18 @@ mod tests {
 
             fn sample_as_i64(sample: &prometheus_parse::Sample) -> i64 {
                 match sample.value {
-                    Value::Counter(v) | Value::Gauge(v) | Value::Untyped(v) => v as i64,
+                    Value::Counter(v)
+                    | Value::Gauge(v)
+                    | Value::Untyped(v) => v as i64,
                     _ => 0,
                 }
             }
 
             self.samples
                 .iter()
-                .find(|sample| is_wanted(sample, metric_name, &label, result.clone()))
+                .find(|sample| {
+                    is_wanted(sample, metric_name, &label, result.clone())
+                })
                 .map(sample_as_i64)
         }
     }

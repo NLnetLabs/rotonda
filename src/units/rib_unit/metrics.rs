@@ -11,7 +11,9 @@ use arc_swap::{ArcSwap, ArcSwapAny};
 use crate::{
     common::frim::FrimMap,
     comms::{Gate, GateMetrics},
-    metrics::{self, util::append_per_router_metric, Metric, MetricType, MetricUnit},
+    metrics::{
+        self, util::append_per_router_metric, Metric, MetricType, MetricUnit,
+    },
     payload::RouterId,
 };
 
@@ -35,7 +37,10 @@ pub struct RibUnitMetrics {
 }
 
 impl RibUnitMetrics {
-    pub fn router_metrics(&self, router_id: Arc<RouterId>) -> Arc<RouterMetrics> {
+    pub fn router_metrics(
+        &self,
+        router_id: Arc<RouterId>,
+    ) -> Arc<RouterMetrics> {
         self.routers
             .entry(router_id)
             .or_insert_with(Default::default)
@@ -52,7 +57,9 @@ impl Default for RouterMetrics {
     fn default() -> Self {
         Self {
             last_e2e_delay: Arc::new(Default::default()),
-            last_e2e_delay_at: Arc::new(ArcSwapAny::new(Arc::new(Instant::now()))),
+            last_e2e_delay_at: Arc::new(ArcSwapAny::new(Arc::new(
+                Instant::now(),
+            ))),
         }
     }
 }
@@ -127,7 +134,10 @@ impl RibUnitMetrics {
 }
 
 impl RibUnitMetrics {
-    pub fn new(gate: &Arc<Gate>, rib_merge_update_stats: Arc<RibMergeUpdateStatistics>) -> Self {
+    pub fn new(
+        gate: &Arc<Gate>,
+        rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
+    ) -> Self {
         RibUnitMetrics {
             gate: gate.metrics(),
             rib_merge_update_stats,
@@ -192,8 +202,9 @@ impl metrics::Source for RibUnitMetrics {
         );
 
         let max_age = Duration::from_secs(60);
-        self.routers
-            .retain(|_, metrics| metrics.last_e2e_delay_at.load().elapsed() <= max_age);
+        self.routers.retain(|_, metrics| {
+            metrics.last_e2e_delay_at.load().elapsed() <= max_age
+        });
 
         for (router_id, metrics) in self.routers.guard().iter() {
             let router_id = router_id.as_str();

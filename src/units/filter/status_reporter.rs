@@ -6,7 +6,9 @@ use std::{
 use log::error;
 
 use crate::{
-    common::status_reporter::{sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter},
+    common::status_reporter::{
+        sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter,
+    },
     payload::{FilterError, SourceId},
 };
 

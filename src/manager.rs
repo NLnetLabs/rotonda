@@ -1657,7 +1657,7 @@ mod tests {
 
         [units.some-unit]
         type = "bmp-tcp-in"
-        listen = ""
+        listen = "1.2.3.4:12345"
 
         [targets.null]
         type = "null-out"
@@ -1681,7 +1681,7 @@ mod tests {
 
         [units.some-unit]
         type = "bmp-tcp-in"
-        listen = ""
+        listen = "1.2.3.4:12345"
 
         [targets.null]
         type = "null-out"
@@ -1710,7 +1710,7 @@ mod tests {
 
         [units.some-unit]
         type = "bmp-tcp-in"
-        listen = ""
+        listen = "1.2.3.4:12345"
 
         [targets.null]
         type = "null-out"
@@ -1749,11 +1749,11 @@ mod tests {
 
         [units.unused-unit]
         type = "bmp-tcp-in"
-        listen = ""
+        listen = "1.2.3.4:12345"
 
         [units.some-unit]
         type = "bmp-tcp-in"
-        listen = ""
+        listen = "1.2.3.4:12345"
 
         [targets.null]
         type = "null-out"
@@ -1782,7 +1782,7 @@ mod tests {
 
         [units.some-unit]
         type = "bmp-tcp-in"
-        listen = ""
+        listen = "1.2.3.4:12345"
 
         [targets.null]
         type = "null-out"
@@ -1807,7 +1807,7 @@ mod tests {
 
         [units.some-unit]
         type = "bmp-tcp-in"
-        listen = ""
+        listen = "1.2.3.4:12345"
 
         [targets.null]
         type = "null-out"
@@ -1840,7 +1840,7 @@ mod tests {
 
         [units.some-unit]
         type = "bmp-tcp-in"
-        listen = ""
+        listen = "1.2.3.4:12345"
 
         [targets.null]
         type = "null-out"
@@ -1870,7 +1870,7 @@ mod tests {
 
         [units.some-unit]
         type = "bmp-tcp-in"
-        listen = ""
+        listen = "1.2.3.4:12345"
 
         #[targets.null]
         #type = "null-out"
@@ -1908,7 +1908,7 @@ mod tests {
 
         [units.some-unit]
         type = "bmp-tcp-in"
-        listen = ""
+        listen = "1.2.3.4:12345"
 
         [targets.null]
         type = "null-out"
@@ -1933,7 +1933,7 @@ mod tests {
 
         [units.some-unit]
         type = "bmp-tcp-in"
-        listen = "changed"
+        listen = "5.6.7.8:1818"
 
         [targets.null]
         type = "null-out"
@@ -1953,7 +1953,7 @@ mod tests {
 
         let item = get_log_item(&log, "some-unit", SpawnAction::ReconfigureUnit);
         if let UnitOrTargetConfig::UnitConfig(Unit::BmpTcpIn(config)) = &item.config {
-            assert_eq!(config.listen.to_string(), "changed");
+            assert_eq!(config.listen.to_string(), "5.6.7.8:1818");
         } else {
             unreachable!();
         }

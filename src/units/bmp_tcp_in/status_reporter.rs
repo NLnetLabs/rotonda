@@ -48,6 +48,10 @@ impl BmpTcpInStatusReporter {
         self.metrics.connection_accepted_count.fetch_add(1, SeqCst);
     }
 
+    pub fn listener_io_error<T: Display>(&self, err: T) {
+        sr_log!(warn: self, "Error while listening for connections: {}", err);
+    }
+
     pub fn router_connection_lost(&self, router_id: Arc<RouterId>) {
         sr_log!(debug: self, "Router connection lost: {}", router_id);
         self.metrics.connection_lost_count.fetch_add(1, SeqCst);

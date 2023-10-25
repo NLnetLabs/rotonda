@@ -459,7 +459,7 @@ impl BmpTcpInRunner {
                 }
 
                 UnitActivity::InputError(err) => {
-                    // self.status_reporter.listener_io_error(&err);
+                    self.status_reporter.listener_io_error(&err);
                     return ControlFlow::Continue(Err(err));
                 }
 

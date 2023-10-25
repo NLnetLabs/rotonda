@@ -21,9 +21,9 @@ impl RouterListApi {
         keys: Vec<SourceId>,
         http_api_path: std::borrow::Cow<'_, str>,
     ) -> Response<Body> {
-        let mut response_body = self.build_response_header();
+        let mut response_body = self.build_response_header(&keys);
 
-        self.build_response_body(keys, http_api_path, &mut response_body)
+        self.build_response_body(&keys, http_api_path, &mut response_body)
             .await;
 
         self.build_response_footer(&mut response_body);
@@ -34,7 +34,7 @@ impl RouterListApi {
             .unwrap()
     }
 
-    fn build_response_header(&self) -> String {
+    fn build_response_header(&self, keys: &[SourceId],) -> String {
         formatdoc! {
             r#"
             <!DOCTYPE html>
@@ -63,7 +63,7 @@ impl RouterListApi {
                         <th># Invalid Messages (Soft/Hard Parse Errors)</th>
                     </tr>
             "#,
-            num_routers = self.router_info.len()
+            num_routers = keys.len()
         }
     }
 
@@ -76,7 +76,7 @@ impl RouterListApi {
 
     async fn build_response_body(
         &self,
-        keys: Vec<SourceId>,
+        keys: &[SourceId],
         http_api_path: std::borrow::Cow<'_, str>,
         response_body: &mut String,
     ) {
@@ -136,10 +136,9 @@ impl RouterListApi {
                             calc_u8_pc(num_peers_up, num_peers_up_eor_capable);
                         let num_peers_up_dumping_pc =
                             calc_u8_pc(num_peers_up_eor_capable, num_peers_up_dumping);
-                        let num_invalid_bmp_messages = if let Some(router_metrics) =
-                            self.router_metrics.router_metrics(router_id)
-                        {
-                            router_metrics
+                        let num_invalid_bmp_messages = if self.router_metrics.contains(&router_id) {
+                            self.router_metrics
+                                .router_metrics(router_id)
                                 .num_invalid_bmp_messages
                                 .load(Ordering::SeqCst)
                         } else {

@@ -1,21 +1,20 @@
 [package]
 name = "rotonda"
-version = "0.0.1"
+version = "0.0.1-dev"
+edition = "2021"
+rust-version = "1.65"
 authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]
 description = "A modular analytical BGP Engine"
-documentation = "https://docs.rs/rotonda/"
-homepage = "https://nlnetlabs.nl/projects/routing/rotonda/"
 repository = "https://github.com/NLnetLabs/rotonda/"
 keywords = ["routing", "bgp"]
 categories = ["network-programming"]
 license = "MPL-2.0"
-edition = "2021"
-rust-version = "1.65"
+exclude = [ ".github" ]
 
 [dependencies]
-arc-swap           = "^1.5"
+arc-swap           = "^1.6"
 chrono             = "^0.4"
-clap               = { version = "^3.1", features = ["cargo"] }
+clap               = { version = "^4.4", features = ["cargo"] }
 crossbeam-utils    = "^0.8"
 fern               = "^0.6"
 futures            = "^0.3"
@@ -25,15 +24,15 @@ log-reroute        = "^0.1"
 pin-project-lite   = "^0.2"
 rand               = "^0.8"
 reqwest            = { version = "^0.11", default-features = false }
-routecore          = { version = "0.4.0-dev", features = ["bgp", "bmp", "serde"], git = "https://github.com/NLnetLabs/routecore.git", branch = "compose-messages-nlri-v2" }
-rotonda-fsm        = { version = "0.1.0-dev", git = "https://github.com/NLnetLabs/rotonda-fsm.git" }
+routecore          = { version = "^0.4.0-dev", features = ["bgp", "bmp", "serde"], git = "https://github.com/NLnetLabs/routecore.git", branch = "compose-messages-nlri-v2" }
+rotonda-fsm        = { version = "^0.1.0-dev", git = "https://github.com/NLnetLabs/rotonda-fsm.git" }
 sanitise-file-name = "^1.0"
 serde              = { version = "^1.0", features = ["derive", "rc"] }
 serde_json         = { version = "^1.0", features = ["preserve_order"] }
 slab               = "^0.4"
-tokio              = { version = "^1.23", features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "test-util", "time", "tracing"] }
-toml               = "^0.5"
-url                = { version = "^2.2", features = ["serde"] }
+tokio              = { version = "^1.33", features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "test-util", "time", "tracing"] }
+toml               = "^0.8"
+url                = { version = "^2.4", features = ["serde"] }
 
 # Dependencies specifically used by the BGP/BMP related modifications to the original RTRTR base
 allocator-api2     = "^0.2"
@@ -42,39 +41,40 @@ async-trait        = "^0.1"
 atomic_enum        = "^0.2.0"
 flate2             = { version = "^1.0", optional = true }
 anyhow             = "^1.0"
-bytes              = { version = "1.1.0" }
+bytes              = { version = "1.5.0" }
+const_format       = "^0.2"
 hex-slice          = "^0.1"
 hash_hasher        = "^2.0"
 hashbrown          = "^0.14"
 html-escape        = { version = "^0.2", optional = true }
-indoc              = "^1.0"
+indoc              = "^2.0"
 layout-rs          = { version = "^0.1", optional = true }
-mqtt               = { version = "0.18.0", package = "rumqttc", default-features = false, optional = true }
+mqtt               = { version = "^0.23.0", package = "rumqttc", default-features = false }
 non-empty-vec      = { version = "^0.2", features = ["serde"]}
-percent-encoding   = "^2.2"
-roto               = { version = "0.1.0", git = "https://github.com/NLnetLabs/roto.git", branch = "compose-messages-nlri-v2" }
-rotonda-store      = { version = "0.3.0-pre.3", git = "https://github.com/NLnetLabs/rotonda-store.git", branch = "compose-messages-nlri-v2" }
+percent-encoding   = "^2.3"
+roto               = { version = "^0.1.0", git = "https://github.com/NLnetLabs/roto.git", branch = "main" }
+rotonda-store      = { version = "^0.3.0-pre.3", git = "https://github.com/NLnetLabs/rotonda-store.git", branch = "compose-messages-nlri-v2" }
 serde_with         = "^3"
-smallvec           = { version = "^1.10", features = ["const_generics", "const_new", "union"] }
-tokio-metrics      = "^0.2"
-uuid               = { version = "^1.1", features = ["v4", "fast-rng"] }
+smallvec           = { version = "^1.11", features = ["const_generics", "const_new", "union"] }
+tokio-metrics      = { version = "^0.3", default-features = false }
+uuid               = { version = "^1.4", features = ["v4", "fast-rng"] }
 
 [target.'cfg(unix)'.dependencies]
-syslog             = "^6.0"
+syslog             = "^6.1"
 
 [dev-dependencies]
 hex                = "^0.4"
 env_logger         = "^0.10"
 prometheus-parse   = "^0.2"
 reqwest            = { version = "^0.11", default-features = false, features = ["json"] }
-rumqttd            = { version = "^0.17.0", default-features = false }
+rumqttd            = { version = "^0.18.0", default-features = false }
 serde_json         = "^1.0"
 
 [profile.release]
 strip = true
 
 [features]
-default = ["config-graph", "mqtt", "router-list", "http-api-gzip"]
+default = ["config-graph", "router-list", "http-api-gzip"]
 
 # Enable the /routers/ HTML router list endpoint
 router-list = ["html-escape"]
@@ -84,3 +84,50 @@ http-api-gzip = ["flate2"]
 
 # Enable the /status/graph config SVG graph endpoint
 config-graph = ["layout-rs"]
+
+[package.metadata.deb]
+name = "rotonda"
+maintainer = "NLnet Labs <routing-team@nlnetlabs.nl>"
+license-file = ["LICENSE", "0"]
+extended-description = """\
+Roll your own BGP applications with programmable RIBs and Filters.
+BGP applications that you can build with Rotonda include, but are
+not limited to, a route monitor|collector|server|reflector, all
+this without modifying a single line in the source code of Rotonda."""
+# ensure that the useradd tools are present by installing their respective packages
+depends = "$auto, passwd"
+section = "net"
+priority = "optional"
+assets = [
+    ["target/release/rotonda", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/rotonda/", "644"],
+    ["doc/rotonda.1", "usr/share/man/man1/rotonda.1", "644"],
+    ["etc/rotonda.conf.system-service", "etc/rotonda/rotonda.conf", "644"]
+]
+maintainer-scripts = "pkg/debian"
+changelog = "target/debian/changelog" # this will be generated by the pkg workflow
+copyright = "Copyright (c) 2023, NLnet Labs. All rights reserved."
+conf-files = ["/etc/rotonda/rotonda.conf"]
+systemd-units = { unit-name = "rotonda", unit-scripts = "pkg/common", enable = false }
+
+[package.metadata.deb.variants.minimal]
+
+[package.metadata.generate-rpm]
+# "BSD" alone is the 3-clause license. Inheriting "license" from above causes rpmlint to
+# complain with "invalid-license".
+# See: https://fedoraproject.org/wiki/Licensing:Main?rd=Licensing
+license = "BSD"
+assets = [
+    { source = "target/release/rotonda", dest = "/usr/bin/rotonda", mode = "755" },
+    { source = "target/rpm/rotonda.service", dest = "/lib/systemd/system/rotonda.service", mode = "644" },
+    { source = "doc/rotonda.1", dest = "/usr/share/man/man1/rotonda.1", mode = "644", doc = true },
+    { source = "etc/rotonda.conf.system-service", dest = "/etc/rotonda/rotonda.conf", mode = "644", config = true }
+]
+# These get set using cargo-generate-rpm --set-metadata at package build time.
+#post_install_script = ...
+#pre_uninstall_script = ...
+#post_uninstall_script = ...
+
+# ensure that the useradd tools are present by installing their respective packages
+[package.metadata.generate-rpm.requires]
+shadow-utils = "*"

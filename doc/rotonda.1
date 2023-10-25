@@ -1,0 +1,33 @@
+.TH "rotonda" "1" "NLnet Labs"
+.SH NAME
+rotonda - A modular analytical BGP Engine
+.SH SYNOPSIS
+rotonda -c, --config <FILE>
+
+rotonda -h, --help
+
+rotonda -V, --version
+.SH DESCRIPTION
+Roll your own BGP applications with programmable RIBs and Filters.
+BGP applications that you can build with Rotonda include, but are
+not limited to, a route monitor|collector|server|reflector, all
+this without modifying a single line in the source code of Rotonda.
+
+For more information please consult the online documentation at:
+    https://rotonda.docs.nlnetlabs.nl/en/stable/
+
+.SH OPTIONS
+The available options are:
+
+.TP
+.BI -c,\ --config\ <FILE>
+Specify the path to the config file to load. If no file is specified, default
+values will be used for all settings.
+
+.TP
+.BI -h,\ --help
+Prints help information.
+
+.TP
+.BI -V,\ --version
+Prints version information.

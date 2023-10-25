@@ -1,6 +1,6 @@
 use std::{str::FromStr, sync::Arc};
 
-use arc_swap::{ArcSwap, ArcSwapOption};
+use arc_swap::ArcSwap;
 use assert_json_diff::{assert_json_matches_no_panic, CompareMode, Config};
 use hyper::{body::Bytes, Body, Request, StatusCode};
 use roto::types::builtin::{BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus};
@@ -25,7 +25,7 @@ use crate::{
     http::ProcessRequest,
     units::{
         rib_unit::{
-            rib::PhysicalRib,
+            rib::HashedRib,
             unit::{MoreSpecifics, QueryLimits},
         },
         RibType,
@@ -460,7 +460,7 @@ async fn exact_match_ipv4_with_large_communities() {
 #[tokio::test]
 async fn select_and_discard() {
     fn insert_announcement_helper<C: Into<Community>>(
-        rib: Arc<ArcSwapOption<PhysicalRib>>,
+        rib: Arc<ArcSwap<HashedRib>>,
         router_n: u8,
         as_path: &[u32],
         community: Option<C>,
@@ -665,7 +665,7 @@ async fn select_and_discard() {
 /// --- Helper functions ------------------------------------------------------------------------------------------
 
 async fn do_query(
-    rib: Arc<ArcSwapOption<PhysicalRib>>,
+    rib: Arc<ArcSwap<HashedRib>>,
     query: &str,
     expected_status_code: StatusCode,
     expected_body: Option<Value>,
@@ -724,7 +724,7 @@ async fn do_query(
 }
 
 async fn assert_query_eq(
-    rib: Arc<ArcSwapOption<PhysicalRib>>,
+    rib: Arc<ArcSwap<HashedRib>>,
     query: &str,
     expected_status_code: StatusCode,
     expected_body: Option<Value>,
@@ -748,12 +748,12 @@ async fn assert_query_eq(
     }
 }
 
-fn mk_rib() -> Arc<ArcSwapOption<PhysicalRib>> {
-    let physical_rib = PhysicalRib::default();
-    Arc::new(ArcSwapOption::from_pointee(physical_rib))
+fn mk_rib() -> Arc<ArcSwap<HashedRib>> {
+    let physical_rib = HashedRib::default();
+    Arc::new(ArcSwap::from_pointee(physical_rib))
 }
 
-fn insert_routes(rib: Arc<ArcSwapOption<PhysicalRib>>, n: u8, announcements: Announcements) {
+fn insert_routes(rib: Arc<ArcSwap<HashedRib>>, n: u8, announcements: Announcements) {
     let bgp_update_bytes = mk_bgp_update(&Prefixes::default(), &announcements, &[]);
     let delta_id = (RotondaId(0), 0); // TODO
     if let Announcements::Some {
@@ -765,7 +765,6 @@ fn insert_routes(rib: Arc<ArcSwapOption<PhysicalRib>>, n: u8, announcements: Ann
     } = announcements
     {
         let loaded_rib = rib.load();
-        let rib = loaded_rib.as_ref().unwrap();
 
         for prefix in prefixes.iter() {
             let roto_update_msg = roto::types::builtin::UpdateMessage::new(
@@ -783,12 +782,12 @@ fn insert_routes(rib: Arc<ArcSwapOption<PhysicalRib>>, n: u8, announcements: Ann
             .with_peer_asn(Asn::from_u32(1000 + (n as u32)))
             .with_router_id(Arc::new(format!("router{n}")));
 
-            rib.insert(&prefix, raw_route).unwrap();
+            loaded_rib.insert(&prefix, raw_route).unwrap();
         }
     }
 }
 
-fn insert_announcement(rib: Arc<ArcSwapOption<PhysicalRib>>, prefix_str: &str, n: u8) {
+fn insert_announcement(rib: Arc<ArcSwap<HashedRib>>, prefix_str: &str, n: u8) {
     let next_hop = get_localhost_next_hop_for_prefix(prefix_str).0;
     insert_announcement_full(
         rib,
@@ -808,7 +807,7 @@ fn get_localhost_next_hop_for_prefix(prefix_str: &str) -> (&str, bool) {
 }
 
 fn insert_announcement_full<C: Into<Community> + Copy>(
-    rib: Arc<ArcSwapOption<PhysicalRib>>,
+    rib: Arc<ArcSwap<HashedRib>>,
     prefix: &str,
     n: u8,
     as_path: &[u32],

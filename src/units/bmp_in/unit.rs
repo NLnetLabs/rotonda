@@ -1,13 +1,9 @@
-use std::{
-    cell::RefCell,
-    sync::{Arc, Weak},
-};
+use std::sync::{Arc, Weak};
 
 use super::state_machine::processing::ProcessingResult;
 use crate::{
     common::{
-        frim::FrimMap,
-        roto::ThreadLocalVM,
+        frim::{Entry, FrimMap},
         status_reporter::{AnyStatusReporter, Chainable, UnitStatusReporter},
     },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate},
@@ -33,7 +29,7 @@ use non_empty_vec::NonEmpty;
 use roto::types::{builtin::BuiltinTypeValue, typevalue::TypeValue};
 use routecore::bmp::message::Message as BmpMsg;
 use serde::Deserialize;
-use tokio::{runtime::Handle, sync::Mutex};
+use tokio::sync::Mutex;
 
 #[cfg(feature = "router-list")]
 use {
@@ -48,6 +44,12 @@ use {
 
 use super::state_machine::metrics::BmpMetrics;
 use super::util::format_source_id;
+
+//-------- Constants ---------------------------------------------------------
+
+pub const UNKNOWN_ROUTER_SYSNAME: &str = "unknown";
+
+//-------- BmpIn -------------------------------------------------------------
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct BmpIn {
@@ -91,6 +93,8 @@ impl BmpIn {
     }
 }
 
+//-------- BmpInRunner -------------------------------------------------------
+
 struct BmpInRunner {
     gate: Arc<Gate>,
     #[cfg(feature = "router-list")]
@@ -109,11 +113,6 @@ struct BmpInRunner {
 }
 
 impl BmpInRunner {
-    thread_local!(
-        #[allow(clippy::type_complexity)]
-        static VM: ThreadLocalVM = RefCell::new(None);
-    );
-
     fn new(
         mut component: Component,
         gate: Gate,
@@ -156,7 +155,7 @@ impl BmpInRunner {
                 router_states.clone(),
             ));
 
-            component.register_http_resource(processor.clone());
+            component.register_http_resource(processor.clone(), &http_api_path);
 
             (processor, router_info)
         };
@@ -180,6 +179,26 @@ impl BmpInRunner {
             _api_processor,
             state_machine_metrics,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn mock() -> (Self, crate::comms::GateAgent) {
+        let (gate, gate_agent) = Gate::new(0);
+
+        let runner = Self {
+            gate: gate.into(),
+            component: Default::default(),
+            router_id_template: BmpIn::default_router_id_template().into(),
+            router_states: Default::default(),
+            router_info: Default::default(),
+            router_metrics: Default::default(),
+            status_reporter: Default::default(),
+            http_api_path: BmpIn::default_http_api_path().into(),
+            _api_processor: Arc::new(|_: &hyper::Request<hyper::Body>| None),
+            state_machine_metrics: Default::default(),
+        };
+
+        (runner, gate_agent)
     }
 
     pub async fn run(
@@ -246,7 +265,7 @@ impl BmpInRunner {
     fn router_connected(&self, source_id: &SourceId) -> BmpState {
         let router_id = Arc::new(format_source_id(
             self.router_id_template.clone(),
-            "unknown",
+            UNKNOWN_ROUTER_SYSNAME,
             source_id,
         ));
 
@@ -273,7 +292,7 @@ impl BmpInRunner {
 
     fn router_disconnected(&self, source_id: &SourceId) {
         self.router_states.remove(source_id);
-        // TODO: also remove from self.router_info ?
+        self.router_info.remove(source_id);
     }
 
     async fn process_msg(
@@ -330,19 +349,8 @@ impl BmpInRunner {
                 // just processed an Initiation message and MUST have captured
                 // a sysName Information TLV string. Use the captured value to
                 // make the router ID more meaningful, instead of the
-                // "unknown" sysName value we used until now.
-                if let BmpState::Dumping(next_state) = &mut res.next_state {
-                    next_state.router_id = Arc::new(format_source_id(
-                        self.router_id_template.clone(),
-                        &next_state.details.sys_name,
-                        source_id,
-                    ));
-
-                    // Ensure that on first use the metrics for this
-                    // new router ID are correctly initialised.
-                    self.status_reporter
-                        .router_id_changed(next_state.router_id.clone());
-                }
+                // UNKNOWN_ROUTER_SYSNAME sysName value we used until now.
+                self.check_update_router_id(&mut res.next_state, source_id);
             }
 
             MessageType::RoutingUpdate { update } => {
@@ -351,7 +359,11 @@ impl BmpInRunner {
                 self.gate.update_data(update).await;
             }
 
-            MessageType::Other => {} // Nothing to do
+            MessageType::Other => {
+                // A BMP initiation message received after the initiation
+                // phase will result in this type of message.
+                self.check_update_router_id(&mut res.next_state, source_id);
+            }
 
             MessageType::Aborted => {
                 // Something went fatally wrong, the issue should already have
@@ -360,6 +372,37 @@ impl BmpInRunner {
         }
 
         res.next_state
+    }
+
+    fn check_update_router_id(&self, next_state: &mut BmpState, source_id: &SourceId) {
+        let new_sys_name = match next_state {
+            BmpState::Dumping(v) => &v.details.sys_name,
+            BmpState::Updating(v) => &v.details.sys_name,
+            _ => {
+                // Other states don't carry the sys name
+                return;
+            }
+        };
+
+        let new_router_id = Arc::new(format_source_id(
+            self.router_id_template.clone(),
+            new_sys_name,
+            source_id,
+        ));
+
+        let old_router_id = next_state.router_id();
+        if new_router_id != old_router_id {
+            // Ensure that on first use the metrics for this
+            // new router ID are correctly initialised.
+            self.status_reporter
+                .router_id_changed(old_router_id, new_router_id.clone());
+
+            match next_state {
+                BmpState::Dumping(v) => v.router_id = new_router_id.clone(),
+                BmpState::Updating(v) => v.router_id = new_router_id.clone(),
+                _ => unreachable!(),
+            }
+        }
     }
 
     // TODO: Should we tear these individual API endpoints down when the
@@ -383,9 +426,10 @@ impl BmpInRunner {
                 // Setup a REST API endpoint for querying information
                 // about this particular monitored router.
                 let processor = RouterInfoApi::new(
+                    self.component.read().await.http_resources().clone(),
                     self.http_api_path.clone(),
                     source_id.clone(),
-                    self.status_reporter.metrics(),
+                    self.status_reporter.typed_metrics(),
                     self.router_metrics.clone(),
                     this_router_info.connected_at,
                     this_router_info.last_msg_at.clone(),
@@ -397,7 +441,7 @@ impl BmpInRunner {
                 self.component
                     .write()
                     .await
-                    .register_http_resource(processor.clone());
+                    .register_sub_http_resource(processor.clone(), &self.http_api_path);
 
                 let updatable_router_info = Arc::make_mut(&mut this_router_info);
                 updatable_router_info.api_processor = Some(processor);
@@ -449,12 +493,12 @@ impl BmpInRunner {
             Update::UpstreamStatusChange(UpstreamStatus::EndOfStream { ref source_id }) => {
                 // The connection to the router has been lost so drop the connection state machine we have for it, if
                 // any.
-                if let Some(entry) = self.router_states.get(&source_id) {
+                if let Some(entry) = self.router_states.get(source_id) {
                     let mut locked = entry.lock().await;
                     let this_state = locked.take().unwrap();
                     let res = this_state.terminate().await;
-                    let _ = self.process_result(res, &source_id).await;
-                    self.router_disconnected(&source_id);
+                    let _ = self.process_result(res, source_id).await;
+                    self.router_disconnected(source_id);
                 }
 
                 // Pass it on
@@ -469,20 +513,25 @@ impl BmpInRunner {
 
                 // Process the message through the BMP state machine.
                 // Initialize the state machine if not already done for this router.
-                let entry = entry.or_insert_with(|| {
-                    let new_entry = Arc::new(tokio::sync::Mutex::new(Some(
-                        self.router_connected(&source_id),
-                    )));
+                // Process the message through the BMP state machine.
+                // Initialize the state machine if not already done for this router.
+                let entry = match entry {
+                    Entry::Occupied(existing_entry) => existing_entry,
 
-                    let weak_ref = Arc::downgrade(&new_entry);
-                    tokio::task::block_in_place(|| {
-                        Handle::current().block_on(
-                            self.setup_router_specific_api_endpoint(weak_ref, &source_id),
-                        );
-                    });
+                    Entry::Vacant(map, key) => {
+                        // Entry doesn't yet exist, create and insert it.
+                        let new_entry =
+                            Arc::new(Mutex::new(Some(self.router_connected(&source_id))));
 
-                    new_entry
-                });
+                        let weak_ref = Arc::downgrade(&new_entry);
+                        self.setup_router_specific_api_endpoint(weak_ref, &source_id)
+                            .await;
+
+                        map.insert(key, new_entry.clone());
+
+                        new_entry
+                    }
+                };
 
                 let mut locked = entry.lock().await;
                 let this_state = locked.take().unwrap();
@@ -530,7 +579,21 @@ impl std::fmt::Debug for BmpInRunner {
 
 #[cfg(test)]
 mod tests {
+    use roto::types::{collections::BytesRecord, lazyrecord_types::BmpMessage};
+
+    use crate::{
+        bgp::encode::{
+            mk_initiation_msg, mk_invalid_initiation_message_that_lacks_information_tlvs,
+            mk_peer_down_notification_msg, mk_per_peer_header,
+        },
+        tests::util::internal::get_testable_metrics_snapshot,
+    };
+
     use super::*;
+
+    const SYS_NAME: &str = "some sys name";
+    const SYS_DESCR: &str = "some sys descr";
+    const OTHER_SYS_NAME: &str = "other sys name";
 
     #[test]
     fn sources_are_required() {
@@ -555,9 +618,106 @@ mod tests {
         mk_config_from_toml(toml).unwrap();
     }
 
+    // Note: The tests below assume that the default router id template
+    // includes the BMP sysName.
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[should_panic]
+    async fn counters_for_expected_sys_name_should_not_exist() {
+        let (runner, _) = BmpInRunner::mock();
+        let initiation_msg = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
+
+        runner.process_update(initiation_msg).await;
+
+        let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
+        assert_eq!(
+            metrics.with_label::<usize>("bmp_in_num_invalid_bmp_messages", ("router", SYS_NAME)),
+            0,
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[should_panic]
+    async fn counters_for_other_sys_name_should_not_exist() {
+        let (runner, _) = BmpInRunner::mock();
+        let initiation_msg = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
+
+        runner.process_update(initiation_msg).await;
+
+        let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
+        assert_eq!(
+            metrics.with_label::<usize>(
+                "bmp_in_num_invalid_bmp_messages",
+                ("router", OTHER_SYS_NAME)
+            ),
+            0,
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn num_invalid_bmp_messages_counter_should_increase() {
+        let (runner, _) = BmpInRunner::mock();
+
+        // A BMP Initiation message that lacks required fields
+        let bad_initiation_msg =
+            mk_update(mk_invalid_initiation_message_that_lacks_information_tlvs());
+
+        // A BMP Peer Down Notification message without a corresponding Peer
+        // Up Notification message.
+        let pph = mk_per_peer_header("10.0.0.1", 12345);
+        let bad_peer_down_msg = mk_update(mk_peer_down_notification_msg(&pph));
+
+        runner.process_update(bad_initiation_msg).await;
+        runner.process_update(bad_peer_down_msg).await;
+
+        let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
+        assert_eq!(
+            metrics.with_label::<usize>(
+                "bmp_in_num_invalid_bmp_messages",
+                ("router", UNKNOWN_ROUTER_SYSNAME)
+            ),
+            2,
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn new_counters_should_be_started_if_the_router_id_changes() {
+        let (runner, _) = BmpInRunner::mock();
+        let initiation_msg = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
+        let pph = mk_per_peer_header("10.0.0.1", 12345);
+        let bad_peer_down_msg = mk_update(mk_peer_down_notification_msg(&pph));
+        let reinitiation_msg = mk_update(mk_initiation_msg(OTHER_SYS_NAME, SYS_DESCR));
+        let another_bad_peer_down_msg = mk_update(mk_peer_down_notification_msg(&pph));
+
+        runner.process_update(initiation_msg).await;
+        runner.process_update(bad_peer_down_msg).await;
+        runner.process_update(reinitiation_msg).await;
+        runner.process_update(another_bad_peer_down_msg).await;
+
+        let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
+        assert_eq!(
+            metrics.with_label::<usize>("bmp_in_num_invalid_bmp_messages", ("router", SYS_NAME)),
+            1,
+        );
+        assert_eq!(
+            metrics.with_label::<usize>(
+                "bmp_in_num_invalid_bmp_messages",
+                ("router", OTHER_SYS_NAME)
+            ),
+            1,
+        );
+    }
+
     // --- Test helpers ------------------------------------------------------
 
     fn mk_config_from_toml(toml: &str) -> Result<BmpIn, toml::de::Error> {
-        toml::de::from_slice::<BmpIn>(toml.as_bytes())
+        toml::from_str::<BmpIn>(toml)
+    }
+
+    fn mk_update(msg_buf: Bytes) -> Update {
+        let source_id = SourceId::SocketAddr("127.0.0.1:8080".parse().unwrap());
+        let bmp_msg = Arc::new(BytesRecord(BmpMessage::from_octets(msg_buf).unwrap()));
+        let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
+        Update::Single(Payload::new(source_id, value))
     }
 }

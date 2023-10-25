@@ -19,7 +19,7 @@ use std::{str::FromStr, sync::Arc};
 
 #[tokio::test]
 async fn process_non_route_update() {
-    let runner = RibUnitRunner::mock("", RibType::Physical);
+    let (runner, _) = RibUnitRunner::mock("", RibType::Physical);
 
     // Given an update that is not a route
     let update = Update::from(Payload::from(TypeValue::Unknown));
@@ -28,12 +28,12 @@ async fn process_non_route_update() {
     assert!(!is_filtered(&runner, update).await);
 
     // And it should NOT be added to the route store
-    assert_eq!(runner.rib().unwrap().prefixes_count(), 0);
+    assert_eq!(runner.rib().store().unwrap().prefixes_count(), 0);
 }
 
 #[tokio::test]
 async fn process_update_single_route() {
-    let runner = RibUnitRunner::mock("", RibType::Physical);
+    let (runner, _) = RibUnitRunner::mock("", RibType::Physical);
 
     // Given a BGP update containing a single route announcement
     let delta_id = (RotondaId(0), 0);
@@ -60,12 +60,12 @@ async fn process_update_single_route() {
     assert!(!is_filtered(&runner, update).await);
 
     // And it should be added to the route store
-    assert_eq!(runner.rib().unwrap().prefixes_count(), 1);
+    assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
 }
 
 #[tokio::test]
 async fn process_update_same_route_twice() {
-    let runner = RibUnitRunner::mock("", RibType::Physical);
+    let (runner, _) = RibUnitRunner::mock("", RibType::Physical);
 
     // Given a BGP update containing a single route announcement
     let delta_id = (RotondaId(0), 0);
@@ -92,20 +92,20 @@ async fn process_update_same_route_twice() {
     assert!(!is_filtered(&runner, update.clone()).await);
 
     // And it should be added to the route store
-    assert_eq!(runner.rib().unwrap().prefixes_count(), 1);
+    assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
 
     // When it is processed by this unit again it should not be filtered
     assert!(!is_filtered(&runner, update).await);
 
     // And it should NOT be added again to the route store
-    assert_eq!(runner.rib().unwrap().prefixes_count(), 1);
+    assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
 }
 
 #[tokio::test]
 async fn process_update_two_routes_to_the_same_prefix() {
     #[rustfmt::skip]
     let (_match_result, match_result2) = {
-        let runner = RibUnitRunner::mock("", RibType::Physical);
+        let (runner, _) = RibUnitRunner::mock("", RibType::Physical);
 
         // Given BGP updates for two different routes to the same prefix
         let delta_id = (RotondaId(0), 0);
@@ -137,7 +137,7 @@ async fn process_update_two_routes_to_the_same_prefix() {
         }
 
         // Then only the one common prefix SHOULD be added to the route store
-        assert_eq!(runner.rib().unwrap().prefixes_count(), 1);
+        assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
 
         // And at that prefix there should be one RibValue containing two routes
         let match_options = MatchOptions {
@@ -147,7 +147,7 @@ async fn process_update_two_routes_to_the_same_prefix() {
             include_more_specifics: true,
         };
         eprintln!("Querying store match_prefix the first time");
-        let match_result = runner.rib().as_ref().unwrap().match_prefix(
+        let match_result = runner.rib().store().unwrap().match_prefix(
             &raw_prefix,
             &match_options,
             &epoch::pin(),
@@ -175,7 +175,7 @@ async fn process_update_two_routes_to_the_same_prefix() {
         // see that the routes HashSet Arc strong reference count increases from 2 to 3 while the inner items of the
         // HashSet still have a strong reference count of 1.
         eprintln!("Querying store match_prefix the second time");
-        let match_result2 = runner.rib().as_ref().unwrap().match_prefix(
+        let match_result2 = runner.rib().store().unwrap().match_prefix(
             &raw_prefix,
             &match_options,
             &epoch::pin(),
@@ -186,8 +186,8 @@ async fn process_update_two_routes_to_the_same_prefix() {
         assert_eq!(Arc::strong_count(rib_value.test_inner()), 3);
         assert_eq!(Arc::weak_count(rib_value.test_inner()), 0);
         for item in rib_value.iter() {
-            assert_eq!(Arc::strong_count(&item), 1);
-            assert_eq!(Arc::weak_count(&item), 0);
+            assert_eq!(Arc::strong_count(item), 1);
+            assert_eq!(Arc::weak_count(item), 0);
         }
 
         (match_result, match_result2)
@@ -201,14 +201,14 @@ async fn process_update_two_routes_to_the_same_prefix() {
     // assert_eq!(Arc::strong_count(&rib_value.per_prefix_items), 2); // TODO: MultiThreadedStore doesn't cleanup on drop...
     assert_eq!(Arc::weak_count(rib_value.test_inner()), 0);
     for item in rib_value.iter() {
-        assert_eq!(Arc::strong_count(&item), 1);
-        assert_eq!(Arc::weak_count(&item), 0);
+        assert_eq!(Arc::strong_count(item), 1);
+        assert_eq!(Arc::weak_count(item), 0);
     }
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn process_update_two_routes_to_different_prefixes() {
-    let runner = RibUnitRunner::mock("", RibType::Physical);
+    let (runner, _) = RibUnitRunner::mock("", RibType::Physical);
 
     // Given BGP updates for two different routes to two different prefixes
     let delta_id = (RotondaId(0), 0);
@@ -242,7 +242,7 @@ async fn process_update_two_routes_to_different_prefixes() {
     }
 
     // Then two separate prefixes SHOULD be added to the route store
-    assert_eq!(runner.rib().unwrap().prefixes_count(), 2);
+    assert_eq!(runner.rib().store().unwrap().prefixes_count(), 2);
 
     // And at that prefix there should be two RibValues
     let match_options = MatchOptions {
@@ -256,7 +256,7 @@ async fn process_update_two_routes_to_different_prefixes() {
         let match_result =
             runner
                 .rib()
-                .as_ref()
+                .store()
                 .unwrap()
                 .match_prefix(&prefix, &match_options, &epoch::pin());
         assert!(matches!(match_result.match_type, MatchType::ExactMatch));

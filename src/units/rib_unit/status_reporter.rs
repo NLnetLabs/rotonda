@@ -4,10 +4,10 @@ use std::{
     time::Instant,
 };
 
-use log::{debug, error};
+use log::{debug, error, warn, info};
 
 use crate::{
-    common::status_reporter::{sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter},
+    common::{status_reporter::{sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter}, roto::FilterName},
     payload::RouterId,
 };
 
@@ -24,6 +24,13 @@ impl RibUnitStatusReporter {
         Self {
             name: format!("{}", name),
             metrics,
+        }
+    }
+
+    pub fn filter_name_changed(&self, old: &FilterName, new: Option<&FilterName>) {
+        match new {
+            Some(new) => { sr_log!(info: self, "Using Roto filter '{}' instead of '{}'", new, old); }
+            None => { sr_log!(info: self, "No longer using Roto filter '{}'", old); }
         }
     }
 
@@ -139,11 +146,19 @@ impl RibUnitStatusReporter {
     pub fn message_filtering_failure<T: Display>(&self, err: T) {
         sr_log!(error: self, "Filtering error: {}", err);
     }
+
+    pub fn filter_load_failure<T: Display>(&self, err: T) {
+        sr_log!(warn: self, "Filter could not be loaded and will be ignored: {}", err);
+    }
 }
 
 impl UnitStatusReporter for RibUnitStatusReporter {}
 
-impl AnyStatusReporter for RibUnitStatusReporter {}
+impl AnyStatusReporter for RibUnitStatusReporter {
+    fn metrics(&self) -> Option<Arc<dyn crate::metrics::Source>> {
+        Some(self.metrics.clone())
+    }
+}
 
 impl Chainable for RibUnitStatusReporter {
     fn add_child<T: Display>(&self, child_name: T) -> Self {

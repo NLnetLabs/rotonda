@@ -15,10 +15,11 @@ use futures::pin_mut;
 use hyper::server::accept::Accept;
 use hyper::service::{make_service_fn, service_fn};
 use hyper::{Body, Method, Request, Response, StatusCode, Uri};
-use log::{debug, error, trace};
+use log::{error, info, trace};
 use percent_encoding::percent_decode;
 use serde::Deserialize;
 use serde_with::{serde_as, OneOrMany};
+use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::convert::Infallible;
 use std::fmt::Display;
@@ -64,6 +65,10 @@ impl Server {
         false
     }
 
+    pub fn listen(&self) -> &[SocketAddr] {
+        &self.listen
+    }
+
     /// Runs the server.
     ///
     /// The method will start a new server listening on the sockets provided
@@ -98,7 +103,7 @@ impl Server {
                 );
                 return Err(ExitError);
             }
-            debug!("HTTP server listening on {}", addr);
+            info!("Listening for HTTP connections on {}", addr);
             listeners.push(listener);
         }
 
@@ -288,7 +293,7 @@ impl Server {
 #[derive(Clone, Default)]
 pub struct Resources {
     /// The currently registered sources.
-    sources: Arc<ArcSwap<Vec<RegisteredResource>>>,
+    sources: Arc<ArcSwap<Vec<Arc<RegisteredResource>>>>,
 
     /// A mutex to be held during registration of a new source.
     ///
@@ -307,17 +312,30 @@ impl Resources {
     ///
     /// The processor is given as a weak pointer so that it gets dropped
     /// when the owning component terminates.
-    pub fn register(&self, process: Weak<dyn ProcessRequest>, is_sub_resource: bool) {
+    pub fn register(
+        &self,
+        process: Weak<dyn ProcessRequest>,
+        component_name: Arc<str>,
+        component_type: &'static str,
+        rel_base_url: &str,
+        is_sub_resource: bool,
+    ) {
         let lock = self.register.lock().unwrap();
         let old_sources = self.sources.load();
         let mut new_sources = Vec::new();
         for item in old_sources.iter() {
-            if item.process.strong_count() > 0 {
+            if item.processor.strong_count() > 0 {
                 new_sources.push(item.clone())
             }
         }
 
-        let new_source = RegisteredResource { process };
+        let new_source = Arc::new(RegisteredResource {
+            processor: process,
+            component_name,
+            component_type,
+            rel_base_url: Arc::new(rel_base_url.to_string()),
+            is_sub_resource,
+        });
         if is_sub_resource {
             new_sources.insert(0, new_source);
         } else {
@@ -335,13 +353,34 @@ impl Resources {
     pub async fn process_request(&self, request: &Request<Body>) -> Option<Response<Body>> {
         let sources = self.sources.load();
         for item in sources.iter() {
-            if let Some(process) = item.process.upgrade() {
+            if let Some(process) = item.processor.upgrade() {
                 if let Some(response) = process.process_request(request).await {
                     return Some(response);
                 }
             }
         }
         None
+    }
+
+    pub fn resources(&self) -> SmallVec<[Arc<RegisteredResource>; 8]> {
+        self.sources
+            .load()
+            .iter()
+            .filter(|item| !item.is_sub_resource)
+            .cloned()
+            .collect()
+    }
+
+    pub fn resources_for_component_type(
+        &self,
+        component_type: &'static str,
+    ) -> SmallVec<[Arc<RegisteredResource>; 8]> {
+        self.sources
+            .load()
+            .iter()
+            .filter(|item| !item.is_sub_resource && item.component_type == component_type)
+            .cloned()
+            .collect()
     }
 }
 
@@ -356,9 +395,21 @@ impl fmt::Debug for Resources {
 
 /// All information on a resource registered with a collection.
 #[derive(Clone)]
-struct RegisteredResource {
+pub struct RegisteredResource {
     /// A weak pointer to the resource’s processor.
-    process: Weak<dyn ProcessRequest>,
+    processor: Weak<dyn ProcessRequest>,
+
+    /// The name of the unit that registered the processor.
+    pub component_name: Arc<str>,
+
+    /// The type of unit that registered the processor.
+    pub component_type: &'static str,
+
+    /// The base URL or main entrypoint of the API offered by the processor.
+    pub rel_base_url: Arc<String>,
+
+    /// Does this processor handle URL space below another processor?
+    pub is_sub_resource: bool,
 }
 
 //------------ ProcessRequest ------------------------------------------------

@@ -9,7 +9,7 @@ use hyper::{Body, Method, Request, Response};
 use tokio::sync::Mutex;
 
 use crate::{
-    http::{PercentDecodedPath, ProcessRequest},
+    http::{PercentDecodedPath, ProcessRequest, self},
     units::bmp_in::{
         metrics::BmpInMetrics,
         state_machine::{
@@ -22,6 +22,7 @@ use crate::{
 use super::response::Focus;
 
 pub struct RouterInfoApi {
+    http_resources: http::Resources,
     http_api_path: Arc<String>,
     source_id: SourceId,
     conn_metrics: Arc<BmpInMetrics>,
@@ -33,6 +34,7 @@ pub struct RouterInfoApi {
 
 impl RouterInfoApi {
     pub fn new(
+        http_resources: http::Resources,
         http_api_path: Arc<String>,
         source_id: SourceId,
         conn_metrics: Arc<BmpInMetrics>,
@@ -42,6 +44,7 @@ impl RouterInfoApi {
         state_machine: Weak<Mutex<Option<BmpState>>>,
     ) -> Self {
         Self {
+            http_resources,
             http_api_path,
             source_id,
             conn_metrics,
@@ -59,7 +62,6 @@ impl ProcessRequest for RouterInfoApi {
         let req_path = request.uri().decoded_path();
         if request.method() == Method::GET && req_path.starts_with(self.http_api_path.deref()) {
             let (base_path, router) = req_path.split_at(self.http_api_path.len());
-            let router = router.trim_start_matches('/');
             if let Some(state_machine) = self.state_machine.upgrade() {
                 let lock = state_machine.lock().await;
                 let sm = lock.as_ref().unwrap();
@@ -103,7 +105,8 @@ impl ProcessRequest for RouterInfoApi {
                     || router == sys_name
                 {
                     return Some(Self::build_response(
-                        format!("{}/{}", base_path, router),
+                        self.http_resources.clone(),
+                        format!("{}{}", base_path, router),
                         self.source_id.clone(),
                         router_id,
                         sys_name,

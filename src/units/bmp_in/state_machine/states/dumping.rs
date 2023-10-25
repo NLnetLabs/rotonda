@@ -259,7 +259,7 @@ impl BmpStateDetails<Dumping> {
         if routes.is_empty() {
             Self::mk_state_transition_result(next_state)
         } else {
-            Self::mk_final_routing_update_result(next_state, Update::Bulk(routes.into()))
+            Self::mk_final_routing_update_result(next_state, Update::Bulk(routes))
         }
     }
 }
@@ -375,10 +375,10 @@ mod tests {
         builtin::{BuiltinTypeValue, MaterializedRoute},
         typevalue::TypeValue,
     };
-    use routecore::{asn::Asn, bmp::message::PeerType};
+    use routecore::asn::Asn;
 
     use crate::{
-        bgp::encode::{Announcements, Prefixes},
+        bgp::encode::{mk_per_peer_header, Announcements, Prefixes},
         payload::{Payload, SourceId, Update},
         units::bmp_in::state_machine::{processing::MessageType, states::updating::Updating},
     };
@@ -469,7 +469,7 @@ mod tests {
         if let BmpState::Dumping(next_state) = res.next_state {
             let Dumping { peer_states, .. } = next_state.details;
             assert_eq!(peer_states.num_peer_configs(), 1);
-            let pph = peer_states.get_peers().nth(0).unwrap();
+            let pph = peer_states.get_peers().next().unwrap();
             assert_eq!(peer_states.is_peer_eor_capable(pph), Some(true));
             assert_eq!(peer_states.num_pending_eors(), 0); // zero because we have to see a route announcement to know which (S)AFI an EoR is expected for
         }
@@ -784,6 +784,7 @@ mod tests {
                     }
                 }
 
+                #[allow(clippy::mutable_key_type)]
                 let mut distinct_bgp_updates_seen = std::collections::HashSet::new();
                 let mut num_withdrawals_seen = 0;
 
@@ -1065,17 +1066,6 @@ mod tests {
 
     // --- Test helpers -----------------------------------------------------------------------------------------------
 
-    fn mk_per_peer_header(peer_ip: &str, peer_as: u32) -> crate::bgp::encode::PerPeerHeader {
-        crate::bgp::encode::PerPeerHeader {
-            peer_type: PeerType::GlobalInstance.into(),
-            peer_flags: 0,
-            peer_distinguisher: [0u8; 8],
-            peer_address: peer_ip.parse().unwrap(),
-            peer_as: Asn::from_u32(peer_as),
-            peer_bgp_id: [1u8, 2u8, 3u8, 4u8],
-        }
-    }
-
     // RFC 4724 Graceful Restart Mechanism for BGP
     // BMP uses the End-of-RIB feature of RFC 4724.
     fn mk_peer_up_notification_msg_without_rfc4724_support(
@@ -1213,12 +1203,11 @@ mod tests {
     }
 
     fn get_peer_states(processor: &BmpState) -> &PeerStates {
-        let peer_states = match processor {
+        match processor {
             BmpState::Dumping(v) => &v.details.peer_states,
             BmpState::Updating(v) => &v.details.peer_states,
             _ => unreachable!(),
-        };
-        peer_states
+        }
     }
 
     fn mk_initiation_msg(sys_name: &str, sys_descr: &str) -> BmpMsg<Bytes> {

@@ -151,90 +151,105 @@ pub struct RouterBmpMetrics {
 }
 
 impl BmpMetrics {
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const BMP_STATE_MACHINE_STATE_METRIC: Metric = Metric::new(
         "bmp_state_machine_state",
         "the current state machine state for this monitored router connection",
         MetricType::Text,
         MetricUnit::State,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_RECEIVED_PREFIXES_METRIC: Metric = Metric::new(
         "bmp_state_num_received_prefixes",
         "the number of prefixes received from this router",
         MetricType::Gauge,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_STORED_PREFIXES_METRIC: Metric = Metric::new(
         "bmp_state_num_stored_prefixes",
         "the number of prefixes stored for this router",
         MetricType::Gauge,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_BGP_UPDATES_PROCESSED_METRIC: Metric = Metric::new(
         "bmp_state_num_bgp_updates_processed",
         "the number of processed BGP UPDATE messages",
         MetricType::Counter,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_BGP_UPDATES_FOR_UNKNOWN_PEER_METRIC: Metric = Metric::new(
         "bmp_state_num_bgp_updates_with_unknown_peer",
         "the number of BGP UPDATE messages for which no Peer Up notification was seen",
         MetricType::Counter,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_BGP_UPDATES_WITH_RECOVERABLE_PARSING_FAILURE_FOR_KNOWN_PEER: Metric = Metric::new(
         "bmp_state_num_bgp_updates_with_recoverable_parsing_failure_for_known_peer",
         "the number of BGP UPDATE messages from known peers that could not be parsed with the expected session config",
         MetricType::Counter,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_BGP_UPDATES_WITH_RECOVERABLE_PARSING_FAILURE_FOR_UNKNOWN_PEER: Metric = Metric::new(
         "bmp_state_num_bgp_updates_with_recoverable_parsing_failure_for_unknown_peer",
         "the number of BGP UPDATE messages from unknown peers that could not be parsed with the expected session config",
         MetricType::Counter,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_BGP_UPDATES_WITH_UNRECOVERABLE_PARSING_FAILURE_FOR_KNOWN_PEER: Metric = Metric::new(
         "bmp_state_num_bgp_updates_with_unrecoverable_parsing_failure_for_known_peer",
         "the number of BGP UPDATE messages from known peers that could not be parsed with the expected or generated session config",
         MetricType::Counter,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_BGP_UPDATES_WITH_UNRECOVERABLE_PARSING_FAILURE_FOR_UNKNOWN_PEER: Metric = Metric::new(
         "bmp_state_num_bgp_updates_with_unrecoverable_parsing_failure_for_unknown_peer",
         "the number of BGP UPDATE messages from unknown peers that could not be parsed with the expected or generated session config",
         MetricType::Counter,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_BGP_UPDATES_FILTERED: Metric = Metric::new(
         "bmp_state_num_bgp_updates_filtered",
         "the number of BGP UPDATE messages filtered out by accept/reject rules",
         MetricType::Counter,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_ANNOUNCEMENTS_METRIC: Metric = Metric::new(
         "bmp_state_num_announcements",
         "the number of route announcements contained in the last BMP message",
         MetricType::Gauge,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_WITHDRAWALS_METRIC: Metric = Metric::new(
         "bmp_state_num_withdrawals",
         "the number of route withdrawals contained in the last BMP message",
         MetricType::Gauge,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_PEERS_UP_METRIC: Metric = Metric::new(
         "bmp_state_num_up_peers",
         "the number of peers connected and in the up state",
         MetricType::Gauge,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_PEERS_UP_EOR_CAPABLE_METRIC: Metric = Metric::new(
         "bmp_state_num_up_peers_eor_capable",
         "the number of up peers that support the graceful restart capability and thus are expected to signal End-of-Rib",
         MetricType::Gauge,
         MetricUnit::Total,
     );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_PEERS_UP_DUMPING_METRIC: Metric = Metric::new(
         "bmp_state_num_up_peers_dumping",
         "the number of up peers expected to but have not yet signalled End-of-RIB",

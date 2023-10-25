@@ -17,9 +17,10 @@
 // These contain all the actual unit types grouped by shared functionality.
 mod bmp_fs_out;
 mod bmp_tcp_out;
-#[cfg(feature = "mqtt")]
 mod mqtt;
 mod null;
+
+pub use self::mqtt::target::DEF_MQTT_PORT;
 
 use tokio::sync::mpsc;
 
@@ -40,7 +41,6 @@ pub enum Target {
     #[serde(rename = "bmp-tcp-out")]
     BmpTcpOut(bmp_tcp_out::target::BmpTcpOut),
 
-    #[cfg(feature = "mqtt")]
     #[serde(rename = "mqtt-out")]
     Mqtt(mqtt::target::Mqtt),
 
@@ -59,9 +59,17 @@ impl Target {
         match self {
             Target::BmpFsOut(target) => target.run(component, cmd, waitpoint).await,
             Target::BmpTcpOut(target) => target.run(component, cmd, waitpoint).await,
-            #[cfg(feature = "mqtt")]
             Target::Mqtt(target) => target.run(component, cmd, waitpoint).await,
             Target::Null(target) => target.run(component, cmd, waitpoint).await,
+        }
+    }
+
+    pub fn type_name(&self) -> &'static str {
+        match self {
+            Target::BmpFsOut(_) => "bmp-fs-out",
+            Target::BmpTcpOut(_) => "bmp-tcp-out",
+            Target::Mqtt(_) => "mqtt-out",
+            Target::Null(_) => "null-out",
         }
     }
 }

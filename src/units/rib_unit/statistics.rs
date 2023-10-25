@@ -94,15 +94,17 @@ impl std::fmt::Display for RibMergeUpdateStatistics {
 }
 
 impl RibMergeUpdateStatistics {
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const RIB_MERGE_UPDATE_WITHDRAW_DURATION_MICROSECONDS: Metric = Metric::new(
-        "rib_merge_update_withdraw_duration",
-        "a histogram of seconds per prefix hashset size for RIB merge update operations on withdraw inserts",
+        "rib_merge_update_withdrawal_duration",
+        "a histogram of seconds per prefix hashset size for RIB merge update operations to insert withdrawals",
         MetricType::Histogram,
         MetricUnit::Microsecond,
     );
-    const RIB_MERGE_UPDATE_OTHER_DURATION_MICROSECONDS: Metric = Metric::new(
-        "rib_merge_update_other_duration",
-        "a histogram of seconds per prefix hashset size for RIB merge update operations on normal inserts",
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    const RIB_MERGE_UPDATE_ANNOUNCE_DURATION_MICROSECONDS: Metric = Metric::new(
+        "rib_merge_update_announce_duration",
+        "a histogram of seconds per prefix hashset size for RIB merge update operations to insert announcements",
         MetricType::Histogram,
         MetricUnit::Microsecond,
     );
@@ -116,7 +118,7 @@ impl metrics::Source for RibMergeUpdateStatistics {
         #[rustfmt::skip]
         let metric_data = [
             (&Self::RIB_MERGE_UPDATE_WITHDRAW_DURATION_MICROSECONDS, withdraw),
-            (&Self::RIB_MERGE_UPDATE_OTHER_DURATION_MICROSECONDS, other),
+            (&Self::RIB_MERGE_UPDATE_ANNOUNCE_DURATION_MICROSECONDS, other),
         ];
 
         for (metric, data) in metric_data {

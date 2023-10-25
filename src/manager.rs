@@ -1,9 +1,10 @@
 //! Controlling the entire operation.
 
-use crate::common::roto::RotoScripts;
-use crate::comms::{DirectLink, Gate, GateAgent, GraphStatus, Link, UPDATE_QUEUE_LEN};
+use crate::common::file_io::{FileIo, TheFileIo};
+use crate::common::roto::{FilterName, LoadErrorKind, RotoError, RotoScriptOrigin, RotoScripts};
+use crate::comms::{DirectLink, Gate, GateAgent, GraphStatus, Link, DEF_UPDATE_QUEUE_LEN};
 use crate::config::{Config, ConfigFile, Marked};
-use crate::log::Failed;
+use crate::log::Terminate;
 use crate::targets::Target;
 use crate::units::Unit;
 use crate::{http, metrics};
@@ -14,6 +15,7 @@ use non_empty_vec::NonEmpty;
 use reqwest::Client as HttpClient;
 use serde::Deserialize;
 use std::collections::HashSet;
+use std::ffi::OsStr;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::{Duration, Instant};
@@ -39,6 +41,9 @@ pub struct Component {
     /// The component’s name.
     name: Arc<str>,
 
+    /// The component's type name.
+    type_name: &'static str,
+
     /// An HTTP client.
     http_client: Option<HttpClient>,
 
@@ -57,6 +62,7 @@ impl Default for Component {
     fn default() -> Self {
         Self {
             name: "MOCK".into(),
+            type_name: "MOCK",
             http_client: Default::default(),
             metrics: Default::default(),
             http_resources: Default::default(),
@@ -69,6 +75,7 @@ impl Component {
     /// Creates a new component from its, well, components.
     fn new(
         name: String,
+        type_name: &'static str,
         http_client: HttpClient,
         metrics: metrics::Collection,
         http_resources: http::Resources,
@@ -76,6 +83,7 @@ impl Component {
     ) -> Self {
         Component {
             name: name.into(),
+            type_name,
             http_client: Some(http_client),
             metrics: Some(metrics),
             http_resources,
@@ -88,13 +96,22 @@ impl Component {
         &self.name
     }
 
+    /// Returns the type name of the component.
+    pub fn type_name(&self) -> &'static str {
+        self.type_name
+    }
+
     /// Returns a reference to an HTTP Client.
     pub fn http_client(&self) -> &HttpClient {
         self.http_client.as_ref().unwrap()
     }
 
-    pub fn roto_scripts(&self) -> RotoScripts {
-        self.roto_scripts.clone()
+    pub fn http_resources(&self) -> &http::Resources {
+        &self.http_resources
+    }
+
+    pub fn roto_scripts(&self) -> &RotoScripts {
+        &self.roto_scripts
     }
 
     /// Register a metrics source.
@@ -104,15 +121,34 @@ impl Component {
         }
     }
 
-    /// Register an HTTP resources.
-    pub fn register_http_resource(&mut self, process: Arc<dyn http::ProcessRequest>) {
-        self.http_resources
-            .register(Arc::downgrade(&process), false)
+    /// Register an HTTP resource.
+    pub fn register_http_resource(
+        &mut self,
+        process: Arc<dyn http::ProcessRequest>,
+        rel_base_url: &str,
+    ) {
+        self.http_resources.register(
+            Arc::downgrade(&process),
+            self.name.clone(),
+            self.type_name,
+            rel_base_url,
+            false,
+        )
     }
 
-    /// Register a sub HTTP resources.
-    pub fn register_sub_http_resource(&mut self, process: Arc<dyn http::ProcessRequest>) {
-        self.http_resources.register(Arc::downgrade(&process), true)
+    /// Register a sub HTTP resource.
+    pub fn register_sub_http_resource(
+        &mut self,
+        process: Arc<dyn http::ProcessRequest>,
+        rel_base_url: &str,
+    ) {
+        self.http_resources.register(
+            Arc::downgrade(&process),
+            self.name.clone(),
+            self.type_name,
+            rel_base_url,
+            true,
+        )
     }
 }
 
@@ -394,7 +430,7 @@ pub struct Manager {
     /// An HTTP client.
     http_client: HttpClient,
 
-    /// The metrics collection maintained by this managers.
+    /// The metrics collection maintained by this manager.
     metrics: metrics::Collection,
 
     /// The HTTP resources collection maintained by this manager.
@@ -407,6 +443,8 @@ pub struct Manager {
     graph_svg_processor: Arc<dyn ProcessRequest>,
 
     graph_svg_data: Arc<ArcSwap<(Instant, LinkReport)>>,
+
+    file_io: TheFileIo,
 }
 
 impl Default for Manager {
@@ -421,9 +459,10 @@ impl Manager {
         let graph_svg_data = Arc::new(ArcSwap::from_pointee((Instant::now(), LinkReport::new())));
 
         #[cfg(feature = "config-graph")]
-        let graph_svg_processor = Self::mk_svg_http_processor(graph_svg_data.clone());
+        let (graph_svg_processor, rel_base_url) =
+            Self::mk_svg_http_processor(graph_svg_data.clone());
 
-        #[allow(clippy::let_and_return)]
+        #[allow(clippy::let_and_return, clippy::default_constructed_unit_structs)]
         let manager = Manager {
             running_units: Default::default(),
             running_targets: Default::default(),
@@ -435,15 +474,25 @@ impl Manager {
             #[cfg(feature = "config-graph")]
             graph_svg_processor,
             graph_svg_data,
+            file_io: TheFileIo::default(),
         };
 
         // Register the /status/graph endpoint.
         #[cfg(feature = "config-graph")]
-        manager
-            .http_resources
-            .register(Arc::downgrade(&manager.graph_svg_processor), false);
+        manager.http_resources.register(
+            Arc::downgrade(&manager.graph_svg_processor),
+            "manager".into(),
+            "manager",
+            rel_base_url,
+            true,
+        );
 
         manager
+    }
+
+    #[cfg(test)]
+    pub fn set_file_io(&mut self, file_io: TheFileIo) {
+        self.file_io = file_io;
     }
 
     /// Loads the given config file.
@@ -454,9 +503,10 @@ impl Manager {
     /// If there are any errors in the config file, they are logged as errors
     /// and a generic error is returned.
     ///
-    /// If the method succeeds, you need to spawn all units and targets via
-    /// the [`spawn`](Self::spawn) method.
-    pub fn load(&mut self, file: ConfigFile) -> Result<Config, Failed> {
+    /// If the method succeeds, you need to call ['prepare'](Self::prepare)
+    /// followed by the [`spawn`](Self::spawn) method to spawn all units and
+    /// targets.
+    pub fn load(&mut self, file: &ConfigFile) -> Result<Config, Terminate> {
         // Now load the config file, e.g. something like this:
         //
         //     [units.a]
@@ -569,20 +619,13 @@ impl Manager {
         //           TxUpdate Sender which it can use to send data updates to
         //           to the RxUpdate Receiver which is now held by the Link
         //           (stored in a LinkConnection object).
-        let config = match Config::from_bytes(file.bytes(), file.dir()) {
-            Ok(config) => config,
-            Err(err) => {
-                match file.path() {
-                    Some(path) => error!("{}: {}", path.display(), err),
-                    None => error!("{}", err),
-                }
-                return Err(Failed);
+        Config::from_bytes(file.bytes(), file.dir()).map_err(|err| {
+            match file.path() {
+                Some(path) => error!("{}: {}", path.display(), err),
+                None => error!("{}", err),
             }
-        };
-
-        self.prepare(&config, &file)?;
-
-        Ok(config)
+            Terminate::error()
+        })
     }
 
     /// Prepare for spawning.
@@ -595,7 +638,62 @@ impl Manager {
     /// Primarily intended for testing purposes, allowing the prepare phase of
     /// the load -> prepare -> spawn pipeline to be tested independently of the
     /// other phases.
-    fn prepare(&mut self, config: &Config, file: &ConfigFile) -> Result<(), Failed> {
+    pub fn prepare(&mut self, config: &Config, file: &ConfigFile) -> Result<(), Terminate> {
+        let mut res = Ok(());
+
+        // Load any .roto script files that exist (and unload any that no longer exist)
+        self.load_roto_scripts(config).or_else(|err| {
+            let msg = format!("Unable to load Roto scripts: {err}.");
+            if matches!(err, RotoError::LoadError { .. })
+                && config.mvp_overrides.ignore_missing_filters
+            {
+                warn!("{msg}");
+                Ok(())
+            } else {
+                error!("{msg}");
+                Err(Terminate::error())
+            }
+        })?;
+
+        // Drain the singleton static ROTO_FILTER_NAMES contents to a local variable.
+        let config_filter_names = ROTO_FILTER_NAMES
+            .with(|filter_names| filter_names.replace(Some(Default::default())))
+            .unwrap();
+
+        // Check if all filter names exist in the loaded filter set
+        let loaded_filter_names = self.roto_scripts.get_filter_names();
+        let unknown_filter_names = config_filter_names
+            .difference(&loaded_filter_names)
+            .map(|fname| format!("'{}'", fname))
+            .collect::<Vec<_>>();
+        if !unknown_filter_names.is_empty() {
+            let unknown_filter_names = unknown_filter_names.join(", ");
+            let loaded_roto_scripts = self.roto_scripts.get_script_origins();
+            let reason: String = if loaded_roto_scripts.is_empty() {
+                if let Some(path) = &config.roto_scripts_path {
+                    format!("no .roto scripts could be loaded from the configured `roto_scripts_path` directory '{}'.", path.display())
+                } else {
+                    "the `roto_scripts_path` setting is not specified so no filters were loaded."
+                        .to_string()
+                }
+            } else {
+                let scripts = loaded_roto_scripts
+                    .iter()
+                    .map(|v| format!("'{v}'"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!("none of the loaded .roto scripts ({scripts}) contains them")
+            };
+            let msg = format!("Roto filters {unknown_filter_names} are referenced by your configuration but do not exist because {reason}");
+
+            if config.mvp_overrides.ignore_missing_filters {
+                warn!("{msg} These filters will be ignored.");
+            } else {
+                error!("{msg}");
+                res = Err(Terminate::error());
+            }
+        }
+
         // Drain the singleton static GATES contents to a local variable.
         let gates = GATES
             .with(|gates| gates.replace(Some(Default::default())))
@@ -608,34 +706,68 @@ impl Manager {
         // links the corresponding Gate will be moved to the pending
         // collection to be handled later by spawn(). For unresolvable links
         // the corresponding Gate will be dropped here.
-        let mut errs = Vec::new();
         for (name, load) in gates {
             if let Some(gate) = load.gate {
                 if !config.units.units.contains_key(&name) {
                     for mut link in load.links {
                         link.resolve_config(file);
-                        errs.push(
+                        error!(
+                            "{}",
                             link.mark(format!("unresolved link to unit '{}'", name))
-                                .to_string(),
-                        )
+                        );
                     }
                 } else {
                     self.pending_gates.insert(name.clone(), (gate, load.agent));
                 }
             }
         }
-        if !errs.is_empty() {
-            for err in errs {
-                error!("{}", err);
-            }
-            return Err(Failed);
-        }
 
         // At this point self.pending contains the newly created but
         // disconnected Gates, and GateAgents for sending commands to them,
-        // and the returned Config object contains the newly created but
-        // not yet started Units and Targets. The caller should invoke spawn()
-        // to run each Unit and Target and assign Gates to Units by name.
+        // and the Config object contains the newly created but not yet
+        // started Units and Targets. The caller should invoke spawn() to run
+        // each Unit and Target and assign Gates to Units by name.
+
+        res
+    }
+
+    // TODO: Use Marked for returned error so that the location in the config file in question can be reported to the
+    // user.
+    // TODO: Don't load .roto script files that are not referenced by any units or targets?
+    fn load_roto_scripts(&mut self, config: &Config) -> Result<(), RotoError> {
+        let mut new_origins = HashSet::<RotoScriptOrigin>::new();
+
+        if let Some(roto_scripts_path) = &config.roto_scripts_path {
+            let entries = self
+                .file_io
+                .read_dir(roto_scripts_path)
+                .map_err(|err| LoadErrorKind::read_dir_err(roto_scripts_path, err))?;
+
+            for entry in entries {
+                let entry = entry
+                    .map_err(|err| LoadErrorKind::read_dir_entry_err(roto_scripts_path, err))?;
+
+                if matches!(entry.path().extension(), Some(ext) if ext == OsStr::new("roto")) {
+                    let roto_script = self
+                        .file_io
+                        .read_to_string(entry.path())
+                        .map_err(|err| LoadErrorKind::read_file_err(entry.path(), err))?;
+
+                    let origin = RotoScriptOrigin::Path(entry.path());
+                    self.roto_scripts
+                        .add_or_update_script(origin.clone(), &roto_script)?;
+
+                    new_origins.insert(origin);
+                }
+            }
+        }
+
+        // Unload any no longer existing scripts
+        let loaded_origins = self.roto_scripts.get_script_origins();
+        let excess_origins = loaded_origins.difference(&new_origins);
+        for origin in excess_origins {
+            self.roto_scripts.remove_script(origin);
+        }
 
         Ok(())
     }
@@ -841,6 +973,7 @@ impl Manager {
             // Spawn the new target
             let component = Component::new(
                 name.clone(),
+                new_target.type_name(),
                 self.http_client.clone(),
                 self.metrics.clone(),
                 self.http_resources.clone(),
@@ -901,6 +1034,7 @@ impl Manager {
             // Spawn the new unit
             let component = Component::new(
                 name.clone(),
+                new_unit.type_name(),
                 self.http_client.clone(),
                 self.metrics.clone(),
                 self.http_resources.clone(),
@@ -1120,10 +1254,12 @@ impl Manager {
     #[cfg(feature = "config-graph")]
     fn mk_svg_http_processor(
         graph_svg_data: Arc<arc_swap::ArcSwapAny<Arc<(Instant, LinkReport)>>>,
-    ) -> Arc<dyn ProcessRequest> {
-        Arc::new(move |request: &Request<_>| {
+    ) -> (Arc<dyn ProcessRequest>, &'static str) {
+        const REL_BASE_URL: &str = "/status/graph";
+
+        let processor = Arc::new(move |request: &Request<_>| {
             let req_path = request.uri().decoded_path();
-            if request.method() == Method::GET && req_path == "/status/graph" {
+            if request.method() == Method::GET && req_path == REL_BASE_URL {
                 let response = Response::builder()
                     .status(hyper::StatusCode::OK)
                     .header("Content-Type", "image/svg+xml")
@@ -1134,7 +1270,9 @@ impl Manager {
             } else {
                 None
             }
-        })
+        });
+
+        (processor, REL_BASE_URL)
     }
 }
 
@@ -1269,6 +1407,12 @@ pub struct UnitSet {
     units: HashMap<String, Unit>,
 }
 
+impl UnitSet {
+    pub fn units(&self) -> &HashMap<String, Unit> {
+        &self.units
+    }
+}
+
 impl From<HashMap<String, Unit>> for UnitSet {
     fn from(v: HashMap<String, Unit>) -> Self {
         Self { units: v }
@@ -1287,6 +1431,10 @@ pub struct TargetSet {
 impl TargetSet {
     pub fn new() -> Self {
         Default::default()
+    }
+
+    pub fn targets(&self) -> &HashMap<String, Target> {
+        &self.targets
     }
 }
 
@@ -1377,15 +1525,37 @@ fn get_queue_size_for_link(link_id: String) -> (String, usize) {
         let queue_len = options.parse::<usize>().unwrap_or_else(|err| {
             warn!(
                 "Invalid queue length '{}' for '{}', falling back to the default ({}): {}",
-                options, name, UPDATE_QUEUE_LEN, err
+                options, name, DEF_UPDATE_QUEUE_LEN, err
             );
-            UPDATE_QUEUE_LEN
+            DEF_UPDATE_QUEUE_LEN
         });
         (name.to_string(), queue_len)
     } else {
-        (link_id, UPDATE_QUEUE_LEN)
+        (link_id, DEF_UPDATE_QUEUE_LEN)
     };
     (name, queue_size)
+}
+
+//------------ Loading FilterName --------------------------------------------
+
+thread_local!(
+    static ROTO_FILTER_NAMES: RefCell<Option<HashSet<FilterName>>> =
+        RefCell::new(Some(Default::default()))
+);
+
+/// Loads a filter name with the given name.
+///
+/// # Panics
+///
+/// This function panics if it is called outside of a run of
+/// [`Manager::load`].
+pub fn load_filter_name(filter_name: FilterName) -> FilterName {
+    ROTO_FILTER_NAMES.with(|filter_names| {
+        let mut filter_names = filter_names.borrow_mut();
+        let filter_names = filter_names.as_mut().unwrap();
+        filter_names.insert(filter_name.clone());
+        filter_name
+    })
 }
 
 //------------ Tests ---------------------------------------------------------
@@ -1421,6 +1591,22 @@ mod tests {
     }
 
     #[test]
+    fn config_without_target_should_fail() {
+        // given a config without any targets
+        let toml = r#"
+        http_listen = []
+        "#;
+        let config_file = mk_config_from_toml(toml);
+
+        // when loaded into the manager
+        let mut manager = init_manager();
+        let res = Config::from_config_file(config_file, &mut manager);
+
+        // then it should fail
+        assert!(res.is_err());
+    }
+
+    #[test]
     fn config_with_unresolvable_links_should_fail() {
         // given a config with only a single target with a link to a missing unit
         let toml = r#"
@@ -1434,7 +1620,31 @@ mod tests {
 
         // when loaded into the manager
         let mut manager = init_manager();
-        let res = manager.load(config_file);
+        let res = Config::from_config_file(config_file, &mut manager);
+
+        // then it should fail
+        assert!(res.is_err());
+    }
+
+    #[test]
+    fn config_with_unresolvable_filter_names_should_fail() {
+        // given a config with only unit that takes a filter_name referring to a roto filter that has not been loaded
+        let toml = r#"
+        http_listen = []
+
+        [units.filter]
+        type = "filter"
+        filter_name = "i-dont-exist"
+
+        [targets.null]
+        type = "null-out"
+        source = "missing-unit"
+        "#;
+        let config_file = mk_config_from_toml(toml);
+
+        // when loaded into the manager
+        let mut manager = init_manager();
+        let res = Config::from_config_file(config_file, &mut manager);
 
         // then it should fail
         assert!(res.is_err());
@@ -1457,14 +1667,14 @@ mod tests {
 
         // when loaded into the manager
         let mut manager = init_manager();
-        let res = manager.load(config_file);
+        let res = Config::from_config_file(config_file, &mut manager);
 
         // then it should pass
         assert!(res.is_ok());
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn fully_resolvable_config_should_spawn() -> Result<(), Failed> {
+    async fn fully_resolvable_config_should_spawn() -> Result<(), Terminate> {
         // given a config with only a single target with a link to a missing unit
         let toml = r#"
         http_listen = []
@@ -1481,7 +1691,7 @@ mod tests {
 
         // when loaded into the manager and spawned
         let mut manager = init_manager();
-        let config = manager.load(config_file)?;
+        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
         spawn(&mut manager, config);
 
         // then it should spawn the unit and target
@@ -1493,7 +1703,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn config_reload_should_trigger_reconfigure() -> Result<(), Failed> {
+    async fn config_reload_should_trigger_reconfigure() -> Result<(), Terminate> {
         // given a config with only a single target with a link to a missing unit
         let toml = r#"
         http_listen = []
@@ -1510,7 +1720,7 @@ mod tests {
 
         // when loaded into the manager and spawned
         let mut manager = init_manager();
-        let config = manager.load(config_file.clone())?;
+        let (_source, config) = Config::from_config_file(config_file.clone(), &mut manager)?;
         spawn(&mut manager, config);
 
         // then it should spawn the unit and target
@@ -1520,7 +1730,7 @@ mod tests {
         assert_log_contains(&log, "null", SpawnAction::SpawnTarget);
 
         // and when re-loaded
-        let config = manager.load(config_file)?;
+        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
         spawn(&mut manager, config);
 
         // it should cause reconfiguration
@@ -1532,7 +1742,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn unused_unit_should_not_be_spawned() -> Result<(), Failed> {
+    async fn unused_unit_should_not_be_spawned() -> Result<(), Terminate> {
         // given a config with only a single target with a link to a missing unit
         let toml = r#"
         http_listen = []
@@ -1553,7 +1763,7 @@ mod tests {
 
         // when loaded into the manager and spawned
         let mut manager = init_manager();
-        let config = manager.load(config_file)?;
+        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
         spawn(&mut manager, config);
 
         // then it should spawn the unit and target
@@ -1565,8 +1775,8 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn added_target_should_be_spawned() -> Result<(), Failed> {
-        // given a config with only a single target with a link to a missing unit
+    async fn added_target_should_be_spawned() -> Result<(), Terminate> {
+        // given a config with only a single target with a link to a single unit
         let toml = r#"
         http_listen = []
 
@@ -1582,7 +1792,7 @@ mod tests {
 
         // when loaded into the manager and spawned
         let mut manager = init_manager();
-        let config = manager.load(config_file)?;
+        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
         spawn(&mut manager, config);
 
         // then it should spawn the unit and target
@@ -1610,7 +1820,7 @@ mod tests {
         let config_file = mk_config_from_toml(toml);
 
         // when loaded into the manager and spawned
-        let config = manager.load(config_file)?;
+        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
         spawn(&mut manager, config);
 
         // then it should spawn the added target
@@ -1623,7 +1833,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn removed_target_should_be_terminated() -> Result<(), Failed> {
+    async fn removed_target_should_be_terminated() -> Result<(), Terminate> {
         // given a config with only a single target with a link to a missing unit
         let toml = r#"
         http_listen = []
@@ -1644,7 +1854,7 @@ mod tests {
 
         // when loaded into the manager and spawned
         let mut manager = init_manager();
-        let config = manager.load(config_file)?;
+        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
         spawn(&mut manager, config);
 
         // then it should spawn the unit and target
@@ -1673,7 +1883,7 @@ mod tests {
         let config_file = mk_config_from_toml(toml);
 
         // when loaded into the manager and spawned
-        let config = manager.load(config_file)?;
+        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
         spawn(&mut manager, config);
 
         // then it should terminate the removed target
@@ -1691,7 +1901,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn modified_settings_are_correctly_announced() -> Result<(), Failed> {
+    async fn modified_settings_are_correctly_announced() -> Result<(), Terminate> {
         // given a config with only a single target with a link to a missing unit
         let toml = r#"
         http_listen = []
@@ -1708,7 +1918,7 @@ mod tests {
 
         // when loaded into the manager and spawned
         let mut manager = init_manager();
-        let config = manager.load(config_file)?;
+        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
         spawn(&mut manager, config);
 
         // then it should spawn the unit and target
@@ -1732,7 +1942,7 @@ mod tests {
         let config_file = mk_config_from_toml(toml);
 
         // when loaded into the manager and spawned
-        let config = manager.load(config_file)?;
+        let (_source, config) = Config::from_config_file(config_file, &mut manager)?;
         spawn(&mut manager, config);
 
         // then it should terminate the removed target
@@ -1756,7 +1966,7 @@ mod tests {
         let coordinator = Coordinator::new(0);
         let mut alarm_fired = false;
         coordinator.wait(|_, _| alarm_fired = true).await;
-        assert_eq!(alarm_fired, false);
+        assert!(!alarm_fired);
     }
 
     #[tokio::test]
@@ -1787,10 +1997,10 @@ mod tests {
         let mut alarm_fired = false;
         let wait_point = coordinator.clone().track(SOME_COMPONENT.to_string());
         let join_handle = tokio::task::spawn(wait_point.running());
-        assert_eq!(join_handle.is_finished(), false);
+        assert!(!join_handle.is_finished());
         coordinator.wait(|_, _| alarm_fired = true).await;
         join_handle.await.unwrap();
-        assert_eq!(alarm_fired, false);
+        assert!(!alarm_fired);
     }
 
     #[tokio::test(start_paused = true)]
@@ -1801,12 +2011,12 @@ mod tests {
         let wait_point2 = coordinator.clone().track(OTHER_COMPONENT.to_string());
         let join_handle1 = tokio::task::spawn(wait_point1.running());
         let join_handle2 = tokio::task::spawn(wait_point2.running());
-        assert_eq!(join_handle1.is_finished(), false);
-        assert_eq!(join_handle2.is_finished(), false);
+        assert!(!join_handle1.is_finished());
+        assert!(!join_handle2.is_finished());
         coordinator.wait(|_, _| alarm_fired = true).await;
         join_handle1.await.unwrap();
         join_handle2.await.unwrap();
-        assert_eq!(alarm_fired, false);
+        assert!(!alarm_fired);
     }
 
     #[tokio::test(start_paused = true)]
@@ -1881,7 +2091,11 @@ mod tests {
     // --- Test helpers ------------------------------------------------------
 
     fn mk_config_from_toml(toml: &str) -> ConfigFile {
-        ConfigFile::new(toml.as_bytes().to_vec(), Source::default())
+        ConfigFile::new(
+            toml.as_bytes().to_vec(),
+            Source::default(),
+            Default::default(),
+        )
     }
 
     type UnitOrTargetName = String;
@@ -2066,6 +2280,7 @@ mod tests {
 
     fn init_manager() -> Manager {
         GATES.with(|gates| gates.replace(Some(Default::default())));
+        ROTO_FILTER_NAMES.with(|filter_names| filter_names.replace(Some(Default::default())));
         Manager::new()
     }
 }

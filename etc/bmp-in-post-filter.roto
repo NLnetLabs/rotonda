@@ -1,0 +1,9 @@
+filter bmp-in-post-filter {
+    define {
+        rx msg: Route;
+    }
+
+    apply {
+        accept;
+    }
+}

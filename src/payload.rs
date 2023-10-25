@@ -1,4 +1,4 @@
-use roto::types::typevalue::TypeValue;
+use roto::{types::typevalue::TypeValue, vm::OutputStreamQueue};
 use rotonda_store::QueryResult;
 
 use smallvec::{smallvec, SmallVec};
@@ -51,7 +51,7 @@ impl SourceId {
     pub fn name(&self) -> Option<&str> {
         match self {
             SourceId::SocketAddr(_) => None,
-            SourceId::Named(name) => Some(&name),
+            SourceId::Named(name) => Some(name),
         }
     }
 }
@@ -100,9 +100,14 @@ pub enum UpstreamStatus {
 //------------ Payload -------------------------------------------------------
 
 pub trait Filterable {
-    fn filter<E, T>(self, filter_fn: T) -> Result<SmallVec<[Payload; 8]>, FilterError>
+    fn filter<E, T, U>(
+        self,
+        filter_fn: T,
+        filtered_fn: U,
+    ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
         T: Fn(TypeValue) -> FilterResult<E> + Clone,
+        U: Fn(SourceId) + Clone,
         FilterError: From<E>;
 }
 
@@ -156,9 +161,14 @@ impl Payload {
 }
 
 impl Filterable for Payload {
-    fn filter<E, T>(self, filter_fn: T) -> Result<SmallVec<[Payload; 8]>, FilterError>
+    fn filter<E, T, U>(
+        self,
+        filter_fn: T,
+        filtered_fn: U,
+    ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
         T: Fn(TypeValue) -> FilterResult<E> + Clone,
+        U: Fn(SourceId) + Clone,
         FilterError: From<E>,
     {
         if let ControlFlow::Continue(filter_output) = filter_fn(self.value)? {
@@ -167,21 +177,27 @@ impl Filterable for Payload {
                 filter_output,
             ))
         } else {
+            filtered_fn(self.source_id);
             Ok(smallvec![])
         }
     }
 }
 
 impl Filterable for SmallVec<[Payload; 8]> {
-    fn filter<E, T>(self, filter_fn: T) -> Result<SmallVec<[Payload; 8]>, FilterError>
+    fn filter<E, T, U>(
+        self,
+        filter_fn: T,
+        filtered_fn: U,
+    ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
         T: Fn(TypeValue) -> FilterResult<E> + Clone,
+        U: Fn(SourceId) + Clone,
         FilterError: From<E>,
     {
         let mut out_payloads = smallvec![];
 
         for payload in self {
-            out_payloads.extend(payload.filter(filter_fn.clone())?);
+            out_payloads.extend(payload.filter(filter_fn.clone(), filtered_fn.clone())?);
         }
 
         Ok(out_payloads)
@@ -191,32 +207,36 @@ impl Filterable for SmallVec<[Payload; 8]> {
 impl Payload {
     pub fn from_filter_output(
         source_id: SourceId,
-        filter_output: FilterOutput<TypeValue>,
+        filter_output: FilterOutput,
     ) -> SmallVec<[Payload; 8]> {
         let mut out_payloads = smallvec![];
 
-        let out_value = match (filter_output.rx, filter_output.tx) {
-            (rx, None) => rx,
-            (_, Some(tx)) => tx,
-        };
-
         // Make a payload out of it
-        let new_payload = Payload::new(source_id.clone(), out_value);
+        let new_payload = Payload::new(source_id.clone(), filter_output.east);
 
         // Add the payload to the result
         out_payloads.push(new_payload);
 
         // Add output stream messages to the result
-        if !filter_output.output_stream_queue.is_empty() {
+        if !filter_output.south.is_empty() {
             out_payloads.extend(
                 filter_output
-                    .output_stream_queue
+                    .south
                     .into_iter()
                     .map(|osm| Payload::new(source_id.clone(), osm)),
             );
         }
 
         out_payloads
+    }
+
+    pub fn from_output_stream_queue(
+        source_id: SourceId,
+        osq: OutputStreamQueue,
+    ) -> SmallVec<[Payload; 8]> {
+        osq.into_iter()
+            .map(|osm| Payload::new(source_id.clone(), osm))
+            .collect()
     }
 }
 

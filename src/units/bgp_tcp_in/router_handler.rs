@@ -1,4 +1,7 @@
+use std::cell::RefCell;
 use std::collections::BTreeSet;
+use std::net::SocketAddr;
+use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
@@ -20,13 +23,16 @@ use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
 use rotonda_fsm::bgp::session::{
+    self,
     BgpConfig, // trait
     Command,
     DisconnectReason,
     Message,
-    Session as BgpSession,
+    NegotiatedConfig,
+    Session,
 };
 
+use crate::common::roto::{FilterOutput, RotoScripts, ThreadLocalVM};
 use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
 use crate::comms::{Gate, GateStatus, Terminated};
 use crate::payload::{Payload, SourceId, Update};
@@ -36,18 +42,55 @@ use crate::units::Unit;
 use super::peer_config::{CombinedConfig, ConfigExt};
 use super::unit::BgpTcpIn;
 
+#[async_trait::async_trait]
+trait BgpSession<C: BgpConfig + ConfigExt> {
+    fn config(&self) -> &C;
+
+    fn connected_addr(&self) -> Option<SocketAddr>;
+
+    fn negotiated(&self) -> Option<NegotiatedConfig>;
+
+    async fn tick(&mut self) -> Result<(), session::Error>;
+}
+
+#[async_trait::async_trait]
+impl BgpSession<CombinedConfig> for Session<CombinedConfig> {
+    fn config(&self) -> &CombinedConfig {
+        self.config()
+    }
+
+    fn connected_addr(&self) -> Option<SocketAddr> {
+        self.connected_addr()
+    }
+
+    fn negotiated(&self) -> Option<NegotiatedConfig> {
+        self.negotiated()
+    }
+
+    #[must_use]
+    #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
+    async fn tick(&mut self) -> Result<(), session::Error> {
+        self.tick().await
+    }
+}
+
 struct Processor {
+    roto_scripts: RotoScripts,
     gate: Gate,
     unit_cfg: BgpTcpIn,
     bgp_ltime: u64, // XXX or should this be on Unit level?
     tx: mpsc::Sender<Command>,
     status_reporter: Arc<BgpTcpInStatusReporter>,
-
     observed_prefixes: BTreeSet<Prefix>,
 }
 
 impl Processor {
+    thread_local!(
+        static VM: ThreadLocalVM = RefCell::new(None);
+    );
+
     fn new(
+        roto_scripts: RotoScripts,
         gate: Gate,
         unit_cfg: BgpTcpIn,
         //rx: mpsc::Receiver<Message>,
@@ -55,6 +98,7 @@ impl Processor {
         status_reporter: Arc<BgpTcpInStatusReporter>,
     ) -> Self {
         Processor {
+            roto_scripts,
             gate,
             unit_cfg,
             bgp_ltime: 0,
@@ -64,12 +108,31 @@ impl Processor {
         }
     }
 
-    async fn process<C: BgpConfig + ConfigExt>(
+    #[cfg(test)]
+    fn mock(unit_cfg: BgpTcpIn) -> (Self, crate::comms::GateAgent) {
+        let (gate, gate_agent) = Gate::new(0);
+
+        let (cmds_tx, _) = mpsc::channel(16);
+
+        let processor = Self {
+            roto_scripts: Default::default(),
+            gate,
+            unit_cfg,
+            bgp_ltime: 0,
+            tx: cmds_tx,
+            status_reporter: Default::default(),
+            observed_prefixes: BTreeSet::new(),
+        };
+
+        (processor, gate_agent)
+    }
+
+    async fn process<C: BgpConfig + ConfigExt, T: BgpSession<C>>(
         &mut self,
-        mut session: BgpSession<C>,
+        mut session: T,
         mut rx_sess: mpsc::Receiver<Message>,
         live_sessions: Arc<Mutex<super::unit::LiveSessions>>,
-    ) -> (BgpSession<C>, mpsc::Receiver<Message>) {
+    ) -> (T, mpsc::Receiver<Message>) {
         let peer_addr_cfg = session.config().remote_prefix_or_exact();
 
         let mut rejected = false;
@@ -181,11 +244,31 @@ impl Processor {
                             // established session, so not having a
                             // NegotiatedConfig should never happen.
                             if let Some(_negotiated) = session.negotiated() {
-                                self.process_update(
-                                    pdu,
-                                    //negotiated.remote_addr(),
-                                    //negotiated.remote_asn()
-                                ).await;
+                                if let Ok(ControlFlow::Continue(FilterOutput { south, east })) = Self::VM.with(|vm| {
+                                    let delta_id = (RotondaId(0), 0); // TODO
+                                    let roto_update_msg = roto::types::builtin::UpdateMessage(pdu);
+                                    let msg = BgpUpdateMessage::new(delta_id, roto_update_msg);
+                                    let msg = Arc::new(msg);
+                                    let value: TypeValue = TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(msg));
+                                    self.roto_scripts.exec(vm, &self.unit_cfg.filter_name, value)
+                                }) {
+                                    if !south.is_empty() {
+                                        let source_id = SourceId::from("TODO");
+                                        let update = Payload::from_output_stream_queue(source_id, south).into();
+                                        self.gate.update_data(update).await;
+                                    }
+                                    if let TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(pdu)) = east {
+                                        if let Some(pdu) = Arc::into_inner(pdu) {
+                                            let pdu = pdu.raw_message().0.clone(); // Bytes is cheap to clone
+                                            let update = self.process_update(
+                                                pdu,
+                                                //negotiated.remote_addr(),
+                                                //negotiated.remote_asn()
+                                            ).await;
+                                            self.gate.update_data(update).await;
+                                        }
+                                    }
+                                }
                             } else {
                                 error!("unexpected state: no NegotiatedConfig for session");
                             }
@@ -296,8 +379,22 @@ impl Processor {
         pdu: UpdatePdu<Bytes>,
         //peer_ip: IpAddr,
         //peer_asn: Asn
-    ) {
-        //Self::print_pcap(pdu.as_ref());
+    ) -> Update {
+        fn mk_payload(
+            prefix: Prefix,
+            msg: &Arc<BgpUpdateMessage>,
+            source_id: &SourceId,
+            route_status: RouteStatus,
+        ) -> Payload {
+            let rrwd = RawRouteWithDeltas::new_with_message_ref(
+                msg.message_id(),
+                RotoPrefix::new(prefix),
+                msg,
+                route_status,
+            );
+            let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
+            Payload::new(source_id.clone(), typval)
+        }
 
         // When sending both v4 and v6 nlri using exabgp, exa sends a v4
         // NextHop in a v6 MP_REACH_NLRI, which is invalid.
@@ -326,6 +423,7 @@ impl Processor {
         // rib. Perhaps this can serve when further developing the part
         // where such an invalid PDU results in a specific NOTIFICATION that
         // needs to go out. Also, check whether 7606 comes into play here.
+        let mut payloads = SmallVec::new();
 
         let source_id: SourceId = "unknown".into(); // TODO
         let rot_id = RotondaId(0_usize);
@@ -334,61 +432,46 @@ impl Processor {
             (rot_id, ltime),
             UpdateMessage(pdu.clone()),
         ));
-        for chunk in pdu.nlris().iter().collect::<Vec<_>>().chunks(8) {
-            let mut bulk = SmallVec::new();
-            for nlri in chunk {
-                let prefix = if let Nlri::Unicast(b) = nlri {
-                    b.prefix()
-                } else {
-                    debug!("non unicast NLRI, skipping");
-                    continue;
-                };
 
-                self.observed_prefixes.insert(prefix);
+        payloads.extend(
+            pdu.nlris()
+                .iter()
+                .filter_map(|nlri| match nlri {
+                    Nlri::Unicast(v) => Some(v.prefix()),
+                    _ => {
+                        debug!("non-unicast NLRI, skipping");
+                        None
+                    }
+                })
+                .inspect(|prefix| {
+                    self.observed_prefixes.insert(*prefix);
+                })
+                .map(|prefix| mk_payload(prefix, &msg, &source_id, RouteStatus::InConvergence)),
+        );
 
-                let rrwd = RawRouteWithDeltas::new_with_message_ref(
-                    (rot_id, ltime),
-                    RotoPrefix::new(prefix),
-                    &msg,
-                    RouteStatus::InConvergence,
-                );
-                let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
-                let payload = Payload::new(source_id.clone(), typval);
-                //self.gate.update_data(Update::Single(payload)).await;
-                bulk.push(payload);
-            }
-            self.gate.update_data(Update::Bulk(bulk.into())).await;
-        }
+        payloads.extend(
+            pdu.nlris()
+                .iter()
+                .filter_map(|nlri| match nlri {
+                    Nlri::Unicast(v) => Some(v.prefix()),
+                    _ => {
+                        debug!("non-unicast withdrawal, skipping");
+                        None
+                    }
+                })
+                .inspect(|prefix| {
+                    self.observed_prefixes.remove(prefix);
+                })
+                .map(|prefix| mk_payload(prefix, &msg, &source_id, RouteStatus::Withdrawn)),
+        );
 
-        for chunk in pdu.withdrawals().iter().collect::<Vec<_>>().chunks(8) {
-            let mut bulk = SmallVec::new();
-            for withdrawal in chunk {
-                let prefix = if let Nlri::Unicast(b) = withdrawal {
-                    b.prefix()
-                } else {
-                    debug!("non unicast Withdrawal, skipping");
-                    continue;
-                };
-
-                self.observed_prefixes.remove(&prefix);
-
-                let rrwd = RawRouteWithDeltas::new_with_message_ref(
-                    (rot_id, ltime),
-                    RotoPrefix::new(prefix),
-                    &msg,
-                    RouteStatus::Withdrawn,
-                );
-                let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
-                let payload = Payload::new(source_id.clone(), typval);
-                //self.gate.update_data(Update::Single(payload)).await;
-                bulk.push(payload);
-            }
-            self.gate.update_data(Update::Bulk(bulk.into())).await;
-        }
+        payloads.into()
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn handle_connection(
+    roto_scripts: RotoScripts,
     gate: Gate,
     unit_config: BgpTcpIn,
     tcp_stream: TcpStream,
@@ -428,7 +511,7 @@ pub async fn handle_connection(
         delay_open
     );
 
-    let mut session = BgpSession::new(candidate_config, tcp_stream, sess_tx, cmds_rx);
+    let mut session = Session::new(candidate_config, tcp_stream, sess_tx, cmds_rx);
 
     if delay_open {
         session.enable_delay_open();
@@ -436,6 +519,146 @@ pub async fn handle_connection(
     session.manual_start().await;
     session.connection_established().await;
 
-    let mut p = Processor::new(gate, unit_config, cmds_tx, status_reporter);
+    let mut p = Processor::new(roto_scripts, gate, unit_config, cmds_tx, status_reporter);
     p.process(session, sess_rx, live_sessions).await;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        collections::HashMap,
+        net::SocketAddr,
+        sync::{Arc, Mutex},
+    };
+
+    use rotonda_fsm::bgp::session::{self, Message, NegotiatedConfig};
+    use routecore::asn::Asn;
+    use tokio::{sync::mpsc, task::JoinHandle};
+
+    use crate::{
+        common::status_reporter::AnyStatusReporter,
+        comms::GateAgent,
+        tests::util::internal::{get_testable_metrics_snapshot, enable_logging},
+        units::bgp_tcp_in::{
+            peer_config::{CombinedConfig, PeerConfig, PrefixOrExact},
+            router_handler::Processor,
+            status_reporter::BgpTcpInStatusReporter,
+            unit::BgpTcpIn,
+        },
+    };
+
+    use super::BgpSession;
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn processor_should_abort_on_unit_termination() {
+        enable_logging("trace");
+        let (join_handle, status_reporter, gate_agent, sess_tx) = setup_test();
+
+        gate_agent.terminate().await;
+
+        // We should be able to just wait for the processor to abort but it
+        // doesn't... because the mock session doesn't respond to the
+        // Disconnect command that gets sent to which it would in turn send
+        // a ConnectionLost message. However we still want to test unit
+        // termination because it should also increment the disconnect metric
+        // while sending only the ConnectionLost message does not.
+        // join_handle.await.unwrap();
+
+        // Note: the disconnect metric is only incremented if both
+        // session.negotiated() and session.connected_addr() return Some.
+
+        // Wait for the termination command to be handled:
+        let mut count = 0;
+        while count < 1 {
+            let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
+            count = metrics.with_name::<usize>("bgp_tcp_in_disconnect_count");
+        }
+
+        // Emulate the real session behaviour of sending a ConnectionLost
+        // message.
+        let msg = Message::ConnectionLost("10.0.0.2:12345".parse().unwrap());
+        let _ = sess_tx.send(msg).await;
+
+        // Now it's safe to wait for the processor to abort.
+        join_handle.await.unwrap();
+
+        let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
+        assert_eq!(
+            metrics.with_name::<usize>("bgp_tcp_in_connection_lost_count"),
+            1
+        );
+        assert_eq!(metrics.with_name::<usize>("bgp_tcp_in_disconnect_count"), 1);
+    }
+
+    #[tokio::test]
+    async fn processor_should_abort_on_connection_lost() {
+        let (join_handle, status_reporter, _gate_agent, sess_tx) = setup_test();
+
+        let msg = Message::ConnectionLost("10.0.0.2:12345".parse().unwrap());
+        let _ = sess_tx.send(msg).await;
+
+        join_handle.await.unwrap();
+
+        let metrics = get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
+        assert_eq!(
+            metrics.with_name::<usize>("bgp_tcp_in_connection_lost_count"),
+            1
+        );
+    }
+
+    //-------- Test helpers --------------------------------------------------
+
+    fn setup_test() -> (
+        JoinHandle<(MockBgpSession, mpsc::Receiver<Message>)>,
+        Arc<BgpTcpInStatusReporter>,
+        GateAgent,
+        mpsc::Sender<Message>,
+    ) {
+        let unit_settings = BgpTcpIn::mock("dummy-listen-address", Asn::from_u32(12345));
+        let peer_config = PeerConfig::mock();
+        let remote_net = PrefixOrExact::Exact("10.0.0.1".parse().unwrap());
+        let config = CombinedConfig::new(unit_settings.clone(), peer_config, remote_net);
+        let session = MockBgpSession(config);
+        let (mut p, gate_agent) = Processor::mock(unit_settings);
+        let (sess_tx, sess_rx) = mpsc::channel::<Message>(100);
+        let live_sessions = Arc::new(Mutex::new(HashMap::new()));
+        let status_reporter = p.status_reporter.clone();
+
+        let join_handle = crate::tokio::spawn("mock_bgp_tcp_in_processor", async move {
+            p.process(session, sess_rx, live_sessions).await
+        });
+
+        (join_handle, status_reporter, gate_agent, sess_tx)
+    }
+
+    struct MockBgpSession(CombinedConfig);
+
+    #[async_trait::async_trait]
+    impl BgpSession<CombinedConfig> for MockBgpSession {
+        fn config(&self) -> &CombinedConfig {
+            &self.0
+        }
+
+        fn connected_addr(&self) -> Option<SocketAddr> {
+            Some("1.2.3.4:12345".parse().unwrap())
+        }
+
+        fn negotiated(&self) -> Option<NegotiatedConfig> {
+            // Scary! We have no way of constructing the NegoatiatedConfig
+            // type as the fields are private and there is no constructor fn.
+            // We don't care what values it has for the purpose of these tests
+            // so use transmute to create a dummy negotiated config.
+            unsafe {
+                let zeroed = [0u8; 28];
+                let created: NegotiatedConfig = std::mem::transmute(zeroed);
+                Some(created)
+            }
+        }
+
+        async fn tick(&mut self) -> Result<(), session::Error> {
+            // Don't tick too fast otherwise process() spends all its time
+            // handling ticks and won't do anything else.
+            Ok(tokio::time::sleep(std::time::Duration::from_millis(100)).await)
+        }
+    }
 }

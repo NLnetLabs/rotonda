@@ -1,10 +1,11 @@
-use std::sync::{atomic::Ordering, Arc, RwLock};
+use std::sync::{atomic::SeqCst, Arc, RwLock};
 
 use chrono::{DateTime, Utc};
-use hyper::{Body, Response, StatusCode};
+use hyper::{Body, Response};
 use indoc::formatdoc;
 
 use crate::{
+    http,
     payload::{RouterId, SourceId},
     units::bmp_in::{
         metrics::{BmpInMetrics, RouterMetrics},
@@ -17,17 +18,21 @@ use crate::{
 
 use super::RouterInfoApi;
 
+/// A Display formatted Per Peer Header
+pub type PeerKey = String;
+
 pub enum Focus {
     None,
 
-    Flags(String), // peer key
+    Flags(PeerKey),
 
-    Prefixes(String), // peer key
+    Prefixes(PeerKey),
 }
 
 impl RouterInfoApi {
     #[allow(clippy::too_many_arguments)]
     pub fn build_response(
+        http_resources: http::Resources,
         base_http_path: String,
         source_id: SourceId,
         router_id: Arc<RouterId>,
@@ -41,37 +46,31 @@ impl RouterInfoApi {
         connected_at: &DateTime<Utc>,
         last_message_at: &Arc<RwLock<DateTime<Utc>>>,
     ) -> Response<Body> {
-        if let Some(router_conn_metrics) = conn_metrics.router_metrics(router_id.clone()) {
-            let mut response_body = Self::build_response_header();
+        let router_conn_metrics = conn_metrics.router_metrics(router_id.clone());
+        let mut response_body = Self::build_response_header();
 
-            response_body.push_str(&Self::build_response_body(
-                base_http_path,
-                source_id,
-                router_id,
-                router_conn_metrics,
-                sys_name,
-                sys_desc,
-                sys_extra,
-                peer_states,
-                focus,
-                bmp_metrics,
-                connected_at,
-                last_message_at,
-            ));
+        response_body.push_str(&Self::build_response_body(
+            http_resources,
+            base_http_path,
+            source_id,
+            router_id,
+            router_conn_metrics,
+            sys_name,
+            sys_desc,
+            sys_extra,
+            peer_states,
+            focus,
+            bmp_metrics,
+            connected_at,
+            last_message_at,
+        ));
 
-            Self::build_response_footer(&mut response_body);
+        Self::build_response_footer(&mut response_body);
 
-            Response::builder()
-                .header("Content-Type", "text/html")
-                .body(Body::from(response_body))
-                .unwrap()
-        } else {
-            Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .header("Content-Type", "text/html")
-                .body("Not Found".into())
-                .unwrap()
-        }
+        Response::builder()
+            .header("Content-Type", "text/html")
+            .body(Body::from(response_body))
+            .unwrap()
     }
 
     fn build_response_header() -> String {
@@ -99,6 +98,7 @@ impl RouterInfoApi {
 
     #[allow(clippy::too_many_arguments)]
     pub fn build_response_body(
+        http_resources: http::Resources,
         base_http_path: String,
         source_id: SourceId,
         router_id: Arc<RouterId>,
@@ -117,38 +117,28 @@ impl RouterInfoApi {
         let last_message_at = last_message_at.read().unwrap().to_rfc3339();
         let router_bmp_metrics = bmp_metrics.router_metrics(router_id.clone());
 
-        let state = router_bmp_metrics
-            .bmp_state_machine_state
-            .load(Ordering::SeqCst);
+        let state = router_bmp_metrics.bmp_state_machine_state.load(SeqCst);
 
-        let num_connects: usize = router_conn_metrics.connection_count.load(Ordering::SeqCst);
-        let num_msg_issues: usize = router_conn_metrics
-            .num_invalid_bmp_messages
-            .load(Ordering::SeqCst);
+        let num_msg_issues: usize = router_conn_metrics.num_invalid_bmp_messages.load(SeqCst);
         let num_retried_bgp_updates_known_peer: usize = router_bmp_metrics
             .num_bgp_updates_with_recoverable_parsing_failures_for_known_peers
-            .load(Ordering::SeqCst);
+            .load(SeqCst);
         let num_unusable_bgp_updates_known_peer: usize = router_bmp_metrics
             .num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers
-            .load(Ordering::SeqCst);
+            .load(SeqCst);
         let num_retried_bgp_updates_unknown_peer: usize = router_bmp_metrics
             .num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers
-            .load(Ordering::SeqCst);
+            .load(SeqCst);
         let num_unusable_bgp_updates_unknown_peer: usize = router_bmp_metrics
             .num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers
-            .load(Ordering::SeqCst);
-        let num_prefixes: usize = router_bmp_metrics
-            .num_stored_prefixes
-            .load(Ordering::SeqCst);
-        let num_announce: usize = router_bmp_metrics.num_announcements.load(Ordering::SeqCst);
-        let num_withdraw: usize = router_bmp_metrics.num_withdrawals.load(Ordering::SeqCst);
-        let num_peers_up: usize = router_bmp_metrics.num_peers_up.load(Ordering::SeqCst);
-        let num_peers_up_eor_capable: usize = router_bmp_metrics
-            .num_peers_up_eor_capable
-            .load(Ordering::SeqCst);
-        let num_peers_up_dumping: usize = router_bmp_metrics
-            .num_peers_up_dumping
-            .load(Ordering::SeqCst);
+            .load(SeqCst);
+        let num_prefixes: usize = router_bmp_metrics.num_stored_prefixes.load(SeqCst);
+        let num_announce: usize = router_bmp_metrics.num_announcements.load(SeqCst);
+        let num_withdraw: usize = router_bmp_metrics.num_withdrawals.load(SeqCst);
+        let num_peers_up: usize = router_bmp_metrics.num_peers_up.load(SeqCst);
+        let num_peers_up_eor_capable: usize =
+            router_bmp_metrics.num_peers_up_eor_capable.load(SeqCst);
+        let num_peers_up_dumping: usize = router_bmp_metrics.num_peers_up_dumping.load(SeqCst);
 
         use std::fmt::Write;
 
@@ -187,7 +177,7 @@ impl RouterInfoApi {
             for pph in peer_states.get_peers() {
                 let peer_key = format!("{}", pph);
                 let num_prefixes = peer_states
-                    .get_announced_prefixes(&pph)
+                    .get_announced_prefixes(pph)
                     .map_or(0, |iter| iter.count());
                 let prefixes_link = if num_prefixes > 0 {
                     format!(
@@ -232,23 +222,27 @@ impl RouterInfoApi {
                     #[rustfmt::skip]
                     Focus::Prefixes(focus_key) => {
                         if peer_key.as_str() == focus_key {
-                            if let Some(prefixes) = peer_states.get_announced_prefixes(&pph) {
+                            if let Some(prefixes) = peer_states.get_announced_prefixes(pph) {
                                 writeln!(peer_report, "<tr><td colspan=6><pre>").unwrap();
                                 writeln!(peer_report, "    Announced prefixes: [<a href=\"{}\">close</a>]", base_http_path).unwrap();
                                 for prefix in prefixes {
-                                    // TODO: Don't hard-code the RIB unit HTTP endpoint here as it is configurable!
-                                    writeln!(peer_report, "        <a href=\"/prefixes/{}\">{}</a>", prefix, prefix).unwrap();
+                                    write!(peer_report, "        {}: ", prefix).unwrap();
+                                    for resource in http_resources.resources_for_component_type("rib") {
+                                        write!(peer_report, "<a href=\"{}{}\">{}</a> ", resource.rel_base_url, prefix, resource.component_name).unwrap();
+                                    }
+                                    writeln!(peer_report, "").unwrap();
                                 }
                                 writeln!(peer_report, "</pre></td></tr>").unwrap();
                             }
                         }
-                    }
+                    },
                 }
             }
 
             writeln!(peer_report, "</table>").unwrap();
         }
 
+        // TODO: Add back in the `Connects: {num_connects}` counter.
         let response_body = formatdoc!(
             r#"
             Router:
@@ -261,7 +255,6 @@ impl RouterInfoApi {
                 Connected at : {connected_at}
                 Last message : {last_message_at}
             Counters:
-                Connects     : {num_connects}
                 Problem Msgs : {num_msg_issues} issues (e.g. RFC violation, parsing retried/failed, etc)
                 BGP UPDATEs:
                     Soft Fail: {num_retried_bgp_updates_known_peer}/{num_retried_bgp_updates_unknown_peer} (known/unknown peer)

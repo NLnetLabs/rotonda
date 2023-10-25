@@ -18,11 +18,12 @@ MVP
 - ✅ single-threaded RIB implementation
 - ✅ lock-free, multi-threaded RIB implementation
 - ✅ client-specific runtime application with BMP ingress and RIBs
-- 🦀 `roto` filtering language
-- 🦀 BGP passive speaker
+- ✅ `roto` filtering language
+- ✅ BGP passive speaker
+- 🦀 daemonize
 - 🦀 ~~BGP limited active speaker~~ POSTPONED
 - 🦀 Documentation
-- 💤 Packaging
+- 🦀 Packaging
 
 NEXT RELEASES
 
@@ -53,7 +54,7 @@ MVP
 - ✅ create experimental compiler
 - ✅ create experimental virtual machine
 - ✅ implement all methods on `roto` types
-- 🦀 Integrate into `rotonda`
+- ✅ Integrate into `rotonda`
 - 💤 create user-friendly error messaging
 - 🦀 extensive stress testing
 - 🦀 create high-level overview documentation
@@ -61,6 +62,7 @@ MVP
 NEXT RELEASES
 
 - 🦀 Simple passive data sources use cases
+- 💤 create namespaces / modules system
 - 💤 create user-configurable graph DSL for units
 - 💤 create user-configurable query DSL
 - 💤 create dev documentation
@@ -75,11 +77,12 @@ MVP
 - ✅ BMP state machine
 - ✅ BGP state machine
 - ✅ BGP passive speaker (session management)
-- 🦀 BGP minimal active speaker
+- 🦀 ~BGP minimal active speaker~
 
 NEXT RELEASES
 
 - 💤 more BGP active speaker features
+
 
 ## `Routecore`
 
@@ -106,16 +109,19 @@ MVP
 - ✅ REST API setup
 - ✅ MQTT OutputConnector
 - ✅ BMP proxy
-- 🦀 integrate BGP passive listener (BGP EventSource)
-- 🦀 integrate BGP limited speaker (BGP EventEmitter)
+- ✅ integrate BGP passive listener (BGP EventSource)
+- 🦀 ~integrate BGP limited speaker (BGP EventEmitter)~
 - 🦀 installation and usage documentation 
 - 🦀 limited packaging
-- 🦀 file OutputConnector
 
 NEXT RELEASES
 
-- 💤 user-configurable RIBs experimental implementation
-- 💤 virtual RIB experimental implementation
+- 🦀 file OutputConnector
+- 🦀 user-configurable RIBs experimental implementation
+- 🦀 virtual RIB experimental implementation
+- 🦀 unit structure
+- 🦀 implement tracing
+- 💤 namespaces / modules support
 - 💤 create experimental global registry
 - 💤 Kafka connector
 - 💤 split-off EventSource, OutputConnector units
@@ -124,8 +130,6 @@ NEXT RELEASES
 - 💤 keep history window (serials)
 - 💤 snapshot/restore functionality
 - 💤 `systemd` integration
-- 💤 implement tracing
-- 💤 split `rotonda-runtime` into units
 - 💤 create experimental distributed units
 
 

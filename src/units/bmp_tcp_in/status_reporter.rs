@@ -46,6 +46,14 @@ impl BmpTcpInStatusReporter {
         sr_log!(debug: self, "Router id changed from '{}' to '{}'", old_router_id, new_router_id);
     }
 
+    pub fn receive_io_error<T: Display>(&self, router_id: Arc<RouterId>, err: T) {
+        sr_log!(warn: self, "Error while receiving BMP messages: {}", err);
+        self.metrics
+            .router_metrics(router_id)
+            .num_receive_io_errors
+            .fetch_add(1, SeqCst);
+    }
+
     pub fn bmp_message_received(&self, router_id: Arc<RouterId>) {
         sr_log!(trace: self, "BMP message received from router '{}'", router_id);
         self.metrics

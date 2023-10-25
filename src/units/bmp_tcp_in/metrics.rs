@@ -22,6 +22,7 @@ pub struct BmpTcpInMetrics {
 #[derive(Debug, Default)]
 pub struct RouterMetrics {
     pub connection_count: Arc<AtomicUsize>,
+    pub num_receive_io_errors: Arc<AtomicUsize>,
     pub num_bmp_messages_received: AtomicUsize,
     pub num_invalid_bmp_messages: AtomicUsize,
 }
@@ -54,6 +55,13 @@ impl BmpTcpInMetrics {
     const NUM_BMP_MESSAGES_RECEIVED_METRIC: Metric = Metric::new(
         "bmp_tcp_in_num_bmp_messages_received",
         "the number of BMP messages successfully received",
+        MetricType::Counter,
+        MetricUnit::Total,
+    );
+    // TEST STATUS: [/] makes sense? [/] passes tests?
+    const NUM_RECEIVE_IO_ERRORS_METRIC: Metric = Metric::new(
+        "bmp_tcp_in_num_receive_io_errors",
+        "the number of BMP messages that could not be received due to an I/O error",
         MetricType::Counter,
         MetricUnit::Total,
     );
@@ -120,6 +128,13 @@ impl metrics::Source for BmpTcpInMetrics {
                 router_id,
                 Self::CONNECTION_COUNT_METRIC,
                 metrics.connection_count.load(SeqCst),
+            );
+            append_per_router_metric(
+                unit_name,
+                target,
+                router_id,
+                Self::NUM_RECEIVE_IO_ERRORS_METRIC,
+                metrics.num_receive_io_errors.load(SeqCst),
             );
             append_per_router_metric(
                 unit_name,

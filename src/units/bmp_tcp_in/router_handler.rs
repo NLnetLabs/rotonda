@@ -110,7 +110,11 @@ impl RouterHandler {
             match stream.next().await {
                 Err(err) => {
                     // There was a problem reading from the BMP stream.
-                    // self.status_reporter.receive_io_error(router_addr, &err);
+                    let bmp_state_lock = self.state_machine.lock().await;
+
+                    // SAFETY: Each connection should always have a state machine.
+                    self.status_reporter
+                        .receive_io_error(bmp_state_lock.as_ref().unwrap().router_id(), &err);
 
                     if err.is_fatal() {
                         // Break to close our side of the connection and stop
@@ -180,7 +184,9 @@ impl RouterHandler {
     }
 
     async fn process_msg(&self, addr: SocketAddr, source_id: SourceId, msg: Message<Bytes>) {
-        let mut bmp_state_lock = self.state_machine.lock().await; // SAFETY: should never be poisoned
+        let mut bmp_state_lock = self.state_machine.lock().await;
+
+        // SAFETY: Each connection should always have a state machine.
         let bmp_state = bmp_state_lock.take().unwrap();
 
         // TODO: Update last_msg_at timestamp

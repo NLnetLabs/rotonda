@@ -75,11 +75,11 @@ test-image:
 #    target: 'x86_64'
 #    test-image: 'centos:9-Stream'
 #
-# 'mode' is not used by the package building workflow job, but is used by the package testing workflow job.
-# Ploutos will not include this key when using this matrix definition to generate package building matrix
-# permutations but will use it when generating package testing permutations.
-test-mode:
-  - 'fresh-install'
+## 'mode' is not used by the package building workflow job, but is used by the package testing workflow job.
+## Ploutos will not include this key when using this matrix definition to generate package building matrix
+## permutations but will use it when generating package testing permutations.
+#test-mode:   
+#  - 'fresh-install'
 #
 #
 ## Disable upgrade testing on Rocky Linux 9 and Debian Bookworm as we haven't published any packages for
@@ -88,6 +88,6 @@ test-exclude:
 #  - pkg: 'rotonda'
 #    image: 'rockylinux:9'
 #    mode: 'upgrade-from-published'
-#  - pkg: 'rotonda'
-#    image: 'debian:bookworm'
-#    mode: 'upgrade-from-published'
+  - pkg: 'rotonda'
+    image: 'debian:bookworm'
+    mode: 'upgrade-from-published'

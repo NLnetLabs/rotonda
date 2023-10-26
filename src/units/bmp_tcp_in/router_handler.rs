@@ -17,8 +17,8 @@ use tokio::{io::AsyncRead, net::TcpStream};
 use crate::common::roto::{
     FilterName, FilterOutput, RotoScripts, ThreadLocalVM,
 };
-use crate::tracing::{BoundTracer, Tracer};
 use crate::payload::SourceId;
+use crate::tracing::Tracer;
 use crate::{
     comms::{Gate, GateStatus},
     payload::{Payload, Update, UpstreamStatus},
@@ -279,8 +279,7 @@ impl RouterHandler {
             }
         }
 
-        let bound_tracer =
-            BoundTracer::bind(self.tracer.clone(), self.gate.id());
+        let bound_tracer = self.tracer.bind(self.gate.id());
 
         self.status_reporter
             .bmp_message_received(bmp_state.router_id());

@@ -7,9 +7,9 @@ use crate::{
         AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus,
         Terminated,
     },
-    tracing::{BoundTracer, Tracer},
     manager::{Component, WaitPoint},
     payload::{FilterError, Filterable, Update, UpstreamStatus},
+    tracing::Tracer,
     units::Unit,
 };
 use arc_swap::ArcSwap;
@@ -228,7 +228,7 @@ impl RotoFilterRunner {
         &self,
         payload: T,
     ) -> Result<(), FilterError> {
-        let tracer = BoundTracer::bind(self.tracer.clone(), self.gate.id());
+        let tracer = self.tracer.bind(self.gate.id());
 
         if let Some(filtered_update) = Self::VM
             .with(|vm| {

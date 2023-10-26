@@ -1,5 +1,5 @@
 /// Support for tracing messages through the Rotonda pipeline.
-/// 
+///
 /// Tracing is implemented as a limited pool of trace ID numbers for each of
 /// which a collection of arbitrary strings may be stored, each timestamped
 /// and associated with a component in the Rotonda pipeline. Collectively
@@ -8,24 +8,24 @@
 /// particular trace ID through the pipeline. The complete set of traces is
 /// owned by a [`Tracer`] of which there is a single "global" instance,
 /// accessed via the [`Component`] instance passed to each unit when created.
-/// 
+///
 /// Trace ID numbers are 8-bit unsigned values meaning we can store at most
 /// 256 traces at any given moment, and only need to pass an 8-bit value along
 /// the pipeline along with the messages being traced.
-/// 
+///
 /// To add the most tracing support with the least code changes tracing is
 /// associated either with a Gate, as most components have a gate or receive
 /// messages from a Gate, or with the component that owns the Gate.
-/// 
+///
 /// A limitation of this is that at present it is not possible to store
 /// messages that relate solely to a target, as they have no Gate except the
 /// Gate they receive messages from.
-/// 
+///
 /// By distinguishing between the Gate and the component that owns it we can
 /// enable visualizing of messages as relating to the component or to the
 /// "sections of pipe" down which messages flow out from the component to its
 /// downstream recipients.
-/// 
+///
 /// To avoid having to pass a [`Tracer`] and a [`Gate`] ID down to a deeper
 /// component so that it can record traces, the two can be bound together in
 /// a [`BoundTracer`] and only that need be passed down deeper into the
@@ -132,6 +132,13 @@ impl Trace {
 
 //----------- Tracer ---------------------------------------------------------
 
+/// A store of trace messages received one message per trace ID at a time.
+///
+/// The [`Tracer`] servers two audiences:
+///   1. Callers wishing to log trace messages by trace ID.
+///   2. The [`Manager`] when it queries the [`Tracer`] for informaiton about
+///      traces in order to serve a visual representation of them to the end
+///      user.
 pub struct Tracer {
     traces: Arc<Mutex<[Trace; 256]>>,
     next_tracing_id: Arc<AtomicU8>,
@@ -155,14 +162,24 @@ impl Tracer {
         }
     }
 
+    /// Create a [`BoundTracer`]` for this [`Tracer`] and a given [`Gate`] ID.
+    pub fn bind(self: &Arc<Self>, gate_id: Uuid) -> BoundTracer {
+        BoundTracer::new(self.clone(), gate_id)
+    }
+
+    /// Increment the next trace ID counter, returning the previous value.
+    ///
+    /// Starts at 0. Increments by 1 each time. Wraps around from 255 to 0.
     pub fn next_tracing_id(&self) -> u8 {
         self.next_tracing_id.fetch_add(1, SeqCst)
     }
 
+    /// Delete all trace messages for a given trace ID.
     pub fn reset_trace_id(&self, trace_id: u8) {
         self.traces.lock().unwrap()[trace_id as usize].clear();
     }
 
+    /// Record a message for a given trace ID that relates to a [`Gate`].
     pub fn note_gate_event(&self, trace_id: u8, gate_id: Uuid, msg: String) {
         self.traces.lock().unwrap()[trace_id as usize].append_msg(
             gate_id,
@@ -171,6 +188,8 @@ impl Tracer {
         );
     }
 
+    /// Record a message for a given trace ID that relates to the owner of a
+    /// [`Gate`].
     pub fn note_component_event(
         &self,
         trace_id: u8,
@@ -184,6 +203,7 @@ impl Tracer {
         );
     }
 
+    /// Fetch all messages for a given trace ID.
     pub fn get_trace(&self, trace_id: u8) -> Trace {
         self.traces.lock().unwrap()[trace_id as usize].clone()
     }
@@ -204,7 +224,7 @@ pub struct BoundTracer {
 }
 
 impl BoundTracer {
-    pub fn bind(tracer: Arc<Tracer>, gate_id: Uuid) -> Self {
+    pub fn new(tracer: Arc<Tracer>, gate_id: Uuid) -> Self {
         Self { tracer, gate_id }
     }
 

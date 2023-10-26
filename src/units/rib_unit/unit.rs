@@ -8,12 +8,12 @@ use crate::{
         AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus, Link,
         Terminated, TriggerData,
     },
-    tracing::{BoundTracer, Tracer},
     manager::{Component, WaitPoint},
     payload::{
         FilterError, Filterable, Payload, RouterId, Update, UpstreamStatus,
     },
     tokio::TokioTaskMetrics,
+    tracing::{BoundTracer, Tracer},
     units::Unit,
 };
 use arc_swap::ArcSwap;
@@ -704,8 +704,7 @@ impl RibUnitRunner {
             + Send
             + 'static,
     {
-        let bound_tracer =
-            BoundTracer::bind(self.tracer.clone(), self.gate.id());
+        let bound_tracer = self.tracer.bind(self.gate.id());
         if let Some(filtered_update) = Self::VM
             .with(|vm| {
                 payload
@@ -942,7 +941,7 @@ impl RibUnitRunner {
             HashBuildHasher::default(),
         );
 
-        let tracer = BoundTracer::bind(self.tracer.clone(), self.gate.id());
+        let tracer = BoundTracer::new(self.tracer.clone(), self.gate.id());
 
         for route in rib_value.iter() {
             let in_type_value: &TypeValue = route.deref();

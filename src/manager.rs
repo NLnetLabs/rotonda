@@ -8,7 +8,8 @@ use crate::comms::{
     DirectLink, Gate, GateAgent, GraphStatus, Link, DEF_UPDATE_QUEUE_LEN,
 };
 use crate::config::{Config, ConfigFile, Marked};
-use crate::tracing::{MsgRelation, Terminate, Trace, Tracer};
+use crate::log::Terminate;
+use crate::tracing::{MsgRelation, Trace, Tracer};
 use crate::targets::Target;
 use crate::units::Unit;
 use crate::{http, metrics};

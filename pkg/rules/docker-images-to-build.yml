@@ -20,17 +20,17 @@ include:
     shortname:   'amd64'
     mode:        'build'
 
-#  - platform:    'linux/arm/v6'
-#    shortname:   'armv6'
-#    crosstarget: 'arm-unknown-linux-musleabihf'
-#    mode:        'copy'
-#
-#  - platform:    'linux/arm/v7'
-#    shortname:   'armv7'
-#    crosstarget: 'armv7-unknown-linux-musleabihf'
-#    mode:        'copy'
-#
-#  - platform:    'linux/arm64'
-#    shortname:   'arm64'
-#    crosstarget: 'aarch64-unknown-linux-musl'
-#    mode:        'copy'
+  - platform:    'linux/arm/v6'
+    shortname:   'armv6'
+    crosstarget: 'arm-unknown-linux-musleabihf'
+    mode:        'copy'
+
+  - platform:    'linux/arm/v7'
+    shortname:   'armv7'
+    crosstarget: 'armv7-unknown-linux-musleabihf'
+    mode:        'copy'
+
+  - platform:    'linux/arm64'
+    shortname:   'arm64'
+    crosstarget: 'aarch64-unknown-linux-musl'
+    mode:        'copy'

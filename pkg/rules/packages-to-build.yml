@@ -4,17 +4,17 @@
 pkg:
   - 'rotonda'
 image:
-  #- "ubuntu:xenial"   # ubuntu/16.04
-  #- "ubuntu:bionic"   # ubuntu/18.04
+  - "ubuntu:xenial"   # ubuntu/16.04
+  - "ubuntu:bionic"   # ubuntu/18.04
   - "ubuntu:focal"    # ubuntu/20.04
   - "ubuntu:jammy"    # ubuntu/22.04
-  #- "debian:stretch"  # debian/9
-  #- "debian:buster"   # debian/10
+  - "debian:stretch"  # debian/9
+  - "debian:buster"   # debian/10
   - "debian:bullseye" # debian/11
   - "debian:bookworm" # debian/12
-  #- 'centos:7'
-  #- 'rockylinux:8'    # compatible with EOL centos:8
-  #- 'rockylinux:9'
+  - 'centos:7'
+  - 'rockylinux:8'    # compatible with EOL centos:8
+  - 'rockylinux:9'
 target:
   - 'x86_64'
 test-image:
@@ -25,69 +25,69 @@ test-image:
   # here, then 'included' entries will no longer overwrite each other because they alter a key that is present
   # in the original matrix. This is just how GitHub Actions matrix include rules work.
   - ""
-#include:
-#  - image: "centos:7"
-#    systemd_service_unit_file: pkg/common/rotonda-minimal.rotonda.service
-#
-#  # CentOS 8 became EOL and is in theory still usable as a build container as there is still a Docker image
-#  # available, and package installation can be done by switching the yum config in the container to use packages
-#  # from the CentOS 8 vault rather than the now offline actual CentOS 8 repository. However, due to experiencing
-#  # lots of timed out connections to the vault we will build the CentOS 8 compatible package in a Rocky Linux
-#  # container instead, as Rocky Linux is 100% compatible with CentOS 8. The server at packages.nlnetlabs.nl
-#  # however has a repo for CentOS 8, not Rocky Linux, and determines the repo to publish in based on the name of
-#  # the archive that we produce below which is in turn based by default on the container image used to build. We
-#  # therefore in this case need to specify that the O/S we are building for has a different name than the Docker
-#  # image we are building it in.
-#  - image: 'rockylinux:8'
-#    systemd_service_unit_file: pkg/common/rotonda.rotonda.service
-#
-#  - image: 'rockylinux:9'
-#    systemd_service_unit_file: pkg/common/rotonda.rotonda.service
-#
-#  # package for the Raspberry Pi 4b as an ARMv7 cross compiled variant of the Debian Bullseye upon which
-#  # Raspbian 11 is based.
-#  - pkg: 'rotonda'
-#    image: 'debian:bullseye'
-#    target: 'armv7-unknown-linux-musleabihf'
-#
-#  # package for the Raspberry Pi 1b as an ARMv6 cross compiled variant of the Debian Buster upon which
-#  # Raspbian 10 is based.
-#  - pkg: 'rotonda'
-#    image: 'debian:buster'
-#    target: 'arm-unknown-linux-musleabihf'
-#
-#  # package for the ROCK64 as an AARCH64 cross compiled variant of Debian Buster upon which Armbian 21 is based.
-#  - pkg: 'rotonda'
-#    image: 'debian:buster'
-#    target: 'aarch64-unknown-linux-musl'
-#
-#  # the include entries below will not cause additional packages to be built because they specify combinations
-#  # of matrix keys and values as already exist elsewhere in the matrix, but they will cause an additional tests
-#  # to be run in the package testing phase, which will install the package in an LXC container running the 
-#  # specified 'test-image' instead of the 'image' it was built in.
-#  - pkg: 'rotonda'
-#    image: 'rockylinux:9'
-#    target: 'x86_64'
-#    test-image: 'almalinux:9'
-#
-#  - pkg: 'rotonda'
-#    image: 'rockylinux:9'
-#    target: 'x86_64'
-#    test-image: 'centos:9-Stream'
-#
-## 'mode' is not used by the package building workflow job, but is used by the package testing workflow job.
-## Ploutos will not include this key when using this matrix definition to generate package building matrix
-## permutations but will use it when generating package testing permutations.
-#test-mode:   
-#  - 'fresh-install'
-#
-#
-## Disable upgrade testing on Rocky Linux 9 and Debian Bookworm as we haven't published any packages for
-## those O/S versions yet.
-test-exclude:
-#  - pkg: 'rotonda'
-#    image: 'rockylinux:9'
-#    mode: 'upgrade-from-published'
+include:
+  - image: "centos:7"
+    systemd_service_unit_file: pkg/common/rotonda-minimal.rotonda.service
+
+  # CentOS 8 became EOL and is in theory still usable as a build container as there is still a Docker image
+  # available, and package installation can be done by switching the yum config in the container to use packages
+  # from the CentOS 8 vault rather than the now offline actual CentOS 8 repository. However, due to experiencing
+  # lots of timed out connections to the vault we will build the CentOS 8 compatible package in a Rocky Linux
+  # container instead, as Rocky Linux is 100% compatible with CentOS 8. The server at packages.nlnetlabs.nl
+  # however has a repo for CentOS 8, not Rocky Linux, and determines the repo to publish in based on the name of
+  # the archive that we produce below which is in turn based by default on the container image used to build. We
+  # therefore in this case need to specify that the O/S we are building for has a different name than the Docker
+  # image we are building it in.
+  - image: 'rockylinux:8'
+    systemd_service_unit_file: pkg/common/rotonda.rotonda.service
+
+  - image: 'rockylinux:9'
+    systemd_service_unit_file: pkg/common/rotonda.rotonda.service
+
+  # package for the Raspberry Pi 4b as an ARMv7 cross compiled variant of the Debian Bullseye upon which
+  # Raspbian 11 is based.
   - pkg: 'rotonda'
+    image: 'debian:bullseye'
+    target: 'armv7-unknown-linux-musleabihf'
+
+  # package for the Raspberry Pi 1b as an ARMv6 cross compiled variant of the Debian Buster upon which
+  # Raspbian 10 is based.
+  - pkg: 'rotonda'
+    image: 'debian:buster'
+    target: 'arm-unknown-linux-musleabihf'
+
+  # package for the ROCK64 as an AARCH64 cross compiled variant of Debian Buster upon which Armbian 21 is based.
+  - pkg: 'rotonda'
+    image: 'debian:buster'
+    target: 'aarch64-unknown-linux-musl'
+
+  # the include entries below will not cause additional packages to be built because they specify combinations
+  # of matrix keys and values as already exist elsewhere in the matrix, but they will cause an additional tests
+  # to be run in the package testing phase, which will install the package in an LXC container running the 
+  # specified 'test-image' instead of the 'image' it was built in.
+  - pkg: 'rotonda'
+    image: 'rockylinux:9'
+    target: 'x86_64'
+    test-image: 'almalinux:9'
+
+  - pkg: 'rotonda'
+    image: 'rockylinux:9'
+    target: 'x86_64'
+    test-image: 'centos:9-Stream'
+
+# 'mode' is not used by the package building workflow job, but is used by the package testing workflow job.
+# Ploutos will not include this key when using this matrix definition to generate package building matrix
+# permutations but will use it when generating package testing permutations.
+test-mode:   
+  - 'fresh-install'
+
+
+# Disable upgrade testing on Rocky Linux 9 and Debian Bookworm as we haven't published any packages for
+# those O/S versions yet.
+test-exclude:
+  - pkg: 'routinator'
+    image: 'rockylinux:9'
+    mode: 'upgrade-from-published'
+  - pkg: 'routinator'
     image: 'debian:bookworm'
     mode: 'upgrade-from-published'

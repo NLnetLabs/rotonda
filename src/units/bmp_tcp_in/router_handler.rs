@@ -45,7 +45,6 @@ pub struct RouterHandler {
     state_machine: Arc<Mutex<Option<BmpState>>>,
     tracer: Arc<Tracer>,
     tracing_mode: Arc<ArcSwap<TracingMode>>,
-    #[cfg(feature = "router-list")]
     last_msg_at: Option<Arc<RwLock<DateTime<Utc>>>>,
 }
 
@@ -62,8 +61,10 @@ impl RouterHandler {
         status_reporter: Arc<BmpTcpInStatusReporter>,
         state_machine: Arc<Mutex<Option<BmpState>>>,
         tracer: Arc<Tracer>,
-        tracing_mode: Arc<ArcSwap<TracingMode>>,
-        #[cfg(feature = "router-list")] last_msg_at: Option<
+        tracing_mode: Arc<
+            ArcSwap<TracingMode>,
+        >,
+        last_msg_at: Option<
             Arc<RwLock<DateTime<Utc>>>,
         >,
     ) -> Self {
@@ -76,7 +77,6 @@ impl RouterHandler {
             state_machine,
             tracer,
             tracing_mode,
-            #[cfg(feature = "router-list")]
             last_msg_at,
         }
     }
@@ -117,7 +117,6 @@ impl RouterHandler {
             state_machine,
             tracer: Default::default(),
             tracing_mode: Default::default(),
-            #[cfg(feature = "router-list")]
             last_msg_at: None,
         };
 
@@ -272,7 +271,6 @@ impl RouterHandler {
         // SAFETY: Each connection should always have a state machine.
         let bmp_state = bmp_state_lock.take().unwrap();
 
-        #[cfg(feature = "router-list")]
         if let Some(last_msg_at) = &self.last_msg_at {
             if let Ok(mut guard) = last_msg_at.write() {
                 *guard = Utc::now();

@@ -8,7 +8,8 @@ use crate::comms::{
     DirectLink, Gate, GateAgent, GraphStatus, Link, DEF_UPDATE_QUEUE_LEN,
 };
 use crate::config::{Config, ConfigFile, Marked};
-use crate::log::{MsgRelation, Terminate, Trace, Tracer};
+use crate::log::{MsgRelation, Trace, Tracer};
+use crate::log::Terminate;
 use crate::targets::Target;
 use crate::units::Unit;
 use crate::{http, metrics};
@@ -29,7 +30,6 @@ use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Barrier;
 use uuid::Uuid;
 
-#[cfg(feature = "config-graph")]
 use {
     crate::http::{PercentDecodedPath, ProcessRequest},
     hyper::{Body, Method, Request, Response},
@@ -241,13 +241,6 @@ impl LinkReport {
         self.gates.get(name).copied()
     }
 
-    #[cfg(not(feature = "config-graph"))]
-    fn get_svg(self) -> String {
-        String::new()
-    }
-
-    // TODO: accept trace id here and colour route through gates by gate id of trace steps.
-    #[cfg(feature = "config-graph")]
     fn get_svg(&self, tracer: Arc<Tracer>, trace_id: Option<u8>) -> String {
         use chrono::Utc;
         use layout::backends::svg::SVGWriter;
@@ -577,7 +570,6 @@ pub struct Manager {
     /// A reference to the Roto script collection.
     roto_scripts: RotoScripts,
 
-    #[cfg(feature = "config-graph")]
     graph_svg_processor: Arc<dyn ProcessRequest>,
 
     graph_svg_data: Arc<ArcSwap<(Instant, LinkReport)>>,
@@ -602,9 +594,9 @@ impl Manager {
             Instant::now(),
             LinkReport::new(),
         )));
+
         let tracer = Arc::new(Tracer::new());
 
-        #[cfg(feature = "config-graph")]
         let (graph_svg_processor, graph_svg_rel_base_url) =
             Self::mk_svg_http_processor(
                 graph_svg_data.clone(),
@@ -626,7 +618,6 @@ impl Manager {
             metrics: Default::default(),
             http_resources: Default::default(),
             roto_scripts: Default::default(),
-            #[cfg(feature = "config-graph")]
             graph_svg_processor,
             graph_svg_data,
             file_io: TheFileIo::default(),
@@ -635,7 +626,6 @@ impl Manager {
         };
 
         // Register the /status/graph endpoint.
-        #[cfg(feature = "config-graph")]
         manager.http_resources.register(
             Arc::downgrade(&manager.graph_svg_processor),
             "status_graph".into(),
@@ -1486,7 +1476,6 @@ impl Manager {
     }
 
     // Create a HTTP processor that renders the SVG unit/target configuration graph.
-    #[cfg(feature = "config-graph")]
     fn mk_svg_http_processor(
         graph_svg_data: Arc<arc_swap::ArcSwapAny<Arc<(Instant, LinkReport)>>>,
         tracer: Arc<Tracer>,

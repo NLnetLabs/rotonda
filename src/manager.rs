@@ -2429,7 +2429,7 @@ mod tests {
     use uuid::Uuid;
 
     use crate::{
-        log::{MsgRelation, Trace},
+        tracing::{MsgRelation, Trace},
         manager::extract_msg_indices,
     };
 

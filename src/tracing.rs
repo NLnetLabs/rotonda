@@ -18,7 +18,7 @@
 /// messages from a Gate, or with the component that owns the Gate.
 /// 
 /// A limitation of this is that at present it is not possible to store
-/// messgaes that relate solely to a target, as they have no Gate except the
+/// messages that relate solely to a target, as they have no Gate except the
 /// Gate they receive messages from.
 /// 
 /// By distinguishing between the Gate and the component that owns it we can

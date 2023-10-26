@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use crate::payload::SourceId;
 
 #[cfg(feature = "router-list")]
@@ -42,7 +40,7 @@ pub fn calc_u8_pc(total: usize, v: usize) -> u8 {
 ///     Messages sent to us by each router.
 ///   - The peer IP address, AS number and BGP ID bytes.
 pub fn format_source_id(
-    router_id_template: Arc<String>,
+    router_id_template: &str,
     sys_name: &str,
     source_id: &SourceId,
 ) -> String {

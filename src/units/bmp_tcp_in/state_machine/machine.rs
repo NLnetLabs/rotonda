@@ -1,6 +1,5 @@
 use atomic_enum::atomic_enum;
 use bytes::Bytes;
-use futures::FutureExt;
 use roto::types::builtin::RouteStatus;
 
 /// RFC 7854 BMP processing.
@@ -68,7 +67,7 @@ use super::{
         dumping::Dumping, initiating::Initiating, terminated::Terminated,
         updating::Updating,
     },
-    status_reporter::BmpStatusReporter,
+    status_reporter::BmpTcpInStatusReporter,
 };
 
 //use octseq::Octets;
@@ -158,7 +157,7 @@ pub enum BmpState {
     Dumping(BmpStateDetails<Dumping>),
     Updating(BmpStateDetails<Updating>),
     Terminated(BmpStateDetails<Terminated>),
-    Aborted(SourceId, Arc<String>),
+    Aborted(SourceId, Arc<RouterId>),
 }
 
 // Rust enums with fields cannot have custom discriminant values assigned to them so we have to use separate
@@ -201,7 +200,7 @@ where
 {
     pub source_id: SourceId,
     pub router_id: Arc<String>,
-    pub status_reporter: Arc<BmpStatusReporter>,
+    pub status_reporter: Arc<BmpTcpInStatusReporter>,
     pub details: T,
 }
 
@@ -236,7 +235,7 @@ impl BmpState {
         }
     }
 
-    pub fn status_reporter(&self) -> Option<Arc<BmpStatusReporter>> {
+    pub fn status_reporter(&self) -> Option<Arc<BmpTcpInStatusReporter>> {
         match self {
             BmpState::Initiating(v) => Some(v.status_reporter.clone()),
             BmpState::Dumping(v) => Some(v.status_reporter.clone()),
@@ -247,11 +246,11 @@ impl BmpState {
     }
 
     #[rustfmt::skip]
-    pub async fn terminate(self) -> ProcessingResult {
+    pub fn terminate(self) -> ProcessingResult {
         match self {
             BmpState::Initiating(v) => v.terminate(Option::<TerminationMessage<Bytes>>::None),
-            BmpState::Dumping(v) => v.terminate(Option::<TerminationMessage<Bytes>>::None).await,
-            BmpState::Updating(v) => v.terminate(Option::<TerminationMessage<Bytes>>::None).await,
+            BmpState::Dumping(v) => v.terminate(Option::<TerminationMessage<Bytes>>::None),
+            BmpState::Updating(v) => v.terminate(Option::<TerminationMessage<Bytes>>::None),
             BmpState::Terminated(_) => BmpStateDetails::<Terminated>::mk_state_transition_result(self),
             BmpState::Aborted(..) => BmpStateDetails::<Terminated>::mk_state_transition_result(self),
         }
@@ -326,7 +325,7 @@ where
     T: Initiable,
     BmpState: From<BmpStateDetails<T>>,
 {
-    pub async fn initiate<Octs: Octets>(
+    pub fn initiate<Octs: Octets>(
         mut self,
         msg: InitiationMessage<Octs>,
     ) -> ProcessingResult {
@@ -454,7 +453,7 @@ where
     T: PeerAware,
     BmpState: From<BmpStateDetails<T>>,
 {
-    pub async fn peer_up(
+    pub fn peer_up(
         mut self,
         msg: PeerUpNotification<Bytes>,
     ) -> ProcessingResult {
@@ -491,7 +490,7 @@ where
         self.mk_other_result()
     }
 
-    pub async fn peer_down(
+    pub fn peer_down(
         mut self,
         msg: PeerDownNotification<Bytes>,
     ) -> ProcessingResult {
@@ -563,7 +562,7 @@ where
 
     /// `filter` should return `None` if the BGP message should be ignored, i.e. be filtered out, otherwise `Some(msg)`
     /// where `msg` is either the original unmodified `msg` or a modified or completely new message.
-    pub async fn route_monitoring<CB>(
+    pub fn route_monitoring<CB>(
         mut self,
         msg: RouteMonitoring<Bytes>,
         route_status: RouteStatus,
@@ -783,7 +782,7 @@ impl BmpState {
     ) -> Self {
         let child_name = parent_status_reporter.link_names("bmp_state");
         let status_reporter =
-            Arc::new(BmpStatusReporter::new(child_name, metrics));
+            Arc::new(BmpTcpInStatusReporter::new(child_name, metrics));
 
         BmpState::Initiating(BmpStateDetails::<Initiating>::new(
             source_id,
@@ -793,10 +792,7 @@ impl BmpState {
     }
 
     #[allow(dead_code)]
-    pub async fn process_msg(
-        self,
-        bmp_msg: BmpMsg<Bytes>,
-    ) -> ProcessingResult {
+    pub fn process_msg(self, bmp_msg: BmpMsg<Bytes>) -> ProcessingResult {
         let saved_addr = self.source_id();
         let saved_router_id = self.router_id().clone();
         let saved_state_idx = self.state_idx();
@@ -818,20 +814,16 @@ impl BmpState {
         //   3. If someone, with good intentions, adds 'panic = "abort"' to
         //      Cargo.toml we will no longer be able to catch this panic and
         //      this defensive logic will become useless.
-        #[rustfmt::skip]
-        let may_panic = async {
-            match self {
-                BmpState::Initiating(inner) => inner.process_msg(bmp_msg).await,
-                BmpState::Dumping(inner) => inner.process_msg(bmp_msg).await,
-                BmpState::Updating(inner) => inner.process_msg(bmp_msg).await,
-                BmpState::Terminated(inner) => inner.process_msg(bmp_msg),
-                BmpState::Aborted(source_id, router_id) => {
-                    ProcessingResult::new(MessageType::Aborted, BmpState::Aborted(source_id, router_id))
-                }
-            }
-        };
-
-        let may_panic_res = may_panic.catch_unwind().await;
+        let may_panic_res = std::panic::catch_unwind(|| match self {
+            BmpState::Initiating(inner) => inner.process_msg(bmp_msg),
+            BmpState::Dumping(inner) => inner.process_msg(bmp_msg),
+            BmpState::Updating(inner) => inner.process_msg(bmp_msg),
+            BmpState::Terminated(inner) => inner.process_msg(bmp_msg),
+            BmpState::Aborted(source_id, router_id) => ProcessingResult::new(
+                MessageType::Aborted,
+                BmpState::Aborted(source_id, router_id),
+            ),
+        });
 
         match may_panic_res {
             Ok(process_res) => {
@@ -912,7 +904,7 @@ mod tests {
 
     use crate::{
         metrics::{OutputFormat, Source},
-        units::bmp_in::state_machine::metrics::BmpMetrics,
+        units::bmp_tcp_in::state_machine::metrics::BmpMetrics,
     };
 
     use super::*;
@@ -923,7 +915,7 @@ mod tests {
     async fn replay_test() {
         const USIZE_BYTES: usize = (usize::BITS as usize) >> 3;
         let bmp_metrics = Arc::new(BmpMetrics::default());
-        let status_reporter = Arc::new(BmpStatusReporter::new(
+        let status_reporter = Arc::new(BmpTcpInStatusReporter::new(
             "some reporter",
             bmp_metrics.clone(),
         ));
@@ -1003,7 +995,7 @@ mod tests {
 
                         let bmp_msg =
                             BmpMsg::from_octets(bmp_bytes.freeze()).unwrap();
-                        let mut res = bmp_state.process_msg(bmp_msg).await;
+                        let mut res = bmp_state.process_msg(bmp_msg);
 
                         match res.processing_result {
                             MessageType::InvalidMessage { err, .. } => {

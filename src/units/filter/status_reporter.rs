@@ -1,6 +1,6 @@
 use std::{
     fmt::Display,
-    sync::{atomic::Ordering, Arc},
+    sync::{atomic::Ordering::SeqCst, Arc},
 };
 
 use log::error;
@@ -41,12 +41,10 @@ impl RotoFilterStatusReporter {
             self.metrics
                 .router_metrics(router_addr)
                 .num_filtered_messages
-                .fetch_add(1, Ordering::Relaxed);
+                .fetch_add(1, SeqCst);
         }
 
-        self.metrics
-            .num_filtered_messages
-            .fetch_add(1, Ordering::Relaxed);
+        self.metrics.num_filtered_messages.fetch_add(1, SeqCst);
     }
 
     pub fn message_filtering_failure(&self, err: &FilterError) {

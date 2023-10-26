@@ -8,7 +8,7 @@ use crate::payload::{RouterId, SourceId};
 use super::super::{
     machine::{BmpState, BmpStateDetails, Initiable},
     processing::{MessageType, ProcessingResult},
-    status_reporter::BmpStatusReporter,
+    status_reporter::BmpTcpInStatusReporter,
 };
 
 /// BmpState machine state 'Initiating'.
@@ -46,7 +46,7 @@ impl BmpStateDetails<Initiating> {
     pub fn new(
         source_id: SourceId,
         router_id: Arc<RouterId>,
-        status_reporter: Arc<BmpStatusReporter>,
+        status_reporter: Arc<BmpTcpInStatusReporter>,
     ) -> Self {
         BmpStateDetails {
             source_id,
@@ -57,14 +57,11 @@ impl BmpStateDetails<Initiating> {
     }
 
     #[allow(dead_code)]
-    pub async fn process_msg(
-        self,
-        bmp_msg: BmpMsg<Bytes>,
-    ) -> ProcessingResult {
+    pub fn process_msg(self, bmp_msg: BmpMsg<Bytes>) -> ProcessingResult {
         match bmp_msg {
             // already verified upstream
             BmpMsg::InitiationMessage(msg) => {
-                let res = self.initiate(msg).await;
+                let res = self.initiate(msg);
 
                 match res.processing_result {
                     MessageType::InvalidMessage { .. } => res,
@@ -138,7 +135,7 @@ mod tests {
             mk_initiation_msg,
             mk_invalid_initiation_message_that_lacks_information_tlvs,
         },
-        units::bmp_in::state_machine::states::dumping::Dumping,
+        units::bmp_tcp_in::state_machine::states::dumping::Dumping,
     };
 
     use super::*;
@@ -174,8 +171,8 @@ mod tests {
         )
     }
 
-    #[tokio::test]
-    async fn sysname_should_be_correctly_extracted() {
+    #[test]
+    fn sysname_should_be_correctly_extracted() {
         // Given
         let processor = mk_test_processor();
         let msg_buf =
@@ -183,7 +180,7 @@ mod tests {
         let bmp_msg = BmpMsg::from_octets(msg_buf).unwrap();
 
         // When
-        let res = processor.process_msg(bmp_msg).await;
+        let res = processor.process_msg(bmp_msg);
 
         // Then
         assert!(matches!(
@@ -206,8 +203,8 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn missing_sysname_should_result_in_invalid_message() {
+    #[test]
+    fn missing_sysname_should_result_in_invalid_message() {
         // Given
         let processor = mk_test_processor();
         let msg_buf =
@@ -215,7 +212,7 @@ mod tests {
         let bmp_msg = BmpMsg::from_octets(msg_buf).unwrap();
 
         // When
-        let res = processor.process_msg(bmp_msg).await;
+        let res = processor.process_msg(bmp_msg);
 
         // Then
         assert!(matches!(
@@ -232,15 +229,15 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn wrong_message_type_should_result_in_invalid_message() {
+    #[test]
+    fn wrong_message_type_should_result_in_invalid_message() {
         // Given
         let processor = mk_test_processor();
         let msg_buf = mk_peer_up_notification_msg();
         let bmp_msg = BmpMsg::from_octets(msg_buf).unwrap();
 
         // When
-        let res = processor.process_msg(bmp_msg).await;
+        let res = processor.process_msg(bmp_msg);
 
         // Then
         assert!(matches!(

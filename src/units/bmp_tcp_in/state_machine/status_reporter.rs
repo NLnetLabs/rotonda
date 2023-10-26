@@ -1,6 +1,6 @@
 use std::{
     fmt::Display,
-    sync::{atomic::Ordering, Arc},
+    sync::{atomic::Ordering::SeqCst, Arc},
 };
 
 use bytes::Bytes;
@@ -15,12 +15,12 @@ use crate::{
 use super::{machine::BmpStateIdx, metrics::BmpMetrics};
 
 #[derive(Debug, Default)]
-pub struct BmpStatusReporter {
+pub struct BmpTcpInStatusReporter {
     name: String,
     metrics: Arc<BmpMetrics>,
 }
 
-impl BmpStatusReporter {
+impl BmpTcpInStatusReporter {
     pub fn new<T: Display>(name: T, metrics: Arc<BmpMetrics>) -> Self {
         Self {
             name: format!("{}", name),
@@ -40,7 +40,7 @@ impl BmpStatusReporter {
         self.metrics
             .router_metrics(router_id)
             .num_bgp_updates_processed
-            .fetch_add(1, Ordering::SeqCst);
+            .fetch_add(1, SeqCst);
     }
 
     pub fn change_state(
@@ -52,16 +52,14 @@ impl BmpStatusReporter {
         self.metrics
             .router_metrics(router_id)
             .bmp_state_machine_state
-            .store(new_state_idx, Ordering::SeqCst);
+            .store(new_state_idx, SeqCst);
     }
 
     pub fn peer_up(&self, router_id: Arc<RouterId>, eor_capable: bool) {
         let metrics = self.metrics.router_metrics(router_id);
-        metrics.num_peers_up.fetch_add(1, Ordering::SeqCst);
+        metrics.num_peers_up.fetch_add(1, SeqCst);
         if eor_capable {
-            metrics
-                .num_peers_up_eor_capable
-                .fetch_add(1, Ordering::SeqCst);
+            metrics.num_peers_up_eor_capable.fetch_add(1, SeqCst);
         }
     }
 
@@ -71,11 +69,9 @@ impl BmpStatusReporter {
         eor_capable: Option<bool>,
     ) {
         let metrics = self.metrics.router_metrics(router_id);
-        metrics.num_peers_up.fetch_sub(1, Ordering::SeqCst);
+        metrics.num_peers_up.fetch_sub(1, SeqCst);
         if Some(true) == eor_capable {
-            metrics
-                .num_peers_up_eor_capable
-                .fetch_sub(1, Ordering::SeqCst);
+            metrics.num_peers_up_eor_capable.fetch_sub(1, SeqCst);
         }
     }
 
@@ -83,7 +79,7 @@ impl BmpStatusReporter {
         self.metrics
             .router_metrics(router_id)
             .num_bgp_updates_for_unknown_peer
-            .fetch_add(1, Ordering::SeqCst);
+            .fetch_add(1, SeqCst);
     }
 
     pub fn bgp_update_parse_soft_fail(
@@ -97,11 +93,11 @@ impl BmpStatusReporter {
         if matches!(known_peer, Some(true)) {
             metrics
                 .num_bgp_updates_with_recoverable_parsing_failures_for_known_peers
-                .fetch_add(1, Ordering::SeqCst);
+                .fetch_add(1, SeqCst);
         } else {
             metrics
                 .num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers
-                .fetch_add(1, Ordering::SeqCst);
+                .fetch_add(1, SeqCst);
         }
 
         metrics.parse_errors.push(err, bytes, true);
@@ -118,11 +114,11 @@ impl BmpStatusReporter {
         if matches!(known_peer, Some(true)) {
             metrics
                 .num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers
-                .fetch_add(1, Ordering::SeqCst);
+                .fetch_add(1, SeqCst);
         } else {
             metrics
                 .num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers
-                .fetch_add(1, Ordering::SeqCst);
+                .fetch_add(1, SeqCst);
         }
 
         metrics.parse_errors.push(err, bytes, false);
@@ -136,7 +132,7 @@ impl BmpStatusReporter {
         self.metrics
             .router_metrics(router_id)
             .num_peers_up_dumping
-            .store(n_peers_dumping, Ordering::SeqCst);
+            .store(n_peers_dumping, SeqCst);
     }
 
     pub fn routing_update(
@@ -150,34 +146,28 @@ impl BmpStatusReporter {
         let metrics = self.metrics.router_metrics(router_id);
         metrics
             .num_received_prefixes
-            .fetch_add(n_new_prefixes, Ordering::SeqCst);
-        metrics
-            .num_stored_prefixes
-            .store(n_total_prefixes, Ordering::SeqCst);
-        metrics
-            .num_announcements
-            .fetch_add(n_announcements, Ordering::SeqCst);
-        metrics
-            .num_withdrawals
-            .fetch_add(n_withdrawals, Ordering::SeqCst);
+            .fetch_add(n_new_prefixes, SeqCst);
+        metrics.num_stored_prefixes.store(n_total_prefixes, SeqCst);
+        metrics.num_announcements.fetch_add(n_announcements, SeqCst);
+        metrics.num_withdrawals.fetch_add(n_withdrawals, SeqCst);
     }
 }
 
-impl UnitStatusReporter for BmpStatusReporter {}
+impl UnitStatusReporter for BmpTcpInStatusReporter {}
 
-impl AnyStatusReporter for BmpStatusReporter {
+impl AnyStatusReporter for BmpTcpInStatusReporter {
     fn metrics(&self) -> Option<Arc<dyn crate::metrics::Source>> {
         Some(self.metrics.clone())
     }
 }
 
-impl Chainable for BmpStatusReporter {
+impl Chainable for BmpTcpInStatusReporter {
     fn add_child<T: Display>(&self, child_name: T) -> Self {
         Self::new(self.link_names(child_name), self.metrics.clone())
     }
 }
 
-impl Named for BmpStatusReporter {
+impl Named for BmpTcpInStatusReporter {
     fn name(&self) -> &str {
         &self.name
     }

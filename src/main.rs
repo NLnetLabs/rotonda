@@ -178,7 +178,7 @@ mod tests {
     use std::{
         net::IpAddr,
         str::FromStr,
-        sync::{atomic::Ordering, Arc},
+        sync::{atomic::Ordering::SeqCst, Arc},
         time::Duration,
     };
 
@@ -200,7 +200,7 @@ mod tests {
 
     use super::*;
 
-    const MAX_TIME_TO_WAIT_SECS: u64 = 3;
+    const MAX_TIME_TO_WAIT_SECS: u64 = 1;
     const METRIC_PREFIX: &str = "rotonda_";
 
     // NOTE: this test is currently flakey, sometimes it fails at the end receiving more MQTT messages than expected.
@@ -223,26 +223,11 @@ mod tests {
         [units.bmp-tcp-in]
         type = "bmp-tcp-in"
         listen = "127.0.0.1:11019"
-
-        [targets.logger]
-        type = "bmp-fs-out"
-        sources = ["filter"]
-        path = "/tmp/bmp.log"
-        mode = "merge"
-        format = "log"
-
-        [units.filter]
-        type = "filter"
-        sources = ["bmp-tcp-in"]
         filter_name = "bmp-in-filter"
-
-        [units.routers]
-        type = "bmp-in"
-        sources = ["filter"]
 
         [units.global-rib]
         type = "rib"
-        sources = ["routers"]
+        sources = ["bmp-tcp-in"]
         filter_names = ["my-module", "my-module", "my-module"]
 
         [targets.dummy-null]
@@ -253,7 +238,7 @@ mod tests {
         let null_target_toml = r#"
         [targets.null]
         type = "null-out"
-        sources = ["global-rib", "filter"]
+        sources = ["global-rib"]
         "#;
 
         let mqtt_target_toml = r#"
@@ -348,7 +333,6 @@ mod tests {
 
             eprintln!("Subscribed to MQTT broker, sending BMP messages...");
             let mut bmp_conn = wait_for_bmp_connect().await;
-            let local_addr = format!("{}", bmp_conn.local_addr().unwrap());
             let sys_name = bmp_initiate(&mut bmp_conn).await;
             bmp_peer_up(&mut bmp_conn).await;
             bmp_route_announce(&mut bmp_conn, test_prefix).await;
@@ -360,20 +344,6 @@ mod tests {
                 "num_updates_total",
                 Some(("component", "bmp-tcp-in")),
                 3,
-            )
-            .await;
-            assert_metric_eq(
-                manager.metrics(),
-                "num_updates_total",
-                Some(("component", "filter")),
-                3,
-            )
-            .await;
-            assert_metric_eq(
-                manager.metrics(),
-                "num_updates_total",
-                Some(("component", "routers")),
-                1,
             )
             .await;
             assert_metric_eq(
@@ -396,7 +366,7 @@ mod tests {
             assert_metric_eq(
                 manager.metrics(),
                 "bmp_tcp_in_num_bmp_messages_received_total",
-                Some(("router", &local_addr)),
+                Some(("router", "my-sys-name")),
                 3,
             )
             .await;
@@ -405,13 +375,6 @@ mod tests {
                 "rib_unit_num_routes_announced_total",
                 Some(("component", "global-rib")),
                 1,
-            )
-            .await;
-            assert_metric_eq(
-                manager.metrics(),
-                "roto_filter_num_filtered_messages_total",
-                Some(("component", "filter")),
-                0,
             )
             .await;
 
@@ -482,20 +445,6 @@ mod tests {
             assert_metric_eq(
                 manager.metrics(),
                 "num_updates_total",
-                Some(("component", "filter")),
-                4,
-            )
-            .await;
-            assert_metric_eq(
-                manager.metrics(),
-                "num_updates_total",
-                Some(("component", "routers")),
-                2,
-            )
-            .await;
-            assert_metric_eq(
-                manager.metrics(),
-                "num_updates_total",
                 Some(("component", "global-rib")),
                 2,
             )
@@ -505,7 +454,7 @@ mod tests {
             assert_metric_eq(
                 manager.metrics(),
                 "bmp_tcp_in_num_bmp_messages_received_total",
-                Some(("router", &local_addr)),
+                Some(("router", "my-sys-name")),
                 4,
             )
             .await;
@@ -698,7 +647,7 @@ mod tests {
         .await
         .is_err()
         {
-            if result.load(Ordering::SeqCst) != MetricLookupResult::Ok {
+            if result.load(SeqCst) != MetricLookupResult::Ok {
                 eprintln!("Metric dump: {:#?}", get_metrics(&metrics));
                 panic!(
                     "Metric '{}' with label '{:?}' != {} after {} seconds (reason: {})",
@@ -706,7 +655,7 @@ mod tests {
                     label,
                     wanted_v,
                     duration.as_secs(),
-                    result.load(Ordering::SeqCst),
+                    result.load(SeqCst),
                 );
             }
         }
@@ -735,7 +684,7 @@ mod tests {
         .await
         .is_ok()
         {
-            if result.load(Ordering::SeqCst) != MetricLookupResult::Ok {
+            if result.load(SeqCst) != MetricLookupResult::Ok {
                 eprintln!("Metric dump: {:#?}", get_metrics(&metrics));
                 panic!(
                     "Metric '{}' with label '{:?}' != {} after {} seconds (reason: {})",
@@ -743,7 +692,7 @@ mod tests {
                     label,
                     wanted_v,
                     duration.as_secs(),
-                    result.load(Ordering::SeqCst),
+                    result.load(SeqCst),
                 );
             }
         }
@@ -764,7 +713,7 @@ mod tests {
                 result.clone(),
             ) == Some(wanted_v)
             {
-                result.store(MetricLookupResult::Ok, Ordering::SeqCst);
+                result.store(MetricLookupResult::Ok, SeqCst);
                 break;
             }
 
@@ -939,33 +888,26 @@ mod tests {
                     if let Some((label_name, label_value)) = label {
                         if let Some(v) = sample.labels.get(label_name) {
                             if v == *label_value {
-                                result.store(
-                                    MetricLookupResult::Ok,
-                                    Ordering::SeqCst,
-                                );
+                                result.store(MetricLookupResult::Ok, SeqCst);
                                 return true;
                             } else {
                                 result.store(
                                     MetricLookupResult::ValueNotMatched,
-                                    Ordering::SeqCst,
+                                    SeqCst,
                                 );
                             }
                         } else {
                             result.store(
                                 MetricLookupResult::LabelNotFound,
-                                Ordering::SeqCst,
+                                SeqCst,
                             );
                         }
                     } else {
-                        result
-                            .store(MetricLookupResult::Ok, Ordering::SeqCst);
+                        result.store(MetricLookupResult::Ok, SeqCst);
                         return true;
                     }
                 } else {
-                    result.store(
-                        MetricLookupResult::NameNotFound,
-                        Ordering::SeqCst,
-                    );
+                    result.store(MetricLookupResult::NameNotFound, SeqCst);
                 }
 
                 false

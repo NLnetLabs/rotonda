@@ -33,6 +33,12 @@ pub enum SourceId {
     Named(Arc<String>),
 }
 
+impl Default for SourceId {
+    fn default() -> Self {
+        "unknown".into()
+    }
+}
+
 impl SourceId {
     pub fn socket_addr(&self) -> Option<&SocketAddr> {
         match self {
@@ -233,7 +239,7 @@ impl Payload {
     }
 
     pub fn from_output_stream_queue(
-        source_id: SourceId,
+        source_id: &SourceId,
         osq: OutputStreamQueue,
     ) -> SmallVec<[Payload; 8]> {
         osq.into_iter()

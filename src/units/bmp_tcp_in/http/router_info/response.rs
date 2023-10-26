@@ -7,8 +7,8 @@ use indoc::formatdoc;
 use crate::{
     http,
     payload::{RouterId, SourceId},
-    units::bmp_in::{
-        metrics::{BmpInMetrics, RouterMetrics},
+    units::bmp_tcp_in::{
+        metrics::{BmpTcpInMetrics, RouterMetrics},
         state_machine::{
             machine::{PeerAware, PeerStates},
             metrics::BmpMetrics,
@@ -41,7 +41,7 @@ impl RouterInfoApi {
         sys_extra: &[String],
         peer_states: Option<&PeerStates>,
         focus: Focus,
-        conn_metrics: &Arc<BmpInMetrics>,
+        conn_metrics: &Arc<BmpTcpInMetrics>,
         bmp_metrics: &Arc<BmpMetrics>,
         connected_at: &DateTime<Utc>,
         last_message_at: &Arc<RwLock<DateTime<Utc>>>,

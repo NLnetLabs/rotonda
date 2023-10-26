@@ -26,7 +26,7 @@ use std::fmt::Display;
 use std::net::SocketAddr;
 use std::net::TcpListener as StdListener;
 use std::pin::Pin;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 use std::sync::{Arc, Mutex, Weak};
 use std::task::{Context, Poll};
 use std::{fmt, io};
@@ -601,11 +601,11 @@ impl QueryParam {
     }
 
     pub fn mark_used(&self) {
-        self.used.store(true, Ordering::SeqCst);
+        self.used.store(true, SeqCst);
     }
 
     pub fn used(&self) -> bool {
-        self.used.load(Ordering::SeqCst)
+        self.used.load(SeqCst)
     }
 }
 

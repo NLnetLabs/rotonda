@@ -1,16 +1,16 @@
 use std::{
     fmt::Display,
     net::SocketAddr,
-    sync::{
-        atomic::Ordering::{self, Relaxed},
-        Arc,
-    },
+    sync::{atomic::Ordering::SeqCst, Arc},
 };
 
-use log::{debug, info, warn};
+use log::{debug, error, info, trace, warn};
 
-use crate::common::status_reporter::{
-    sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter,
+use crate::{
+    common::status_reporter::{
+        sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter,
+    },
+    payload::RouterId,
 };
 
 use super::metrics::BmpTcpInMetrics;
@@ -29,60 +29,81 @@ impl BmpTcpInStatusReporter {
         }
     }
 
+    #[cfg(feature = "router-list")]
+    pub fn typed_metrics(&self) -> Arc<BmpTcpInMetrics> {
+        self.metrics.clone()
+    }
+
     pub fn bind_error<T: Display>(&self, listen_addr: &str, err: T) {
         sr_log!(warn: self, "Error while listening for connections on {}: {}", listen_addr, err);
     }
 
     pub fn listener_listening(&self, server_uri: &str) {
         sr_log!(info: self, "Listening for connections on {}", server_uri);
-        self.metrics.listener_bound_count.fetch_add(1, Relaxed);
+        self.metrics.listener_bound_count.fetch_add(1, SeqCst);
     }
 
     pub fn listener_connection_accepted(&self, router_addr: SocketAddr) {
         sr_log!(debug: self, "Router connected from {}", router_addr);
-        self.metrics.connection_accepted_count.fetch_add(1, Relaxed);
+        self.metrics.connection_accepted_count.fetch_add(1, SeqCst);
     }
 
     pub fn listener_io_error<T: Display>(&self, err: T) {
         sr_log!(warn: self, "Error while listening for connections: {}", err);
     }
 
+    pub fn router_connection_lost(&self, router_id: Arc<RouterId>) {
+        sr_log!(debug: self, "Router connection lost: {}", router_id);
+        self.metrics.connection_lost_count.fetch_add(1, SeqCst);
+        self.metrics.remove_router(router_id);
+    }
+
+    pub fn router_id_changed(
+        &self,
+        old_router_id: Arc<RouterId>,
+        new_router_id: Arc<RouterId>,
+    ) {
+        sr_log!(debug: self, "Router id changed from '{}' to '{}'", old_router_id, new_router_id);
+    }
+
     pub fn receive_io_error<T: Display>(
         &self,
-        router_addr: SocketAddr,
+        router_id: Arc<RouterId>,
         err: T,
     ) {
         sr_log!(warn: self, "Error while receiving BMP messages: {}", err);
         self.metrics
-            .router_metrics(router_addr)
+            .router_metrics(router_id)
             .num_receive_io_errors
-            .fetch_add(1, Ordering::SeqCst);
+            .fetch_add(1, SeqCst);
     }
 
-    /// Ensure only when necessary that metric counters for a new (or changed)
-    /// router ID are initialised.
-    ///
-    /// This must be called prior to calling any other member function that
-    /// takes a [RouterId] as input otherwise metrics will not be properly
-    /// counted.
-    pub fn router_id_changed(&self, router_addr: SocketAddr) {
+    pub fn bmp_message_received(&self, router_id: Arc<RouterId>) {
+        sr_log!(trace: self, "BMP message received from router '{}'", router_id);
         self.metrics
-            .router_metrics(router_addr)
-            .connection_count
-            .fetch_add(1, Ordering::SeqCst);
-    }
-
-    pub fn bmp_message_received(&self, router_addr: SocketAddr) {
-        self.metrics
-            .router_metrics(router_addr)
+            .router_metrics(router_id)
             .num_bmp_messages_received
-            .fetch_add(1, Ordering::SeqCst);
+            .fetch_add(1, SeqCst);
     }
 
-    pub fn router_connection_lost(&self, router_addr: SocketAddr) {
-        sr_log!(debug: self, "Router connection lost: {}", router_addr);
-        self.metrics.connection_lost_count.fetch_add(1, Relaxed);
-        self.metrics.remove_router(router_addr);
+    pub fn bmp_message_processed(&self, router_id: Arc<RouterId>) {
+        sr_log!(trace: self, "BMP message processed from router '{}'", router_id);
+        self.metrics
+            .router_metrics(router_id)
+            .num_bmp_messages_received
+            .fetch_add(1, SeqCst);
+    }
+
+    pub fn invalid_bmp_message_received(&self, router_id: Arc<RouterId>) {
+        sr_log!(trace: self, "Invalid BMP message received from router '{}'", router_id);
+        self.metrics
+            .router_metrics(router_id)
+            .num_invalid_bmp_messages
+            .fetch_add(1, SeqCst);
+    }
+
+    pub fn internal_error<T: Display>(&self, err: T) {
+        sr_log!(error: self, "Internal error: {}", err);
     }
 }
 

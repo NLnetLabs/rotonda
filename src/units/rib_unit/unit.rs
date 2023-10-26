@@ -944,12 +944,19 @@ impl RibUnitRunner {
                     filtered_payloads
                         .into_iter()
                         .filter(|payload| {
-                            !matches!(payload.value, TypeValue::OutputStreamMessage(_))
+                            !matches!(
+                                payload.value,
+                                TypeValue::OutputStreamMessage(_)
+                            )
                         })
                         .map(|payload| {
                             // Add this processed query result route into the new query result
-                            let hash = self.rib.load().precompute_hash_code(&payload.value);
-                            PreHashedTypeValue::new(payload.value, hash).into()
+                            let hash = self
+                                .rib
+                                .load()
+                                .precompute_hash_code(&payload.value);
+                            PreHashedTypeValue::new(payload.value, hash)
+                                .into()
                         }),
                 );
             }

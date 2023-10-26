@@ -276,7 +276,7 @@ impl std::fmt::Debug for RotoFilterRunner {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::Ordering;
+    use std::sync::atomic::Ordering::SeqCst;
 
     use bytes::Bytes;
     use roto::types::{
@@ -537,16 +537,14 @@ mod tests {
     async fn is_filtered(filter: &RotoFilterRunner, update: Update) -> bool {
         let gate_metrics = filter.gate.metrics();
         let num_dropped_updates_before =
-            gate_metrics.num_dropped_updates.load(Ordering::SeqCst);
-        let num_updates_before =
-            gate_metrics.num_updates.load(Ordering::SeqCst);
+            gate_metrics.num_dropped_updates.load(SeqCst);
+        let num_updates_before = gate_metrics.num_updates.load(SeqCst);
 
         filter.process_update(update).await.unwrap();
 
         let num_dropped_updates_after =
-            gate_metrics.num_dropped_updates.load(Ordering::SeqCst);
-        let num_updates_after =
-            gate_metrics.num_updates.load(Ordering::SeqCst);
+            gate_metrics.num_dropped_updates.load(SeqCst);
+        let num_updates_after = gate_metrics.num_updates.load(SeqCst);
 
         // If not filtered then the number of updates processed by the gate should have increased,
         // either by failing to deliver the update i.e. dropping it, or by delivering it. So if the

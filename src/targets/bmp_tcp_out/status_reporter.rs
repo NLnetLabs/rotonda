@@ -1,7 +1,7 @@
 use std::{
     fmt::Display,
     net::SocketAddr,
-    sync::{atomic::Ordering, Arc},
+    sync::{atomic::Ordering::SeqCst, Arc},
 };
 
 use log::{debug, info, trace, warn};
@@ -80,7 +80,7 @@ impl BmpProxyStatusReporter {
         self.metrics
             .proxy_metrics(router_addr)
             .proxy_state
-            .store(ProxyState::None, Ordering::SeqCst);
+            .store(ProxyState::None, SeqCst);
     }
 
     fn update_proxy_state_metrics(
@@ -89,10 +89,10 @@ impl BmpProxyStatusReporter {
         new_state: ProxyState,
     ) {
         let metrics = self.metrics.proxy_metrics(router_addr);
-        metrics.proxy_state.store(new_state, Ordering::SeqCst);
+        metrics.proxy_state.store(new_state, SeqCst);
         metrics
             .proxy_handler_state
-            .store(new_state.as_handler_state(), Ordering::SeqCst);
+            .store(new_state.as_handler_state(), SeqCst);
     }
 
     pub fn proxy_queue_started(&self, router_addr: SocketAddr) {
@@ -119,7 +119,7 @@ impl BmpProxyStatusReporter {
         self.metrics
             .proxy_metrics(router_addr)
             .num_undeliverable_messages
-            .fetch_add(1, Ordering::SeqCst);
+            .fetch_add(1, SeqCst);
     }
 
     pub fn proxy_terminate(&self, router_addr: SocketAddr) {
@@ -135,7 +135,7 @@ impl BmpProxyStatusReporter {
         self.metrics
             .proxy_metrics(router_addr)
             .queue_capacity
-            .store(capacity, Ordering::SeqCst);
+            .store(capacity, SeqCst);
     }
 }
 

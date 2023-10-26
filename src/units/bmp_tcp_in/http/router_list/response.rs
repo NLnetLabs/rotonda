@@ -1,11 +1,11 @@
-use std::sync::{atomic::Ordering, Arc};
+use std::sync::{atomic::Ordering::SeqCst, Arc};
 
 use hyper::{Body, Response};
 use indoc::formatdoc;
 
 use crate::{
     payload::SourceId,
-    units::bmp_in::{
+    units::bmp_tcp_in::{
         state_machine::machine::{BmpState, BmpStateDetails},
         util::{calc_u8_pc, format_source_id},
     },
@@ -126,7 +126,7 @@ impl RouterListApi {
                         };
 
                         let router_id = Arc::new(format_source_id(
-                            self.router_id_template.clone(),
+                            &self.router_id_template.load(),
                             sys_name,
                             addr,
                         ));
@@ -134,17 +134,13 @@ impl RouterListApi {
                             .bmp_metrics
                             .router_metrics(router_id.clone());
 
-                        let state = metrics
-                            .bmp_state_machine_state
-                            .load(Ordering::SeqCst);
-                        let num_peers_up =
-                            metrics.num_peers_up.load(Ordering::SeqCst);
-                        let num_peers_up_eor_capable = metrics
-                            .num_peers_up_eor_capable
-                            .load(Ordering::SeqCst);
-                        let num_peers_up_dumping = metrics
-                            .num_peers_up_dumping
-                            .load(Ordering::SeqCst);
+                        let state =
+                            metrics.bmp_state_machine_state.load(SeqCst);
+                        let num_peers_up = metrics.num_peers_up.load(SeqCst);
+                        let num_peers_up_eor_capable =
+                            metrics.num_peers_up_eor_capable.load(SeqCst);
+                        let num_peers_up_dumping =
+                            metrics.num_peers_up_dumping.load(SeqCst);
                         let num_peers_up_eor_capable_pc = calc_u8_pc(
                             num_peers_up,
                             num_peers_up_eor_capable,
@@ -158,18 +154,18 @@ impl RouterListApi {
                                 self.router_metrics
                                     .router_metrics(router_id)
                                     .num_invalid_bmp_messages
-                                    .load(Ordering::SeqCst)
+                                    .load(SeqCst)
                             } else {
                                 0
                             };
                         let num_soft_parsing_failures = metrics
                             .num_bgp_updates_with_recoverable_parsing_failures_for_known_peers
-                            .load(Ordering::SeqCst)
+                            .load(SeqCst)
                             + metrics
                                 .num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers
-                                .load(Ordering::SeqCst);
-                        let num_hard_parsing_failures = metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers.load(Ordering::SeqCst) +
-                            metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers.load(Ordering::SeqCst);
+                                .load(SeqCst);
+                        let num_hard_parsing_failures = metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers.load(SeqCst) +
+                            metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers.load(SeqCst);
 
                         formatdoc! {
                             r#"

@@ -1,20 +1,21 @@
 use std::{
     ops::Deref,
-    sync::{atomic::Ordering, Arc},
+    sync::{atomic::Ordering::SeqCst, Arc},
 };
 
+use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use hyper::{Body, Method, Request, Response};
 
 use crate::{
     common::frim::FrimMap,
     http::{
-        extract_params, get_param, MatchedParam, PercentDecodedPath,
+        self, extract_params, get_param, MatchedParam, PercentDecodedPath,
         ProcessRequest,
     },
     payload::SourceId,
-    units::bmp_in::{
-        metrics::BmpInMetrics,
+    units::bmp_tcp_in::{
+        metrics::BmpTcpInMetrics,
         state_machine::{
             machine::{BmpState, BmpStateDetails},
             metrics::BmpMetrics,
@@ -25,11 +26,12 @@ use crate::{
 };
 
 pub struct RouterListApi {
-    http_api_path: Arc<String>,
+    pub http_resources: http::Resources,
+    pub http_api_path: Arc<String>,
     pub router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
-    pub router_metrics: Arc<BmpInMetrics>,
+    pub router_metrics: Arc<BmpTcpInMetrics>,
     pub bmp_metrics: Arc<BmpMetrics>,
-    pub router_id_template: Arc<String>,
+    pub router_id_template: Arc<ArcSwap<String>>,
     pub router_states:
         Arc<FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>,
 }
@@ -74,16 +76,18 @@ impl ProcessRequest for RouterListApi {
 
 impl RouterListApi {
     pub fn new(
+        http_resources: http::Resources,
         http_api_path: Arc<String>,
         router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
-        router_metrics: Arc<BmpInMetrics>,
+        router_metrics: Arc<BmpTcpInMetrics>,
         bmp_metrics: Arc<BmpMetrics>,
-        router_id_template: Arc<String>,
+        router_id_template: Arc<ArcSwap<String>>,
         router_states: Arc<
             FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
         >,
     ) -> Self {
         Self {
+            http_resources,
             http_api_path,
             router_info,
             router_metrics,
@@ -187,7 +191,7 @@ impl RouterListApi {
                             let sys_name = html_escape::encode_safe(sys_name);
 
                             let router_id = Arc::new(format_source_id(
-                                self.router_id_template.clone(),
+                                &self.router_id_template.load(),
                                 &sys_name,
                                 source_id,
                             ));
@@ -196,41 +200,41 @@ impl RouterListApi {
                                 .router_metrics(router_id.clone());
 
                             match sort_by {
-                                Some("state") => metrics.bmp_state_machine_state.load(Ordering::SeqCst) as usize,
+                                Some("state") => metrics.bmp_state_machine_state.load(SeqCst) as usize,
 
-                                Some("peers_up") => metrics.num_peers_up.load(Ordering::SeqCst),
+                                Some("peers_up") => metrics.num_peers_up.load(SeqCst),
 
-                                Some("peers_up_eor_capable") => metrics.num_peers_up_eor_capable.load(Ordering::SeqCst),
+                                Some("peers_up_eor_capable") => metrics.num_peers_up_eor_capable.load(SeqCst),
 
-                                Some("peers_up_dumping") => metrics.num_peers_up_dumping.load(Ordering::SeqCst),
+                                Some("peers_up_dumping") => metrics.num_peers_up_dumping.load(SeqCst),
 
                                 Some("peers_up_eor_capable_pc") => {
-                                    let total = metrics.num_peers_up.load(Ordering::SeqCst);
-                                    let v = metrics.num_peers_up_eor_capable.load(Ordering::SeqCst);
+                                    let total = metrics.num_peers_up.load(SeqCst);
+                                    let v = metrics.num_peers_up_eor_capable.load(SeqCst);
                                     calc_u8_pc(total, v).into()
                                 }
                                 Some("peers_up_dumping_pc") => {
-                                    let total = metrics.num_peers_up_eor_capable.load(Ordering::SeqCst);
-                                    let v = metrics.num_peers_up_dumping.load(Ordering::SeqCst);
+                                    let total = metrics.num_peers_up_eor_capable.load(SeqCst);
+                                    let v = metrics.num_peers_up_dumping.load(SeqCst);
                                     calc_u8_pc(total, v).into()
                                 }
 
                                 Some("invalid_messages") => {
                                     if self.router_metrics.contains(&router_id) {
-                                        self.router_metrics.router_metrics(router_id).num_invalid_bmp_messages.load(Ordering::SeqCst)
+                                        self.router_metrics.router_metrics(router_id).num_invalid_bmp_messages.load(SeqCst)
                                     } else {
                                         0
                                     }
                                 }
 
                                 Some("soft_parse_errors") => {
-                                    metrics.num_bgp_updates_with_recoverable_parsing_failures_for_known_peers.load(Ordering::SeqCst) +
-                                    metrics.num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers.load(Ordering::SeqCst)
+                                    metrics.num_bgp_updates_with_recoverable_parsing_failures_for_known_peers.load(SeqCst) +
+                                    metrics.num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers.load(SeqCst)
                                 }
 
                                 Some("hard_parse_errors") => {
-                                    metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers.load(Ordering::SeqCst) +
-                                    metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers.load(Ordering::SeqCst)
+                                    metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers.load(SeqCst) +
+                                    metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers.load(SeqCst)
                                 }
 
                                 _ => unreachable!()

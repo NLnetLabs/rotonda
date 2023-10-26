@@ -14,7 +14,7 @@ use smallvec::SmallVec;
 
 use crate::{
     payload::{Payload, Update},
-    units::bmp_in::state_machine::machine::{PeerState, PeerStates},
+    units::bmp_tcp_in::state_machine::machine::{PeerState, PeerStates},
 };
 
 use super::super::{
@@ -59,32 +59,24 @@ pub struct Updating {
 
 impl BmpStateDetails<Updating> {
     #[allow(dead_code)]
-    pub async fn process_msg(
-        self,
-        bmp_msg: BmpMsg<Bytes>,
-    ) -> ProcessingResult {
+    pub fn process_msg(self, bmp_msg: BmpMsg<Bytes>) -> ProcessingResult {
         match bmp_msg {
             // already verified upstream
-            BmpMsg::InitiationMessage(msg) => self.initiate(msg).await,
+            BmpMsg::InitiationMessage(msg) => self.initiate(msg),
 
-            BmpMsg::PeerUpNotification(msg) => self.peer_up(msg).await,
+            BmpMsg::PeerUpNotification(msg) => self.peer_up(msg),
 
-            BmpMsg::PeerDownNotification(msg) => self.peer_down(msg).await,
+            BmpMsg::PeerDownNotification(msg) => self.peer_down(msg),
 
-            BmpMsg::RouteMonitoring(msg) => {
-                self.route_monitoring(
-                    msg,
-                    RouteStatus::UpToDate,
-                    |s, pph, update| {
-                        s.route_monitoring_preprocessing(pph, update)
-                    },
-                )
-                .await
-            }
+            BmpMsg::RouteMonitoring(msg) => self.route_monitoring(
+                msg,
+                RouteStatus::UpToDate,
+                |s, pph, update| {
+                    s.route_monitoring_preprocessing(pph, update)
+                },
+            ),
 
-            BmpMsg::TerminationMessage(msg) => {
-                self.terminate(Some(msg)).await
-            }
+            BmpMsg::TerminationMessage(msg) => self.terminate(Some(msg)),
 
             _ => {
                 // We ignore these. TODO: Should we count them?
@@ -113,7 +105,7 @@ impl BmpStateDetails<Updating> {
         ControlFlow::Continue(self)
     }
 
-    pub async fn terminate(
+    pub fn terminate(
         mut self,
         _msg: Option<TerminationMessage<Bytes>>,
     ) -> ProcessingResult {

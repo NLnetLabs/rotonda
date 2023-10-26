@@ -233,3 +233,8 @@ impl BoundTracer {
             .note_component_event(trace_id, self.gate_id, msg)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    // TO DO
+}

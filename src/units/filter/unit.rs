@@ -7,7 +7,7 @@ use crate::{
         AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus,
         Terminated,
     },
-    log::{BoundTracer, Tracer},
+    tracing::{BoundTracer, Tracer},
     manager::{Component, WaitPoint},
     payload::{FilterError, Filterable, Update, UpstreamStatus},
     units::Unit,

@@ -17,7 +17,7 @@ use tokio::{io::AsyncRead, net::TcpStream};
 use crate::common::roto::{
     FilterName, FilterOutput, RotoScripts, ThreadLocalVM,
 };
-use crate::log::{BoundTracer, Tracer};
+use crate::tracing::{BoundTracer, Tracer};
 use crate::payload::SourceId;
 use crate::{
     comms::{Gate, GateStatus},

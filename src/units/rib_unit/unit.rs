@@ -8,7 +8,7 @@ use crate::{
         AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus, Link,
         Terminated, TriggerData,
     },
-    log::{BoundTracer, Tracer},
+    tracing::{BoundTracer, Tracer},
     manager::{Component, WaitPoint},
     payload::{
         FilterError, Filterable, Payload, RouterId, Update, UpstreamStatus,

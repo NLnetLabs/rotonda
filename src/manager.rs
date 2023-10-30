@@ -2445,7 +2445,7 @@ mod tests {
     fn test_single_extract_msg_indices() {
         let mut empty_trace = Trace::new();
         let gate_id = Uuid::new_v4();
-        empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::ALL);
+        empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::GATE);
         let trace_txt = extract_msg_indices(&empty_trace, gate_id);
         assert_eq!("[0]", trace_txt);
     }
@@ -2454,9 +2454,9 @@ mod tests {
     fn test_long_range_extract_msg_indices() {
         let mut empty_trace = Trace::new();
         let gate_id = Uuid::new_v4();
-        empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::ALL);
+        empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::GATE);
         let trace_txt = extract_msg_indices(&empty_trace, gate_id);
         assert_eq!("[0-2]", trace_txt);
     }
@@ -2465,8 +2465,8 @@ mod tests {
     fn test_single_range_extract_msg_indices() {
         let mut empty_trace = Trace::new();
         let gate_id = Uuid::new_v4();
-        empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::ALL);
+        empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::GATE);
         let trace_txt = extract_msg_indices(&empty_trace, gate_id);
         assert_eq!("[0-1]", trace_txt);
     }
@@ -2476,10 +2476,10 @@ mod tests {
         let mut empty_trace = Trace::new();
         let gate_id1 = Uuid::new_v4();
         let gate_id2 = Uuid::new_v4();
-        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id1, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::ALL);
+        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id1, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::GATE);
         let trace_txt = extract_msg_indices(&empty_trace, gate_id2);
         assert_eq!("[0, 2-3]", trace_txt);
     }
@@ -2489,12 +2489,12 @@ mod tests {
         let mut empty_trace = Trace::new();
         let gate_id1 = Uuid::new_v4();
         let gate_id2 = Uuid::new_v4();
-        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id1, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id1, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::ALL);
+        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id1, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id1, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::GATE);
         let trace_txt = extract_msg_indices(&empty_trace, gate_id2);
         assert_eq!("[0, 2-3, 5]", trace_txt);
     }
@@ -2504,16 +2504,16 @@ mod tests {
         let mut empty_trace = Trace::new();
         let gate_id1 = Uuid::new_v4();
         let gate_id2 = Uuid::new_v4();
-        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id1, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id1, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id1, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::ALL);
+        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id1, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id1, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id1, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::GATE);
         let trace_txt = extract_msg_indices(&empty_trace, gate_id2);
         assert_eq!("[0, 2-3, 5, 7-9]", trace_txt);
     }
@@ -2523,10 +2523,10 @@ mod tests {
         let mut empty_trace = Trace::new();
         let gate_id1 = Uuid::new_v4();
         let gate_id2 = Uuid::new_v4();
-        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id1, "blah".to_owned(), MsgRelation::ALL);
-        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::ALL);
+        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id1, "blah".to_owned(), MsgRelation::GATE);
+        empty_trace.append_msg(gate_id2, "blah".to_owned(), MsgRelation::GATE);
         let trace_txt = extract_msg_indices(&empty_trace, gate_id2);
         assert_eq!("[0-1, 3]", trace_txt);
     }

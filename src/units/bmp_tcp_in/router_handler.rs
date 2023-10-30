@@ -216,7 +216,7 @@ impl RouterHandler {
                     }
 
                     if trace_id > 0 || tracing_mode == TracingMode::On {
-                        self.tracer.reset_trace_id(trace_id);
+                        self.tracer.clear_trace_id(trace_id);
                     }
 
                     if let Ok(bmp_msg) = BmpMessage::from_octets(msg_buf) {

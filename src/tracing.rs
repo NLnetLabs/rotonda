@@ -35,13 +35,13 @@ use std::sync::{
     Arc, Mutex,
 };
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SubsecRound, Utc};
 use uuid::Uuid;
 
 //----------- MsgRelation ----------------------------------------------------
 
 /// To which component does a trace message relate?
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MsgRelation {
     /// The message relates to the Gate.
     GATE,
@@ -69,6 +69,12 @@ impl TraceMsg {
         msg: String,
         msg_relation: MsgRelation,
     ) -> Self {
+        // ALL is intended for querying, a trace msg cannot be both for a
+        // gate and a component at the same time so ALL is nonsensical.
+        if msg_relation == MsgRelation::ALL {
+            panic!("TraceMsg cannot have MsgRelation ALL");
+        }
+
         let timestamp = Utc::now();
         Self {
             timestamp,
@@ -78,6 +84,19 @@ impl TraceMsg {
         }
     }
 }
+
+#[cfg(test)]
+impl PartialEq for TraceMsg {
+    fn eq(&self, other: &Self) -> bool {
+        self.timestamp.trunc_subsecs(0) == other.timestamp.trunc_subsecs(0)
+            && self.gate_id == other.gate_id
+            && self.msg == other.msg
+            && self.msg_relation == other.msg_relation
+    }
+}
+
+#[cfg(test)]
+impl Eq for TraceMsg {}
 
 //----------- Trace ----------------------------------------------------------
 
@@ -175,7 +194,7 @@ impl Tracer {
     }
 
     /// Delete all trace messages for a given trace ID.
-    pub fn reset_trace_id(&self, trace_id: u8) {
+    pub fn clear_trace_id(&self, trace_id: u8) {
         self.traces.lock().unwrap()[trace_id as usize].clear();
     }
 
@@ -236,5 +255,217 @@ impl BoundTracer {
 
 #[cfg(test)]
 mod tests {
-    // TO DO
+    use chrono::SubsecRound;
+
+    use super::*;
+
+    #[test]
+    fn new_gate_trace_msg_has_expected_properties() {
+        let gate_id = Uuid::new_v4();
+        let msg = format!("Some msg");
+        let msg_relation = MsgRelation::GATE;
+        let now = Utc::now();
+
+        let trace_msg = TraceMsg::new(gate_id, msg.clone(), msg_relation);
+
+        assert_eq!(trace_msg.gate_id, gate_id);
+        assert_eq!(trace_msg.msg, msg);
+        assert_eq!(trace_msg.msg_relation, msg_relation);
+        assert_eq!(
+            trace_msg.timestamp.trunc_subsecs(0),
+            now.trunc_subsecs(0)
+        );
+    }
+
+    #[test]
+    fn new_component_trace_msg_has_expected_properties() {
+        let gate_id = Uuid::new_v4();
+        let msg = format!("Some msg");
+        let msg_relation = MsgRelation::COMPONENT;
+        let now = Utc::now();
+
+        let trace_msg = TraceMsg::new(gate_id, msg.clone(), msg_relation);
+
+        assert_eq!(trace_msg.gate_id, gate_id);
+        assert_eq!(trace_msg.msg, msg);
+        assert_eq!(trace_msg.msg_relation, msg_relation);
+        assert_eq!(
+            trace_msg.timestamp.trunc_subsecs(0),
+            now.trunc_subsecs(0)
+        );
+    }
+
+    #[test]
+    #[should_panic]
+    fn trace_msg_cannot_be_all_relation() {
+        TraceMsg::new(Uuid::new_v4(), String::new(), MsgRelation::ALL);
+    }
+
+    #[test]
+    fn new_trace_is_empty() {
+        let trace = Trace::new();
+        assert_eq!(trace.msgs(), &[]);
+        assert!(trace
+            .msg_indices(Uuid::new_v4(), MsgRelation::ALL)
+            .is_empty());
+    }
+
+    #[test]
+    fn clearing_an_empty_trace_has_no_effect() {
+        let mut trace = Trace::new();
+        trace.clear();
+        assert_eq!(trace.msgs(), &[]);
+        assert!(trace
+            .msg_indices(Uuid::new_v4(), MsgRelation::ALL)
+            .is_empty());
+    }
+
+    #[test]
+    fn trace_with_one_msg_has_expected_properties() {
+        let mut trace = Trace::new();
+        let gate_id = Uuid::new_v4();
+        let msg = format!("Some msg");
+        let msg_relation = MsgRelation::GATE;
+
+        trace.append_msg(gate_id, msg.clone(), msg_relation);
+
+        assert_eq!(
+            trace.msgs(),
+            &[TraceMsg::new(gate_id, msg, msg_relation)]
+        );
+
+        assert!(trace
+            .msg_indices(Uuid::new_v4(), MsgRelation::ALL)
+            .is_empty());
+
+        assert_eq!(trace.msg_indices(gate_id, MsgRelation::ALL), vec![0]);
+    }
+
+    #[test]
+    fn trace_with_multiple_msgs_has_expected_properties() {
+        let mut trace = Trace::new();
+
+        let gate_id1 = Uuid::new_v4();
+        let gate_id2 = Uuid::new_v4();
+        let gate_id3 = Uuid::new_v4();
+        let msg1 = format!("Some msg1");
+        let msg2 = format!("Some msg2");
+        let msg3 = format!("Some msg3");
+        let msg4 = format!("Some msg4");
+
+        trace.append_msg(gate_id1, msg1.clone(), MsgRelation::GATE);
+        trace.append_msg(gate_id2, msg2.clone(), MsgRelation::GATE);
+        trace.append_msg(gate_id2, msg3.clone(), MsgRelation::COMPONENT);
+        trace.append_msg(gate_id3, msg4.clone(), MsgRelation::GATE);
+
+        assert_eq!(
+            trace.msgs(),
+            &[
+                TraceMsg::new(gate_id1, msg1, MsgRelation::GATE),
+                TraceMsg::new(gate_id2, msg2, MsgRelation::GATE),
+                TraceMsg::new(gate_id2, msg3, MsgRelation::COMPONENT),
+                TraceMsg::new(gate_id3, msg4, MsgRelation::GATE)
+            ]
+        );
+
+        assert_eq!(trace.msg_indices(gate_id1, MsgRelation::GATE), vec![0]);
+        assert_eq!(
+            trace.msg_indices(gate_id1, MsgRelation::COMPONENT),
+            Vec::<usize>::new(),
+        );
+        assert_eq!(trace.msg_indices(gate_id1, MsgRelation::ALL), vec![0]);
+
+        assert_eq!(trace.msg_indices(gate_id2, MsgRelation::GATE), vec![1]);
+        assert_eq!(
+            trace.msg_indices(gate_id2, MsgRelation::COMPONENT),
+            vec![2]
+        );
+        assert_eq!(trace.msg_indices(gate_id2, MsgRelation::ALL), vec![1, 2]);
+
+        assert_eq!(trace.msg_indices(gate_id3, MsgRelation::GATE), vec![3]);
+        assert_eq!(
+            trace.msg_indices(gate_id3, MsgRelation::COMPONENT),
+            Vec::<usize>::new(),
+        );
+        assert_eq!(trace.msg_indices(gate_id3, MsgRelation::ALL), vec![3]);
+    }
+
+    #[test]
+    fn new_tracer_is_empty() {
+        let tracer = Tracer::new();
+        assert_eq!(tracer.next_tracing_id(), 0);
+        for trace_id in u8::MIN..=u8::MAX {
+            assert!(tracer.get_trace(trace_id).msgs().is_empty());
+        }
+    }
+
+    #[test]
+    fn tracer_next_trace_id_wraps_around() {
+        let tracer = Tracer::new();
+        for trace_id in u8::MIN..=u8::MAX {
+            assert_eq!(tracer.next_tracing_id(), trace_id);
+        }
+        assert_eq!(tracer.next_tracing_id(), u8::MIN);
+    }
+
+    #[test]
+    fn tracer_note_gate_event_works() {
+        let tracer = Tracer::new();
+        let trace_id: u8 = 0;
+        let gate_id: Uuid = Uuid::new_v4();
+        let msg = format!("some msg");
+        tracer.note_gate_event(trace_id, gate_id, msg.clone());
+        assert!(!tracer.get_trace(trace_id).msgs().is_empty());
+        assert_eq!(
+            tracer.get_trace(trace_id).msgs(),
+            vec![TraceMsg::new(gate_id, msg, MsgRelation::GATE)]
+        );
+    }
+
+    #[test]
+    fn tracer_note_component_event_works() {
+        let tracer = Tracer::new();
+        let trace_id: u8 = 0;
+        let gate_id: Uuid = Uuid::new_v4();
+        let msg = format!("some msg");
+        tracer.note_component_event(trace_id, gate_id, msg.clone());
+        assert!(!tracer.get_trace(trace_id).msgs().is_empty());
+        assert_eq!(
+            tracer.get_trace(trace_id).msgs(),
+            vec![TraceMsg::new(gate_id, msg, MsgRelation::COMPONENT)]
+        );
+    }
+
+    #[test]
+    fn clear_tracer_id_works() {
+        let tracer = Tracer::new();
+        let trace_id: u8 = 0;
+        let gate_id: Uuid = Uuid::new_v4();
+        let msg = format!("some msg");
+        tracer.note_gate_event(trace_id, gate_id, msg.clone());
+        assert!(!tracer.get_trace(trace_id).msgs().is_empty());
+        assert_eq!(
+            tracer.get_trace(trace_id).msgs(),
+            vec![TraceMsg::new(gate_id, msg, MsgRelation::GATE)]
+        );
+        tracer.clear_trace_id(trace_id);
+        assert!(tracer.get_trace(trace_id).msgs().is_empty());
+    }
+
+    #[test]
+    fn bound_tracer_works() {
+        let tracer = Arc::new(Tracer::new());
+        let gate_id = Uuid::new_v4();
+        let bound_tracer = tracer.bind(gate_id);
+
+        let trace_id = 0;
+        let msg = format!("some msg");
+        bound_tracer.note_event(trace_id, msg.clone());
+
+        assert!(!tracer.get_trace(trace_id).msgs().is_empty());
+        assert_eq!(
+            tracer.get_trace(trace_id).msgs(),
+            vec![TraceMsg::new(gate_id, msg, MsgRelation::COMPONENT)]
+        );
+    }
 }

@@ -9,6 +9,7 @@ use crate::{
     },
     manager::{Component, WaitPoint},
     payload::{FilterError, Filterable, Update, UpstreamStatus},
+    tracing::Tracer,
     units::Unit,
 };
 use arc_swap::ArcSwap;
@@ -50,6 +51,7 @@ struct RotoFilterRunner {
     gate: Arc<Gate>,
     status_reporter: Arc<RotoFilterStatusReporter>,
     filter_name: Arc<ArcSwap<FilterName>>,
+    tracer: Arc<Tracer>,
 }
 
 impl RotoFilterRunner {
@@ -75,12 +77,14 @@ impl RotoFilterRunner {
 
         let filter_name = Arc::new(ArcSwap::from_pointee(filter_name));
         let roto_scripts = component.roto_scripts().clone();
+        let tracer = component.tracer().clone();
 
         Self {
             roto_scripts,
             gate,
             status_reporter,
             filter_name,
+            tracer,
         }
     }
 
@@ -103,12 +107,14 @@ impl RotoFilterRunner {
         let status_reporter = RotoFilterStatusReporter::default().into();
         let filter_name =
             Arc::new(ArcSwap::from_pointee(FilterName::from(filter_name)));
+        let tracer = Arc::new(Tracer::new());
 
         let runner = Self {
             roto_scripts,
             gate,
             status_reporter,
             filter_name,
+            tracer,
         };
 
         (runner, gate_agent)
@@ -222,15 +228,19 @@ impl RotoFilterRunner {
         &self,
         payload: T,
     ) -> Result<(), FilterError> {
+        let tracer = self.tracer.bind(self.gate.id());
+
         if let Some(filtered_update) = Self::VM
             .with(|vm| {
                 payload
                     .filter(
-                        |value| {
-                            self.roto_scripts.exec(
+                        |value, trace_id| {
+                            self.roto_scripts.exec_with_tracer(
                                 vm,
                                 &self.filter_name.load(),
                                 value,
+                                tracer.clone(),
+                                trace_id,
                             )
                         },
                         |source_id| {
@@ -300,86 +310,86 @@ mod tests {
     const TEST_PEER_ASN: u32 = 12345;
 
     const FILTER_OUT_ASN_ROTO: &str = r###"
-        filter my-module {
-            define {
-                rx msg: BmpMessage;
-            }
+            filter my-module {
+                define {
+                    rx msg: BmpMessage;
+                }
 
-            term has_asn {
-                // Compare the ASN for BMP message types that have a Per Peer Header
-                // Omiting the other message types has the same effect as the explicit
-                // 1 != 1 (false) result that we define here explicity.
-                match msg with {
-                    InitiationMessage(i_msg) -> 1 != 1,
-                    PeerDownNotification(pd_msg) -> pd_msg.per_peer_header.asn == <ASN>,
-                    PeerUpNotification(pu_msg) -> pu_msg.per_peer_header.asn == <ASN>,
-                    RouteMonitoring(rm_msg) -> rm_msg.per_peer_header.asn == <ASN>,
-                    StatisticsReport(sr_msg) -> sr_msg.per_peer_header.asn == <ASN>,
-                    TerminationMessage(t_msg) -> 1 != 1,
+                term has_asn {
+                    // Compare the ASN for BMP message types that have a Per Peer Header
+                    // Omiting the other message types has the same effect as the explicit
+                    // 1 != 1 (false) result that we define here explicity.
+                    match msg with {
+                        InitiationMessage(i_msg) -> 1 != 1,
+                        PeerDownNotification(pd_msg) -> pd_msg.per_peer_header.asn == <ASN>,
+                        PeerUpNotification(pu_msg) -> pu_msg.per_peer_header.asn == <ASN>,
+                        RouteMonitoring(rm_msg) -> rm_msg.per_peer_header.asn == <ASN>,
+                        StatisticsReport(sr_msg) -> sr_msg.per_peer_header.asn == <ASN>,
+                        TerminationMessage(t_msg) -> 1 != 1,
+                    }
+                }
+
+                apply {
+                    filter match has_asn matching {
+                        return reject;
+                    };
+                    accept;
                 }
             }
-
-            apply {
-                filter match has_asn matching {
-                    return reject;
-                };
-                accept;
-            }
-        }
-    "###;
+        "###;
 
     const FILTER_IN_ASN_ROTO: &str = r###"
-        filter my-module {
-            define {
-                rx msg: BmpMessage;
-            }
+            filter my-module {
+                define {
+                    rx msg: BmpMessage;
+                }
 
-            term has_asn {
-                // Compare the ASN for BMP message types that have a Per Peer Header
-                // We can't omit the other message types as without the explicit
-                // 1 == 1 (true) check the resulting logic isn't what we want.
-                match msg with {
-                    InitiationMessage(i_msg) -> 1 == 1,
-                    PeerDownNotification(pd_msg) -> pd_msg.per_peer_header.asn == <ASN>,
-                    PeerUpNotification(pu_msg) -> pu_msg.per_peer_header.asn == <ASN>,
-                    RouteMonitoring(rm_msg) -> rm_msg.per_peer_header.asn == <ASN>,
-                    StatisticsReport(sr_msg) -> sr_msg.per_peer_header.asn == <ASN>,
-                    TerminationMessage(t_msg) -> 1 == 1,
+                term has_asn {
+                    // Compare the ASN for BMP message types that have a Per Peer Header
+                    // We can't omit the other message types as without the explicit
+                    // 1 == 1 (true) check the resulting logic isn't what we want.
+                    match msg with {
+                        InitiationMessage(i_msg) -> 1 == 1,
+                        PeerDownNotification(pd_msg) -> pd_msg.per_peer_header.asn == <ASN>,
+                        PeerUpNotification(pu_msg) -> pu_msg.per_peer_header.asn == <ASN>,
+                        RouteMonitoring(rm_msg) -> rm_msg.per_peer_header.asn == <ASN>,
+                        StatisticsReport(sr_msg) -> sr_msg.per_peer_header.asn == <ASN>,
+                        TerminationMessage(t_msg) -> 1 == 1,
+                    }
+                }
+
+                apply {
+                    filter match has_asn matching {
+                        return accept;
+                    };
+                    reject;
                 }
             }
-
-            apply {
-                filter match has_asn matching {
-                    return accept;
-                };
-                reject;
-            }
-        }
-    "###;
+        "###;
 
     const MSG_TYPE_MATCHING_ROTO: &str = r###"
-        filter my-module {
-            define {
-                rx msg: BmpMessage;
-            }
+            filter my-module {
+                define {
+                    rx msg: BmpMessage;
+                }
 
-            term is_wanted_bmp_msg_type {
-                match msg with {
-                    InitiationMessage(i_msg) -> 1 == 0,
-                    PeerDownNotification(pd_msg) -> 1 == 1,
-                    PeerUpNotification(pu_msg) -> 1 == 1,
-                    RouteMonitoring(rm_msg) -> 1 == 0,
-                    StatisticsReport(sr_msg) -> 1 == 0,
-                    TerminationMessage(t_msg) -> 1 == 0,
+                term is_wanted_bmp_msg_type {
+                    match msg with {
+                        InitiationMessage(i_msg) -> 1 == 0,
+                        PeerDownNotification(pd_msg) -> 1 == 1,
+                        PeerUpNotification(pu_msg) -> 1 == 1,
+                        RouteMonitoring(rm_msg) -> 1 == 0,
+                        StatisticsReport(sr_msg) -> 1 == 0,
+                        TerminationMessage(t_msg) -> 1 == 0,
+                    }
+                }
+
+                apply {
+                    filter match is_wanted_bmp_msg_type matching { return accept; };
+                    return reject;
                 }
             }
-
-            apply {
-                filter match is_wanted_bmp_msg_type matching { return accept; };
-                return reject;
-            }
-        }
-    "###;
+        "###;
 
     #[tokio::test]
     async fn bmp_messages_without_a_per_peer_header_should_not_be_filtered() {
@@ -531,7 +541,7 @@ mod tests {
         let bmp_msg =
             Arc::new(BytesRecord(BmpMessage::from_octets(msg_buf).unwrap()));
         let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
-        Update::Single(Payload::new(source_id, value))
+        Update::Single(Payload::new(source_id, value, None))
     }
 
     async fn is_filtered(filter: &RotoFilterRunner, update: Update) -> bool {

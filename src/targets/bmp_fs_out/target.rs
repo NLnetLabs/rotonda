@@ -246,6 +246,7 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
         while let Some(Payload {
             source_id,
             value: TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bytes)),
+            ..
         }) = rx.recv().await
         {
             let bytes = BytesRecord::as_ref(&bytes);

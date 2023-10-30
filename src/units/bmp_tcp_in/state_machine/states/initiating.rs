@@ -57,7 +57,11 @@ impl BmpStateDetails<Initiating> {
     }
 
     #[allow(dead_code)]
-    pub fn process_msg(self, bmp_msg: BmpMsg<Bytes>) -> ProcessingResult {
+    pub fn process_msg(
+        self,
+        bmp_msg: BmpMsg<Bytes>,
+        _trace_id: Option<u8>,
+    ) -> ProcessingResult {
         match bmp_msg {
             // already verified upstream
             BmpMsg::InitiationMessage(msg) => {
@@ -127,8 +131,7 @@ impl Initiable for Initiating {
 mod tests {
     use std::ops::Deref;
 
-    use routecore::asn::Asn;
-    use routecore::bmp::message::PeerType;
+    use routecore::{asn::Asn, bmp::message::PeerType};
 
     use crate::{
         bgp::encode::{
@@ -180,7 +183,7 @@ mod tests {
         let bmp_msg = BmpMsg::from_octets(msg_buf).unwrap();
 
         // When
-        let res = processor.process_msg(bmp_msg);
+        let res = processor.process_msg(bmp_msg, None);
 
         // Then
         assert!(matches!(
@@ -212,7 +215,7 @@ mod tests {
         let bmp_msg = BmpMsg::from_octets(msg_buf).unwrap();
 
         // When
-        let res = processor.process_msg(bmp_msg);
+        let res = processor.process_msg(bmp_msg, None);
 
         // Then
         assert!(matches!(
@@ -237,7 +240,7 @@ mod tests {
         let bmp_msg = BmpMsg::from_octets(msg_buf).unwrap();
 
         // When
-        let res = processor.process_msg(bmp_msg);
+        let res = processor.process_msg(bmp_msg, None);
 
         // Then
         assert!(matches!(

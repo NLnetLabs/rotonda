@@ -59,7 +59,11 @@ pub struct Updating {
 
 impl BmpStateDetails<Updating> {
     #[allow(dead_code)]
-    pub fn process_msg(self, bmp_msg: BmpMsg<Bytes>) -> ProcessingResult {
+    pub fn process_msg(
+        self,
+        bmp_msg: BmpMsg<Bytes>,
+        trace_id: Option<u8>,
+    ) -> ProcessingResult {
         match bmp_msg {
             // already verified upstream
             BmpMsg::InitiationMessage(msg) => self.initiate(msg),
@@ -71,6 +75,7 @@ impl BmpStateDetails<Updating> {
             BmpMsg::RouteMonitoring(msg) => self.route_monitoring(
                 msg,
                 RouteStatus::UpToDate,
+                trace_id,
                 |s, pph, update| {
                     s.route_monitoring_preprocessing(pph, update)
                 },

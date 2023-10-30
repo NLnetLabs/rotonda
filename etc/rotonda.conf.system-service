@@ -60,9 +60,7 @@
 #
 # The currently available components are intended to be used like so:
 #
-#   bmp-tcp-in -> [filter] -> bmp-in -> rib -> mqtt-out
-#
-# (where [] denotes that the filter is optional)
+#   bmp-tcp-in / bgp-tcp-in -> rib -> mqtt-out
 #
 # Additionally there are some components intended for diagnostic use:
 #
@@ -114,6 +112,8 @@
 #                            the script file with the filter_name setting of
 #                            the unit or target.
 #
+# Note: In the diagrams below the term "RT" denotes any valid Roto scripting
+# type.
 
 
 
@@ -211,6 +211,12 @@
 #                                [units.my-bgp-in]
 #                                peers.".." = { name = .., remote_asn = .. }
 #
+#     filter_name            The name of a loaded "filter" or "filter-map"
+#                            that will be executed for every BGP UPDATE PDU
+#                            received by this unit. If the script terminates
+#                            with "reject" the UPDATE PDU will be discarded
+#                            as if it had never been received.
+#
 # The following MANDATORY settings MUST be specified in a peers."address"
 # table:
 #
@@ -229,9 +235,13 @@
 #
 # --- Pipeline interaction ---------------------------------------------------
 #
-#                              +------------+
-#            - - TCP/IP - - -> | bgp-tcp-in | --> N * Route (RT)
-#                              +------------+
+#            +-------------------------------------------------+
+# TCP/IP --> | BgpUpdateMessage -> filter --> BgpUpdateMessage | --> N * Route
+#            +-----------------------|-------------------------+
+#                                    |
+#                                    v         
+#                         0..N output streams each
+#                      emitting values of a single RT
 #
 # One Route value is output per prefix announced or withdrawn via a BGP UPDATE
 # message received. Withdrawals may also be synthesized if the BGP session is
@@ -246,34 +256,10 @@
 
 ### Unit: bmp-tcp-in #########################################################
 #
-# This unit listens on a specified TCP/IP address and port number for incoming 
-# connections from zero or more BMP capable routers. This unit and the "bmp-in"
-# unit together implement an RFC 7854 "BGP Monitoring Protocol (BMP)"
-# "monitoring station" [1].
-#
-# --- Settings ---------------------------------------------------------------
-#
-# The following MANDATORY settings MUST be specified:
-#
-#     Setting                Description
-#     ========================================================================
-#     listen                 The "<IP ADDRESS>:<PORT>" to listen on for
-#                            incoming BGP connections from BGP speakers.
-#
-# --- Pipeline interaction ---------------------------------------------------
-#
-#                              +------------+
-#            - - TCP/IP - - -> | bmp-tcp-in | --> BmpMessage (RT)
-#                              +------------+
-#
-# [1]: https://www.rfc-editor.org/rfc/rfc7854
-
-
-
-
-### Unit: bmp-in #############################################################
-#
-# This unit processes incoming raw BMP messages through a BMP state machine in
+# This unit implement an RFC 7854 "BGP Monitoring Protocol (BMP)"
+# "monitoring station" [1] by listening on a specified TCP/IP address and port
+# number for incoming connections from zero or more BMP capable routers. This
+# unit processes the incoming raw BMP messages through a BMP state machine in
 # order to extract, store and propagate downstream the route announcements and
 # withdrawals.
 #
@@ -283,14 +269,15 @@
 # and not for automation purposes. The output format is not intended to be
 # machine readable and may change without warning.
 #
+#
 # --- Settings ---------------------------------------------------------------
 #
 # The following MANDATORY settings MUST be specified:
 #
 #     Setting                Description
 #     ========================================================================
-#     sources                An ["array", "of", "upstream", "unit", "names"]
-#                            from which data will be received.
+#     listen                 The "<IP ADDRESS>:<PORT>" to listen on for
+#                            incoming BGP connections from BGP speakers.
 #
 # The following OPTIONAL settings MAY be specified if desired:
 #
@@ -313,6 +300,28 @@
 #                            sysName information TLV is received from the
 #                            router as part of the BMP Initiation Message that
 #                            it is required to send before any other messages.
+#
+#     filter_name            The name of a loaded "filter" or "filter-map"
+#                            that will be executed for every BMP message
+#                            received by this unit. If the script terminates
+#                            with "reject" the BMP message will be discarded.
+#                            as if it had never been received.
+#
+#     tracing_mode           Whether and how to trace BMP messages through the
+#     (def: Off)             pipeline.
+#
+#                            When set to "On" all received BMP messages will
+#                            be traced into successive tracing buffers
+#                            numbered 0-255 inclusive. These can be seen on
+#                            the status graph at:
+#
+#                              /status/graph/traces/N.
+#
+#                            When set to "IfRequested" received BMP messages
+#                            whose upper niblle of the "Version" header byte
+#                            is non-zero will cause that unsigned integer
+#                            number to be used as the tracing buffer index to
+#                            capture traces into.
 #
 # --- HTTP API ---------------------------------------------------------------
 #
@@ -353,18 +362,24 @@
 #
 # --- Pipeline interaction ---------------------------------------------------
 #
-#                                 HTTP API
-#                                     ^ 
-#                                     | 
-#                                     | 
-#                                +--------+
-#            BmpMessage (RT) --> | bmp-in | --> N * Route (RT)
-#                                +--------+
+#                                HTTP API
+#                                  ^ |
+#                                  | |
+#                                  | v
+#                 +-------------------------------------+
+#      TCP/IP --> | BmpMessage -> filter --> BmpMessage | --> N * Route
+#                 +-----------------|-------------------+
+#                                   |
+#                                   v         
+#                        0..N output streams each
+#                     emitting values of a single RT
 #
 # One Route value is output per prefix announced or withdrawn via a BGP UPDATE
 # message received as the payload of a BMP Route Monitoring message.
 # Withdrawals may also be synthesized due to BMP Peer Down notification or
 # loss of TCP/IP connection to the monitored BMP router.
+#
+# [1]: https://www.rfc-editor.org/rfc/rfc7854
 
 
 
@@ -458,7 +473,7 @@
 #                            announced routes stored in the rib than expected.
 #
 #     filter_name            Either a single name of a loaded "filter" or
-#     (def: None)            "filter-map", or an ["array", "of", "filter",
+#                            "filter-map", or an ["array", "of", "filter",
 #                            "or", "filter-map", "names"]. If more than one
 #                            is specified, the additional entries cause
 #                            virtual RIB units to be created to the East of
@@ -486,7 +501,7 @@
 #                                     | |
 #                                     | v
 #                                  +------+
-#                   Route (RT) --> | pRIB | --> Route (RT)
+#                           RT --> | pRIB | --> RT
 #                                  +------+
 #
 #
@@ -498,12 +513,12 @@
 #                                     | |
 #                                     | v
 #                                  +------+
-# RT --> filter --> Route (RT) --> | pRIB | --> Route (RT)
-#           |                      +------+
-#           |
-#           v         
-#   0..N output streams each   
-#   emitting values of a single RT
+#         RT --> filter --> RT --> | pRIB | --> RT
+#                   |              +------+
+#                   |
+#                   v         
+#           0..N output streams each   
+#           emitting values of a single RT
 #
 #
 # 3. A physical RIB and a virtual RIB, each with their own Roto script filter:
@@ -513,14 +528,14 @@
 #                                     | |
 #                                     | v
 #                                  +------+
-# RT --> filter --> Route (RT) --> | pRIB | --> Route (RT) -->+
-#           |                      +------+                   |  
-#           |                                                 |
-#           v                                                 |
-#   0..N output streams each                                  |
-#   emitting values of a single RT                            |
-#                                                             v
-#           +<------------------------------------------------+
+#         RT --> filter --> RT --> | pRIB | --> RT -->+
+#                   |              +------+           |  
+#                   |                                 |
+#                   v                                 |
+#           0..N output streams each                  |
+#           emitting values of a single RT            |
+#                                                     v
+#           +<----------------------------------------+
 #           |
 #           |                       HTTP API
 #           |                         ^ |
@@ -551,12 +566,12 @@
 #       of a HTTP API query.
 #       ======================================================================
 #
-#   - The input to a physical RIB is usually a Route (RT) but can also be a
-#     Record (RT) with a "prefix" key, but only Route (RT) values support the
-#     notion of being "withdrawn". The entire record (all its keys and values)
-#     will be added to the set of values stored at the prefix in the RIB, with
-#     the rib_keys fields determining whether a new value is added to the set
-#     or replaces an existing item in the set.
+#   - The input to a physical RIB is usually a Route but can also be a Record
+#     with a "prefix" key, but only Route values support the notion of being
+#     "withdrawn". The entire record (all its keys and values) will be added
+#     to the set of values stored at the prefix in the RIB, with the rib_keys
+#     fields determining whether a new value is added to the set or replaces
+#     an existing item in the set.
 
 
 
@@ -575,8 +590,8 @@
 #
 #   - Was received from a configured upstream source unit.
 #   - Was emitted by a Roto script output stream.
-#   - Is of type Record (RT) with a "name" field whose value matches the name
-#     of this instance of the mqtt-out target.
+#   - Is of type Record with a "name" field whose value matches the name of
+#     this instance of the mqtt-out target.
 #
 # So naming an instance of this unit in a Roto script output stream record is
 # not sufficient to have this unit receive it, this unit must still be
@@ -639,16 +654,16 @@
 #     (def: "rotonda/{id}")  determine the MQTT topic to which events will be
 #                            published. If present, the "{id}" placeholder
 #                            will be replaced by the "topic" value in the
-#                            incoming Record (RT) value. When using "{id}" an
-#                            MQTT client that supports MQTT wildcards can
-#                            still receive all events by subscribing to
-#                            'rotonda/#' for example.
+#                            incoming Record value. When using "{id}" an MQTT
+#                            client that supports MQTT wildcards can still 
+#                            receive all events by subscribing to 'rotonda/#'
+#                            for example.
 #
 # --- Pipeline interaction ---------------------------------------------------
 #
-#                               +----------+
-#               Record (RT) --> | mqtt-out | - - JSON - - > MQTT server
-#                               +----------+
+#                          +----------+
+#               Record --> | mqtt-out | - - JSON - - > MQTT server
+#                          +----------+
 #
 # [1]: https://www.emqx.com/en/mqtt/public-mqtt5-broker
 # [2]: https://hub.docker.com/r/emqx/emqx
@@ -735,9 +750,9 @@
 #
 # --- Pipeline interaction ---------------------------------------------------
 #
-#                              +------------+
-#          BmpMessage (RT) --> | bmp-fs-out | - - - - > Writes to disk
-#                              +------------+
+#                               +------------+
+#                BmpMessage --> | bmp-fs-out | - - - - > Writes to disk
+#                               +------------+
 
 
 
@@ -779,7 +794,7 @@
 # --- Pipeline interaction ---------------------------------------------------
 #
 #                              +-------------+
-#          BmpMessage (RT) --> | bmp-tcp-out | - - - - > Proxied via TCP/IP
+#               BmpMessage --> | bmp-tcp-out | - - - - > Proxied via TCP/IP
 #                              +-------------+
 
 
@@ -806,20 +821,12 @@ my_asn = SOME_ASN              # Tip: edit me, or comment this unit out
 my_bgp_id = []                 # Tip: edit me, or comment this unit out
 filter_name = "bgp-in-filter"
 
-[units.bmp-tcp-in]
+[units.bmp-in]
 type = "bmp-tcp-in"
 listen = "0.0.0.0:11019"
-
-[units.bmp-in-filter]
-type = "filter"
-sources = ["bmp-tcp-in"]
 filter_name = "bmp-in-filter"
-
-[units.bmp-in]
-type = "bmp-in"
-sources = ["bmp-in-filter"]
 http_api_path = "/bmp-routers/"
-router_id_template = "{sys_name}"
+tracing_mode = "Off"
 
 # The two RIB units below could have been defined like so:
 #
@@ -853,12 +860,12 @@ sources = ["rib-in-post"]
 
 [targets.bmp-proxy]
 type = "bmp-tcp-out"
-sources = ["bmp-in-filter"]
+sources = ["bmp-in"]
 destination = "SOME_IP_ADDRESS:SOME_PORT"      # Tip: edit me, or comment this target out
 
 [targets.mqtt]
 type = "mqtt-out"
-sources = ["bmp-in-post-filter", "bgp-in-post-filter", "rib-in-pre", "rib-in-post"]
+sources = ["bmp-in", "bgp-in", "rib-in-pre", "rib-in-post"]
 client_id = "rotonda"                          # Tip: edit me
 topic_template = "{id}"                        # Tip: edit me
 destination = "SOME_IP_ADDRESS:SOME_PORT"      # Tip: edit me, or comment this target out

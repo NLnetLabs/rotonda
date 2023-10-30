@@ -594,7 +594,6 @@ impl Manager {
             Instant::now(),
             LinkReport::new(),
         )));
-
         let tracer = Arc::new(Tracer::new());
 
         let (graph_svg_processor, graph_svg_rel_base_url) =

@@ -29,7 +29,6 @@ impl BmpTcpInStatusReporter {
         }
     }
 
-    #[cfg(feature = "router-list")]
     pub fn typed_metrics(&self) -> Arc<BmpTcpInMetrics> {
         self.metrics.clone()
     }

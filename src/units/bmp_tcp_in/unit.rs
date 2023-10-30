@@ -34,13 +34,12 @@ use crate::{
     units::Unit,
 };
 
+use super::{http::{RouterInfoApi, RouterListApi}, types::RouterInfo};
 use super::{
-    http::{RouterInfoApi, RouterListApi},
     metrics::BmpTcpInMetrics,
     router_handler::RouterHandler,
     state_machine::{machine::BmpState, metrics::BmpMetrics},
     status_reporter::BmpTcpInStatusReporter,
-    types::RouterInfo,
     util::format_source_id,
 };
 
@@ -141,7 +140,6 @@ pub struct BmpTcpIn {
     pub listen: Arc<SocketAddr>,
 
     /// The relative path at which we should listen for HTTP query API requests
-    #[cfg(feature = "router-list")]
     #[serde(default = "BmpTcpIn::default_http_api_path")]
     http_api_path: Arc<String>,
 
@@ -190,7 +188,6 @@ impl BmpTcpIn {
         let filter_name = Arc::new(ArcSwap::from_pointee(self.filter_name));
 
         // Setup REST API endpoint
-        #[cfg(feature = "router-list")]
         let (_api_processor, router_info) = {
             let router_info = Arc::new(FrimMap::default());
 
@@ -254,7 +251,6 @@ impl BmpTcpIn {
         Ok(())
     }
 
-    #[cfg(feature = "router-list")]
     fn default_http_api_path() -> Arc<String> {
         Arc::new("/routers/".to_string())
     }
@@ -295,7 +291,9 @@ impl BmpTcpInRunner {
         router_states: Arc<
             FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
         >, // Option is never None, instead Some is take()'n and replace()'d.
-        router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
+        router_info: Arc<
+            FrimMap<SourceId, Arc<RouterInfo>>,
+        >,
         bmp_metrics: Arc<BmpMetrics>,
         bmp_in_metrics: Arc<BmpTcpInMetrics>,
         state_machine_metrics: Arc<TokioTaskMetrics>,
@@ -309,7 +307,7 @@ impl BmpTcpInRunner {
         Self {
             component,
             listen,
-            http_api_path: http_api_path,
+            http_api_path,
             gate,
             router_states,
             router_info,
@@ -401,7 +399,6 @@ impl BmpTcpInRunner {
                             self.router_connected(&source_id),
                         )));
 
-                        #[cfg(feature = "router-list")]
                         let last_msg_at = {
                             let weak_ref = Arc::downgrade(&state_machine);
                             self.setup_router_specific_api_endpoint(
@@ -444,7 +441,6 @@ impl BmpTcpInRunner {
                             state_machine,
                             self.tracer.clone(),
                             self.tracing_mode.clone(),
-                            #[cfg(feature = "router-list")]
                             last_msg_at,
                         );
 
@@ -560,7 +556,6 @@ impl BmpTcpInRunner {
         let child_status_reporter =
             Arc::new(self.status_reporter.add_child(child_name));
 
-        #[cfg(feature = "router-list")]
         {
             let this_router_info = Arc::new(RouterInfo::new());
             self.router_info.insert(source_id.clone(), this_router_info);
@@ -583,7 +578,6 @@ impl BmpTcpInRunner {
 
     // TODO: Should we tear these individual API endpoints down when the
     // connection to the monitored router is lost?
-    #[cfg(feature = "router-list")]
     async fn setup_router_specific_api_endpoint(
         &self,
         state_machine: Weak<Mutex<Option<BmpState>>>,

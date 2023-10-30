@@ -240,7 +240,7 @@ impl LogConfig {
             ..Default::default()
         };
         if formatter.hostname.is_none() {
-            formatter.hostname = Some("routinator".into());
+            formatter.hostname = Some("rotonda".into());
         }
         let formatter = formatter;
         let logger = syslog::unix(formatter.clone())

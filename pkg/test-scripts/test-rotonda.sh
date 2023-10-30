@@ -10,7 +10,7 @@ case $1 in
     echo $VER
 
     echo -e "\nROTONDA CONF DIR:"
-    ls -lr /etc/rotonda/
+    ls -lR /etc/rotonda/
 
     echo -e "\nROTONDA CONF:"
     cat /etc/rotonda/rotonda.conf
@@ -30,7 +30,7 @@ case $1 in
     rotonda --version
 
     echo -e "\nROTONDA CONF DIR:"
-    ls -lr /etc/rotonda/
+    ls -lR /etc/rotonda/
     
     echo -e "\nROTONDA CONF:"
     cat /etc/rotonda/rotonda.conf

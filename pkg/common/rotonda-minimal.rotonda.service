@@ -4,7 +4,7 @@ Documentation=man:rotonda(1)
 After=network.target
 
 [Service]
-ExecStart=/usr/bin/rotonda --config=/etc/rotonda/rotonda.conf --syslog server
+ExecStart=/usr/bin/rotonda --config=/etc/rotonda/rotonda.conf
 User=rotonda
 
 [Install]

@@ -27,7 +27,7 @@ use crate::{
         unit::UnitActivity,
     },
     comms::{Gate, GateStatus, Terminated},
-    log::Tracer,
+    tracing::Tracer,
     manager::{Component, WaitPoint},
     payload::SourceId,
     tokio::TokioTaskMetrics,

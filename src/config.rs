@@ -10,7 +10,7 @@ use crate::log::{LogConfig, Terminate};
 use crate::manager::{Manager, TargetSet, UnitSet};
 use crate::mvp::{
     MvpConfig, ARG_CONFIG, CFG_TARGET_BMP_PROXY, CFG_TARGET_MQTT,
-    CFG_UNIT_BGP_TCP_IN, CFG_UNIT_BMP_TCP_IN,
+    CFG_UNIT_BGP_IN, CFG_UNIT_BMP_IN,
 };
 use clap::{Arg, ArgMatches, Command};
 use log::{error, info, trace};
@@ -440,6 +440,25 @@ impl ConfigFile {
                 }
             }
 
+            if let Some(new_tracing_mode) = mvp_overrides.tracing_mode {
+                let Value::Table(ref mut units) =
+                    root.get_mut(CFG_UNITS).unwrap()
+                else {
+                    unreachable!()
+                };
+                let Value::Table(ref mut bmp_in) =
+                    units.get_mut(CFG_UNIT_BMP_IN).unwrap()
+                else {
+                    unreachable!()
+                };
+                let Value::String(ref mut tracing_mode) =
+                    bmp_in.get_mut("tracing_mode").unwrap()
+                else {
+                    unreachable!()
+                };
+                *tracing_mode = new_tracing_mode.to_string();
+            }
+
             // Handle the special MVP case of allowing a user to complete or remove the MQTT target config based on the
             // command line arguments supplied.
             match mvp_overrides.mqtt_destination_addr {
@@ -496,7 +515,7 @@ impl ConfigFile {
                     unreachable!()
                 };
                 let Value::Table(ref mut bgp_in) =
-                    units.get_mut(CFG_UNIT_BGP_TCP_IN).unwrap()
+                    units.get_mut(CFG_UNIT_BGP_IN).unwrap()
                 else {
                     unreachable!()
                 };
@@ -514,7 +533,7 @@ impl ConfigFile {
                     unreachable!()
                 };
                 let Value::Table(ref mut bmp_tcp_in) =
-                    units.get_mut(CFG_UNIT_BMP_TCP_IN).unwrap()
+                    units.get_mut(CFG_UNIT_BMP_IN).unwrap()
                 else {
                     unreachable!()
                 };

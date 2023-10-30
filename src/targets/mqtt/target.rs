@@ -495,15 +495,7 @@ impl DirectUpdate for MqttRunner {
                 }
             }
 
-            _ => {
-                // QueryResults are only intended to be sent from physical RIB to virtual RIBs. If we receive one it has
-                // mistakenly escaped (been wrongly propagated onward by the last vRIB in a chain), but it wasn't
-                // intended for nor can we do anything with it.
-                self.status_reporter.input_mismatch(
-                    "Update::Single(OutputStreamMessage)|Update::Bulk(OutputStreamMessage)",
-                    update,
-                );
-            }
+            _ => { /* We may have received the output from another unit, but we are not interested in it */ }
         }
     }
 }

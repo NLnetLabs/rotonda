@@ -429,6 +429,11 @@ impl RibUnitRunner {
     }
 
     #[cfg(test)]
+    pub(super) fn status_reporter(&self) -> Arc<RibUnitStatusReporter> {
+        self.status_reporter.clone()
+    }
+
+    #[cfg(test)]
     pub(super) fn gate(&self) -> Arc<Gate> {
         self.gate.clone()
     }
@@ -825,11 +830,13 @@ impl RibUnitRunner {
                                     propagation_delay,
                                     num_retries,
                                     is_announcement,
-                                    1,
+                                    1, 1, 0,
                                 );
                             }
                             Upsert::Update(StoreInsertionReport {
-                                item_count_delta,
+                                num_items_delta,
+                                num_announcements_delta,
+                                num_withdrawals_delta,
                                 item_count_total,
                                 op_duration,
                             }) => {
@@ -851,7 +858,9 @@ impl RibUnitRunner {
                                     insert_delay,
                                     propagation_delay,
                                     num_retries,
-                                    item_count_delta,
+                                    num_items_delta,
+                                    num_announcements_delta,
+                                    num_withdrawals_delta,
                                 );
 
                                 // status_reporter.update_processed(

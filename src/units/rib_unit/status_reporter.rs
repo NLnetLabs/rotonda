@@ -59,7 +59,9 @@ impl RibUnitStatusReporter {
         propagation_delay: i64,
         num_retries: u32,
         is_announcement: bool,
-        item_count_delta: isize,
+        num_items_delta: isize,
+        num_announcements_delta: isize,
+        num_withdrawals_delta: isize,
     ) {
         self.metrics
             .last_insert_duration
@@ -69,7 +71,9 @@ impl RibUnitStatusReporter {
             router_id,
             propagation_delay,
             num_retries,
-            item_count_delta,
+            num_items_delta,
+            num_announcements_delta,
+            num_withdrawals_delta,
         );
 
         if !is_announcement {
@@ -85,7 +89,9 @@ impl RibUnitStatusReporter {
         insert_delay: i64,
         propagation_delay: i64,
         num_retries: u32,
-        item_count_delta: isize,
+        num_items_delta: isize,
+        num_announcements_delta: isize,
+        num_withdrawals_delta: isize,
     ) {
         self.metrics
             .last_update_duration
@@ -95,7 +101,9 @@ impl RibUnitStatusReporter {
             router_id,
             propagation_delay,
             num_retries,
-            item_count_delta,
+            num_items_delta,
+            num_announcements_delta,
+            num_withdrawals_delta,
         );
     }
 
@@ -104,7 +112,9 @@ impl RibUnitStatusReporter {
         router_id: Arc<String>,
         propagation_delay: i64,
         num_retries: u32,
-        item_count_delta: isize,
+        num_items_delta: isize,
+        num_announcements_delta: isize,
+        num_withdrawals_delta: isize,
     ) {
         let metrics = self.metrics.router_metrics(router_id);
         metrics.last_e2e_delay.store(propagation_delay, SeqCst);
@@ -116,20 +126,32 @@ impl RibUnitStatusReporter {
                 .fetch_add(num_retries as usize, SeqCst);
         }
 
-        if item_count_delta > 0 {
+        if num_items_delta > 0 {
             self.metrics
                 .num_items
-                .fetch_add(item_count_delta as usize, SeqCst);
-            self.metrics
-                .num_routes_announced
-                .fetch_add(item_count_delta as usize, SeqCst);
+                .fetch_add(num_items_delta as usize, SeqCst);
         } else {
             self.metrics
                 .num_items
-                .fetch_sub(-item_count_delta as usize, SeqCst);
+                .fetch_sub(-num_items_delta as usize, SeqCst);
+        }
+        if num_announcements_delta > 0 {
+            self.metrics
+                .num_routes_announced
+                .fetch_add(num_announcements_delta as usize, SeqCst);
+        } else {
+            self.metrics
+                .num_routes_announced
+                .fetch_sub(-num_announcements_delta as usize, SeqCst);
+        }
+        if num_withdrawals_delta > 0 {
             self.metrics
                 .num_routes_withdrawn
-                .fetch_add(-item_count_delta as usize, SeqCst);
+                .fetch_add(num_withdrawals_delta as usize, SeqCst);
+        } else {
+            self.metrics
+                .num_routes_withdrawn
+                .fetch_sub(-num_withdrawals_delta as usize, SeqCst);
         }
     }
 

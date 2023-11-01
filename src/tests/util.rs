@@ -878,7 +878,7 @@ pub mod bgp {
                     //  field of the UPDATE message."
                     //
                     // From: https://datatracker.ietf.org/doc/html/rfc4271#section-4.3
-                    if let NextHop::Ipv4(addr) = next_hop.0 {
+                    if let NextHop::Unicast(IpAddr::V4(addr)) | NextHop::Multicast(IpAddr::V4(addr)) = next_hop.0 {
                         push_attributes(
                             &mut path_attributes,
                             PathAttributeType::NextHop,
@@ -985,7 +985,7 @@ pub mod bgp {
                                     mp_reach_nlri.put_u16(AFI::Ipv6.into());
                                     mp_reach_nlri
                                         .put_u8(u8::from(SAFI::Unicast));
-                                    if let NextHop::Ipv6(addr) = next_hop.0 {
+                                    if let NextHop::Unicast(IpAddr::V6(addr)) | NextHop::Ipv6LL(addr, _) | NextHop::Multicast(IpAddr::V6(addr)) = next_hop.0 {
                                         mp_reach_nlri.put_u8(addr.octets().len() as u8);
                                         mp_reach_nlri.extend_from_slice(
                                             &addr.octets(),
@@ -1510,10 +1510,7 @@ pub mod bgp {
 
             fn from_str(s: &str) -> Result<Self, Self::Err> {
                 let ip_addr: IpAddr = s.parse()?;
-                match ip_addr {
-                    IpAddr::V4(addr) => Ok(MyNextHop(NextHop::Ipv4(addr))),
-                    IpAddr::V6(addr) => Ok(MyNextHop(NextHop::Ipv6(addr))),
-                }
+                Ok(MyNextHop(NextHop::Unicast(ip_addr)))
             }
         }
 

@@ -227,7 +227,7 @@ impl BmpStateDetails<Dumping> {
         pph: &PerPeerHeader<Bytes>,
         update: &UpdateMessage<Bytes>,
     ) -> ControlFlow<ProcessingResult, Self> {
-        if let Some((afi, safi)) = update.is_eor() {
+        if let Ok(Some((afi, safi))) = update.is_eor() {
             if self.details.remove_pending_eor(pph, afi, safi) {
                 // The last pending EOR has been removed and so this signifies the end of the initial table dump, if
                 // we're in the Dumping state, otherwise in the Updating state it signifies only that a late Peer Up

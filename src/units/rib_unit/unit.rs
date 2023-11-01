@@ -47,7 +47,10 @@ use uuid::Uuid;
 use super::{
     http::PrefixesApi,
     metrics::RibUnitMetrics,
-    rib::{HashedRib, PreHashedTypeValue, RibValue, RouteExtra},
+    rib::{
+        HashedRib, PreHashedTypeValue, RibValue, RouteExtra,
+        StoreEvictionPolicy, StoreMergeUpdateSettings,
+    },
     status_reporter::RibUnitStatusReporter,
 };
 use super::{
@@ -268,7 +271,11 @@ impl RibUnitRunner {
     ) -> Self {
         let unit_name = component.name().clone();
         let gate = Arc::new(gate);
-        let rib = Self::mk_rib(rib_type, rib_keys);
+        let rib = Self::mk_rib(
+            rib_type,
+            rib_keys,
+            StoreEvictionPolicy::UpdateStatusOnWithdraw.into(),
+        );
         let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> =
             Default::default();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
@@ -339,6 +346,7 @@ impl RibUnitRunner {
     pub(crate) fn mock(
         roto_script: &str,
         rib_type: RibType,
+        settings: StoreMergeUpdateSettings,
     ) -> (Self, crate::comms::GateAgent) {
         use crate::common::roto::RotoScriptOrigin;
 
@@ -356,7 +364,7 @@ impl RibUnitRunner {
         let query_limits =
             Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
         let rib_keys = RibUnit::default_rib_keys();
-        let rib = Self::mk_rib(rib_type, &rib_keys);
+        let rib = Self::mk_rib(rib_type, &rib_keys, settings);
         let status_reporter = RibUnitStatusReporter::default().into();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
         let filter_name =
@@ -411,6 +419,7 @@ impl RibUnitRunner {
     fn mk_rib(
         rib_type: RibType,
         rib_keys: &[RouteToken],
+        settings: StoreMergeUpdateSettings,
     ) -> Arc<ArcSwap<HashedRib>> {
         //
         // --- TODO: Create the Rib based on the Roto script Rib 'contains' type
@@ -424,7 +433,7 @@ impl RibUnitRunner {
         // --- End: Create the Rib based on the Roto script Rib 'contains' type
         //
         let physical = matches!(rib_type, RibType::Physical);
-        let rib = HashedRib::new(rib_keys, physical);
+        let rib = HashedRib::new(rib_keys, physical, settings);
         Arc::new(ArcSwap::from_pointee(rib))
     }
 
@@ -817,6 +826,7 @@ impl RibUnitRunner {
                         // let propagation_delay = (post_insert - rib_el.received).num_milliseconds();
                         let propagation_delay = 0;
 
+                        // TODO
                         let router_id = Arc::new(
                             RouterId::from_str("not implemented yet")
                                 .unwrap(),
@@ -830,7 +840,9 @@ impl RibUnitRunner {
                                     propagation_delay,
                                     num_retries,
                                     is_announcement,
-                                    1, 1, 0,
+                                    1,
+                                    1,
+                                    0,
                                 );
                             }
                             Upsert::Update(StoreInsertionReport {

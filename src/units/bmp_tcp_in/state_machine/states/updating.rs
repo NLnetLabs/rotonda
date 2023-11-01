@@ -102,7 +102,7 @@ impl BmpStateDetails<Updating> {
         pph: &PerPeerHeader<Bytes>,
         update: &UpdateMessage<Bytes>,
     ) -> ControlFlow<ProcessingResult, Self> {
-        if let Some((afi, safi)) = update.is_eor() {
+        if let Ok(Some((afi, safi))) = update.is_eor() {
             if self.details.remove_pending_eor(pph, afi, safi) {
                 let num_pending_eors = self.details.num_pending_eors();
                 self.status_reporter.pending_eors_update(

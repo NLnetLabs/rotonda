@@ -889,8 +889,8 @@ fn mk_response_announced_prefix_full(
     communities: Option<Value>,
 ) -> Value {
     let next_hop = match get_localhost_next_hop_for_prefix(prefix) {
-        (next_hop, true) => json!({ "Ipv4": next_hop}),
-        (next_hop, false) => json!({ "Ipv6": next_hop}),
+        (next_hop, true) => json!({ "Unicast": next_hop}),
+        (next_hop, false) => json!({ "Unicast": next_hop}),
     };
 
     let mut route_object = json!({

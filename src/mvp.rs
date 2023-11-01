@@ -238,11 +238,7 @@ mod tests {
         let mut manager = Manager::default();
 
         // when the expected roto scripts exist in the mock filesystem
-        let readable_paths: [(PathBuf, String); 5] = [
-            (
-                "etc/filter.roto".into(),
-                include_str!("../etc/filter.roto").into(),
-            ),
+        let readable_paths: [(PathBuf, String); 4] = [
             (
                 "etc/bgp-in-filter.roto".into(),
                 include_str!("../etc/bgp-in-filter.roto").into(),

@@ -10,7 +10,7 @@ use routecore::{
     addr::Prefix,
     asn::Asn,
     bgp::message::{
-        nlri::Nlri,
+        nlri::{Nlri, BasicNlri},
         update::{AddPath, FourOctetAsn},
         update_builder::{ComposeError, UpdateBuilder},
         SessionConfig, UpdateMessage,
@@ -76,14 +76,14 @@ where
     while withdrawals_iter.peek().is_some() {
         match mk_bgp_update(&mut withdrawals_iter) {
             Ok(bgp_update) => {
-                for nlri in bgp_update.all_withdrawals_iter() {
-                    if let Nlri::Unicast(nlri) = nlri {
+                for nlri in bgp_update.withdrawals().unwrap().flatten() {
+                    if let Nlri::Unicast(BasicNlri { prefix, .. }) = nlri {
                         let route = mk_route_for_prefix(
                             router_id.clone(),
                             bgp_update.clone(),
                             peer_address,
                             peer_asn,
-                            nlri.prefix(),
+                            prefix,
                             RouteStatus::Withdrawn,
                         );
                         let payload = Payload::new(source_id.clone(), route);

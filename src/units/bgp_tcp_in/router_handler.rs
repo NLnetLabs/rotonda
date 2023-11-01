@@ -433,10 +433,9 @@ impl Processor {
         ));
 
         payloads.extend(
-            pdu.nlris()
-                .iter()
-                .filter_map(|nlri| match nlri {
-                    Nlri::Unicast(v) => Some(v.prefix()),
+            if let Ok(announce_iter) = pdu.unicast_announcements() {
+                announce_iter.flat_map(|nlri| match nlri {
+                    Ok(Nlri::Unicast(v)) => Some(v.prefix()),
                     _ => {
                         debug!("non-unicast NLRI, skipping");
                         None
@@ -452,30 +451,40 @@ impl Processor {
                         &source_id,
                         RouteStatus::InConvergence,
                     )
-                }),
+                })
+                .collect()
+            } else {
+                debug!("non-unicast NLRI, skipping");
+                vec![]
+            }
         );
 
         payloads.extend(
-            pdu.nlris()
-                .iter()
-                .filter_map(|nlri| match nlri {
-                    Nlri::Unicast(v) => Some(v.prefix()),
-                    _ => {
-                        debug!("non-unicast withdrawal, skipping");
-                        None
-                    }
-                })
-                .inspect(|prefix| {
-                    self.observed_prefixes.remove(prefix);
-                })
-                .map(|prefix| {
-                    mk_payload(
-                        prefix,
-                        &msg,
-                        &source_id,
-                        RouteStatus::Withdrawn,
-                    )
-                }),
+            if let Ok(announce_iter) = pdu.unicast_announcements() {
+                announce_iter
+                    .flat_map(|nlri| match nlri {
+                        Ok(Nlri::Unicast(v)) => Some(v.prefix()),
+                        _ => {
+                            debug!("non-unicast withdrawal, skipping");
+                            None
+                        }
+                    })
+                    .inspect(|prefix| {
+                        self.observed_prefixes.remove(prefix);
+                    })
+                    .map(|prefix| {
+                        mk_payload(
+                            prefix,
+                            &msg,
+                            &source_id,
+                            RouteStatus::Withdrawn,
+                        )
+                    })
+                    .collect()
+            } else {
+                debug!("non-unicast NLRI, skipping");
+                vec![]
+            }
         );
 
         payloads.into()

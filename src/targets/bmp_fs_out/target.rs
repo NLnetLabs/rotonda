@@ -326,26 +326,26 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                                             > 0
                                         {
                                             true => format!(
-                                                "[{}, {}]",
-                                                update.withdrawals().afi(),
-                                                update.withdrawals().safi()
+                                                "[{:?}, {:?}]",
+                                                update.withdrawals().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi().0).ok()).collect::<Vec<routecore::bgp::types::AFI>>()),
+                                                update.withdrawals().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi().1).ok()).collect::<Vec<routecore::bgp::types::SAFI>>()),
                                             ),
                                             false => String::new(),
                                         };
 
                                         let num_announcements =
-                                            update.nlris().iter().count();
+                                            update.announcements().map(|n| n.filter_map(|w| w.ok()).count()).unwrap_or(0);
                                         let ann_s_afis =
                                             match num_announcements > 0 {
                                                 true => format!(
-                                                    "[{}, {}]",
-                                                    update.nlris().afi(),
-                                                    update.nlris().safi()
+                                                    "[{:?}, {:?}]",
+                                                    update.announcements().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi().0).ok()).collect::<Vec<routecore::bgp::types::AFI>>()),
+                                                    update.announcements().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi().1).ok()).collect::<Vec<routecore::bgp::types::SAFI>>()),
                                                 ),
                                                 false => String::new(),
                                             };
 
-                                        if let Some((afi, safi)) =
+                                        if let Ok(Some((afi, safi))) =
                                             update.is_eor()
                                         {
                                             break format!(" [peer: {}, peer up seen: {}] EOR<{}, {}>, caps[GR: {}]", msg.per_peer_header(), known_peer, afi, safi, has_gr_cap);

@@ -636,12 +636,17 @@ where
                         && saved_self.details.is_peer_eor_capable(&pph)
                             == Some(true)
                     {
-                        let nlris = update.nlris();
-                        saved_self.details.add_pending_eor(
-                            &pph,
-                            nlris.afi(),
-                            nlris.safi(),
-                        );
+                        // We are only looking at the (AFI,SAFI) of the first
+                        // NLRI we can find!
+                        if let Ok(mut nlris) = update.announcements() {
+                            if let Some(Ok(afi_safi)) = nlris.next().map(|n| n.map(|n| n.afi_safi())) {
+                                saved_self.details.add_pending_eor(
+                                    &pph,
+                                    afi_safi.0,
+                                    afi_safi.1,
+                                );
+                            };
+                        }
                     }
 
                     saved_self.status_reporter.routing_update(
@@ -689,14 +694,14 @@ where
         route_status: RouteStatus,
     ) -> (SmallVec<[Payload; 8]>, usize, usize, usize) {
         let mut num_new_prefixes = 0;
-        let num_announcements: usize = update.nlris().iter().count();
-        let mut num_withdrawals: usize = update.withdrawn_routes_len().into();
+        let num_announcements: usize = update.announcements().map(|a| a.flat_map(|nlri| nlri.ok()).count()).unwrap_or(0);
+        let mut num_withdrawals: usize = update.withdrawn_routes_len();
         let mut payloads =
             SmallVec::with_capacity(num_announcements + num_withdrawals);
 
-        let nlris = &update.nlris();
+        let nlris: Vec<Nlri<Bytes>> = if let Ok(nlris) = update.unicast_announcements() { nlris.filter_map(|nlri| nlri.ok()).collect() } else { vec![] };
 
-        for nlri in nlris.iter() {
+        for nlri in &nlris {
             // If we want to process multicast here, use a `match nlri { }`:
             //      match nlri {
             //          Nlri::Unicast(b) | Nlri::Multicast(b) => {
@@ -705,8 +710,8 @@ where
             //
             // For unicast only, the `if let` suffices, at the cost of hiding
             // any possibly unprocessed non-unicast NLRI.
-            if let Nlri::Unicast(b) = nlri {
-                let prefix = b.prefix();
+            if let Nlri::Unicast(nlri) = nlri {
+                let prefix = nlri.prefix;
                 if self.details.add_announced_prefix(&pph, prefix) {
                     num_new_prefixes += 1;
                 }
@@ -725,7 +730,7 @@ where
             }
         }
 
-        for nlri in update.withdrawals().iter() {
+        for nlri in update.withdrawals().unwrap().flatten() {
             if let Nlri::Unicast(b) = nlri {
                 let prefix = b.prefix();
 

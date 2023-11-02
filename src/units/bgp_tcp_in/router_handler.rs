@@ -437,7 +437,7 @@ impl Processor {
 
         payloads.extend(
             if let Ok(announce_iter) = pdu.unicast_announcements() {
-                announce_iter.flat_map(|nlri| match nlri {
+                announce_iter.filter_map(|nlri| match nlri {
                     Ok(Nlri::Unicast(v)) => Some(v.prefix()),
                     _ => {
                         debug!("non-unicast NLRI, skipping");
@@ -466,7 +466,7 @@ impl Processor {
         payloads.extend(
             if let Ok(announce_iter) = pdu.unicast_announcements() {
                 announce_iter
-                    .flat_map(|nlri| match nlri {
+                    .filter_map(|nlri| match nlri {
                         Ok(Nlri::Unicast(v)) => Some(v.prefix()),
                         _ => {
                             debug!("non-unicast withdrawal, skipping");

@@ -460,7 +460,7 @@ where
 
         if let Some((pph_4, bgp_4)) = inconsistent {
             warn!(
-                "Four-Octxwet-ASN capability in encapsulated BGP OPEN message \
+                "Four-Octet-ASN capability in encapsulated BGP OPEN message \
                 is '{:?}', but conflicts with the Per Peer Header. Ignoring \
                 BGP OPEN. Setting Four-Octet-ASN to '{:?}' for this BMP session.",
                 bgp_4, pph_4

@@ -1,6 +1,5 @@
 use crate::payload::SourceId;
 
-#[cfg(feature = "router-list")]
 pub fn calc_u8_pc(total: usize, v: usize) -> u8 {
     if total > 0 {
         (100.0f64 * (v as f64 / total as f64)) as u8

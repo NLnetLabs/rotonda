@@ -495,15 +495,7 @@ impl DirectUpdate for MqttRunner {
                 }
             }
 
-            _ => {
-                // QueryResults are only intended to be sent from physical RIB to virtual RIBs. If we receive one it has
-                // mistakenly escaped (been wrongly propagated onward by the last vRIB in a chain), but it wasn't
-                // intended for nor can we do anything with it.
-                self.status_reporter.input_mismatch(
-                    "Update::Single(OutputStreamMessage)|Update::Bulk(OutputStreamMessage)",
-                    update,
-                );
-            }
+            _ => { /* We may have received the output from another unit, but we are not interested in it */ }
         }
     }
 }
@@ -615,7 +607,7 @@ mod tests {
         let bmp_msg = BmpMsg::from_octets(bmp_bytes).unwrap();
         let bmp_msg = Arc::new(BytesRecord(bmp_msg));
         let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
-        Payload::new(source_id, value)
+        Payload::new(source_id, value, None)
     }
 
     fn mk_raw_route_with_deltas_payload(prefix: Prefix) -> Payload {
@@ -635,7 +627,7 @@ mod tests {
         .with_router_id("test-router".to_string().into());
 
         let value = TypeValue::Builtin(BuiltinTypeValue::Route(route));
-        Payload::new("test", value)
+        Payload::new("test", value, None)
     }
 
     fn mk_roto_output_stream_payload() -> Arc<OutputStreamMessage> {

@@ -167,9 +167,3 @@ EXPOSE 11179/tcp
 # foreground without the Docker argument "--init" (which is actually another
 # way of activating Tini, but cannot be enabled from inside the Docker image).
 ENTRYPOINT ["/sbin/tini", "--", "rotonda"]
-
-# Expect a config file, but we don't provide one. What Rotonda should do is
-# user specific. Instead they should invoke
-# `docker run -v <HOST_PATH>:/etc/rotonda.conf` to map a Rotonda config file
-# from the host into the container where Rotonda can use it.
-CMD ["--config", "/etc/rotonda.conf"]

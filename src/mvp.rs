@@ -13,13 +13,14 @@ use std::str::FromStr;
 use crate::log::Terminate;
 
 use crate::targets::DEF_MQTT_PORT;
+use crate::units::TracingMode;
 
 //------------ Constants -----------------------------------------------------
 
 // NOTE: Unit and target names MUST match the names used in `rotonda.conf`!
 
-pub const CFG_UNIT_BGP_TCP_IN: &str = "bgp-in";
-pub const CFG_UNIT_BMP_TCP_IN: &str = "bmp-in";
+pub const CFG_UNIT_BGP_IN: &str = "bgp-in";
+pub const CFG_UNIT_BMP_IN: &str = "bmp-in";
 pub const CFG_UNIT_RIB_IN_PRE: &str = "rib-in-pre";
 pub const CFG_UNIT_RIB_IN_POST: &str = "rib-in-post";
 
@@ -32,6 +33,7 @@ pub const ARG_PRINT_CONFIG_AND_EXIT: &str = "print-config-and-exit";
 pub const ARG_HTTP_LISTEN: &str = "http-listen";
 pub const ARG_BGP_LISTEN: &str = "bgp-listen";
 pub const ARG_BMP_LISTEN: &str = "bmp-listen";
+pub const ARG_BMP_TRACING_MODE: &str = "bmp-tracing-mode";
 pub const ARG_BMP_PROXY_DESTINATION: &str = "bmp-proxy-destination";
 pub const ARG_MQTT_DESTINATION: &str = "mqtt-destination";
 
@@ -67,6 +69,9 @@ pub struct MvpConfig {
     /// Print finalised embedded config and exit
     #[serde(default)]
     pub print_config_and_exit: bool,
+
+    #[serde(default)]
+    pub tracing_mode: Option<TracingMode>,
 }
 
 impl MvpConfig {
@@ -96,6 +101,14 @@ impl MvpConfig {
                     .value_name("IP:PORT")
                     .conflicts_with(ARG_CONFIG)
                     .help("Listen for BGP connections on this address"),
+            )
+            .arg(
+                Arg::new(ARG_BMP_TRACING_MODE)
+                    .long(ARG_BMP_TRACING_MODE)
+                    .required(false)
+                    .value_name("<Off|IfRequested|On>")
+                    .conflicts_with(ARG_CONFIG)
+                    .help("Whether and how to enable tracing of BMP messages"),
             )
             .arg(
                 Arg::new(ARG_BMP_LISTEN)
@@ -152,6 +165,8 @@ impl MvpConfig {
             Self::from_str_value_of(matches, ARG_MQTT_DESTINATION)?;
         self.print_config_and_exit =
             matches.get_flag(ARG_PRINT_CONFIG_AND_EXIT);
+        self.tracing_mode =
+            Self::from_str_value_of(matches, ARG_BMP_TRACING_MODE)?;
 
         // If a config file is specified it should be valid, but if not specified then we are using an embedded MVP
         // config file that references Roto filters that the user may not have the required .roto files for, e.g.
@@ -206,7 +221,7 @@ mod tests {
         manager::Manager,
         mvp::{
             CFG_TARGET_BMP_PROXY, CFG_TARGET_MQTT, CFG_TARGET_NULL,
-            CFG_UNIT_BGP_TCP_IN, CFG_UNIT_BMP_TCP_IN, CFG_UNIT_RIB_IN_POST,
+            CFG_UNIT_BGP_IN, CFG_UNIT_BMP_IN, CFG_UNIT_RIB_IN_POST,
             CFG_UNIT_RIB_IN_PRE,
         },
         tests::util::internal::enable_logging,
@@ -223,11 +238,7 @@ mod tests {
         let mut manager = Manager::default();
 
         // when the expected roto scripts exist in the mock filesystem
-        let readable_paths: [(PathBuf, String); 5] = [
-            (
-                "etc/filter.roto".into(),
-                include_str!("../etc/filter.roto").into(),
-            ),
+        let readable_paths: [(PathBuf, String); 4] = [
             (
                 "etc/bgp-in-filter.roto".into(),
                 include_str!("../etc/bgp-in-filter.roto").into(),
@@ -268,8 +279,8 @@ mod tests {
 
         let units = conf.units.units();
         assert_eq!(units.len(), 4);
-        assert!(units.contains_key(CFG_UNIT_BGP_TCP_IN));
-        assert!(units.contains_key(CFG_UNIT_BMP_TCP_IN));
+        assert!(units.contains_key(CFG_UNIT_BGP_IN));
+        assert!(units.contains_key(CFG_UNIT_BMP_IN));
         assert!(units.contains_key(CFG_UNIT_RIB_IN_PRE));
         assert!(units.contains_key(CFG_UNIT_RIB_IN_POST));
 
@@ -308,8 +319,8 @@ mod tests {
 
         let units = conf.units.units();
         assert_eq!(units.len(), 4);
-        assert!(units.contains_key(CFG_UNIT_BGP_TCP_IN));
-        assert!(units.contains_key(CFG_UNIT_BMP_TCP_IN));
+        assert!(units.contains_key(CFG_UNIT_BGP_IN));
+        assert!(units.contains_key(CFG_UNIT_BMP_IN));
         assert!(units.contains_key(CFG_UNIT_RIB_IN_PRE));
         assert!(units.contains_key(CFG_UNIT_RIB_IN_POST));
 

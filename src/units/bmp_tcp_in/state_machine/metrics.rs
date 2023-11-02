@@ -18,13 +18,8 @@ use super::machine::{AtomicBmpStateIdx, BmpStateIdx};
 
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 
-#[cfg(feature = "router-list")]
 use std::sync::RwLock;
-
-#[cfg(feature = "router-list")]
 use hex_slice::AsHex;
-
-#[cfg(feature = "router-list")]
 const MAX_RECENT_PARSE_ERRORS: usize = 10;
 
 #[derive(Clone, Debug, Default)]
@@ -36,7 +31,6 @@ pub struct ParseError {
     pub recoverable: bool,
 }
 
-#[cfg(feature = "router-list")]
 impl ParseError {
     pub fn new(msg: String, bytes: Option<Bytes>, recoverable: bool) -> Self {
         Self {
@@ -50,16 +44,11 @@ impl ParseError {
 }
 
 /// A very primitive "ring buffer" of recent parse error messages.
-#[cfg(feature = "router-list")]
 #[derive(Debug, Default)]
 pub struct ParseErrorsRingBuffer {
     errors: Arc<RwLock<Vec<ParseError>>>,
     next_idx: AtomicUsize,
 }
-
-#[cfg(not(feature = "router-list"))]
-#[derive(Debug, Default)]
-pub struct ParseErrorsRingBuffer;
 
 impl Display for ParseErrorsRingBuffer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -67,14 +56,6 @@ impl Display for ParseErrorsRingBuffer {
     }
 }
 
-#[cfg(not(feature = "router-list"))]
-impl ParseErrorsRingBuffer {
-    pub fn push(&self, _error: String, _bytes: &[u8], _recoverable: bool) {
-        // Nothing to do
-    }
-}
-
-#[cfg(feature = "router-list")]
 impl ParseErrorsRingBuffer {
     pub fn push(
         &self,

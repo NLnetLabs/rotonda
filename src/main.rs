@@ -214,7 +214,7 @@ mod tests {
         Config::init().unwrap();
 
         let base_config_toml = r#"
-        roto_scripts_path = "etc/"
+        roto_scripts_path = "test-data/"
 
         http_listen = "127.0.0.1:8080"
         log_target = "stderr"

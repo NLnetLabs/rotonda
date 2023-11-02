@@ -22,6 +22,7 @@ mod bgp_tcp_in;
 mod bmp_tcp_in;
 mod filter;
 mod rib_unit;
+pub use bmp_tcp_in::unit::TracingMode;
 pub use rib_unit::{
     unit::{RibType, RibUnit},
     RibValue,

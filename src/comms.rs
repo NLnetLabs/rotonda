@@ -67,6 +67,7 @@
 use crate::common::frim::FrimMap;
 use crate::manager::UpstreamLinkReport;
 use crate::metrics::{Metric, MetricType, MetricUnit};
+use crate::tracing::Tracer;
 use crate::{config::Marked, payload::Update, units::Unit};
 use crate::{manager, metrics};
 use async_trait::async_trait;
@@ -80,7 +81,7 @@ use routecore::addr::Prefix;
 use serde::Deserialize;
 use tokio::sync::mpsc::Sender;
 
-use std::sync::atomic::{AtomicU16, Ordering::SeqCst};
+use std::sync::atomic::Ordering::SeqCst;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 use std::{
@@ -152,8 +153,8 @@ pub enum GateState {
 /// the unit will receive an update to the gate’s state as soon as it
 /// becomes available.
 ///
-/// Sending of updates happens via the [`update_data`](Self::update_data) and
-/// [`update_status`](Self::update_status) methods.
+/// Sending of updates happens via the [`update_data`](Self::update_data)
+/// method.
 #[derive(Debug)]
 pub struct Gate {
     id: Arc<Mutex<Uuid>>,
@@ -172,14 +173,14 @@ pub struct Gate {
     /// Suspended senders.
     suspended: Arc<FrimMap<Uuid, UpdateSender>>,
 
-    /// The current unit status.
-    unit_status: Arc<AtomicCell<UnitStatus>>,
-
     /// The gate metrics.
     metrics: Arc<GateMetrics>,
 
     /// Gate type dependent state.
     state: GateState,
+
+    /// Tracer
+    tracer: Option<Arc<Tracer>>,
 }
 
 // On drop, notify the parent of a cloned gate that this clone is detaching itself so that the parent Gate remove the
@@ -228,12 +229,12 @@ impl Gate {
             updates: Default::default(),
             queue_size,
             suspended: Default::default(),
-            unit_status: Default::default(),
             metrics: Default::default(),
             state: GateState::Normal(NormalGateState {
                 command_sender: tx.clone(),
                 clone_senders: Default::default(),
             }),
+            tracer: None,
         };
         let agent = GateAgent {
             id: gate.id.clone(),
@@ -350,6 +351,10 @@ impl Gate {
                 self.id()
             );
         }
+    }
+
+    pub fn set_tracer(&mut self, tracer: Arc<Tracer>) {
+        self.tracer = Some(tracer);
     }
 
     /// Runs the gate’s internal machine.
@@ -667,6 +672,15 @@ impl Gate {
         for (uuid, item) in self.updates.guard().iter() {
             match (&item.queue, &item.direct) {
                 (Some(sender), None) => {
+                    if let Some(tracer) = &self.tracer {
+                        for payload in update.trace_ids() {
+                            tracer.note_gate_event(
+                                payload.trace_id().unwrap(),
+                                self.id(),
+                                format!("Sent by queue from gate {} to slot {uuid}: {payload:#?}", self.id()),
+                            );
+                        }
+                    }
                     if sender.send(Ok(update.clone())).await.is_ok() {
                         sent_at_least_once = true;
                         continue;
@@ -686,6 +700,18 @@ impl Gate {
                             self.id(),
                             uuid
                         );
+                    }
+                    if let Some(tracer) = &self.tracer {
+                        for payload in update.trace_ids() {
+                            tracer.note_gate_event(
+                                payload.trace_id().unwrap(),
+                                self.id(),
+                                format!(
+                                    "Sent by direct update from gate {} to slot {uuid}: {payload:#?}",
+                                    self.id()
+                                ),
+                            );
+                        }
                     }
                     if let Some(direct) = direct.upgrade() {
                         direct.direct_update(update.clone()).await;
@@ -725,35 +751,6 @@ impl Gate {
             self.updates.clone(),
             sent_at_least_once,
         );
-    }
-
-    /// Updates the unit status.
-    ///
-    /// The method sends out the new status to all links.
-    pub async fn update_status(&self, update: UnitStatus) {
-        self.unit_status.store(update);
-
-        // let mut sender_lost = false;
-        for (_uuid, item) in self.updates.guard().iter() {
-            match &item.queue {
-                Some(sender) => {
-                    if sender.send(Err(update)).await.is_ok() {
-                        continue;
-                    }
-                }
-                None => continue,
-            }
-            // We don't actually have any usage of queue based sending at present
-            // so we can skip doing this for now.
-            // item.queue = None;
-            // sender_lost = true;
-        }
-
-        // if sender_lost {
-        //     self.updates.load().retain(|_, item| item.queue.is_some());
-        // }
-
-        self.metrics.update_status(update);
     }
 
     /// Returns the current gate status.
@@ -809,11 +806,7 @@ impl Gate {
             self.updates.insert(slot, update_sender.clone());
         }
 
-        let subscription = SubscribeResponse {
-            slot,
-            receiver,
-            unit_status: self.unit_status.load(),
-        };
+        let subscription = SubscribeResponse { slot, receiver };
 
         if let Err(subscription) = response.send(subscription) {
             if suspended {
@@ -891,12 +884,12 @@ impl Clone for Gate {
             updates: self.updates.clone(),
             queue_size: self.queue_size,
             suspended: self.suspended.clone(),
-            unit_status: self.unit_status.clone(),
             metrics: self.metrics.clone(),
             state: GateState::Clone(CloneGateState {
                 clone_id,
                 parent_command_sender: parent_command_sender.clone(),
             }),
+            tracer: self.tracer.clone(),
         };
 
         // Ask the real gate to add our command sender to the set it sends
@@ -999,9 +992,6 @@ pub trait GraphStatus: Send + Sync {
 /// method. When stored behind an arc t can be kept and passed around freely.
 #[derive(Debug, Default)]
 pub struct GateMetrics {
-    /// The current unit status.
-    pub status: AtomicCell<UnitStatus>,
-
     /// The number of payload items in the last update.
     pub update_set_size: AtomicUsize,
 
@@ -1015,18 +1005,6 @@ pub struct GateMetrics {
 
     /// The number of updates that could not be sent through the gate
     pub num_dropped_updates: AtomicUsize,
-
-    /// The total space available in the queues used for sending
-    /// updates to downstream links.
-    pub capacity: AtomicUsize,
-
-    /// The number of downstreams to which data will be sent via
-    /// queue.
-    pub num_queue_senders: AtomicU16,
-
-    /// The number of downsreams to which data will be sent via
-    /// direct update fn invocation.
-    pub num_direct_senders: AtomicU16,
 }
 
 impl GraphStatus for GateMetrics {
@@ -1051,99 +1029,39 @@ impl GateMetrics {
             self.update_set_size.store(update.len(), SeqCst);
         }
         self.update.store(Some(Utc::now()));
-
-        // let mut capacity = 0;
-        // let mut num_queue_senders = 0;
-        // let mut num_direct_senders = 0;
-        // for entry in senders.load().iter() {
-        //     let sender = entry.value();
-        //     if let Some(sender) = &sender.queue {
-        //         capacity += sender.capacity();
-        //         num_queue_senders += 1;
-        //     } else {
-        //         num_direct_senders += 1;
-        //     }
-        // }
-
-        // if num_queue_senders > 0 {
-        //     self.capacity.store(capacity, SeqCst);
-        // }
-
-        // self.num_queue_senders
-        //     .store(num_queue_senders, SeqCst);
-        // self.num_direct_senders
-        //     .store(num_direct_senders, SeqCst);
-    }
-
-    /// Updates the metrics to match the given unit status.
-    fn update_status(&self, status: UnitStatus) {
-        self.status.store(status)
     }
 }
 
 impl GateMetrics {
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
-    const STATUS_METRIC: Metric = Metric::new(
-        "unit_status",
-        "the operational status of the unit",
-        MetricType::Text,
-        MetricUnit::Info,
-    );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_UPDATES_METRIC: Metric = Metric::new(
         "num_updates",
         "the number of updates sent through the gate",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_DROPPED_UPDATES_METRIC: Metric = Metric::new(
         "num_dropped_updates",
         "the number of updates that could not be sent through the gate",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const UPDATE_SET_SIZE_METRIC: Metric = Metric::new(
         "update_set_size",
         "the number of set items in the last update",
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const UPDATE_WHEN_METRIC: Metric = Metric::new(
         "last_update",
         "the date and time of the last update",
         MetricType::Text,
         MetricUnit::Info,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const UPDATE_AGO_METRIC: Metric = Metric::new(
         "since_last_update",
         "the number of seconds since the last update",
         MetricType::Gauge,
         MetricUnit::Second,
-    );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
-    const LINK_CAPACITY_METRIC: Metric = Metric::new(
-        "link_capacity",
-        "the number of items that can be queued for sending downstream",
-        MetricType::Gauge,
-        MetricUnit::Total,
-    );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
-    const NUM_QUEUE_SENDERS_METRIC: Metric = Metric::new(
-        "num_queue_senders",
-        "the number of downstreams that receive data via queue",
-        MetricType::Gauge,
-        MetricUnit::Total,
-    );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
-    const NUM_DIRECT_SENDERS_METRIC: Metric = Metric::new(
-        "num_direct_senders",
-        "the number of downstreams that receive data directly",
-        MetricType::Gauge,
-        MetricUnit::Total,
     );
 }
 
@@ -1153,12 +1071,6 @@ impl metrics::Source for GateMetrics {
     /// The name of the unit these metrics are associated with is given via
     /// `unit_name`.
     fn append(&self, unit_name: &str, target: &mut metrics::Target) {
-        target.append_simple(
-            &Self::STATUS_METRIC,
-            Some(unit_name),
-            self.status.load(),
-        );
-
         target.append_simple(
             &Self::NUM_UPDATES_METRIC,
             Some(unit_name),
@@ -1178,8 +1090,8 @@ impl metrics::Source for GateMetrics {
                     Some(unit_name),
                     update,
                 );
-                let ago = Utc::now().signed_duration_since(update);
-                let ago = (ago.num_milliseconds() as f64) / 1000.;
+                let ago =
+                    Utc::now().signed_duration_since(update).num_seconds();
                 target.append_simple(
                     &Self::UPDATE_AGO_METRIC,
                     Some(unit_name),
@@ -1205,22 +1117,6 @@ impl metrics::Source for GateMetrics {
                 );
             }
         }
-
-        target.append_simple(
-            &Self::LINK_CAPACITY_METRIC,
-            Some(unit_name),
-            self.capacity.load(SeqCst),
-        );
-        target.append_simple(
-            &Self::NUM_QUEUE_SENDERS_METRIC,
-            Some(unit_name),
-            self.num_queue_senders.load(SeqCst),
-        );
-        target.append_simple(
-            &Self::NUM_DIRECT_SENDERS_METRIC,
-            Some(unit_name),
-            self.num_direct_senders.load(SeqCst),
-        );
     }
 }
 
@@ -1577,13 +1473,9 @@ impl Link {
                 sub.slot
             );
         }
-        self.unit_status = sub.unit_status;
+        self.unit_status = UnitStatus::Healthy;
         self.suspended = suspended;
-        if self.unit_status == UnitStatus::Gone {
-            Err(UnitStatus::Gone)
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 
     /// Disconnects the link to the gate
@@ -1917,9 +1809,6 @@ struct SubscribeResponse {
 
     /// The update receiver for this subscription.
     receiver: Option<UpdateReceiver>,
-
-    /// The current unit status.
-    unit_status: UnitStatus,
 }
 
 //------------ Tests ---------------------------------------------------------
@@ -1931,9 +1820,17 @@ struct SubscribeResponse {
 /// into these topics.
 #[cfg(test)]
 mod tests {
+    use chrono::SubsecRound;
     use roto::types::builtin::U8;
+    use smallvec::smallvec;
+    use tokio::sync::Notify;
 
-    use crate::{payload::Payload, tests::util::internal::enable_logging};
+    use crate::{
+        payload::Payload,
+        tests::util::internal::{
+            enable_logging, get_testable_metrics_snapshot,
+        },
+    };
 
     use super::*;
 
@@ -2003,9 +1900,8 @@ mod tests {
         //     │╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌▶│╌╌ recv() ╌┐
         //     │                    Err(UnitStatus::Gone) │      None │
         //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│◀╌╌╌╌╌╌╌╌╌╌┘
-
         fn mk_test_payload() -> Payload {
-            Payload::new("test", U8::new(18))
+            Payload::new("test", U8::new(18), None)
         }
 
         eprintln!("STARTING");
@@ -2016,26 +1912,28 @@ mod tests {
         let mut link = agent.create_link();
 
         #[derive(Debug)]
-        struct TestDirectUpdateTarget(Arc<AtomicUsize>);
+        struct TestDirectUpdateTarget(Arc<Notify>);
 
         #[async_trait]
         impl DirectUpdate for TestDirectUpdateTarget {
             async fn direct_update(&self, update: Update) {
-                assert!(matches!(update, Update::Single(_)));
-                if let Update::Single(payload) = update {
-                    assert_eq!(payload, mk_test_payload());
-                    self.0.fetch_add(1, SeqCst);
+                assert!(matches!(update, Update::Bulk(_)));
+                if let Update::Bulk(payload) = update {
+                    assert_eq!(payload.len(), 2);
+                    assert_eq!(payload[0], mk_test_payload());
+                    assert_eq!(payload[1], mk_test_payload());
+                    self.0.notify_one();
                 }
             }
         }
 
         impl AnyDirectUpdate for TestDirectUpdateTarget {}
 
-        let counter = Arc::new(AtomicUsize::default());
-        let dut = Arc::new(TestDirectUpdateTarget(counter.clone()));
+        let notify = Arc::new(Notify::default());
+        let test_target = Arc::new(TestDirectUpdateTarget(notify.clone()));
 
-        eprintln!("SETTING LINK TO DU MODE");
-        link.set_direct_update_target(dut.clone());
+        eprintln!("SETTING LINK TO DIRECT UPDATE MODE");
+        link.set_direct_update_target(test_target.clone());
 
         let gate = Arc::new(gate);
         let gate_clone = gate.clone();
@@ -2047,21 +1945,65 @@ mod tests {
             }
         });
 
+        let metrics = get_testable_metrics_snapshot(&gate_clone.metrics());
+        assert_eq!(metrics.with_name::<usize>("num_updates"), 0);
+        assert_eq!(metrics.with_name::<String>("last_update"), "N/A");
+        assert_eq!(metrics.with_name::<String>("since_last_update"), "-1");
+
+        eprintln!(
+            "TESTING THAT UPDATES ARE DROPPED WHEN THERE IS NO DOWNSTREAM"
+        );
+
+        // Build an update to send
+        let update = Update::Single(mk_test_payload());
+        gate_clone.update_data(update).await;
+
+        let metrics = get_testable_metrics_snapshot(&gate_clone.metrics());
+        assert_eq!(metrics.with_name::<usize>("num_updates"), 1);
+        assert_eq!(metrics.with_name::<usize>("num_dropped_updates"), 1);
+        assert_eq!(
+            metrics
+                .with_name::<DateTime<Utc>>("last_update")
+                .round_subsecs(0),
+            Utc::now().round_subsecs(0)
+        );
+        assert!(metrics.with_name::<i64>("since_last_update") >= 0);
+
         eprintln!("CONNECTING LINK TO GATE");
         link.connect(false).await.unwrap();
 
         // Build an update to send
-        let update = Update::Single(mk_test_payload());
+        let update =
+            Update::Bulk(smallvec![mk_test_payload(), mk_test_payload()]);
 
         // Send the update through the gate
         eprintln!("SENDING PAYLOAD");
         gate_clone.update_data(update).await;
 
-        eprintln!("WAITING FOR PAYLOAD");
-        tokio::time::sleep(Duration::from_secs(3)).await;
+        eprintln!("WAITING FOR PAYLOAD TO BE RECEIVED BY THE TEST TARGET");
+        let timeout = Box::pin(tokio::time::sleep(Duration::from_secs(3)));
+        let notified = Box::pin(notify.notified());
+        assert!(matches!(select(timeout, notified).await, Either::Right(..)));
 
-        eprintln!("CHECKING FOR PAYLOAD");
-        assert_eq!(1, counter.load(SeqCst));
+        let metrics = get_testable_metrics_snapshot(&gate_clone.metrics());
+        assert_eq!(metrics.with_name::<usize>("num_updates"), 2);
+        assert_eq!(metrics.with_name::<usize>("num_dropped_updates"), 1);
+        assert_eq!(
+            metrics
+                .with_name::<DateTime<Utc>>("last_update")
+                .round_subsecs(0),
+            Utc::now().round_subsecs(0)
+        );
+        let since_last_update = metrics.with_name::<i64>("since_last_update");
+        assert_eq!(metrics.with_name::<usize>("update_set_size"), 2);
+
+        eprintln!("WAITING TO CHECK THAT SINCE_LAST_UPDATE METRIC UPDATES");
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        let metrics = get_testable_metrics_snapshot(&gate_clone.metrics());
+        let new_since_last_update =
+            metrics.with_name::<i64>("since_last_update");
+
+        assert!(new_since_last_update > since_last_update);
     }
 
     #[tokio::test(flavor = "multi_thread")]

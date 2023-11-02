@@ -18,6 +18,7 @@ use crate::common::roto::{
     FilterName, FilterOutput, RotoScripts, ThreadLocalVM,
 };
 use crate::payload::SourceId;
+use crate::tracing::Tracer;
 use crate::{
     comms::{Gate, GateStatus},
     payload::{Payload, Update, UpstreamStatus},
@@ -32,6 +33,7 @@ use crate::{
 use super::io::FatalError;
 use super::state_machine::machine::BmpState;
 use super::state_machine::processing::MessageType;
+use super::unit::TracingMode;
 use super::util::format_source_id;
 
 pub struct RouterHandler {
@@ -41,7 +43,8 @@ pub struct RouterHandler {
     filter_name: Arc<ArcSwap<FilterName>>,
     status_reporter: Arc<BmpTcpInStatusReporter>,
     state_machine: Arc<Mutex<Option<BmpState>>>,
-    #[cfg(feature = "router-list")]
+    tracer: Arc<Tracer>,
+    tracing_mode: Arc<ArcSwap<TracingMode>>,
     last_msg_at: Option<Arc<RwLock<DateTime<Utc>>>>,
 }
 
@@ -57,7 +60,11 @@ impl RouterHandler {
         filter_name: Arc<ArcSwap<FilterName>>,
         status_reporter: Arc<BmpTcpInStatusReporter>,
         state_machine: Arc<Mutex<Option<BmpState>>>,
-        #[cfg(feature = "router-list")] last_msg_at: Option<
+        tracer: Arc<Tracer>,
+        tracing_mode: Arc<
+            ArcSwap<TracingMode>,
+        >,
+        last_msg_at: Option<
             Arc<RwLock<DateTime<Utc>>>,
         >,
     ) -> Self {
@@ -68,7 +75,8 @@ impl RouterHandler {
             filter_name,
             status_reporter,
             state_machine,
-            #[cfg(feature = "router-list")]
+            tracer,
+            tracing_mode,
             last_msg_at,
         }
     }
@@ -107,7 +115,8 @@ impl RouterHandler {
             filter_name: Default::default(),
             status_reporter: parent_status_reporter,
             state_machine,
-            #[cfg(feature = "router-list")]
+            tracer: Default::default(),
+            tracing_mode: Default::default(),
             last_msg_at: None,
         };
 
@@ -136,7 +145,8 @@ impl RouterHandler {
         source_id: SourceId,
     ) {
         // Setup BMP streaming
-        let mut stream = BmpStream::new(rx, self.gate.clone());
+        let mut stream =
+            BmpStream::new(rx, self.gate.clone(), self.tracing_mode.clone());
 
         // Ensure that on first use the metrics for the "unknown" router are
         // correctly initialised.
@@ -162,14 +172,14 @@ impl RouterHandler {
                     }
                 }
 
-                Ok((None, _)) => {
+                Ok((None, _, _)) => {
                     // The stream consumer exited in response to a Gate
                     // termination message. Break to close our side of the
                     // connection and stop processing this BMP stream.
                     break;
                 }
 
-                Ok((Some(msg_buf), status)) => {
+                Ok((Some(msg_buf), status, mut trace_id)) => {
                     // We want the stream reading to abort as soon as the Gate
                     // is terminated so we handle status updates to the Gate in
                     // the stream reader. The last non-terminal status updates is
@@ -198,11 +208,34 @@ impl RouterHandler {
                         _ => { /* Nothing to do */ }
                     }
 
+                    let tracing_mode = **self.tracing_mode.load();
+
+                    if trace_id == 0 && tracing_mode == TracingMode::On {
+                        trace_id = self.tracer.next_tracing_id();
+                    }
+
+                    if trace_id > 0 || tracing_mode == TracingMode::On {
+                        self.tracer.clear_trace_id(trace_id);
+                    }
+
                     if let Ok(bmp_msg) = BmpMessage::from_octets(msg_buf) {
+                        let trace_id = if trace_id > 0
+                            || tracing_mode == TracingMode::On
+                        {
+                            self.tracer.note_component_event(
+                                trace_id,
+                                self.gate.id(),
+                                format!("Started tracing BMP message {bmp_msg:#?}"),
+                            );
+                            Some(trace_id)
+                        } else {
+                            None
+                        };
                         self.process_msg(
                             router_addr,
                             source_id.clone(),
                             bmp_msg,
+                            trace_id,
                         )
                         .await;
                     }
@@ -231,40 +264,50 @@ impl RouterHandler {
         addr: SocketAddr,
         source_id: SourceId,
         msg: Message<Bytes>,
+        trace_id: Option<u8>,
     ) {
         let mut bmp_state_lock = self.state_machine.lock().await;
 
         // SAFETY: Each connection should always have a state machine.
         let bmp_state = bmp_state_lock.take().unwrap();
 
-        #[cfg(feature = "router-list")]
         if let Some(last_msg_at) = &self.last_msg_at {
             if let Ok(mut guard) = last_msg_at.write() {
                 *guard = Utc::now();
             }
         }
 
+        let bound_tracer = self.tracer.bind(self.gate.id());
+
         self.status_reporter
             .bmp_message_received(bmp_state.router_id());
 
         let next_state =
             if let Ok(ControlFlow::Continue(FilterOutput { south, east })) =
-                Self::VM.with(|vm| {
-                    let value =
-                        TypeValue::Builtin(BuiltinTypeValue::BmpMessage(
-                            Arc::new(BytesRecord(msg)),
-                        ));
-                    self.roto_scripts.exec(
-                        vm,
-                        &self.filter_name.load(),
-                        value,
-                    )
-                })
+                Self::VM
+                    .with(|vm| {
+                        let value =
+                            TypeValue::Builtin(BuiltinTypeValue::BmpMessage(
+                                Arc::new(BytesRecord(msg)),
+                            ));
+                        self.roto_scripts.exec_with_tracer(
+                            vm,
+                            &self.filter_name.load(),
+                            value,
+                            bound_tracer,
+                            trace_id,
+                        )
+                    })
+                    .map_err(|err| {
+                        self.status_reporter.message_filtering_failure(&err);
+                        err
+                    })
             {
                 if !south.is_empty() {
-                    let payload =
-                        Payload::from_output_stream_queue(&source_id, south)
-                            .into();
+                    let payload = Payload::from_output_stream_queue(
+                        &source_id, south, trace_id,
+                    )
+                    .into();
                     self.gate.update_data(payload).await;
                 }
 
@@ -277,7 +320,7 @@ impl RouterHandler {
                     self.status_reporter
                         .bmp_message_processed(bmp_state.router_id());
 
-                    let mut res = bmp_state.process_msg(msg);
+                    let mut res = bmp_state.process_msg(msg, trace_id);
 
                     match res.processing_result {
                         MessageType::InvalidMessage {
@@ -336,7 +379,6 @@ impl RouterHandler {
                         }
                     }
 
-                    // *bmp_state_lock = Some(res.next_state);
                     res.next_state
                 } else {
                     bmp_state
@@ -522,23 +564,25 @@ mod tests {
     // #[tokio::test(flavor = "multi_thread")]
     // #[should_panic]
     // async fn counters_for_expected_sys_name_should_not_exist() {
-    // let (runner, _) = RouterHandler::mock();
-    // let initiation_msg =
-    //     BmpMessage::from_octets(mk_initiation_msg(SYS_NAME, SYS_DESCR)).unwrap();
+    //     let (runner, _, _) = RouterHandler::mock();
+    //     let initiation_msg =
+    //         BmpMessage::from_octets(mk_initiation_msg(SYS_NAME, SYS_DESCR))
+    //             .unwrap();
 
-    // runner
-    //     .process_msg(
-    //         "127.0.0.1".parse().unwrap(),
-    //         "unknown".into(),
-    //         initiation_msg,
-    //     )
-    //     .await;
+    //     runner
+    //         .process_msg(
+    //             "127.0.0.1".parse().unwrap(),
+    //             "unknown".into(),
+    //             initiation_msg,
+    //             None,
+    //         )
+    //         .await;
 
-    // let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
-    // assert_eq!(
-    //     metrics.with_label::<usize>("bmp_in_num_invalid_bmp_messages", ("router", SYS_NAME)),
-    //     0,
-    // );
+    // // let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
+    // // assert_eq!(
+    // //     metrics.with_label::<usize>("bmp_in_num_invalid_bmp_messages", ("router", SYS_NAME)),
+    // //     0,
+    // // );
     // }
 
     // #[tokio::test(flavor = "multi_thread")]

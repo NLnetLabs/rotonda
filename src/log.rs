@@ -7,13 +7,17 @@
 //! indicate that error information has been logged and a consumer can just
 //! return quietly.
 use crate::config::ConfigPath;
+use chrono::{DateTime, Utc};
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use log::{error, LevelFilter, Log};
 use serde::Deserialize;
 use std::convert::TryFrom;
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{Arc, Mutex};
 use std::{fmt, io};
+use uuid::Uuid;
 
 //------------ LogConfig -----------------------------------------------------
 
@@ -236,12 +240,17 @@ impl LogConfig {
             ..Default::default()
         };
         if formatter.hostname.is_none() {
-            formatter.hostname = Some("routinator".into());
+            formatter.hostname = Some("rotonda".into());
         }
         let formatter = formatter;
         let logger = syslog::unix(formatter.clone())
-            .or_else(|_| syslog::tcp(formatter.clone(), ("127.0.0.1", 601)))
             .or_else(|_| {
+                error!("Syslog not available via UNIX socket, falling back to tcp://127.0.0.1:601");
+                syslog::tcp(formatter.clone(), ("127.0.0.1", 601))
+            })
+            .or_else(|_| {
+                error!("Syslog not available via TCP socket, falling back to udp://127.0.0.1:514");
+                error!("Warning: Logs may be lost if no syslog daemon is listening at udp://127.0.0.1:514 !");
                 syslog::udp(formatter, ("127.0.0.1", 0), ("127.0.0.1", 514))
             });
         match logger {

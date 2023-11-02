@@ -29,7 +29,6 @@ impl BmpTcpInStatusReporter {
         }
     }
 
-    #[cfg(feature = "router-list")]
     pub fn typed_metrics(&self) -> Arc<BmpTcpInMetrics> {
         self.metrics.clone()
     }
@@ -100,6 +99,10 @@ impl BmpTcpInStatusReporter {
             .router_metrics(router_id)
             .num_invalid_bmp_messages
             .fetch_add(1, SeqCst);
+    }
+
+    pub fn message_filtering_failure<T: Display>(&self, err: T) {
+        sr_log!(error: self, "Filtering error: {}", err);
     }
 
     pub fn internal_error<T: Display>(&self, err: T) {

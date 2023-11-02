@@ -713,9 +713,13 @@ where
         let mut payloads =
             SmallVec::with_capacity(num_announcements + num_withdrawals);
 
-        let nlris: Vec<Nlri<Bytes>> = if let Ok(nlris) = update.unicast_announcements() { nlris.filter_map(|nlri| nlri.ok()).collect() } else { vec![] };
+        let nlris: Vec<Result<Nlri<Bytes>,_>> = if let Ok(nlris) = update.unicast_announcements() {
+            nlris.collect()
+        } else { 
+            return (vec![].into(),0,0,0)
+        };
 
-        for nlri in &nlris {
+        for nlri in nlris.iter().flatten() {
             // If we want to process multicast here, use a `match nlri { }`:
             //      match nlri {
             //          Nlri::Unicast(b) | Nlri::Multicast(b) => {
@@ -761,7 +765,7 @@ where
                 //  as though the WITHDRAWN ROUTES do not contain the address prefix.
 
                 if nlris.iter().all(|nlri| {
-                    if let Nlri::Unicast(b) = nlri {
+                    if let Ok(Nlri::Unicast(b)) = nlri {
                         b.prefix() != prefix
                     } else {
                         true

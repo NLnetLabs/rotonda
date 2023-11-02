@@ -1,5 +1,6 @@
 use atomic_enum::atomic_enum;
 use bytes::Bytes;
+use log::warn;
 use roto::types::builtin::RouteStatus;
 
 /// RFC 7854 BMP processing.
@@ -458,7 +459,16 @@ where
         msg: PeerUpNotification<Bytes>,
     ) -> ProcessingResult {
         let pph = msg.per_peer_header();
-        let config = msg.session_config();
+        let (config, inconsistent) = msg.pph_session_config();
+
+        if let Some((pph_4, bgp_4)) = inconsistent {
+            warn!(
+                "Four-Octxwet-ASN capability in encapsulated BGP OPEN message \
+                is '{:?}', but conflicts with the Per Peer Header. Ignoring \
+                BGP OPEN. Setting Four-Octet-ASN to '{:?}' for this BMP session.",
+                bgp_4, pph_4
+            );
+        }
 
         // Will this peer send End-of-RIB?
         let eor_capable = msg

@@ -10,7 +10,7 @@ use routecore::{
     addr::Prefix,
     asn::Asn,
     bgp::message::{
-        nlri::{Nlri, BasicNlri},
+        nlri::{BasicNlri, Nlri},
         update::{AddPath, FourOctetAsn},
         update_builder::{ComposeError, UpdateBuilder},
         SessionConfig, UpdateMessage,
@@ -69,33 +69,34 @@ where
     };
     let mut payloads = SmallVec::with_capacity(possible_num_payloads);
 
-    // Loop over announced prefixes constructing BGP UPDATE PDUs with as many prefixes as can fit in one PDU at a
-    // time until withdrawals have been generated for all announced prefixes.
-    let mut withdrawals_iter =
-        prefixes.map(|p| Nlri::Unicast((*p).into())).peekable();
-    while withdrawals_iter.peek().is_some() {
-        match mk_bgp_update(&mut withdrawals_iter) {
-            Ok(bgp_update) => {
-                for nlri in bgp_update.withdrawals().unwrap().flatten() {
-                    if let Nlri::Unicast(BasicNlri { prefix, .. }) = nlri {
-                        let route = mk_route_for_prefix(
-                            router_id.clone(),
-                            bgp_update.clone(),
-                            peer_address,
-                            peer_asn,
-                            prefix,
-                            RouteStatus::Withdrawn,
-                        );
-                        let payload =
-                            Payload::new(source_id.clone(), route, None);
-                        payloads.push(payload);
-                    }
-                }
-            }
+    // create all the withdrawals for the prefixes we need to withdraw
+    let mut withdrawals = prefixes
+        .map(|p| Nlri::Unicast::<Bytes>(BasicNlri::new(*p)))
+        .collect::<Vec<_>>();
 
-            Err(err) => {
-                error!("Unable to construct BGP UPDATE to withdraw routes announced by a peer: {err}");
-                return SmallVec::new();
+    // create a new UpdateBuilder and insert all the withdrawals
+    let mut builder = UpdateBuilder::new_bytes();
+    let _ = builder.append_withdrawals(&mut withdrawals);
+
+    // turn all the withdrawals into possibly several PDUs (if the amount of
+    // withdrawals will exceed the max PDU size). We only care about these
+    // PDUs since we want to reference them in our routes.
+    if let Ok(pdus) = builder.into_messages() {
+        for pdu in pdus {
+            for nlri in pdu.withdrawals().unwrap().flatten() {
+                if let Nlri::Unicast(BasicNlri { prefix, .. }) = nlri {
+                    let route = mk_route_for_prefix(
+                        router_id.clone(),
+                        pdu.clone(),
+                        peer_address,
+                        peer_asn,
+                        prefix,
+                        RouteStatus::Withdrawn,
+                    );
+                    let payload =
+                        Payload::new(source_id.clone(), route, None);
+                    payloads.push(payload);
+                }
             }
         }
     }

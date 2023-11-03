@@ -721,18 +721,12 @@ where
         trace_id: Option<u8>,
     ) -> (SmallVec<[Payload; 8]>, usize, usize, usize) {
         let mut num_new_prefixes = 0;
-        let num_announcements: usize = update.announcements().map(|a| a.flat_map(|nlri| nlri.ok()).count()).unwrap_or(0);
+        let valid_announcements = update.announcements().unwrap().filter_map(|a| a.ok()).collect::<Vec<_>>();
+
         let mut num_withdrawals: usize = update.withdrawn_routes_len();
-        let mut payloads =
-            SmallVec::with_capacity(num_announcements + num_withdrawals);
+        let mut payloads: SmallVec<[Payload; 8]> = SmallVec::new();
 
-        let nlris: Vec<Result<Nlri<Bytes>,_>> = if let Ok(nlris) = update.unicast_announcements() {
-            nlris.collect()
-        } else { 
-            return (vec![].into(),0,0,0)
-        };
-
-        for nlri in nlris.iter().flatten() {
+        for nlri in &valid_announcements {
             // If we want to process multicast here, use a `match nlri { }`:
             //      match nlri {
             //          Nlri::Unicast(b) | Nlri::Multicast(b) => {
@@ -766,9 +760,9 @@ where
             }
         }
 
-        for nlri in update.withdrawals().unwrap().flatten() {
-            if let Nlri::Unicast(b) = nlri {
-                let prefix = b.prefix();
+        for nlri in update.withdrawals().unwrap().filter_map(|a| a.ok()).collect::<Vec<_>>() {
+            if let Nlri::Unicast(wd) = nlri {
+                let prefix = wd.prefix();
 
                 // RFC 4271 section "4.3 UPDATE Message Format" states:
                 //
@@ -778,9 +772,9 @@ where
                 //  this form.  A BGP speaker SHOULD treat an UPDATE message of this form
                 //  as though the WITHDRAWN ROUTES do not contain the address prefix.
 
-                if nlris.iter().all(|nlri| {
-                    if let Ok(Nlri::Unicast(b)) = nlri {
-                        b.prefix() != prefix
+                if valid_announcements.iter().all(|nlri| {
+                    if let Nlri::Unicast(a) = nlri {
+                        a.prefix() != prefix
                     } else {
                         true
                     }
@@ -812,7 +806,7 @@ where
         (
             payloads,
             num_new_prefixes,
-            num_announcements,
+            valid_announcements.len(),
             num_withdrawals,
         )
     }

@@ -928,6 +928,7 @@ mod tests {
                     std::collections::HashSet::new();
                 let mut num_withdrawals_seen = 0;
 
+                // eprintln!("bulk len() {}", bulk.len());
                 for Payload {
                     source_id, value, ..
                 } in bulk.drain(..)
@@ -939,14 +940,13 @@ mod tests {
                         if !distinct_bgp_updates_seen
                             .contains(&route.raw_message)
                         {
-                            eprintln!("withdrawals {:?}", route.raw_message.raw_message().0.withdrawals().unwrap().map(|n| n.unwrap()).collect::<Vec<_>>().len());
                             num_withdrawals_seen += route
                                 .raw_message
                                 .raw_message()
                                 .0
                                 .withdrawals()
                                 .unwrap()
-                                .filter_map(|n| if n.is_ok() { Some(()) } else { None })
+                                .flatten()
                                 .count();
                             distinct_bgp_updates_seen
                                 .insert(route.raw_message.clone());

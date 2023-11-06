@@ -61,12 +61,8 @@ impl RouterHandler {
         status_reporter: Arc<BmpTcpInStatusReporter>,
         state_machine: Arc<Mutex<Option<BmpState>>>,
         tracer: Arc<Tracer>,
-        tracing_mode: Arc<
-            ArcSwap<TracingMode>,
-        >,
-        last_msg_at: Option<
-            Arc<RwLock<DateTime<Utc>>>,
-        >,
+        tracing_mode: Arc<ArcSwap<TracingMode>>,
+        last_msg_at: Option<Arc<RwLock<DateTime<Utc>>>>,
     ) -> Self {
         Self {
             gate,

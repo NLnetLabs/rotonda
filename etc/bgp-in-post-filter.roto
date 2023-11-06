@@ -1,9 +1,0 @@
-filter bgp-in-post-filter {
-    define {
-        rx msg: Route;
-    }
-
-    apply {
-        accept;
-    }
-}

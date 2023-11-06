@@ -244,8 +244,13 @@ impl LogConfig {
         }
         let formatter = formatter;
         let logger = syslog::unix(formatter.clone())
-            .or_else(|_| syslog::tcp(formatter.clone(), ("127.0.0.1", 601)))
             .or_else(|_| {
+                error!("Syslog not available via UNIX socket, falling back to tcp://127.0.0.1:601");
+                syslog::tcp(formatter.clone(), ("127.0.0.1", 601))
+            })
+            .or_else(|_| {
+                error!("Syslog not available via TCP socket, falling back to udp://127.0.0.1:514");
+                error!("Warning: Logs may be lost if no syslog daemon is listening at udp://127.0.0.1:514 !");
                 syslog::udp(formatter, ("127.0.0.1", 0), ("127.0.0.1", 514))
             });
         match logger {

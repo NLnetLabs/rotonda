@@ -806,11 +806,10 @@ log_level = "info"         # "error", "warn", "info", "debug" or "trace"
 log_target = "syslog"      # "stderr", "file" or "syslog"
 log_facility = "daemon"    # used if log_target is "syslog"
 
-roto_scripts_path = "/etc/rotonda/" # Optional path to a directory from which
-                                    # any .roto files present will be loaded
-                                    # into Rotonda. Filter names used below
-                                    # refer to blocks in the .roto files
-                                    # loaded from this directory.
+# Optional path to a directory from which any .roto files present will be
+# loaded into Rotonda. Filter names used below refer to blocks in the .roto
+# files loaded from this directory.
+roto_scripts_path = "/etc/rotonda/filters/"
 
 http_listen = ["127.0.0.1:8080"]
 

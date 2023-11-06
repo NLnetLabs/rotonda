@@ -15,7 +15,7 @@ use roto::{
 };
 use serde::Deserialize;
 
-use crate::{tracing::BoundTracer, manager};
+use crate::{manager, tracing::BoundTracer};
 
 use super::frim::FrimMap;
 

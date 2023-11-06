@@ -582,21 +582,22 @@ where
             .bmp_update_message_processed(self.router_id.clone());
 
         let pph = msg.per_peer_header();
-        let (known_peer, chosen_peer_config) = self
-            .details
-            .get_peer_config(&pph)
-            .map(|v| (true, v))
-            .unwrap_or_else(|| {
-                self.status_reporter.peer_unknown(self.router_id.clone());
-                // TODO: use SessionConfig::modern() when it is const
-                static FALLBACK_CONFIG: SessionConfig = SessionConfig {
-                    four_octet_asn: FourOctetAsn::Enabled,
-                    add_path: AddPath::Disabled,
-                };
-                (false, &FALLBACK_CONFIG)
-            });
 
-        let mut chosen_peer_config = *chosen_peer_config;
+        let known_peer;
+
+        let mut chosen_peer_config = match self.details.get_peer_config(&pph) {
+            Some(found_config) => {
+                known_peer = true;
+                *found_config
+            }
+
+            None => {
+                known_peer = false;
+                self.status_reporter.peer_unknown(self.router_id.clone());
+                generate_session_config_for_peer(&pph)
+            }
+        };
+
         let mut retry_due_to_err: Option<String> = None;
         loop {
             let res = match msg.bgp_update(chosen_peer_config) {
@@ -783,6 +784,15 @@ where
     }
 }
 
+fn generate_session_config_for_peer(pph: &PerPeerHeader<Bytes>) -> SessionConfig {
+    let four_octet_asn = match pph.is_legacy_format() {
+        true => FourOctetAsn::Disabled,
+        false => FourOctetAsn::Enabled,
+    };
+        
+    SessionConfig::new(four_octet_asn, AddPath::Disabled)
+}
+
 impl BmpState {
     pub fn new<T: AnyStatusReporter>(
         source_id: SourceId,
@@ -910,22 +920,231 @@ impl From<BmpStateDetails<Terminated>> for BmpState {
     }
 }
 
-// #[cfg(test)]
-// mod tests {
-//     use std::{
-//         ffi::OsStr, fs::File, io::Read, net::SocketAddr, time::Instant,
-//     };
+#[derive(Debug, Default)]
+pub struct PeerStates(HashMap<PerPeerHeader<Bytes>, PeerState>);
 
-// //     use bytes::BytesMut;
-// //     // use chrono::{DateTime, NaiveDateTime};
-// //     use futures::future::join_all;
+impl PeerStates {
+    #[allow(dead_code)]
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
 
-// //     use crate::{
-// //         metrics::{OutputFormat, Source},
-// //         units::bmp_tcp_in::state_machine::metrics::BmpMetrics,
-// //     };
+impl PeerAware for PeerStates {
+    fn add_peer_config(
+        &mut self,
+        pph: PerPeerHeader<Bytes>,
+        session_config: SessionConfig,
+        eor_capable: bool,
+    ) -> bool {
+        let mut added = false;
+        let _ = self.0.entry(pph).or_insert_with(|| {
+            added = true;
+            PeerState {
+                session_config,
+                eor_capable,
+                pending_eors: HashSet::with_capacity(0),
+                announced_prefixes: HashSet::with_capacity(0),
+            }
+        });
+        added
+    }
 
-// //     use super::*;
+    fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState> {
+        self.0.keys()
+    }
+
+    fn update_peer_config(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        new_config: SessionConfig,
+    ) -> bool {
+        if let Some(peer_state) = self.0.get_mut(pph) {
+            peer_state.session_config = new_config;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn get_peer_config(
+        &self,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> Option<&SessionConfig> {
+        self.0.get(pph).map(|peer_state| &peer_state.session_config)
+    }
+
+    fn remove_peer(&mut self, pph: &PerPeerHeader<Bytes>) -> bool {
+        self.0.remove(pph).is_some()
+    }
+
+    fn num_peer_configs(&self) -> usize {
+        self.0.len()
+    }
+
+    fn is_peer_eor_capable(
+        &self,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> Option<bool> {
+        self.0.get(pph).map(|peer_state| peer_state.eor_capable)
+    }
+
+    fn add_pending_eor(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        afi: AFI,
+        safi: SAFI,
+    ) {
+        if let Some(peer_state) = self.0.get_mut(pph) {
+            peer_state
+                .pending_eors
+                .insert(EoRProperties::new(pph, afi, safi));
+        }
+    }
+
+    fn remove_pending_eor(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        afi: AFI,
+        safi: SAFI,
+    ) -> bool {
+        if let Some(peer_state) = self.0.get_mut(pph) {
+            peer_state
+                .pending_eors
+                .remove(&EoRProperties::new(pph, afi, safi));
+        }
+
+        // indicate if all pending EORs have been removed, i.e. this is
+        // the end of the initial table dump
+        self.0
+            .values()
+            .all(|peer_state| peer_state.pending_eors.is_empty())
+    }
+
+    fn num_pending_eors(&self) -> usize {
+        self.0
+            .values()
+            .fold(0, |acc, peer_state| acc + peer_state.pending_eors.len())
+    }
+
+    fn add_announced_prefix(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        prefix: Prefix,
+    ) -> bool {
+        if let Some(peer_state) = self.0.get_mut(pph) {
+            peer_state.announced_prefixes.insert(prefix)
+        } else {
+            false
+        }
+    }
+
+    fn remove_announced_prefix(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+        prefix: &Prefix,
+    ) {
+        if let Some(peer_state) = self.0.get_mut(pph) {
+            peer_state.announced_prefixes.remove(prefix);
+        }
+    }
+
+    fn get_announced_prefixes(
+        &self,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> Option<std::collections::hash_set::Iter<Prefix>> {
+        self.0
+            .get(pph)
+            .map(|peer_state| peer_state.announced_prefixes.iter())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // From: https://www.rfc-editor.org/rfc/rfc7854.html#section-4.2
+    //
+    // 4.2.  Per-Peer Header
+    // 
+    // The per-peer header follows the common header for most BMP messages.
+    // The rest of the data in a BMP message is dependent on the Message
+    // Type field in the common header.
+    // 
+    //    0                   1                   2                   3
+    //    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+    //   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    //   |   Peer Type   |  Peer Flags   |
+    //   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    //   |         Peer Distinguisher (present based on peer type)       |
+    //   |                                                               |
+    //   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    //   |                 Peer Address (16 bytes)                       |
+    //   ~                                                               ~
+    //   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    //   |                           Peer AS                             |
+    //   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    //   |                         Peer BGP ID                           |
+    //   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    //   |                    Timestamp (seconds)                        |
+    //   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    //   |                  Timestamp (microseconds)                     |
+    //   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    //
+    // And:
+    //
+    // *  The A flag, if set to 1, indicates that the message is
+    //    formatted using the legacy 2-byte AS_PATH format.  If set to 0,
+    //    the message is formatted using the 4-byte AS_PATH format
+    //    [RFC6793].  A BMP speaker MAY choose to propagate the AS_PATH
+    //    information as received from its peer, or it MAY choose to
+    //    reformat all AS_PATH information into a 4-byte format
+    //    regardless of how it was received from the peer.  In the latter
+    //    case, AS4_PATH or AS4_AGGREGATOR path attributes SHOULD NOT be
+    //    sent in the BMP UPDATE message.  This flag has no significance
+    //    when used with route mirroring messages (Section 4.7).
+    
+    #[test]
+    fn generate_two_octet_session_config_for_bmp_peer_with_a_flag_set() {
+        static TEST_BYTES: [u8; 42] = [
+            0, // Peer Type: Global,
+            0b00_1_00000, // Peer Flags: A flag set
+            0, 0, 0, 0, // Peer Distinguisher
+            0, 0, 0, 0, // Peer Distinguisher
+            0, 0, 0, 0, // Peer Address
+            0, 0, 0, 0, // Peer Address
+            0, 0, 0, 0, // Peer Address
+            0, 0, 0, 0, // Peer Address
+            0, 0, 0, 0, // Peer AS
+            0, 0, 0, 0, // Peer BGP ID
+            0, 0, 0, 0, // Timestamp (seconds)
+            0, 0, 0, 0, // Timestamp (microseconds)
+        ];
+        let pph = routecore::bmp::message::PerPeerHeader::for_slice(Bytes::from_static(&TEST_BYTES));
+        let config = generate_session_config_for_peer(&pph);
+        assert!(!config.has_four_octet_asn());
+    }
+
+    #[test]
+    fn generate_four_octet_session_config_for_bmp_peer_with_a_flag_cleared() {
+        static TEST_BYTES: [u8; 42] = [
+            0, // Peer Type: Global,
+            0b00_0_00000, // Peer Flags: A flag cleared
+            0, 0, 0, 0, // Peer Distinguisher
+            0, 0, 0, 0, // Peer Distinguisher
+            0, 0, 0, 0, // Peer Address
+            0, 0, 0, 0, // Peer Address
+            0, 0, 0, 0, // Peer Address
+            0, 0, 0, 0, // Peer Address
+            0, 0, 0, 0, // Peer AS
+            0, 0, 0, 0, // Peer BGP ID
+            0, 0, 0, 0, // Timestamp (seconds)
+            0, 0, 0, 0, // Timestamp (microseconds)
+        ];
+        let pph = routecore::bmp::message::PerPeerHeader::for_slice(Bytes::from_static(&TEST_BYTES));
+        let config = generate_session_config_for_peer(&pph);
+        assert!(config.has_four_octet_asn());
+    }
 
 //     /// This test replays data captured by BmpRawDumper.
 //     #[tokio::test(flavor = "multi_thread")]
@@ -1075,143 +1294,4 @@ impl From<BmpStateDetails<Terminated>> for BmpState {
 // //         //     0
 // //         // );
 // //     }
-// // }
-
-#[derive(Debug, Default)]
-pub struct PeerStates(HashMap<PerPeerHeader<Bytes>, PeerState>);
-
-impl PeerStates {
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
-    }
-}
-
-impl PeerAware for PeerStates {
-    fn add_peer_config(
-        &mut self,
-        pph: PerPeerHeader<Bytes>,
-        session_config: SessionConfig,
-        eor_capable: bool,
-    ) -> bool {
-        let mut added = false;
-        let _ = self.0.entry(pph).or_insert_with(|| {
-            added = true;
-            PeerState {
-                session_config,
-                eor_capable,
-                pending_eors: HashSet::with_capacity(0),
-                announced_prefixes: HashSet::with_capacity(0),
-            }
-        });
-        added
-    }
-
-    fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState> {
-        self.0.keys()
-    }
-
-    fn update_peer_config(
-        &mut self,
-        pph: &PerPeerHeader<Bytes>,
-        new_config: SessionConfig,
-    ) -> bool {
-        if let Some(peer_state) = self.0.get_mut(pph) {
-            peer_state.session_config = new_config;
-            true
-        } else {
-            false
-        }
-    }
-
-    fn get_peer_config(
-        &self,
-        pph: &PerPeerHeader<Bytes>,
-    ) -> Option<&SessionConfig> {
-        self.0.get(pph).map(|peer_state| &peer_state.session_config)
-    }
-
-    fn remove_peer(&mut self, pph: &PerPeerHeader<Bytes>) -> bool {
-        self.0.remove(pph).is_some()
-    }
-
-    fn num_peer_configs(&self) -> usize {
-        self.0.len()
-    }
-
-    fn is_peer_eor_capable(
-        &self,
-        pph: &PerPeerHeader<Bytes>,
-    ) -> Option<bool> {
-        self.0.get(pph).map(|peer_state| peer_state.eor_capable)
-    }
-
-    fn add_pending_eor(
-        &mut self,
-        pph: &PerPeerHeader<Bytes>,
-        afi: AFI,
-        safi: SAFI,
-    ) {
-        if let Some(peer_state) = self.0.get_mut(pph) {
-            peer_state
-                .pending_eors
-                .insert(EoRProperties::new(pph, afi, safi));
-        }
-    }
-
-    fn remove_pending_eor(
-        &mut self,
-        pph: &PerPeerHeader<Bytes>,
-        afi: AFI,
-        safi: SAFI,
-    ) -> bool {
-        if let Some(peer_state) = self.0.get_mut(pph) {
-            peer_state
-                .pending_eors
-                .remove(&EoRProperties::new(pph, afi, safi));
-        }
-
-        // indicate if all pending EORs have been removed, i.e. this is
-        // the end of the initial table dump
-        self.0
-            .values()
-            .all(|peer_state| peer_state.pending_eors.is_empty())
-    }
-
-    fn num_pending_eors(&self) -> usize {
-        self.0
-            .values()
-            .fold(0, |acc, peer_state| acc + peer_state.pending_eors.len())
-    }
-
-    fn add_announced_prefix(
-        &mut self,
-        pph: &PerPeerHeader<Bytes>,
-        prefix: Prefix,
-    ) -> bool {
-        if let Some(peer_state) = self.0.get_mut(pph) {
-            peer_state.announced_prefixes.insert(prefix)
-        } else {
-            false
-        }
-    }
-
-    fn remove_announced_prefix(
-        &mut self,
-        pph: &PerPeerHeader<Bytes>,
-        prefix: &Prefix,
-    ) {
-        if let Some(peer_state) = self.0.get_mut(pph) {
-            peer_state.announced_prefixes.remove(prefix);
-        }
-    }
-
-    fn get_announced_prefixes(
-        &self,
-        pph: &PerPeerHeader<Bytes>,
-    ) -> Option<std::collections::hash_set::Iter<Prefix>> {
-        self.0
-            .get(pph)
-            .map(|peer_state| peer_state.announced_prefixes.iter())
-    }
 }

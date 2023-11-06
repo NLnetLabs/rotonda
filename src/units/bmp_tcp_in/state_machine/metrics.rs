@@ -18,8 +18,8 @@ use super::machine::{AtomicBmpStateIdx, BmpStateIdx};
 
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 
-use std::sync::RwLock;
 use hex_slice::AsHex;
+use std::sync::RwLock;
 const MAX_RECENT_PARSE_ERRORS: usize = 10;
 
 #[derive(Clone, Debug, Default)]

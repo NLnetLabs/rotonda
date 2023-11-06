@@ -495,7 +495,8 @@ impl DirectUpdate for MqttRunner {
                 }
             }
 
-            _ => { /* We may have received the output from another unit, but we are not interested in it */ }
+            _ => { /* We may have received the output from another unit, but we are not interested in it */
+            }
         }
     }
 }

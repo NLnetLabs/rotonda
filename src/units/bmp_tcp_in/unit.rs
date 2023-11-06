@@ -27,14 +27,17 @@ use crate::{
         unit::UnitActivity,
     },
     comms::{Gate, GateStatus, Terminated},
-    tracing::Tracer,
     manager::{Component, WaitPoint},
     payload::SourceId,
     tokio::TokioTaskMetrics,
+    tracing::Tracer,
     units::Unit,
 };
 
-use super::{http::{RouterInfoApi, RouterListApi}, types::RouterInfo};
+use super::{
+    http::{RouterInfoApi, RouterListApi},
+    types::RouterInfo,
+};
 use super::{
     metrics::BmpTcpInMetrics,
     router_handler::RouterHandler,
@@ -291,9 +294,7 @@ impl BmpTcpInRunner {
         router_states: Arc<
             FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
         >, // Option is never None, instead Some is take()'n and replace()'d.
-        router_info: Arc<
-            FrimMap<SourceId, Arc<RouterInfo>>,
-        >,
+        router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
         bmp_metrics: Arc<BmpMetrics>,
         bmp_in_metrics: Arc<BmpTcpInMetrics>,
         state_machine_metrics: Arc<TokioTaskMetrics>,

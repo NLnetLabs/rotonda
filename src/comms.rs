@@ -65,9 +65,9 @@
 //! clones configuration in sync with that of the original Gate.
 
 use crate::common::frim::FrimMap;
-use crate::tracing::Tracer;
 use crate::manager::UpstreamLinkReport;
 use crate::metrics::{Metric, MetricType, MetricUnit};
+use crate::tracing::Tracer;
 use crate::{config::Marked, payload::Update, units::Unit};
 use crate::{manager, metrics};
 use async_trait::async_trait;

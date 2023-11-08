@@ -282,11 +282,11 @@ impl RouterHandler {
         self.status_reporter
             .bmp_message_received(bmp_state.router_id());
 
-        let next_state = if let ControlFlow::Continue(FilterOutput {
+        let next_state = if let Ok(ControlFlow::Continue(FilterOutput {
             south,
             east,
             received,
-        }) = Self::VM
+        })) = Self::VM
                     .with(|vm| {
                 let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(
                                 Arc::new(BytesRecord(msg)),
@@ -302,9 +302,8 @@ impl RouterHandler {
                     })
                     .map_err(|err| {
                         self.status_reporter.message_filtering_failure(&err);
-                        err
-                    })
-            {
+                (bmp_state.router_id(), err.to_string())
+            }) {
                 if !south.is_empty() {
                 let payload =
                     Payload::from_output_stream_queue(south, trace_id).into();

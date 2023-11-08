@@ -23,6 +23,8 @@ use routecore::{addr::Prefix, asn::Asn};
 use serde::Serialize;
 use smallvec::SmallVec;
 
+use crate::payload::RouterId;
+
 // -------- PhysicalRib -----------------------------------------------------------------------------------------------
 
 pub struct HashedRib {
@@ -145,7 +147,7 @@ impl HashedRib {
 
 // -------- RibValue --------------------------------------------------------------------------------------------------
 
-//// The metadata value associated with a prefix in the store of a physical RIB.
+/// The metadata value associated with a prefix in the store of a physical RIB.
 ///
 /// # Design
 ///
@@ -211,6 +213,63 @@ pub enum StoreEvictionPolicy {
     RemoveOnWithdraw,
 }
 
+impl RibValue {
+    pub fn withdraw(
+        &self,
+        policy: StoreEvictionPolicy,
+        withdrawing_peer: &PeerId,
+    ) -> (HashedSet<Arc<PreHashedTypeValue>>, StoreInsertionEffect) {
+        let mut out_items: HashedSet<Arc<PreHashedTypeValue>>;
+        let effect: StoreInsertionEffect;
+
+        match policy {
+            StoreEvictionPolicy::UpdateStatusOnWithdraw => {
+                let mut num_withdrawals = 0;
+
+                out_items = self
+                    .iter()
+                    .map(|route| {
+                        // If the route was not issued by this peer then
+                        // keep it as-is by including a clone of its Arc
+                        // in the result collection.
+                        if route.is_withdrawn()
+                            || !route.announced_by(withdrawing_peer)
+                        {
+                            Arc::clone(route)
+                        } else {
+                            // Otherwise, return a clone of the Arc's
+                            // inner route having first set its status to
+                            // withdrawn.
+                            let mut cloned = Arc::deref(route).clone();
+                            cloned.withdraw();
+                            num_withdrawals += 1;
+                            Arc::new(cloned)
+                        }
+                    })
+                    .collect();
+
+                effect =
+                    StoreInsertionEffect::RoutesWithdrawn(num_withdrawals);
+            }
+
+            StoreEvictionPolicy::RemoveOnWithdraw => {
+                out_items = self
+                    .iter()
+                    .filter(|route| !route.announced_by(withdrawing_peer))
+                    .cloned()
+                    .collect();
+
+                let num_removals = self.len() - out_items.len();
+                effect = StoreInsertionEffect::RoutesRemoved(num_removals);
+            }
+        }
+
+        out_items.shrink_to_fit();
+
+        (out_items, effect)
+    }
+}
+
 #[derive(Copy, Clone, Debug, Default)]
 pub struct StoreMergeUpdateSettings {
     pub eviction_policy: StoreEvictionPolicy,
@@ -235,14 +294,20 @@ impl From<StoreEvictionPolicy> for StoreMergeUpdateSettings {
     }
 }
 
-pub struct StoreInsertionReport {
-    /// The number of items added or removed (withdrawn) by the MergeUpdate operation.
-    pub num_items_delta: isize,
-    pub num_announcements_delta: isize,
-    pub num_withdrawals_delta: isize,
+#[derive(Debug)]
+pub enum StoreInsertionEffect {
+    RoutesWithdrawn(usize),
+    RoutesRemoved(usize),
+    RouteAdded,
+    RouteUpdated,
+}
 
-    /// The number of items resulting after the MergeUpdate operation.
-    pub item_count_total: usize,
+#[derive(Debug)]
+pub struct StoreInsertionReport {
+    pub change: StoreInsertionEffect,
+
+    /// The number of items stored at the prefix after the MergeUpdate operation.
+    pub item_count: usize,
 
     /// The time taken to perform the MergeUpdate operation.
     pub op_duration: Duration,
@@ -266,14 +331,11 @@ impl MergeUpdate for RibValue {
         &self,
         update_meta: &Self,
         settings: Option<&StoreMergeUpdateSettings>,
-    ) -> Result<(Self, Self::UserDataOut), Box<dyn std::error::Error>>
+    ) -> Result<(Self, StoreInsertionReport), Box<dyn std::error::Error>>
     where
         Self: std::marker::Sized,
     {
         let pre_insert = Utc::now();
-        let mut num_items_delta: isize = 0;
-        let mut num_announcements_delta: isize = 0;
-        let mut num_withdrawals_delta: isize = 0;
 
         #[cfg(test)]
         if let Some(StoreMergeUpdateSettings {
@@ -288,100 +350,54 @@ impl MergeUpdate for RibValue {
             std::thread::sleep(*delay);
         }
 
-        // There should only ever be one so unwrap().
-        let in_item: &TypeValue =
-            update_meta.per_prefix_items.iter().next().unwrap();
+        // There should only ever be one incoming item.
+        assert_eq!(update_meta.len(), 1);
+        let in_item = update_meta.per_prefix_items.iter().next().unwrap();
 
-        // Clone ourselves, withdrawing matching routes if the given item is a withdrawn route
-        let out_items: HashedSet<Arc<PreHashedTypeValue>> = match in_item {
-            TypeValue::Builtin(BuiltinTypeValue::Route(new_route))
-                if new_route.status() == RouteStatus::Withdrawn =>
-            {
-                let peer_id =
-                    PeerId::new(new_route.peer_ip(), new_route.peer_asn());
+        // Create a new RIB value whose inner HashSet contains the same items
+        // as this RIB value, but for which the HashSet itself is distinct, so
+        // that we can add/modify/remove values in the output HashSet. Only go
+        // to the effort of creating a clone of the HashSet if the given input
+        // value actually requires us to make a change in the value being
+        // updated, i.e. don't dumbly clone and modify as the clone might not
+        // be necessary.
 
-                match settings {
-                    None
-                    | Some(StoreMergeUpdateSettings {
-                        eviction_policy:
-                            StoreEvictionPolicy::UpdateStatusOnWithdraw,
-                        ..
-                    }) => {
-                        self.per_prefix_items
-                            .iter()
-                            .map(|route| {
-                                let (out_route, withdrawn) =
-                                    route.clone_and_withdraw(peer_id);
-                                if withdrawn {
-                                    num_announcements_delta -= 1;
-                                    num_withdrawals_delta += 1;
-                                    // Don't modify num_items_delta as routes
-                                    // are not being added or removed, only
-                                    // their status is being modified
-                                }
-                                out_route
-                            })
-                            .collect::<_>()
-                    }
+        let mut out_items: HashedSet<Arc<PreHashedTypeValue>>;
+        let change;
 
-                    Some(StoreMergeUpdateSettings {
-                        eviction_policy: StoreEvictionPolicy::RemoveOnWithdraw,
-                        ..
-                    }) => {
-                        let mut out_items: HashedSet<
-                            Arc<PreHashedTypeValue>,
-                        > = self
-                            .per_prefix_items
-                            .iter()
-                            .filter(|route| {
-                                // Keep only routes that are not being withdrawn
-                                route.peer_id() != Some(peer_id)
-                            })
-                            .cloned()
-                            .collect::<_>();
+        if in_item.value.is_withdrawn() {
+            // Only routes can be withdrawn, other kinds of of items stored in
+            // a RIB don't support the notion of being withdrawable. A route
+            // withdrawal is defined as the prefix to which routing is no
+            // longer possible via a given peer. This RIB item represents
+            // routes to the prefix via various peers. To apply the withdrawal
+            // we must therefore update/remove the routes to the prefix from
+            // the peer that issued the withdrawal.
+            let withdrawing_peer = in_item.peer_id().unwrap();
 
-                        let delta = (self.per_prefix_items.len()
-                            - out_items.len())
-                            as isize;
-                        if delta != 0 {
-                            num_items_delta -= delta;
-                            num_announcements_delta -= delta;
-                            // Don't modify num_withdrawals_delta as routes are not
-                            // being withdrawn, they are being removed
-                        }
+            // Apply the withdrawal, either by updating the status of
+            // affected routes, or by removing them entirely.
+            let eviction_policy =
+                settings.map(|v| v.eviction_policy).unwrap_or_default();
 
-                        out_items.shrink_to_fit();
-                        out_items
-                    }
-                }
+            (out_items, change) =
+                self.withdraw(eviction_policy, &withdrawing_peer);
+        } else {
+            // Merge the new items into the existing set, replacing any
+            // existing item that has the same RIB key as a new item.
+            out_items = self.per_prefix_items.deref().clone();
+            if out_items.replace(in_item.clone()).is_some() {
+                change = StoreInsertionEffect::RouteUpdated;
+            } else {
+                change = StoreInsertionEffect::RouteAdded;
             }
-
-            _ => {
-                // For all other cases, just use the Eq/Hash impls to replace matching or insert new.
-                let out_items: HashedSet<Arc<PreHashedTypeValue>> = self
-                    .per_prefix_items
-                    .union(&update_meta.per_prefix_items)
-                    .cloned()
-                    .collect::<_>();
-
-                num_items_delta = out_items
-                    .len()
-                    .saturating_sub(self.per_prefix_items.len())
-                    as isize;
-
-                num_announcements_delta = num_items_delta;
-
-                out_items
-            }
-        };
+        }
 
         let post_insert = Utc::now();
         let op_duration = post_insert - pre_insert;
         let user_data = StoreInsertionReport {
-            num_items_delta,
-            num_announcements_delta,
-            num_withdrawals_delta,
-            item_count_total: out_items.len(),
+            item_count: out_items.len(),
+            change,
             op_duration,
         };
 
@@ -444,19 +460,6 @@ impl PreHashedTypeValue {
             precomputed_hash,
         }
     }
-
-    pub fn clone_and_withdraw(
-        self: &Arc<PreHashedTypeValue>,
-        peer_id: PeerId,
-    ) -> (Arc<PreHashedTypeValue>, bool) {
-        if !self.is_withdrawn() && self.peer_id() == Some(peer_id) {
-            let mut cloned = Arc::deref(self).clone();
-            cloned.withdraw();
-            (Arc::new(cloned), true)
-        } else {
-            (Arc::clone(self), false)
-        }
-    }
 }
 
 impl std::ops::Deref for PreHashedTypeValue {
@@ -515,7 +518,9 @@ pub trait RouteExtra {
 
     fn peer_id(&self) -> Option<PeerId>;
 
-    fn is_route_from_peer(&self, peer_id: PeerId) -> bool;
+    fn router_id(&self) -> Option<Arc<RouterId>>;
+
+    fn announced_by(&self, peer_id: &PeerId) -> bool;
 
     fn is_withdrawn(&self) -> bool;
 }
@@ -537,8 +542,17 @@ impl RouteExtra for TypeValue {
         }
     }
 
-    fn is_route_from_peer(&self, peer_id: PeerId) -> bool {
-        self.peer_id() == Some(peer_id)
+    fn router_id(&self) -> Option<Arc<RouterId>> {
+        match self {
+            TypeValue::Builtin(BuiltinTypeValue::Route(route)) => {
+                route.router_id()
+            }
+            _ => None,
+        }
+    }
+
+    fn announced_by(&self, peer_id: &PeerId) -> bool {
+        self.peer_id().as_ref() == Some(peer_id)
     }
 
     fn is_withdrawn(&self) -> bool {

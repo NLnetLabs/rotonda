@@ -49,7 +49,7 @@ use super::{
     metrics::RibUnitMetrics,
     rib::{
         HashedRib, PreHashedTypeValue, RibValue, RouteExtra,
-        StoreEvictionPolicy, StoreMergeUpdateSettings,
+        StoreEvictionPolicy, StoreInsertionEffect, StoreMergeUpdateSettings,
     },
     status_reporter::RibUnitStatusReporter,
 };
@@ -722,11 +722,12 @@ impl RibUnitRunner {
         if let Some(filtered_update) = Self::VM
             .with(|vm| {
                 payload
-                    .filter(|value, trace_id| {
+                    .filter(|value, received, trace_id| {
                         self.roto_scripts.exec_with_tracer(
                             vm,
                             &self.filter_name.load(),
                             value,
+                            received,
                             bound_tracer.clone(),
                             trace_id,
                         )
@@ -813,43 +814,43 @@ impl RibUnitRunner {
 
             if let Some(prefix) = prefix {
                 let is_announcement = !payload.value.is_withdrawn();
+                let router_id =
+                    payload.value.router_id().unwrap_or_else(|| {
+                        Arc::new(RouterId::from_str("unknown").unwrap())
+                    });
 
                 let pre_insert = Utc::now();
                 match insert_fn(&prefix, payload.value.clone(), &rib) {
                     Ok((upsert, num_retries)) => {
                         let post_insert = Utc::now();
-                        let insert_delay = (post_insert - pre_insert)
-                            .num_microseconds()
-                            .unwrap_or(i64::MAX);
-
-                        // TODO: Use RawBgpMessage LogicalTime?
-                        // let propagation_delay = (post_insert - rib_el.received).num_milliseconds();
-                        let propagation_delay = 0;
-
-                        // TODO
-                        let router_id = Arc::new(
-                            RouterId::from_str("not implemented yet")
-                                .unwrap(),
-                        );
+                        let store_op_delay =
+                            (post_insert - pre_insert).to_std().unwrap();
+                        let propagation_delay = (post_insert
+                            - payload.received)
+                            .to_std()
+                            .unwrap();
 
                         match upsert {
                             Upsert::Insert => {
+                                let change = if is_announcement {
+                                    StoreInsertionEffect::RouteAdded
+                                } else {
+                                    // WTF - a withdrawal should NOT result in 'Insert' as that means
+                                    // that the prefix didn't yet have any routes associated with it
+                                    // so what was there to withdraw?
+                                    StoreInsertionEffect::RoutesWithdrawn(0)
+                                };
                                 self.status_reporter.insert_ok(
                                     router_id,
-                                    insert_delay,
+                                    store_op_delay,
                                     propagation_delay,
                                     num_retries,
-                                    is_announcement,
-                                    1,
-                                    1,
-                                    0,
+                                    change,
                                 );
                             }
                             Upsert::Update(StoreInsertionReport {
-                                num_items_delta,
-                                num_announcements_delta,
-                                num_withdrawals_delta,
-                                item_count_total,
+                                change,
+                                item_count,
                                 op_duration,
                             }) => {
                                 STATS_COUNTER.with(|counter| {
@@ -859,7 +860,7 @@ impl RibUnitRunner {
                                         self.rib_merge_update_stats.add(
                                             op_duration.num_microseconds().unwrap_or(i64::MAX)
                                                 as u64,
-                                            item_count_total,
+                                            item_count,
                                             is_announcement,
                                         );
                                     }
@@ -867,19 +868,11 @@ impl RibUnitRunner {
 
                                 self.status_reporter.update_ok(
                                     router_id,
-                                    insert_delay,
+                                    store_op_delay,
                                     propagation_delay,
                                     num_retries,
-                                    num_items_delta,
-                                    num_announcements_delta,
-                                    num_withdrawals_delta,
+                                    change,
                                 );
-
-                                // status_reporter.update_processed(
-                                //     new_announcements,
-                                //     modified_announcements,
-                                //     new_withdrawals,
-                                // );
                             }
                         }
                     }
@@ -971,11 +964,12 @@ impl RibUnitRunner {
             trace!("Re-processing route");
 
             if let Ok(filtered_payloads) = Self::VM.with(|vm| {
-                payload.filter(|value, trace_id| {
+                payload.filter(|value, received, trace_id| {
                     self.roto_scripts.exec_with_tracer(
                         vm,
                         &self.filter_name.load(),
                         value,
+                        received,
                         tracer.clone(),
                         trace_id,
                     )

@@ -1,6 +1,6 @@
 use std::{
     sync::{
-        atomic::{AtomicI64, AtomicUsize, Ordering::SeqCst},
+        atomic::{AtomicU64, AtomicUsize, Ordering::SeqCst},
         Arc,
     },
     time::{Duration, Instant},
@@ -30,8 +30,8 @@ pub struct RibUnitMetrics {
     pub num_modified_route_announcements: AtomicUsize,
     pub num_routes_withdrawn: AtomicUsize,
     pub num_route_withdrawals_without_announcement: AtomicUsize,
-    pub last_insert_duration: AtomicI64,
-    pub last_update_duration: AtomicI64,
+    pub last_insert_duration_micros: AtomicU64,
+    pub last_update_duration_micros: AtomicU64,
     routers: Arc<FrimMap<Arc<RouterId>, Arc<RouterMetrics>>>,
     pub rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
 }
@@ -49,14 +49,14 @@ impl RibUnitMetrics {
 
 #[derive(Debug)]
 pub struct RouterMetrics {
-    pub last_e2e_delay: Arc<AtomicI64>,
+    pub last_e2e_delay_millis: Arc<AtomicU64>,
     pub last_e2e_delay_at: Arc<ArcSwap<Instant>>,
 }
 
 impl Default for RouterMetrics {
     fn default() -> Self {
         Self {
-            last_e2e_delay: Arc::new(Default::default()),
+            last_e2e_delay_millis: Arc::new(Default::default()),
             last_e2e_delay_at: Arc::new(ArcSwapAny::new(Arc::new(
                 Instant::now(),
             ))),
@@ -204,12 +204,12 @@ impl metrics::Source for RibUnitMetrics {
         target.append_simple(
             &Self::LAST_INSERT_DURATION_METRIC,
             Some(unit_name),
-            self.last_insert_duration.load(SeqCst),
+            self.last_insert_duration_micros.load(SeqCst),
         );
         target.append_simple(
             &Self::LAST_UPDATE_DURATION_METRIC,
             Some(unit_name),
-            self.last_update_duration.load(SeqCst),
+            self.last_update_duration_micros.load(SeqCst),
         );
 
         let max_age = Duration::from_secs(60);
@@ -224,7 +224,7 @@ impl metrics::Source for RibUnitMetrics {
                 target,
                 router_id,
                 Self::LAST_END_TO_END_DELAY_PER_ROUTER_METRIC,
-                metrics.last_e2e_delay.load(SeqCst),
+                metrics.last_e2e_delay_millis.load(SeqCst),
             );
         }
 

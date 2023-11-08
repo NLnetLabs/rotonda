@@ -1,5 +1,6 @@
 use atomic_enum::atomic_enum;
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 use roto::types::builtin::RouteStatus;
 
 /// RFC 7854 BMP processing.
@@ -564,6 +565,7 @@ where
     /// where `msg` is either the original unmodified `msg` or a modified or completely new message.
     pub fn route_monitoring<CB>(
         mut self,
+        received: DateTime<Utc>,
         msg: RouteMonitoring<Bytes>,
         route_status: RouteStatus,
         trace_id: Option<u8>,
@@ -629,6 +631,7 @@ where
                         n_announcements,
                         n_withdrawals,
                     ) = saved_self.extract_route_monitoring_routes(
+                        received,
                         pph.clone(),
                         &update,
                         route_status,
@@ -687,6 +690,7 @@ where
 
     pub fn extract_route_monitoring_routes(
         &mut self,
+        received: DateTime<Utc>,
         pph: PerPeerHeader<Bytes>,
         update: &UpdateMessage<Bytes>,
         route_status: RouteStatus,
@@ -725,10 +729,11 @@ where
                     route_status,
                 );
 
-                payloads.push(Payload::new(
+                payloads.push(Payload::with_received(
                     self.source_id.clone(),
                     route,
                     trace_id,
+                    received,
                 ));
             }
         }
@@ -762,10 +767,11 @@ where
                         RouteStatus::Withdrawn,
                     );
 
-                    payloads.push(Payload::new(
+                    payloads.push(Payload::with_received(
                         self.source_id.clone(),
                         route,
                         trace_id,
+                        received,
                     ));
 
                     self.details.remove_announced_prefix(&pph, &prefix);
@@ -814,6 +820,7 @@ impl BmpState {
     #[allow(dead_code)]
     pub fn process_msg(
         self,
+        received: DateTime<Utc>,
         bmp_msg: BmpMsg<Bytes>,
         trace_id: Option<u8>,
     ) -> ProcessingResult {
@@ -842,8 +849,12 @@ impl BmpState {
             BmpState::Initiating(inner) => {
                 inner.process_msg(bmp_msg, trace_id)
             }
-            BmpState::Dumping(inner) => inner.process_msg(bmp_msg, trace_id),
-            BmpState::Updating(inner) => inner.process_msg(bmp_msg, trace_id),
+            BmpState::Dumping(inner) => {
+                inner.process_msg(received, bmp_msg, trace_id)
+            }
+            BmpState::Updating(inner) => {
+                inner.process_msg(received, bmp_msg, trace_id)
+            }
             BmpState::Terminated(inner) => {
                 inner.process_msg(bmp_msg, trace_id)
             }

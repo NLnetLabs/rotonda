@@ -9,6 +9,7 @@ use crate::{
     payload::{Payload, Update},
     units::rib_unit::unit::RibUnitRunner,
 };
+use chrono::Utc;
 use futures::future::join_all;
 use roto::types::{
     builtin::{
@@ -19,13 +20,18 @@ use roto::types::{
 };
 use rotonda_store::prelude::multi::PrefixStoreError;
 use rotonda_store::{epoch, MatchOptions, MatchType};
+use routecore::asn::Asn;
+use routecore::bgp::communities::Wellknown;
 use routecore::{addr::Prefix, bgp::message::SessionConfig};
 
+use std::net::IpAddr;
 use std::sync::atomic::Ordering::SeqCst;
 use std::time::Duration;
 use std::{str::FromStr, sync::Arc};
 
 use super::status_reporter::RibUnitStatusReporter;
+
+const MOCK_ROUTER_ID: &str = "mock-router";
 
 #[tokio::test]
 async fn process_non_route_update() {
@@ -71,6 +77,37 @@ async fn process_update_single_route() {
 }
 
 #[tokio::test]
+async fn process_update_withdraw_unannounced_route() {
+    let (runner, _) = RibUnitRunner::mock(
+        "",
+        RibType::Physical,
+        StoreEvictionPolicy::UpdateStatusOnWithdraw.into(),
+    );
+
+    // Given a BGP update containing a single route withdrawal
+    let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
+    let update = mk_route_update(&prefix, None);
+
+    // When it is processed by this unit it should not be filtered
+    assert!(!is_filtered(&runner, update.clone()).await);
+
+    // And it should cause the prefix to be added to the route store
+    assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
+
+    // And check that recorded metrics are correct
+    assert_eq!(check_metrics(&runner.status_reporter()), (0, 1, 0, 0, 1));
+
+    // When it is processed again by this unit it should not be filtered
+    assert!(!is_filtered(&runner, update).await);
+
+    // And it should cause the prefix to be added to the route store
+    assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
+
+    // And check that recorded metrics are correct
+    assert_eq!(check_metrics(&runner.status_reporter()), (0, 2, 0, 0, 1));
+}
+
+#[tokio::test]
 async fn process_update_same_route_twice() {
     let (runner, _) = RibUnitRunner::mock(
         "",
@@ -96,6 +133,162 @@ async fn process_update_same_route_twice() {
 
     // And check that recorded metrics are correct
     assert_eq!(check_metrics(&runner.status_reporter()), (1, 0, 1, 0, 1));
+
+    // But when withdrawn
+    let update = mk_route_update(&prefix, None);
+
+    // When it is processed by this unit it should not be filtered
+    assert!(!is_filtered(&runner, update.clone()).await);
+
+    // And it should cause the route to be marked as withdrawn
+    assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
+
+    // And check that recorded metrics are correct
+    assert_eq!(check_metrics(&runner.status_reporter()), (1, 0, 0, 1, 1));
+}
+
+#[tokio::test]
+async fn process_update_equivalent_route_twice() {
+    let (runner, _) = RibUnitRunner::mock(
+        "",
+        RibType::Physical,
+        StoreEvictionPolicy::UpdateStatusOnWithdraw.into(),
+    );
+
+    // Given a BGP update containing a single route announcement
+    let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
+    let update = mk_route_update_with_communities(
+        &prefix,
+        Some("[111,222,333]"),
+        Some("BLACKHOLE"),
+    );
+
+    // When it is processed by this unit it should not be filtered
+    assert!(!is_filtered(&runner, update.clone()).await);
+
+    // And it should be added to the route store
+    assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
+
+    // And check that recorded metrics are correct
+    assert_eq!(check_metrics(&runner.status_reporter()), (1, 0, 1, 0, 1));
+
+    let metrics = runner.status_reporter().metrics().unwrap();
+    let metrics = get_testable_metrics_snapshot(&metrics);
+    assert_eq!(
+        metrics
+            .with_name::<usize>("rib_unit_num_modified_route_announcements"),
+        0
+    );
+
+    // And check the value stored
+    let match_options = MatchOptions {
+        match_type: MatchType::ExactMatch,
+        include_all_records: true,
+        include_less_specifics: true,
+        include_more_specifics: true,
+    };
+    eprintln!("Querying store match_prefix the first time");
+    let match_result = runner.rib().store().unwrap().match_prefix(
+        &prefix,
+        &match_options,
+        &epoch::pin(),
+    );
+    assert!(matches!(match_result.match_type, MatchType::ExactMatch));
+    let rib_value = match_result.prefix_meta.as_ref().unwrap();
+    assert_eq!(rib_value.len(), 1);
+    let prehashed_type_value = rib_value.iter().next().unwrap();
+    if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) =
+        &***prehashed_type_value
+    {
+        assert_eq!(
+            route
+                .raw_message
+                .raw_message()
+                .0
+                .communities()
+                .unwrap()
+                .next()
+                .unwrap(),
+            Wellknown::Blackhole.into()
+        );
+    } else {
+        unreachable!()
+    };
+
+    // When a route that is identical by key but different by value then the
+    // new route should not be filtered, where the default key is peer IP,
+    // peer ASN and AS path (see RibUnit::default_rib_keys()).
+    let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
+    let update = mk_route_update_with_communities(
+        &prefix,
+        Some("[111,222,333]"),
+        Some("NO_EXPORT"),
+    );
+    if let Update::Single(Payload {
+        value: TypeValue::Builtin(BuiltinTypeValue::Route(route)),
+        ..
+    }) = &update
+    {
+        assert_eq!(
+            route
+                .raw_message
+                .raw_message()
+                .0
+                .communities()
+                .unwrap()
+                .next()
+                .unwrap(),
+            Wellknown::NoExport.into()
+        );
+    }
+    assert!(!is_filtered(&runner, update).await);
+
+    // And should replace the old route in the store
+    assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
+    let match_options = MatchOptions {
+        match_type: MatchType::ExactMatch,
+        include_all_records: true,
+        include_less_specifics: true,
+        include_more_specifics: true,
+    };
+    eprintln!("Querying store match_prefix the second time");
+    let match_result = runner.rib().store().unwrap().match_prefix(
+        &prefix,
+        &match_options,
+        &epoch::pin(),
+    );
+    assert!(matches!(match_result.match_type, MatchType::ExactMatch));
+    let rib_value = match_result.prefix_meta.as_ref().unwrap();
+    assert_eq!(rib_value.len(), 1);
+    let prehashed_type_value = rib_value.iter().next().unwrap();
+    if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) =
+        &***prehashed_type_value
+    {
+        assert_eq!(
+            route
+                .raw_message
+                .raw_message()
+                .0
+                .communities()
+                .unwrap()
+                .next()
+                .unwrap(),
+            Wellknown::NoExport.into()
+        );
+    } else {
+        unreachable!()
+    };
+
+    // And check that recorded metrics are correct
+    assert_eq!(check_metrics(&runner.status_reporter()), (1, 0, 1, 0, 1));
+
+    let metrics = runner.status_reporter().metrics().unwrap();
+    let metrics = get_testable_metrics_snapshot(&metrics);
+    assert_eq!(
+        metrics
+            .with_name::<usize>("rib_unit_num_modified_route_announcements"),
+        1
+    );
 
     // But when withdrawn
     let update = mk_route_update(&prefix, None);
@@ -266,8 +459,8 @@ async fn process_update_two_routes_to_different_prefixes() {
 
 #[tokio::test]
 async fn time_store_op_durations() {
-    const INSERT_DELAY: Duration = Duration::from_secs(1);
-    const UPDATE_DELAY: Duration = Duration::from_secs(2);
+    const INSERT_DELAY: Duration = Duration::from_secs(2);
+    const UPDATE_DELAY: Duration = Duration::from_secs(3);
     let mut settings = StoreMergeUpdateSettings::new(
         StoreEvictionPolicy::UpdateStatusOnWithdraw,
     );
@@ -278,6 +471,7 @@ async fn time_store_op_durations() {
     // Given a BGP update containing a single route announcement
     let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
     let update = mk_route_update(&prefix, Some("[111,222,333]"));
+    let started_at = Utc::now();
 
     // Insert it once, MergeUpdate won't be invoked so there should be no
     // delay there, but we deliberately introduce a delay around the store
@@ -301,6 +495,16 @@ async fn time_store_op_durations() {
     let actual_duration = Duration::from_micros(insert_duration_micros);
     assert_eq!(actual_duration.as_secs(), INSERT_DELAY.as_secs());
 
+    let propagation_duration_millis = metrics.with_label::<u64>(
+        "rib_unit_e2e_duration",
+        ("router", MOCK_ROUTER_ID),
+    );
+    let actual_duration = Duration::from_millis(propagation_duration_millis);
+    assert_eq!(
+        actual_duration.as_secs(),
+        (Utc::now() - started_at).to_std().unwrap().as_secs()
+    );
+
     // Insert it again, MergeUpdate should be invoked so insertion should be
     // delayed by DELAY as configured above.
     runner
@@ -314,6 +518,16 @@ async fn time_store_op_durations() {
         metrics.with_name::<u64>("rib_unit_update_duration");
     let actual_duration = Duration::from_micros(update_duration_micros);
     assert_eq!(actual_duration.as_secs(), UPDATE_DELAY.as_secs());
+
+    let propagation_duration_millis = metrics.with_label::<u64>(
+        "rib_unit_e2e_duration",
+        ("router", MOCK_ROUTER_ID),
+    );
+    let actual_duration = Duration::from_millis(propagation_duration_millis);
+    assert_eq!(
+        actual_duration.as_secs(),
+        (Utc::now() - started_at).to_std().unwrap().as_secs()
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -424,14 +638,27 @@ fn mk_route_update(
     prefix: &Prefix,
     announced_as_path_str: Option<&str>,
 ) -> Update {
+    mk_route_update_with_communities(
+        prefix,
+        announced_as_path_str,
+        Some("BLACKHOLE,123:44"),
+    )
+}
+
+fn mk_route_update_with_communities(
+    prefix: &Prefix,
+    announced_as_path_str: Option<&str>,
+    communities: Option<&str>,
+) -> Update {
     let delta_id = (RotondaId(0), 0);
     let ann;
     let wit;
     let route_status;
     match announced_as_path_str {
         Some(as_path_str) => {
+            let communities = communities.unwrap_or("none");
             ann = Announcements::from_str(&format!(
-                "e {as_path_str} 10.0.0.1 BLACKHOLE,123:44 {prefix}",
+                "e {as_path_str} 10.0.0.1 {communities} {prefix}",
             ))
             .unwrap();
             wit = Prefixes::default();
@@ -454,7 +681,10 @@ fn mk_route_update(
         (*prefix).into(),
         &bgp_update_msg,
         route_status,
-    );
+    )
+    .with_peer_asn(Asn::from_u32(64512))
+    .with_peer_ip(IpAddr::from_str("127.0.0.1").unwrap())
+    .with_router_id(MOCK_ROUTER_ID.to_string().into());
 
     Update::from(Payload::from(TypeValue::from(BuiltinTypeValue::Route(
         route,

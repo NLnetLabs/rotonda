@@ -41,7 +41,7 @@ use super::{
 use super::{
     metrics::BmpTcpInMetrics,
     router_handler::RouterHandler,
-    state_machine::{machine::BmpState, metrics::BmpMetrics},
+    state_machine::{machine::BmpState, metrics::BmpStateMachineMetrics},
     status_reporter::BmpTcpInStatusReporter,
     util::format_source_id,
 };
@@ -164,7 +164,7 @@ impl BmpTcpIn {
         let bmp_in_metrics = Arc::new(BmpTcpInMetrics::new(&gate));
         component.register_metrics(bmp_in_metrics.clone());
 
-        let bmp_metrics = Arc::new(BmpMetrics::new());
+        let bmp_metrics = Arc::new(BmpStateMachineMetrics::new());
         component.register_metrics(bmp_metrics.clone());
 
         let state_machine_metrics = Arc::new(TokioTaskMetrics::new());
@@ -268,7 +268,7 @@ struct BmpTcpInRunner {
     router_states:
         Arc<FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>, // Option is never None, instead Some is take()'n and replace()'d.
     router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
-    bmp_metrics: Arc<BmpMetrics>,
+    bmp_metrics: Arc<BmpStateMachineMetrics>,
     bmp_in_metrics: Arc<BmpTcpInMetrics>,
     state_machine_metrics: Arc<TokioTaskMetrics>,
     status_reporter: Arc<BmpTcpInStatusReporter>,
@@ -290,7 +290,7 @@ impl BmpTcpInRunner {
             FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
         >, // Option is never None, instead Some is take()'n and replace()'d.
         router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
-        bmp_metrics: Arc<BmpMetrics>,
+        bmp_metrics: Arc<BmpStateMachineMetrics>,
         bmp_in_metrics: Arc<BmpTcpInMetrics>,
         state_machine_metrics: Arc<TokioTaskMetrics>,
         status_reporter: Arc<BmpTcpInStatusReporter>,

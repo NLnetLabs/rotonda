@@ -8,7 +8,7 @@ use crate::payload::{RouterId, SourceId};
 use super::super::{
     machine::{BmpState, BmpStateDetails, Initiable},
     processing::{MessageType, ProcessingResult},
-    status_reporter::BmpTcpInStatusReporter,
+    status_reporter::BmpStateMachineStatusReporter,
 };
 
 /// BmpState machine state 'Initiating'.
@@ -46,7 +46,7 @@ impl BmpStateDetails<Initiating> {
     pub fn new(
         source_id: SourceId,
         router_id: Arc<RouterId>,
-        status_reporter: Arc<BmpTcpInStatusReporter>,
+        status_reporter: Arc<BmpStateMachineStatusReporter>,
     ) -> Self {
         BmpStateDetails {
             source_id,

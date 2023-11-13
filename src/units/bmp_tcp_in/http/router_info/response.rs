@@ -11,7 +11,7 @@ use crate::{
         metrics::{BmpTcpInMetrics, RouterMetrics},
         state_machine::{
             machine::{PeerAware, PeerStates},
-            metrics::BmpMetrics,
+            metrics::BmpStateMachineMetrics,
         },
     },
 };
@@ -42,7 +42,7 @@ impl RouterInfoApi {
         peer_states: Option<&PeerStates>,
         focus: Focus,
         conn_metrics: &Arc<BmpTcpInMetrics>,
-        bmp_metrics: &Arc<BmpMetrics>,
+        bmp_metrics: &Arc<BmpStateMachineMetrics>,
         connected_at: &DateTime<Utc>,
         last_message_at: &Arc<RwLock<DateTime<Utc>>>,
     ) -> Response<Body> {
@@ -109,7 +109,7 @@ impl RouterInfoApi {
         sys_extra: &[String],
         peer_states: Option<&PeerStates>,
         focus: Focus,
-        bmp_metrics: &Arc<BmpMetrics>,
+        bmp_metrics: &Arc<BmpStateMachineMetrics>,
         connected_at: &DateTime<Utc>,
         last_message_at: &Arc<RwLock<DateTime<Utc>>>,
     ) -> String {

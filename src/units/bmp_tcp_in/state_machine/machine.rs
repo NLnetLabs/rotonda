@@ -62,13 +62,13 @@ use crate::{
 };
 
 use super::{
-    metrics::BmpMetrics,
+    metrics::BmpStateMachineMetrics,
     processing::{MessageType, ProcessingResult},
     states::{
         dumping::Dumping, initiating::Initiating, terminated::Terminated,
         updating::Updating,
     },
-    status_reporter::BmpTcpInStatusReporter,
+    status_reporter::BmpStateMachineStatusReporter,
 };
 
 //use octseq::Octets;
@@ -201,7 +201,7 @@ where
 {
     pub source_id: SourceId,
     pub router_id: Arc<String>,
-    pub status_reporter: Arc<BmpTcpInStatusReporter>,
+    pub status_reporter: Arc<BmpStateMachineStatusReporter>,
     pub details: T,
 }
 
@@ -236,7 +236,7 @@ impl BmpState {
         }
     }
 
-    pub fn status_reporter(&self) -> Option<Arc<BmpTcpInStatusReporter>> {
+    pub fn status_reporter(&self) -> Option<Arc<BmpStateMachineStatusReporter>> {
         match self {
             BmpState::Initiating(v) => Some(v.status_reporter.clone()),
             BmpState::Dumping(v) => Some(v.status_reporter.clone()),
@@ -807,11 +807,11 @@ impl BmpState {
         source_id: SourceId,
         router_id: Arc<RouterId>,
         parent_status_reporter: Arc<T>,
-        metrics: Arc<BmpMetrics>,
+        metrics: Arc<BmpStateMachineMetrics>,
     ) -> Self {
         let child_name = parent_status_reporter.link_names("bmp_state");
         let status_reporter =
-            Arc::new(BmpTcpInStatusReporter::new(child_name, metrics));
+            Arc::new(BmpStateMachineStatusReporter::new(child_name, metrics));
 
         BmpState::Initiating(BmpStateDetails::<Initiating>::new(
             source_id,

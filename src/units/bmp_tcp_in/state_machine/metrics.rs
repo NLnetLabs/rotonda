@@ -101,11 +101,11 @@ impl ParseErrorsRingBuffer {
 // avoid the need to find the right metric to update, which in a concurrent
 // access scenario requires some sort of concurrent safe map.
 #[derive(Debug, Default)]
-pub struct BmpMetrics {
+pub struct BmpStateMachineMetrics {
     routers: Arc<FrimMap<Arc<RouterId>, Arc<RouterBmpMetrics>>>,
 }
 
-impl BmpMetrics {
+impl BmpStateMachineMetrics {
     pub fn router_metrics(
         &self,
         router_id: Arc<RouterId>,
@@ -151,7 +151,7 @@ pub struct RouterBmpMetrics {
     pub parse_errors: Arc<ParseErrorsRingBuffer>,
 }
 
-impl BmpMetrics {
+impl BmpStateMachineMetrics {
     // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_CONNECTED_ROUTERS_METRIC: Metric = Metric::new(
         "bmp_num_connected_routers",
@@ -266,13 +266,13 @@ impl BmpMetrics {
     );
 }
 
-impl BmpMetrics {
+impl BmpStateMachineMetrics {
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-impl metrics::Source for BmpMetrics {
+impl metrics::Source for BmpStateMachineMetrics {
     fn append(&self, unit_name: &str, target: &mut metrics::Target) {
         target.append_simple(
             &Self::NUM_CONNECTED_ROUTERS_METRIC,

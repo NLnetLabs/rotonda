@@ -432,7 +432,7 @@ mod tests {
         bgp::encode::{mk_per_peer_header, Announcements, Prefixes},
         payload::{Payload, SourceId, Update},
         units::bmp_tcp_in::state_machine::{
-            processing::MessageType, states::updating::Updating,
+            processing::MessageType, states::updating::Updating, status_reporter::BmpStateMachineStatusReporter, metrics::BmpStateMachineMetrics,
         },
     };
 
@@ -1416,10 +1416,12 @@ mod tests {
 
     fn mk_test_processor() -> BmpStateDetails<Dumping> {
         let addr = "127.0.0.1:1818".parse().unwrap();
+        let bmp_metrics = Arc::new(BmpStateMachineMetrics::new());
+        let status_reporter = Arc::new(BmpStateMachineStatusReporter::new("mock", bmp_metrics));
         BmpStateDetails::<Dumping> {
             source_id: SourceId::SocketAddr(addr),
             router_id: Arc::new("test-router".to_string()),
-            status_reporter: Arc::default(),
+            status_reporter,
             details: Dumping::default(),
         }
     }

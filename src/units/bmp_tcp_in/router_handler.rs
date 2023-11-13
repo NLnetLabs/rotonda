@@ -32,7 +32,7 @@ use crate::{
 
 use super::io::FatalError;
 use super::state_machine::machine::BmpState;
-use super::state_machine::metrics::BmpMetrics;
+use super::state_machine::metrics::BmpStateMachineMetrics;
 use super::state_machine::processing::MessageType;
 use super::unit::TracingMode;
 use super::util::format_source_id;
@@ -47,7 +47,7 @@ pub struct RouterHandler {
     tracer: Arc<Tracer>,
     tracing_mode: Arc<ArcSwap<TracingMode>>,
     last_msg_at: Option<Arc<RwLock<DateTime<Utc>>>>,
-    bmp_metrics: Arc<BmpMetrics>,
+    bmp_metrics: Arc<BmpStateMachineMetrics>,
 }
 
 impl RouterHandler {
@@ -66,7 +66,7 @@ impl RouterHandler {
         tracer: Arc<Tracer>,
         tracing_mode: Arc<ArcSwap<TracingMode>>,
         last_msg_at: Option<Arc<RwLock<DateTime<Utc>>>>,
-        bmp_metrics: Arc<BmpMetrics>,
+        bmp_metrics: Arc<BmpStateMachineMetrics>,
     ) -> Self {
         Self {
             gate,
@@ -92,7 +92,7 @@ impl RouterHandler {
             SourceId::SocketAddr("1.2.3.4:12345".parse().unwrap());
         let router_id = Arc::new("unknown".into());
         let bmp_in_metrics = Arc::new(BmpTcpInMetrics::default());
-        let bmp_metrics = Arc::new(BmpMetrics::default());
+        let bmp_metrics = Arc::new(BmpStateMachineMetrics::default());
         let parent_status_reporter = Arc::new(BmpTcpInStatusReporter::new(
             "dummy",
             bmp_in_metrics.clone(),

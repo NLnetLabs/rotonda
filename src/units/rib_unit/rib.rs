@@ -60,31 +60,35 @@ impl Default for HashedRib {
         Self::new(
             &[RouteToken::PeerIp, RouteToken::PeerAsn, RouteToken::AsPath],
             true,
+            StoreEvictionPolicy::UpdateStatusOnWithdraw.into(),
         )
     }
 }
 
 impl HashedRib {
-    pub fn new(key_fields: &[RouteToken], physical: bool) -> Self {
+    pub fn new(
+        key_fields: &[RouteToken],
+        physical: bool,
+        settings: StoreMergeUpdateSettings,
+    ) -> Self {
         let key_fields = key_fields
             .iter()
             .map(|&v| vec![v as usize].into())
             .collect::<Vec<_>>();
-        Self::with_custom_type(TypeDef::Route, key_fields, physical)
+        Self::with_custom_type(TypeDef::Route, key_fields, physical, settings)
     }
 
     pub fn with_custom_type(
         ty: TypeDef,
         ty_keys: Vec<SmallVec<[usize; 8]>>,
         physical: bool,
+        settings: StoreMergeUpdateSettings,
     ) -> Self {
         let rib = match physical {
             true => {
                 let store = MultiThreadedStore::<RibValue>::new()
                     .unwrap() // TODO: handle this Err
-                    .with_user_data(
-                        StoreEvictionPolicy::UpdateStatusOnWithdraw,
-                    );
+                    .with_user_data(settings);
                 let rib =
                     Rib::new("rib-names-are-not-used-yet", ty.clone(), store);
                 Some(rib)
@@ -207,6 +211,30 @@ pub enum StoreEvictionPolicy {
     RemoveOnWithdraw,
 }
 
+#[derive(Copy, Clone, Debug, Default)]
+pub struct StoreMergeUpdateSettings {
+    pub eviction_policy: StoreEvictionPolicy,
+
+    #[cfg(test)]
+    pub delay: Option<std::time::Duration>,
+}
+
+impl StoreMergeUpdateSettings {
+    pub fn new(eviction_policy: StoreEvictionPolicy) -> Self {
+        Self {
+            eviction_policy,
+            #[cfg(test)]
+            delay: None,
+        }
+    }
+}
+
+impl From<StoreEvictionPolicy> for StoreMergeUpdateSettings {
+    fn from(eviction_policy: StoreEvictionPolicy) -> Self {
+        StoreMergeUpdateSettings::new(eviction_policy)
+    }
+}
+
 pub struct StoreInsertionReport {
     /// The number of items added or removed (withdrawn) by the MergeUpdate operation.
     pub num_items_delta: isize,
@@ -221,7 +249,7 @@ pub struct StoreInsertionReport {
 }
 
 impl MergeUpdate for RibValue {
-    type UserDataIn = StoreEvictionPolicy;
+    type UserDataIn = StoreMergeUpdateSettings;
     type UserDataOut = StoreInsertionReport;
 
     fn merge_update(
@@ -235,7 +263,7 @@ impl MergeUpdate for RibValue {
     fn clone_merge_update(
         &self,
         update_meta: &Self,
-        eviction_policy: Option<&StoreEvictionPolicy>,
+        settings: Option<&StoreMergeUpdateSettings>,
     ) -> Result<(Self, Self::UserDataOut), Box<dyn std::error::Error>>
     where
         Self: std::marker::Sized,
@@ -244,6 +272,19 @@ impl MergeUpdate for RibValue {
         let mut num_items_delta: isize = 0;
         let mut num_announcements_delta: isize = 0;
         let mut num_withdrawals_delta: isize = 0;
+
+        #[cfg(test)]
+        if let Some(StoreMergeUpdateSettings {
+            delay: Some(delay), ..
+        }) = settings
+        {
+            eprintln!(
+                "Sleeping in clone_merge_update() [thread {:?}] for {}ms",
+                std::thread::current().id(),
+                delay.as_millis()
+            );
+            std::thread::sleep(*delay);
+        }
 
         // There should only ever be one so unwrap().
         let in_item: &TypeValue =
@@ -257,9 +298,13 @@ impl MergeUpdate for RibValue {
                 let peer_id =
                     PeerId::new(new_route.peer_ip(), new_route.peer_asn());
 
-                match eviction_policy {
+                match settings {
                     None
-                    | Some(StoreEvictionPolicy::UpdateStatusOnWithdraw) => {
+                    | Some(StoreMergeUpdateSettings {
+                        eviction_policy:
+                            StoreEvictionPolicy::UpdateStatusOnWithdraw,
+                        ..
+                    }) => {
                         self.per_prefix_items
                             .iter()
                             .map(|route| {
@@ -277,7 +322,10 @@ impl MergeUpdate for RibValue {
                             .collect::<_>()
                     }
 
-                    Some(StoreEvictionPolicy::RemoveOnWithdraw) => {
+                    Some(StoreMergeUpdateSettings {
+                        eviction_policy: StoreEvictionPolicy::RemoveOnWithdraw,
+                        ..
+                    }) => {
                         let mut out_items: HashedSet<
                             Arc<PreHashedTypeValue>,
                         > = self
@@ -290,7 +338,9 @@ impl MergeUpdate for RibValue {
                             .cloned()
                             .collect::<_>();
 
-                        let delta = (self.per_prefix_items.len() - out_items.len()) as isize;
+                        let delta = (self.per_prefix_items.len()
+                            - out_items.len())
+                            as isize;
                         if delta != 0 {
                             num_items_delta -= delta;
                             num_announcements_delta -= delta;
@@ -540,36 +590,36 @@ mod tests {
 
     #[test]
     fn merging_in_separate_values_yields_two_entries() {
-        let eviction_policy = StoreEvictionPolicy::UpdateStatusOnWithdraw;
+        let settings = StoreEvictionPolicy::UpdateStatusOnWithdraw.into();
         let rib_value = RibValue::default();
         let value_one = PreHashedTypeValue::new(1u8.into(), 1);
         let value_two = PreHashedTypeValue::new(2u8.into(), 2);
 
         let (rib_value, _user_data) = rib_value
-            .clone_merge_update(&value_one.into(), Some(&eviction_policy))
+            .clone_merge_update(&value_one.into(), Some(&settings))
             .unwrap();
         assert_eq!(rib_value.len(), 1);
 
         let (rib_value, _user_data) = rib_value
-            .clone_merge_update(&value_two.into(), Some(&eviction_policy))
+            .clone_merge_update(&value_two.into(), Some(&settings))
             .unwrap();
         assert_eq!(rib_value.len(), 2);
     }
 
     #[test]
     fn merging_in_the_same_precomputed_hashcode_yields_one_entry() {
-        let eviction_policy = StoreEvictionPolicy::UpdateStatusOnWithdraw;
+        let settings = StoreEvictionPolicy::UpdateStatusOnWithdraw.into();
         let rib_value = RibValue::default();
         let value_one = PreHashedTypeValue::new(1u8.into(), 1);
         let value_two = PreHashedTypeValue::new(2u8.into(), 1);
 
         let (rib_value, _user_data) = rib_value
-            .clone_merge_update(&value_one.into(), Some(&eviction_policy))
+            .clone_merge_update(&value_one.into(), Some(&settings))
             .unwrap();
         assert_eq!(rib_value.len(), 1);
 
         let (rib_value, _user_data) = rib_value
-            .clone_merge_update(&value_two.into(), Some(&eviction_policy))
+            .clone_merge_update(&value_two.into(), Some(&settings))
             .unwrap();
         assert_eq!(rib_value.len(), 1);
     }
@@ -606,14 +656,14 @@ mod tests {
             PreHashedTypeValue::new(peer_one_withdrawal.into(), 4);
 
         // When merged into a RibValue
-        let update_policy = StoreEvictionPolicy::UpdateStatusOnWithdraw;
+        let settings = StoreEvictionPolicy::UpdateStatusOnWithdraw.into();
         let rib_value = RibValue::default();
 
         // Unique announcements accumulate in the RibValue
         let (rib_value, _user_data) = rib_value
             .clone_merge_update(
                 &peer_one_announcement_one.into(),
-                Some(&update_policy),
+                Some(&settings),
             )
             .unwrap();
         assert_eq!(rib_value.len(), 1);
@@ -621,7 +671,7 @@ mod tests {
         let (rib_value, _user_data) = rib_value
             .clone_merge_update(
                 &peer_one_announcement_two.into(),
-                Some(&update_policy),
+                Some(&settings),
             )
             .unwrap();
         assert_eq!(rib_value.len(), 2);
@@ -629,7 +679,7 @@ mod tests {
         let (rib_value, _user_data) = rib_value
             .clone_merge_update(
                 &peer_two_announcement_one.into(),
-                Some(&update_policy),
+                Some(&settings),
             )
             .unwrap();
         assert_eq!(rib_value.len(), 3);
@@ -638,7 +688,7 @@ mod tests {
         let (rib_value, _user_data) = rib_value
             .clone_merge_update(
                 &peer_one_withdrawal.clone().into(),
-                Some(&update_policy),
+                Some(&settings),
             )
             .unwrap();
         assert_eq!(rib_value.len(), 3);
@@ -687,12 +737,9 @@ mod tests {
 
         // And a withdrawal by one peer of the prefix which the RibValue represents, when using the removal eviction
         // policy, causes the two routes from that peer to be removed leaving only one in the RibValue.
-        let remove_policy = StoreEvictionPolicy::RemoveOnWithdraw;
+        let settings = StoreEvictionPolicy::RemoveOnWithdraw.into();
         let (rib_value, _user_data) = rib_value
-            .clone_merge_update(
-                &peer_one_withdrawal.into(),
-                Some(&remove_policy),
-            )
+            .clone_merge_update(&peer_one_withdrawal.into(), Some(&settings))
             .unwrap();
         assert_eq!(rib_value.len(), 1);
     }

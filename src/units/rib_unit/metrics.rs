@@ -80,7 +80,7 @@ impl RibUnitMetrics {
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_INSERT_RETRIES_METRIC: Metric = Metric::new(
         "rib_unit_num_insert_retries",
         "the number of times prefix insertions had to be retried due to contention",
@@ -122,14 +122,14 @@ impl RibUnitMetrics {
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const LAST_INSERT_DURATION_METRIC: Metric = Metric::new(
         "rib_unit_insert_duration",
         "the time taken to insert the last prefix inserted into the RIB unit store",
         MetricType::Gauge,
         MetricUnit::Microsecond,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const LAST_UPDATE_DURATION_METRIC: Metric = Metric::new(
         "rib_unit_update_duration",
         "the time taken to update the last prefix modified in the RIB unit store",

@@ -26,6 +26,7 @@ impl RotoFilterMetrics {
         &self,
         socket_addr: SocketAddr,
     ) -> Arc<RouterMetrics> {
+        #[allow(clippy::unwrap_or_default)]
         self.routers
             .entry(Arc::new(socket_addr))
             .or_insert_with(Default::default)

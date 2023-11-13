@@ -170,6 +170,7 @@ impl BgpTcpIn {
 }
 
 trait ConfigAcceptor {
+    #[allow(clippy::too_many_arguments)]
     fn accept_config(
         child_name: String,
         roto_scripts: &RotoScripts,

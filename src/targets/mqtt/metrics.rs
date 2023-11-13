@@ -22,6 +22,7 @@ pub struct MqttMetrics {
 
 impl MqttMetrics {
     pub fn topic_metrics(&self, topic: Arc<String>) -> Arc<TopicMetrics> {
+        #[allow(clippy::unwrap_or_default)]
         self.topics.entry(topic).or_insert_with(Default::default)
     }
 }

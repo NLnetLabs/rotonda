@@ -294,7 +294,7 @@ impl LinkReport {
                     let mut trace_txt = String::new();
 
                     if let Some(gate_id) =
-                        self.get_gate_id(&unit_or_target_name)
+                        self.get_gate_id(unit_or_target_name)
                     {
                         let msg_indices =
                             trace.msg_indices(gate_id, MsgRelation::ALL);

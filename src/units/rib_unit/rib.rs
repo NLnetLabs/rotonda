@@ -141,7 +141,7 @@ impl HashedRib {
 
 // -------- RibValue --------------------------------------------------------------------------------------------------
 
-//// The metadata value associated with a prefix in the store of a physical RIB.
+/// The metadata value associated with a prefix in the store of a physical RIB.
 ///
 /// # Design
 ///

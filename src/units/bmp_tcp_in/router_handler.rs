@@ -53,6 +53,7 @@ impl RouterHandler {
         static VM: ThreadLocalVM = RefCell::new(None);
     );
 
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         gate: Gate,
         roto_scripts: RotoScripts,

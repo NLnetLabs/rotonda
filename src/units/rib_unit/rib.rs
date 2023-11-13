@@ -209,7 +209,9 @@ pub enum StoreEvictionPolicy {
 
 pub struct StoreInsertionReport {
     /// The number of items added or removed (withdrawn) by the MergeUpdate operation.
-    pub item_count_delta: isize,
+    pub num_items_delta: isize,
+    pub num_announcements_delta: isize,
+    pub num_withdrawals_delta: isize,
 
     /// The number of items resulting after the MergeUpdate operation.
     pub item_count_total: usize,
@@ -239,7 +241,9 @@ impl MergeUpdate for RibValue {
         Self: std::marker::Sized,
     {
         let pre_insert = Utc::now();
-        let mut item_count_delta: isize = 0;
+        let mut num_items_delta: isize = 0;
+        let mut num_announcements_delta: isize = 0;
+        let mut num_withdrawals_delta: isize = 0;
 
         // There should only ever be one so unwrap().
         let in_item: &TypeValue =
@@ -262,7 +266,11 @@ impl MergeUpdate for RibValue {
                                 let (out_route, withdrawn) =
                                     route.clone_and_withdraw(peer_id);
                                 if withdrawn {
-                                    item_count_delta -= 1;
+                                    num_announcements_delta -= 1;
+                                    num_withdrawals_delta += 1;
+                                    // Don't modify num_items_delta as routes
+                                    // are not being added or removed, only
+                                    // their status is being modified
                                 }
                                 out_route
                             })
@@ -276,11 +284,19 @@ impl MergeUpdate for RibValue {
                             .per_prefix_items
                             .iter()
                             .filter(|route| {
-                                !route.is_withdrawn()
-                                    || route.peer_id() != Some(peer_id)
+                                // Keep only routes that are not being withdrawn
+                                route.peer_id() != Some(peer_id)
                             })
                             .cloned()
                             .collect::<_>();
+
+                        let delta = (self.per_prefix_items.len() - out_items.len()) as isize;
+                        if delta != 0 {
+                            num_items_delta -= delta;
+                            num_announcements_delta -= delta;
+                            // Don't modify num_withdrawals_delta as routes are not
+                            // being withdrawn, they are being removed
+                        }
 
                         out_items.shrink_to_fit();
                         out_items
@@ -296,10 +312,12 @@ impl MergeUpdate for RibValue {
                     .cloned()
                     .collect::<_>();
 
-                item_count_delta = out_items
+                num_items_delta = out_items
                     .len()
-                    .checked_sub(self.per_prefix_items.len())
-                    .unwrap_or(0) as isize;
+                    .saturating_sub(self.per_prefix_items.len())
+                    as isize;
+
+                num_announcements_delta = num_items_delta;
 
                 out_items
             }
@@ -308,7 +326,9 @@ impl MergeUpdate for RibValue {
         let post_insert = Utc::now();
         let op_duration = post_insert - pre_insert;
         let user_data = StoreInsertionReport {
-            item_count_delta,
+            num_items_delta,
+            num_announcements_delta,
+            num_withdrawals_delta,
             item_count_total: out_items.len(),
             op_duration,
         };

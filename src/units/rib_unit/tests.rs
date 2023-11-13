@@ -1,3 +1,5 @@
+use crate::common::status_reporter::AnyStatusReporter;
+use crate::tests::util::internal::get_testable_metrics_snapshot;
 use crate::units::RibType;
 use crate::{
     bgp::encode::{mk_bgp_update, Announcements, Prefixes},
@@ -17,6 +19,8 @@ use routecore::{addr::Prefix, bgp::message::SessionConfig};
 use std::sync::atomic::Ordering::SeqCst;
 use std::{str::FromStr, sync::Arc};
 
+use super::status_reporter::RibUnitStatusReporter;
+
 #[tokio::test]
 async fn process_non_route_update() {
     let (runner, _) = RibUnitRunner::mock("", RibType::Physical);
@@ -29,6 +33,9 @@ async fn process_non_route_update() {
 
     // And it should NOT be added to the route store
     assert_eq!(runner.rib().store().unwrap().prefixes_count(), 0);
+
+    // And check that recorded metrics are correct
+    assert_eq!(check_metrics(&runner.status_reporter()), (0, 0, 0, 0, 0));
 }
 
 #[tokio::test]
@@ -66,6 +73,9 @@ async fn process_update_single_route() {
 
     // And it should be added to the route store
     assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
+
+    // And check that recorded metrics are correct
+    assert_eq!(check_metrics(&runner.status_reporter()), (1, 0, 1, 0, 1));
 }
 
 #[tokio::test]
@@ -74,9 +84,8 @@ async fn process_update_same_route_twice() {
 
     // Given a BGP update containing a single route announcement
     let delta_id = (RotondaId(0), 0);
-    let prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32)
-        .unwrap()
-        .into();
+    let raw_prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32).unwrap();
+    let prefix = raw_prefix.into();
     let announcements = Announcements::from_str(
         "e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32",
     )
@@ -109,6 +118,39 @@ async fn process_update_same_route_twice() {
 
     // And it should NOT be added again to the route store
     assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
+
+    // And check that recorded metrics are correct
+    assert_eq!(check_metrics(&runner.status_reporter()), (1, 0, 1, 0, 1));
+
+    // But when withdrawn
+    let bgp_update_bytes = mk_bgp_update(
+        &Prefixes::new([raw_prefix].to_vec()),
+        &Announcements::None,
+        &[],
+    );
+
+    let roto_update_msg =
+        UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+    let bgp_update_msg =
+        Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+    let route = RawRouteWithDeltas::new_with_message_ref(
+        delta_id,
+        prefix,
+        &bgp_update_msg,
+        RouteStatus::Withdrawn,
+    );
+    let update = Update::from(Payload::from(TypeValue::from(
+        BuiltinTypeValue::Route(route),
+    )));
+
+    // When it is processed by this unit it should not be filtered
+    assert!(!is_filtered(&runner, update.clone()).await);
+
+    // And it should cause the route to be marked as withdrawn
+    assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
+
+    // And check that recorded metrics are correct
+    assert_eq!(check_metrics(&runner.status_reporter()), (1, 0, 0, 1, 1));
 }
 
 #[tokio::test]
@@ -148,6 +190,9 @@ async fn process_update_two_routes_to_the_same_prefix() {
 
         // Then only the one common prefix SHOULD be added to the route store
         assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
+
+        // And check that recorded metrics are correct
+        assert_eq!(check_metrics(&runner.status_reporter()), (2, 0, 2, 0, 1));
 
         // And at that prefix there should be one RibValue containing two routes
         let match_options = MatchOptions {
@@ -199,6 +244,36 @@ async fn process_update_two_routes_to_the_same_prefix() {
             assert_eq!(Arc::strong_count(item), 1);
             assert_eq!(Arc::weak_count(item), 0);
         }
+
+        // And when withdrawn
+        let bgp_update_bytes = mk_bgp_update(
+            &Prefixes::new([raw_prefix].to_vec()),
+            &Announcements::None,
+            &[],
+        );
+
+        let roto_update_msg =
+            UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        let bgp_update_msg =
+            Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        let route = RawRouteWithDeltas::new_with_message_ref(
+            delta_id,
+            prefix,
+            &bgp_update_msg,
+            RouteStatus::Withdrawn,
+        );
+        let update = Update::from(Payload::from(TypeValue::from(
+            BuiltinTypeValue::Route(route),
+        )));
+
+        // When it is processed by this unit it should not be filtered
+        assert!(!is_filtered(&runner, update.clone()).await);
+
+        // And it should cause the route to be marked as withdrawn
+        assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
+
+        // And check that recorded metrics are correct
+        assert_eq!(check_metrics(&runner.status_reporter()), (2, 0, 0, 2, 1));
 
         (match_result, match_result2)
     };
@@ -280,6 +355,39 @@ async fn process_update_two_routes_to_different_prefixes() {
         let rib_value = match_result.prefix_meta.unwrap(); // TODO: Why do we get the actual value out of the store here and not an Arc?
         assert_eq!(rib_value.len(), 1);
     }
+
+    // And check that recorded metrics are correct
+    assert_eq!(check_metrics(&runner.status_reporter()), (2, 0, 2, 0, 2));
+
+    // And when one prefix is withdrawn
+    let bgp_update_bytes = mk_bgp_update(
+        &Prefixes::new([raw_prefix1].to_vec()),
+        &Announcements::None,
+        &[],
+    );
+
+    let roto_update_msg =
+        UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+    let bgp_update_msg =
+        Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+    let route = RawRouteWithDeltas::new_with_message_ref(
+        delta_id,
+        prefix1,
+        &bgp_update_msg,
+        RouteStatus::Withdrawn,
+    );
+    let update = Update::from(Payload::from(TypeValue::from(
+        BuiltinTypeValue::Route(route),
+    )));
+
+    // When it is processed by this unit it should not be filtered
+    assert!(!is_filtered(&runner, update.clone()).await);
+
+    // And it should cause the route to be marked as withdrawn
+    assert_eq!(runner.rib().store().unwrap().prefixes_count(), 2);
+
+    // And check that recorded metrics are correct
+    assert_eq!(check_metrics(&runner.status_reporter()), (2, 0, 1, 1, 2));
 }
 
 // --- Test helpers ------------------------------------------------------
@@ -293,4 +401,21 @@ async fn is_filtered(runner: &RibUnitRunner, update: Update) -> bool {
     let num_dropped_updates = gate_metrics.num_dropped_updates.load(SeqCst);
     let num_updates = gate_metrics.num_updates.load(SeqCst);
     num_dropped_updates == 0 && num_updates == 0
+}
+
+fn check_metrics(
+    status_reporter: &Arc<RibUnitStatusReporter>,
+) -> (usize, usize, usize, usize, usize) {
+    let metrics =
+        get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
+    let num_items = metrics.with_name::<usize>("rib_unit_num_items");
+    let num_orphan = metrics.with_name::<usize>(
+        "rib_unit_num_route_withdrawals_without_announcements",
+    );
+    let num_ann = metrics.with_name::<usize>("rib_unit_num_routes_announced");
+    let num_wit = metrics.with_name::<usize>("rib_unit_num_routes_withdrawn");
+    let num_unique =
+        metrics.with_name::<usize>("rib_unit_num_unique_prefixes");
+
+    (num_items, num_orphan, num_ann, num_wit, num_unique)
 }

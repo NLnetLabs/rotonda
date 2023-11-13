@@ -85,9 +85,10 @@ impl TcpListener for StandardTcpListener {
 
 //-------- BmpIn -------------------------------------------------------------
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
 pub enum TracingMode {
     /// Don't enable tracing of incoming messages through the pipeline.
+    #[default]
     Off,
 
     /// Only enable tracing if the incoming BMP message includes a trace ID.
@@ -96,12 +97,6 @@ pub enum TracingMode {
     /// Trace all incoming messages by automatically generating sequentially
     /// rising trace IDs in the range 0..255 then wrapping back to 0.
     On,
-}
-
-impl Default for TracingMode {
-    fn default() -> Self {
-        TracingMode::Off
-    }
 }
 
 impl FromStr for TracingMode {
@@ -312,9 +307,9 @@ impl BmpTcpInRunner {
             gate,
             router_states,
             router_info,
-            bmp_metrics: bmp_metrics,
-            bmp_in_metrics: bmp_in_metrics,
-            state_machine_metrics: state_machine_metrics,
+            bmp_metrics,
+            bmp_in_metrics,
+            state_machine_metrics,
             status_reporter,
             roto_scripts,
             router_id_template,

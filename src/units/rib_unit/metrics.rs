@@ -41,6 +41,7 @@ impl RibUnitMetrics {
         &self,
         router_id: Arc<RouterId>,
     ) -> Arc<RouterMetrics> {
+        #[allow(clippy::unwrap_or_default)]
         self.routers
             .entry(router_id)
             .or_insert_with(Default::default)

@@ -239,7 +239,7 @@ impl RouterInfoApi {
                                     for resource in http_resources.resources_for_component_type("rib") {
                                         write!(peer_report, "<a href=\"{}{}\">{}</a> ", resource.rel_base_url, prefix, resource.component_name).unwrap();
                                     }
-                                    writeln!(peer_report, "").unwrap();
+                                    writeln!(peer_report).unwrap();
                                 }
                                 writeln!(peer_report, "</pre></td></tr>").unwrap();
                             }

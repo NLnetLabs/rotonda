@@ -78,6 +78,7 @@ impl BmpProxyMetrics {
         socket_addr: SocketAddr,
         queue_capacity: usize,
     ) -> Arc<ProxyMetrics> {
+        #[allow(clippy::unwrap_or_default)]
         let metrics = self
             .proxies
             .entry(Arc::new(socket_addr))

@@ -117,7 +117,7 @@ impl BmpTcpInMetrics {
     }
 
     pub fn contains(&self, router_id: &Arc<RouterId>) -> bool {
-        self.routers.contains_key(&router_id)
+        self.routers.contains_key(router_id)
     }
 
     /// Warning: This fn will create a metric set for the given router id if
@@ -127,6 +127,7 @@ impl BmpTcpInMetrics {
         &self,
         router_id: Arc<RouterId>,
     ) -> Arc<RouterMetrics> {
+        #[allow(clippy::unwrap_or_default)]
         self.routers
             .entry(router_id)
             .or_insert_with(Default::default)

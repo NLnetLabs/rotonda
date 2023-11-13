@@ -66,77 +66,66 @@ impl Default for RouterMetrics {
 }
 
 impl RibUnitMetrics {
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_UNIQUE_PREFIXES_METRIC: Metric = Metric::new(
         "rib_unit_num_unique_prefixes",
         "the number of unique prefixes seen by the rib",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_ITEMS_METRIC: Metric = Metric::new(
         "rib_unit_num_items",
         "the total number of items (e.g. routes) stored (withdrawn or not) in the rib",
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_INSERT_RETRIES_METRIC: Metric = Metric::new(
         "rib_unit_num_insert_retries",
         "the number of times prefix insertions had to be retried due to contention",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_INSERT_HARD_FAILURES_METRIC: Metric = Metric::new(
         "rib_unit_num_insert_hard_failures",
         "the number of prefix insertions that were given up after exhausting all retries",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_ROUTES_ANNOUNCED_METRIC: Metric = Metric::new(
         "rib_unit_num_routes_announced",
         "the number of announced routes stored in the rib",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_MODIFIED_ROUTE_ANNOUNCEMENTS_METRIC: Metric = Metric::new(
         "rib_unit_num_modified_route_announcements",
         "the number of modified route announcements processed",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_ROUTES_WITHDRAWN_METRIC: Metric = Metric::new(
         "rib_unit_num_routes_withdrawn",
         "the number of withdrawn routes stored in the rib",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_WITHDRAWN_ROUTES_WITHOUT_ANNOUNCEMENTS_METRIC: Metric = Metric::new(
         "rib_unit_num_route_withdrawals_without_announcements",
         "the number of route withdrawals processed without a corresponding announcement",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const LAST_INSERT_DURATION_METRIC: Metric = Metric::new(
         "rib_unit_insert_duration",
         "the time taken to insert the last prefix inserted into the RIB unit store",
         MetricType::Gauge,
         MetricUnit::Microsecond,
     );
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const LAST_UPDATE_DURATION_METRIC: Metric = Metric::new(
         "rib_unit_update_duration",
         "the time taken to update the last prefix modified in the RIB unit store",
         MetricType::Gauge,
         MetricUnit::Microsecond,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const LAST_END_TO_END_DELAY_PER_ROUTER_METRIC: Metric = Metric::new(
         "rib_unit_e2e_duration",
         "the time taken from initial receipt to completed insertion for a prefix into the RIB unit store",

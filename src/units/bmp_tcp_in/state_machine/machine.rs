@@ -416,7 +416,7 @@ pub trait PeerAware {
         pph: &PerPeerHeader<Bytes>,
         afi: AFI,
         safi: SAFI,
-    );
+    ) -> usize;
 
     /// Remove previously recorded pending End-of-RIB note for a peer.
     ///
@@ -658,10 +658,14 @@ where
                             == Some(true)
                     {
                         let nlris = update.nlris();
-                        saved_self.details.add_pending_eor(
-                            &pph,
-                            nlris.afi(),
-                            nlris.safi(),
+
+                        let num_pending_eors = saved_self
+                            .details
+                            .add_pending_eor(&pph, nlris.afi(), nlris.safi());
+
+                        saved_self.status_reporter.pending_eors_update(
+                            saved_self.router_id.clone(),
+                            num_pending_eors,
                         );
                     }
 
@@ -1012,11 +1016,15 @@ impl PeerAware for PeerStates {
         pph: &PerPeerHeader<Bytes>,
         afi: AFI,
         safi: SAFI,
-    ) {
+    ) -> usize {
         if let Some(peer_state) = self.0.get_mut(pph) {
             peer_state
                 .pending_eors
                 .insert(EoRProperties::new(pph, afi, safi));
+
+            peer_state.pending_eors.len()
+        } else {
+            0
         }
     }
 

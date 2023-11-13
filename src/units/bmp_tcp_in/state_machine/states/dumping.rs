@@ -379,7 +379,7 @@ impl PeerAware for Dumping {
         pph: &PerPeerHeader<Bytes>,
         afi: AFI,
         safi: SAFI,
-    ) {
+    ) -> usize {
         self.peer_states.add_pending_eor(pph, afi, safi)
     }
 
@@ -1193,8 +1193,17 @@ mod tests {
             assert_eq!(peer_states.num_pending_eors(), 0);
         }
 
-        // And when a route announcement is received
+        // Check the metrics
         let processor = res.next_state;
+        assert_metrics(
+            &processor,
+            ("Dumping", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0]),
+        );
+        //               ^ 1 connected router
+        //                                                ^ 1 up peer
+        //                          and the peer is EoR capable ^
+
+        // And when a route announcement is received
         let res = processor.process_msg(Utc::now(), route_mon_msg_buf, None);
 
         // Then there should be one up peer and one pending EoR
@@ -1207,8 +1216,19 @@ mod tests {
             panic!("Expected to be in the DUMPING state");
         }
 
-        // And when an EoR is received
+        // Check the metrics
         let processor = res.next_state;
+        assert_metrics(
+            &processor,
+            ("Dumping", [1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0]),
+        );
+        //                  ^ 1 announcement was received
+        //                        ^ 1 BGP UPDATE was processed
+        //                    1 prefix was received ^
+        //                     and 1 prefix was stored ^
+        //                      and one EoR should be pending ^
+
+        // And when an EoR is received
         let res = processor.process_msg(Utc::now(), eor_msg_buf, None);
 
         // Then
@@ -1217,13 +1237,23 @@ mod tests {
             MessageType::StateTransition
         ));
         assert!(matches!(res.next_state, BmpState::Updating(_)));
-        if let BmpState::Updating(next_state) = res.next_state {
-            let Updating { peer_states, .. } = next_state.details;
+        if let BmpState::Updating(next_state) = &res.next_state {
+            let Updating { peer_states, .. } = &next_state.details;
             assert_eq!(peer_states.num_peer_configs(), 1);
             assert_eq!(peer_states.num_pending_eors(), 0);
         } else {
             panic!("Expected to be in the UPDATING state");
         }
+
+        // Check the metrics
+        let processor = res.next_state;
+        assert_metrics(
+            &processor,
+            ("Updating", [1, 1, 0, 2, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0]),
+        );
+        //    ^ The phase changed
+        //                         ^ We received another BGP UPDATE
+        //                   And the EoR is no longer pending ^
     }
 
     #[test]

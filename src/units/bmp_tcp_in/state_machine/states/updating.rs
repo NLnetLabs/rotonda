@@ -234,7 +234,7 @@ impl PeerAware for Updating {
         pph: &PerPeerHeader<Bytes>,
         afi: AFI,
         safi: SAFI,
-    ) {
+    ) -> usize {
         self.peer_states.add_pending_eor(pph, afi, safi)
     }
 

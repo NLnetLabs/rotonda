@@ -648,6 +648,7 @@ fn peer_down_spreads_withdrawals_across_multiple_bgp_updates_if_needed() {
             #[allow(clippy::mutable_key_type)]
             let mut distinct_bgp_updates_seen =
                 std::collections::HashSet::new();
+            let mut distinct_prefixes_seen = std::collections::HashSet::new();
             let mut num_withdrawals_seen = 0;
 
             for Payload {
@@ -660,7 +661,17 @@ fn peer_down_spreads_withdrawals_across_multiple_bgp_updates_if_needed() {
                 if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) =
                     value
                 {
-                    if !distinct_bgp_updates_seen.contains(&route.raw_message)
+                    // If we haven't seen this BGP UPDATE before we assume it
+                    // contains only withdrawals that we haven't seen before,
+                    // so count them and check the total at the end is what
+                    // we expect. Don't do a contains() check against route.
+                    // raw_message as its PartialEq impl compares a RotondaId
+                    // which at the time of writing is not set to be unique
+                    // per generated BGP UPDATE withdrawal message, instead
+                    // compare the actual underlying BGP UPDATE.
+                    let bgp_update_bytes =
+                        route.raw_message.raw_message().0.clone();
+                    if !distinct_bgp_updates_seen.contains(&bgp_update_bytes)
                     {
                         num_withdrawals_seen += route
                             .raw_message
@@ -669,9 +680,14 @@ fn peer_down_spreads_withdrawals_across_multiple_bgp_updates_if_needed() {
                             .withdrawals()
                             .iter()
                             .count();
-                        distinct_bgp_updates_seen
-                            .insert(route.raw_message.clone());
+
+                        // This route may reference the same underlying BGP UPDATE
+                        // withdrawal message as other routes in the bulk update.
+                        // We want to keep track of how many distinct BGP UPDATE
+                        // messages the bulk update set refers to.
+                        distinct_bgp_updates_seen.insert(bgp_update_bytes);
                     }
+
                     let materialized_route = MaterializedRoute::from(route);
                     let found_pfx =
                         materialized_route.route.prefix.as_ref().unwrap();
@@ -684,6 +700,11 @@ fn peer_down_spreads_withdrawals_across_multiple_bgp_updates_if_needed() {
                         materialized_route.status,
                         RouteStatus::Withdrawn
                     );
+
+                    // This route withdraws a single prefix that should not
+                    // have been seen in one of the bulk update routes that
+                    // we already processed.
+                    assert!(distinct_prefixes_seen.insert(found_pfx.clone()));
                 } else {
                     panic!("Expected TypeValue::Builtin(BuiltinTypeValue::Route(_)");
                 }
@@ -697,6 +718,7 @@ fn peer_down_spreads_withdrawals_across_multiple_bgp_updates_if_needed() {
 
             // The sum of prefixes withdrawn across the set of distinct BGP UPDATE messages
             // should be the same as the number of prefixes that were expected to be withdrawn.
+            assert_eq!(NUM_PREFIXES, distinct_prefixes_seen.len());
             assert_eq!(NUM_PREFIXES, num_withdrawals_seen);
         }
     } else {

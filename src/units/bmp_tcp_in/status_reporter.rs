@@ -107,14 +107,6 @@ impl BmpTcpInStatusReporter {
             .fetch_add(1, SeqCst);
     }
 
-    pub fn invalid_bmp_message_received(&self, router_id: Arc<RouterId>) {
-        sr_log!(trace: self, "Invalid BMP message received from router '{}'", router_id);
-        self.metrics
-            .router_metrics(router_id)
-            .num_invalid_bmp_messages
-            .fetch_add(1, SeqCst);
-    }
-
     pub fn message_filtering_failure<T: Display>(&self, err: T) {
         sr_log!(error: self, "Filtering error: {}", err);
     }

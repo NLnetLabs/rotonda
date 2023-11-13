@@ -9,10 +9,7 @@ use crate::{
     payload::{RouterId, SourceId},
     units::bmp_tcp_in::{
         metrics::{BmpTcpInMetrics, RouterMetrics},
-        state_machine::{
-            machine::{PeerAware, PeerStates},
-            metrics::BmpStateMachineMetrics,
-        },
+        state_machine::{BmpStateMachineMetrics, PeerAware, PeerStates},
     },
 };
 
@@ -124,10 +121,10 @@ impl RouterInfoApi {
         let num_msg_issues: usize =
             router_conn_metrics.num_invalid_bmp_messages.load(SeqCst);
         let num_retried_bgp_updates: usize = router_bmp_metrics
-            .num_bgp_updates_with_recoverable_parsing_failures
+            .num_bgp_updates_reparsed_due_to_incorrect_header_flags
             .load(SeqCst);
         let num_unusable_bgp_updates: usize = router_bmp_metrics
-            .num_bgp_updates_with_unrecoverable_parsing_failures
+            .num_unprocessable_bmp_messages
             .load(SeqCst);
         let num_prefixes: usize =
             router_bmp_metrics.num_stored_prefixes.load(SeqCst);

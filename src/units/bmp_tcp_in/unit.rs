@@ -36,14 +36,12 @@ use crate::{
 
 use super::{
     http::{RouterInfoApi, RouterListApi},
+    state_machine::{BmpState, BmpStateMachineMetrics},
     types::RouterInfo,
 };
 use super::{
-    metrics::BmpTcpInMetrics,
-    router_handler::RouterHandler,
-    state_machine::{machine::BmpState, metrics::BmpStateMachineMetrics},
-    status_reporter::BmpTcpInStatusReporter,
-    util::format_source_id,
+    metrics::BmpTcpInMetrics, router_handler::RouterHandler,
+    status_reporter::BmpTcpInStatusReporter, util::format_source_id,
 };
 
 //--- TCP listener traits ----------------------------------------------------

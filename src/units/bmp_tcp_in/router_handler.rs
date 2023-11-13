@@ -31,9 +31,7 @@ use crate::{
 };
 
 use super::io::FatalError;
-use super::state_machine::machine::BmpState;
-use super::state_machine::metrics::BmpStateMachineMetrics;
-use super::state_machine::processing::MessageType;
+use super::state_machine::{BmpState, BmpStateMachineMetrics, MessageType};
 use super::unit::TracingMode;
 use super::util::format_source_id;
 
@@ -335,24 +333,11 @@ impl RouterHandler {
 
                 let mut res = bmp_state.process_msg(received, msg, trace_id);
 
-                match res.processing_result {
-                    MessageType::InvalidMessage {
-                        err,
-                        known_peer: _known_peer,
-                        msg_bytes,
-                    } => {
-                        self.status_reporter.invalid_bmp_message_received(
-                            res.next_state.router_id(),
-                        );
-                        if let Some(reporter) =
-                            res.next_state.status_reporter()
-                        {
-                            reporter.bgp_update_parse_hard_fail(
-                                res.next_state.router_id(),
-                                err,
-                                msg_bytes,
-                            );
-                        }
+                match res.message_type {
+                    MessageType::InvalidMessage { .. } => {
+                        // This issue has already been handled by a status
+                        // reporter, no futher processing is needed here
+                        // at the moment.
                     }
 
                     MessageType::StateTransition => {

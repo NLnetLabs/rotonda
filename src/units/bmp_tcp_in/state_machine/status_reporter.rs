@@ -31,21 +31,6 @@ impl BmpStateMachineStatusReporter {
         }
     }
 
-    // This is done by the owner of the metrics, BmpInRunner, directly via
-    // the BmpMetrics interface, so it isn't needed here. However, someone has
-    // to make sure they call it so leaving this here as a reminder of why it
-    // ISN'T done here.
-    // pub fn init_per_proxy_metrics(&self, router_id: Arc<RouterId>) {
-    //     self.metrics.init_per_proxy_metrics(router_id);
-    // }
-
-    pub fn bgp_update_message_processed(&self, router_id: Arc<RouterId>) {
-        self.metrics
-            .router_metrics(router_id)
-            .num_bgp_updates_processed
-            .fetch_add(1, SeqCst);
-    }
-
     pub fn change_state(
         &self,
         router_id: Arc<RouterId>,
@@ -81,7 +66,7 @@ impl BmpStateMachineStatusReporter {
     pub fn peer_unknown(&self, router_id: Arc<RouterId>) {
         self.metrics
             .router_metrics(router_id)
-            .num_bgp_updates_for_unknown_peer
+            .num_bmp_route_monitoring_msgs_with_unknown_peer
             .fetch_add(1, SeqCst);
     }
 
@@ -94,7 +79,7 @@ impl BmpStateMachineStatusReporter {
         let metrics = self.metrics.router_metrics(router_id);
 
         metrics
-            .num_bgp_updates_with_recoverable_parsing_failures
+            .num_bgp_updates_reparsed_due_to_incorrect_header_flags
             .fetch_add(1, SeqCst);
 
         metrics.parse_errors.push(err, bytes, true);
@@ -109,7 +94,7 @@ impl BmpStateMachineStatusReporter {
         let metrics = self.metrics.router_metrics(router_id);
 
         metrics
-            .num_bgp_updates_with_unrecoverable_parsing_failures
+            .num_unprocessable_bmp_messages
             .fetch_add(1, SeqCst);
 
         metrics.parse_errors.push(err, bytes, false);

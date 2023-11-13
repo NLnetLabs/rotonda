@@ -6,7 +6,7 @@ use indoc::formatdoc;
 use crate::{
     payload::SourceId,
     units::bmp_tcp_in::{
-        state_machine::machine::{BmpState, BmpStateDetails},
+        state_machine::{BmpState, BmpStateDetails},
         util::{calc_u8_pc, format_source_id},
     },
 };
@@ -159,9 +159,9 @@ impl RouterListApi {
                                 0
                             };
                         let num_soft_parsing_failures = metrics
-                            .num_bgp_updates_with_recoverable_parsing_failures
+                            .num_bgp_updates_reparsed_due_to_incorrect_header_flags
                             .load(SeqCst);
-                        let num_hard_parsing_failures = metrics.num_bgp_updates_with_unrecoverable_parsing_failures.load(SeqCst);
+                        let num_hard_parsing_failures = metrics.num_unprocessable_bmp_messages.load(SeqCst);
 
                         formatdoc! {
                             r#"

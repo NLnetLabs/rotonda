@@ -591,9 +591,6 @@ where
     {
         let mut tried_peer_configs = SmallVec::<[SessionConfig; 4]>::new();
 
-        self.status_reporter
-            .bgp_update_message_processed(self.router_id.clone());
-
         let pph = msg.per_peer_header();
 
         let Some(peer_config) = self.details.get_peer_config(&pph) else {
@@ -871,32 +868,59 @@ impl BmpState {
             ),
         });
 
-        match may_panic_res {
-            Ok(process_res) => process_res,
+        let res = may_panic_res.unwrap_or_else(|err| {
+            let err = format!(
+                "Internal error while processing BMP message: {:?}",
+                err
+            );
 
-            Err(err) => {
-                let err = format!(
-                    "Internal error while processing BMP message: {:?}",
-                    err
+            // We've lost the bmp state machine and associated state...
+            // including things like detected peer configurations which we
+            // need in order to be able to process subsequent messages.
+            // With the current design it is difficult to recover from
+            // this, on the other hand we don't know what we've missed by
+            // a panic occuring in the first place so maybe it's just
+            // better to blow up at this point (just without a panic that
+            // will take out other Tokio tasks being handled by the same
+            // worker thread!).
+            ProcessingResult::new(
+                MessageType::InvalidMessage {
+                    err,
+                    known_peer: None,
+                    msg_bytes: None,
+                },
+                BmpState::Aborted(saved_addr, saved_router_id.clone()),
+            )
+        });
+
+        if let ProcessingResult {
+            message_type:
+                MessageType::InvalidMessage {
+                    known_peer: _known_peer,
+                    msg_bytes,
+                    err,
+                },
+            next_state,
+        } = res
+        {
+            if let Some(reporter) = next_state.status_reporter() {
+                reporter.bgp_update_parse_hard_fail(
+                    next_state.router_id(),
+                    err.clone(),
+                    msg_bytes,
                 );
-                // We've lost the bmp state machine and associated state...
-                // including things like detected peer configurations which we
-                // need in order to be able to process subsequent messages.
-                // With the current design it is difficult to recover from
-                // this, on the other hand we don't know what we've missed by
-                // a panic occuring in the first place so maybe it's just
-                // better to blow up at this point (just without a panic that
-                // will take out other Tokio tasks being handled by the same
-                // worker thread!).
-                ProcessingResult::new(
-                    MessageType::InvalidMessage {
-                        err,
-                        known_peer: None,
-                        msg_bytes: None,
-                    },
-                    BmpState::Aborted(saved_addr, saved_router_id.clone()),
-                )
             }
+
+            ProcessingResult::new(
+                MessageType::InvalidMessage {
+                    known_peer: None,
+                    msg_bytes: None,
+                    err,
+                },
+                next_state,
+            )
+        } else {
+            res
         }
     }
 }

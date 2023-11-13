@@ -16,12 +16,8 @@ use crate::{
     payload::SourceId,
     units::bmp_tcp_in::{
         metrics::BmpTcpInMetrics,
-        state_machine::{
-            machine::{BmpState, BmpStateDetails},
-            metrics::BmpStateMachineMetrics,
-        },
         types::RouterInfo,
-        util::{calc_u8_pc, format_source_id},
+        util::{calc_u8_pc, format_source_id}, state_machine::{BmpStateMachineMetrics, BmpState, BmpStateDetails},
     },
 };
 
@@ -228,11 +224,11 @@ impl RouterListApi {
                                 }
 
                                 Some("soft_parse_errors") => {
-                                    metrics.num_bgp_updates_with_recoverable_parsing_failures.load(SeqCst)
+                                    metrics.num_bgp_updates_reparsed_due_to_incorrect_header_flags.load(SeqCst)
                                 }
 
                                 Some("hard_parse_errors") => {
-                                    metrics.num_bgp_updates_with_unrecoverable_parsing_failures.load(SeqCst)
+                                    metrics.num_unprocessable_bmp_messages.load(SeqCst)
                                 }
 
                                 _ => unreachable!()

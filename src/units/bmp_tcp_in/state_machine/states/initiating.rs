@@ -70,7 +70,7 @@ impl BmpStateDetails<Initiating> {
             BmpMsg::InitiationMessage(msg) => {
                 let res = self.initiate(msg);
 
-                match res.processing_result {
+                match res.message_type {
                     MessageType::InvalidMessage { .. } => res,
 
                     _ => {
@@ -184,7 +184,7 @@ mod tests {
 
         // Then
         assert!(matches!(
-            res.processing_result,
+            res.message_type,
             MessageType::StateTransition
         ));
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
@@ -216,11 +216,11 @@ mod tests {
 
         // Then
         assert!(matches!(
-            res.processing_result,
+            res.message_type,
             MessageType::InvalidMessage { .. }
         ));
         assert!(matches!(res.next_state, BmpState::Initiating(_)));
-        if let MessageType::InvalidMessage { err, .. } = res.processing_result
+        if let MessageType::InvalidMessage { err, .. } = res.message_type
         {
             assert_eq!(
                 err,
@@ -241,11 +241,11 @@ mod tests {
 
         // Then
         assert!(matches!(
-            res.processing_result,
+            res.message_type,
             MessageType::InvalidMessage { .. }
         ));
         assert!(matches!(res.next_state, BmpState::Initiating(_)));
-        if let MessageType::InvalidMessage { err, .. } = res.processing_result
+        if let MessageType::InvalidMessage { err, .. } = res.message_type
         {
             assert_eq!(err, "RFC 7854 4.3 violation: Expected BMP Initiation Message but received: PeerUpNotification");
         }

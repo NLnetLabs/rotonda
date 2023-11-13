@@ -581,7 +581,7 @@ where
         let mut tried_peer_configs = SmallVec::<[SessionConfig; 4]>::new();
 
         self.status_reporter
-            .bmp_update_message_processed(self.router_id.clone());
+            .bgp_update_message_processed(self.router_id.clone());
 
         let pph = msg.per_peer_header();
 

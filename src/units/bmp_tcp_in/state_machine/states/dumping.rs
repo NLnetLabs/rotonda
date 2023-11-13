@@ -430,9 +430,13 @@ mod tests {
 
     use crate::{
         bgp::encode::{mk_per_peer_header, Announcements, Prefixes},
+        common::status_reporter::AnyStatusReporter,
         payload::{Payload, SourceId, Update},
+        tests::util::internal::get_testable_metrics_snapshot,
         units::bmp_tcp_in::state_machine::{
-            processing::MessageType, states::updating::Updating, status_reporter::BmpStateMachineStatusReporter, metrics::BmpStateMachineMetrics,
+            metrics::BmpStateMachineMetrics, processing::MessageType,
+            states::updating::Updating,
+            status_reporter::BmpStateMachineStatusReporter,
         },
     };
 
@@ -455,15 +459,15 @@ mod tests {
         // Then
         assert!(matches!(res.processing_result, MessageType::Other));
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
-        if let BmpState::Dumping(next_state) = res.next_state {
+        if let BmpState::Dumping(next_state) = &res.next_state {
             let Dumping {
                 sys_name,
                 sys_desc,
                 peer_states,
                 ..
-            } = next_state.details;
-            assert_eq!(&sys_name, TEST_ROUTER_SYS_NAME);
-            assert_eq!(&sys_desc, TEST_ROUTER_SYS_DESC);
+            } = &next_state.details;
+            assert_eq!(sys_name, TEST_ROUTER_SYS_NAME);
+            assert_eq!(sys_desc, TEST_ROUTER_SYS_DESC);
             assert!(peer_states.is_empty());
         }
     }
@@ -534,13 +538,22 @@ mod tests {
         // Then
         assert!(matches!(res.processing_result, MessageType::Other));
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
-        if let BmpState::Dumping(next_state) = res.next_state {
-            let Dumping { peer_states, .. } = next_state.details;
+        if let BmpState::Dumping(next_state) = &res.next_state {
+            let Dumping { peer_states, .. } = &next_state.details;
             assert_eq!(peer_states.num_peer_configs(), 1);
             let pph = peer_states.get_peers().next().unwrap();
             assert_eq!(peer_states.is_peer_eor_capable(pph), Some(true));
             assert_eq!(peer_states.num_pending_eors(), 0); // zero because we have to see a route announcement to know which (S)AFI an EoR is expected for
         }
+
+        let processor = res.next_state;
+        let actual_metrics =
+            check_metrics(&processor.status_reporter().unwrap());
+        let expected_metrics = (
+            "Dumping".to_string(),
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0],
+        );
+        assert_eq!(actual_metrics, expected_metrics);
     }
 
     #[test]
@@ -583,6 +596,15 @@ mod tests {
                 "PeerUpNotification received for peer that is already 'up'"
             ));
         }
+
+        let processor = res.next_state;
+        let actual_metrics =
+            check_metrics(&processor.status_reporter().unwrap());
+        let expected_metrics = (
+            "Dumping".to_string(),
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0],
+        );
+        assert_eq!(actual_metrics, expected_metrics);
     }
 
     #[test]
@@ -626,6 +648,15 @@ mod tests {
         // And there should now be two known peers
         assert_eq!(get_unique_peer_up_count(&processor), 2);
 
+        // Check the metrics
+        let actual_metrics =
+            check_metrics(&processor.status_reporter().unwrap());
+        let expected_metrics = (
+            "Dumping".to_string(),
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0],
+        );
+        assert_eq!(actual_metrics, expected_metrics);
+
         // When the state machine processes a peer down notification for a peer that announced no routes
         let res =
             processor.process_msg(Utc::now(), peer_down_msg_1_buf, None);
@@ -635,6 +666,15 @@ mod tests {
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
         assert!(matches!(res.processing_result, MessageType::Other));
         let processor = res.next_state;
+
+        // Check the metrics
+        let actual_metrics =
+            check_metrics(&processor.status_reporter().unwrap());
+        let expected_metrics = (
+            "Dumping".to_string(),
+            [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0],
+        );
+        assert_eq!(actual_metrics, expected_metrics);
 
         // When the state machine processes a couple of route announcements
         let processor = processor
@@ -651,6 +691,15 @@ mod tests {
             2
         );
         let processor = res.next_state;
+
+        // Check the metrics
+        let actual_metrics =
+            check_metrics(&processor.status_reporter().unwrap());
+        let expected_metrics = (
+            "Dumping".to_string(),
+            [1, 2, 0, 2, 0, 0, 0, 0, 0, 2, 0, 1, 0, 0, 0],
+        );
+        assert_eq!(actual_metrics, expected_metrics);
 
         // And when one of the routes is withdrawn
         let res = processor.process_msg(
@@ -745,6 +794,14 @@ mod tests {
         } else {
             unreachable!();
         }
+
+        let actual_metrics =
+            check_metrics(&processor.status_reporter().unwrap());
+        let expected_metrics = (
+            "Dumping".to_string(),
+            [1, 2, 0, 4, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0],
+        );
+        assert_eq!(actual_metrics, expected_metrics);
     }
 
     #[test]
@@ -1417,7 +1474,8 @@ mod tests {
     fn mk_test_processor() -> BmpStateDetails<Dumping> {
         let addr = "127.0.0.1:1818".parse().unwrap();
         let bmp_metrics = Arc::new(BmpStateMachineMetrics::new());
-        let status_reporter = Arc::new(BmpStateMachineStatusReporter::new("mock", bmp_metrics));
+        let status_reporter =
+            Arc::new(BmpStateMachineStatusReporter::new("mock", bmp_metrics));
         BmpStateDetails::<Dumping> {
             source_id: SourceId::SocketAddr(addr),
             router_id: Arc::new("test-router".to_string()),
@@ -1473,5 +1531,33 @@ mod tests {
             extra_path_attributes,
         ))
         .unwrap()
+    }
+
+    fn check_metrics(
+        status_reporter: &Arc<BmpStateMachineStatusReporter>,
+    ) -> (String, [usize; 15]) {
+        let metrics = get_testable_metrics_snapshot(
+            &status_reporter.metrics().unwrap(),
+        );
+        (
+            metrics.with_label::<String>("bmp_state_machine_state", ("router", "test-router")),
+            [
+                metrics.with_name::<usize>("bmp_num_connected_routers"),
+                metrics.with_label::<usize>("bmp_state_num_announcements", ("router", "test-router")),
+                metrics.with_label::<usize>("bmp_state_num_bgp_updates_filtered", ("router", "test-router")),
+                metrics.with_label::<usize>("bmp_state_num_bgp_updates_processed", ("router", "test-router")),
+                metrics.with_label::<usize>("bmp_state_num_bgp_updates_with_recoverable_parsing_failure_for_known_peer", ("router", "test-router")),
+                metrics.with_label::<usize>("bmp_state_num_bgp_updates_with_recoverable_parsing_failure_for_unknown_peer", ("router", "test-router")),
+                metrics.with_label::<usize>("bmp_state_num_bgp_updates_with_unknown_peer", ("router", "test-router")),
+                metrics.with_label::<usize>("bmp_state_num_bgp_updates_with_unrecoverable_parsing_failure_for_known_peer", ("router", "test-router")),
+                metrics.with_label::<usize>("bmp_state_num_bgp_updates_with_unrecoverable_parsing_failure_for_unknown_peer", ("router", "test-router")),
+                metrics.with_label::<usize>("bmp_state_num_received_prefixes", ("router", "test-router")),
+                metrics.with_label::<usize>("bmp_state_num_stored_prefixes", ("router", "test-router")),
+                metrics.with_label::<usize>("bmp_state_num_up_peers", ("router", "test-router")),
+                metrics.with_label::<usize>("bmp_state_num_up_peers_dumping", ("router", "test-router")),
+                metrics.with_label::<usize>("bmp_state_num_up_peers_eor_capable", ("router", "test-router")),
+                metrics.with_label::<usize>("bmp_state_num_withdrawals", ("router", "test-router"))
+            ]
+        )
     }
 }

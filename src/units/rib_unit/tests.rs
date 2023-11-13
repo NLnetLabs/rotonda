@@ -585,7 +585,10 @@ async fn count_insert_retries_during_forced_contention() {
         }));
     }
 
-    eprintln!("WAITING IN THEREAD {:?} FOR STORE UPDATES TO COMPLETE", std::thread::current().id());
+    eprintln!(
+        "WAITING IN THEREAD {:?} FOR STORE UPDATES TO COMPLETE",
+        std::thread::current().id()
+    );
     join_all(join_handles).await;
 
     eprintln!("STORE UPDATES ARE COMPLETE");
@@ -707,14 +710,13 @@ fn check_metrics(
 ) -> (usize, usize, usize, usize, usize) {
     let metrics =
         get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
-    let num_items = metrics.with_name::<usize>("rib_unit_num_items");
-    let num_orphan = metrics.with_name::<usize>(
-        "rib_unit_num_route_withdrawals_without_announcements",
-    );
-    let num_ann = metrics.with_name::<usize>("rib_unit_num_routes_announced");
-    let num_wit = metrics.with_name::<usize>("rib_unit_num_routes_withdrawn");
-    let num_unique =
-        metrics.with_name::<usize>("rib_unit_num_unique_prefixes");
-
-    (num_items, num_orphan, num_ann, num_wit, num_unique)
+    (
+        metrics.with_name::<usize>("rib_unit_num_items"),
+        metrics.with_name::<usize>(
+            "rib_unit_num_route_withdrawals_without_announcements",
+        ),
+        metrics.with_name::<usize>("rib_unit_num_routes_announced"),
+        metrics.with_name::<usize>("rib_unit_num_routes_withdrawn"),
+        metrics.with_name::<usize>("rib_unit_num_unique_prefixes"),
+    )
 }

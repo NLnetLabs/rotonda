@@ -87,11 +87,15 @@ impl BmpTcpInStatusReporter {
             .fetch_add(1, SeqCst);
     }
 
-    pub fn bmp_message_received(&self, router_id: Arc<RouterId>) {
+    pub fn bmp_message_received(
+        &self,
+        router_id: Arc<RouterId>,
+        rfc_7854_msg_type_code: u8,
+    ) {
         sr_log!(trace: self, "BMP message received from router '{}'", router_id);
         self.metrics
             .router_metrics(router_id)
-            .num_bmp_messages_received
+            .num_bmp_messages_received[rfc_7854_msg_type_code as usize]
             .fetch_add(1, SeqCst);
     }
 
@@ -99,7 +103,7 @@ impl BmpTcpInStatusReporter {
         sr_log!(trace: self, "BMP message processed from router '{}'", router_id);
         self.metrics
             .router_metrics(router_id)
-            .num_bmp_messages_received
+            .num_bmp_messages_processed
             .fetch_add(1, SeqCst);
     }
 

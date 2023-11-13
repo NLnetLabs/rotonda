@@ -245,7 +245,8 @@ impl RouterHandler {
                         {
                             self.status_reporter
                                 .router_connection_aborted(&router_id, err);
-                            self.bmp_metrics.remove_router_metrics(&router_id);
+                            self.bmp_metrics
+                                .remove_router_metrics(&router_id);
                             break;
                         }
                     }
@@ -290,8 +291,10 @@ impl RouterHandler {
 
         let bound_tracer = self.tracer.bind(self.gate.id());
 
-        self.status_reporter
-            .bmp_message_received(bmp_state.router_id());
+        self.status_reporter.bmp_message_received(
+            bmp_state.router_id(),
+            msg.common_header().msg_type().into(),
+        );
 
         let next_state = if let ControlFlow::Continue(FilterOutput {
             south,

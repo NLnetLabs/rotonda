@@ -36,7 +36,7 @@ impl BmpStateMachineStatusReporter {
     //     self.metrics.init_per_proxy_metrics(router_id);
     // }
 
-    pub fn bmp_update_message_processed(&self, router_id: Arc<RouterId>) {
+    pub fn bgp_update_message_processed(&self, router_id: Arc<RouterId>) {
         self.metrics
             .router_metrics(router_id)
             .num_bgp_updates_processed

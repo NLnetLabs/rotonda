@@ -670,7 +670,11 @@ where
                         n_new_prefixes,
                         n_announcements,
                         n_withdrawals,
-                        0, //self.details.get_stored_routes().prefixes_len(), // TODO
+                        saved_self
+                            .details
+                            .get_announced_prefixes(&pph)
+                            .unwrap()
+                            .len(),
                     );
 
                     saved_self

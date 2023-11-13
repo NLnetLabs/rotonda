@@ -110,8 +110,8 @@ impl RibUnitMetrics {
     );
     // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_ROUTES_WITHDRAWN_METRIC: Metric = Metric::new(
-        "rib_unit_num_routes_withdrawan",
-        "the number of routes withdrawan",
+        "rib_unit_num_routes_withdrawn",
+        "the number of routes withdrawn",
         MetricType::Counter,
         MetricUnit::Total,
     );

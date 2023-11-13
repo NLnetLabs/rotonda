@@ -710,11 +710,12 @@ mod tests {
         // Check the metrics
         assert_metrics(
             &processor,
-            ("Dumping", [1, 2, 0, 2, 0, 0, 0, 0, 0, 2, 0, 1, 0, 0, 0]),
+            ("Dumping", [1, 2, 0, 2, 0, 0, 0, 0, 0, 2, 2, 1, 0, 0, 0]),
         );
         //                  ^ 2 routes announced
         //                        ^ from 2 BGP UPDATE messages
         //                                          ^ for 2 prefixes
+        //                   both of which were stored ^
 
         // And when one of the routes is withdrawn
         let res = processor.process_msg(
@@ -735,10 +736,11 @@ mod tests {
         // Check the metrics
         assert_metrics(
             &processor,
-            ("Dumping", [1, 2, 0, 3, 0, 0, 0, 0, 0, 2, 0, 1, 0, 0, 1]),
+            ("Dumping", [1, 2, 0, 3, 0, 0, 0, 0, 0, 2, 1, 1, 0, 0, 1]),
         );
         //                        ^ 1 more BGP UPDATE processed
         //                            which contained a withdrawal ^
+        //             and now only 1 prefix is stored ^
 
         // Unless it is a not-before-announced/already-withdrawn route
         let res =
@@ -755,7 +757,7 @@ mod tests {
         // Check the metrics
         assert_metrics(
             &processor,
-            ("Dumping", [1, 2, 0, 4, 0, 0, 0, 0, 0, 2, 0, 1, 0, 0, 2]),
+            ("Dumping", [1, 2, 0, 4, 0, 0, 0, 0, 0, 2, 1, 1, 0, 0, 2]),
         );
         //                        ^ 1 more BGP UPDATE processed
         //                       which also contained a withdrawal ^

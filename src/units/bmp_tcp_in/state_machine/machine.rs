@@ -502,11 +502,7 @@ where
         // packet captures so it seems that it is indeed sent.
         let pph = msg.per_peer_header();
 
-        let eor_capable = self.details.is_peer_eor_capable(&pph);
-
-        self.status_reporter
-            .peer_down(self.router_id.clone(), eor_capable);
-
+        // We have to grab these before we remove the peer.
         let withdrawals = self.mk_withdrawals_for_peers_routes(&pph);
 
         if !self.details.remove_peer(&pph) {
@@ -521,10 +517,28 @@ where
                 // TODO: Silly to_copy the bytes, but PDN won't give us the octets back..
                 Some(Bytes::copy_from_slice(msg.as_ref())),
             );
-        } else if withdrawals.is_empty() {
+        } else {
+            self.status_reporter.routing_update(
+                self.router_id.clone(),
+                0, // no new prefixes
+                0, // no new announcements
+                0, // no new withdrawals
+                0, // zero because we just removed all stored prefixes for this peer
+            );
+
+            let eor_capable = self.details.is_peer_eor_capable(&pph);
+
+            // Don't announce this above as it will cause metric
+            // underflow from 0 to MAX if there were no peers
+            // currently up.
+            self.status_reporter
+                .peer_down(self.router_id.clone(), eor_capable);
+
+            if withdrawals.is_empty() {
             self.mk_other_result()
         } else {
             self.mk_routing_update_result(Update::Bulk(withdrawals))
+            }
         }
     }
 

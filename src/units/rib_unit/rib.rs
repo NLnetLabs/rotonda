@@ -260,6 +260,8 @@ impl MergeUpdate for RibValue {
         unreachable!()
     }
 
+    // NOTE: Do NOT return Err() as this will likely be changed in the
+    // underlying rotonda-store definition to be infallible.
     fn clone_merge_update(
         &self,
         update_meta: &Self,

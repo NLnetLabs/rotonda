@@ -87,7 +87,7 @@ impl RibUnitMetrics {
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_INSERT_HARD_FAILURES_METRIC: Metric = Metric::new(
         "rib_unit_num_insert_hard_failures",
         "the number of prefix insertions that were given up after exhausting all retries",

@@ -4,7 +4,7 @@ use std::{
     time::Instant,
 };
 
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 
 use crate::{
     common::{
@@ -48,7 +48,7 @@ impl RibUnitStatusReporter {
     }
 
     pub fn insert_failed<P: Display, E: Display>(&self, pfx: P, err: E) {
-        sr_log!(debug: self, "Failed to insert prefix {}: {}", pfx, err);
+        sr_log!(error: self, "Failed to insert prefix {}: {}", pfx, err);
         self.metrics.num_insert_hard_failures.fetch_add(1, SeqCst);
     }
 

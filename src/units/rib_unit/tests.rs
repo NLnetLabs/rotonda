@@ -17,6 +17,7 @@ use roto::types::{
     },
     typevalue::TypeValue,
 };
+use rotonda_store::prelude::multi::PrefixStoreError;
 use rotonda_store::{epoch, MatchOptions, MatchType};
 use routecore::{addr::Prefix, bgp::message::SessionConfig};
 
@@ -379,6 +380,42 @@ async fn count_insert_retries_during_forced_contention() {
     let num_retries =
         metrics.with_name::<usize>("rib_unit_num_insert_retries");
     assert!(num_retries > 0);
+}
+
+#[tokio::test]
+async fn count_hard_insert_failures() {
+    let settings = StoreEvictionPolicy::UpdateStatusOnWithdraw.into();
+    let (runner, _) = RibUnitRunner::mock("", RibType::Physical, settings);
+
+    // Given a BGP update containing a single route announcement
+    let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
+    let update = mk_route_update(&prefix, Some("[111,222,333]"));
+
+    // Check that the counter is zero to begin with
+    let metrics = runner.status_reporter().metrics().unwrap();
+    let metrics = get_testable_metrics_snapshot(&metrics);
+    assert_eq!(
+        metrics.with_name::<u64>("rib_unit_num_insert_hard_failures"),
+        0
+    );
+
+    // Insert multiple times and check that the counter increases accordingly
+    for expected_counter_value in 1..=10 {
+        runner
+            .process_update(update.clone(), |_, _, _| {
+                eprintln!("Deliberately failing to insert into the store");
+                Err(PrefixStoreError::StoreNotReadyError)
+            })
+            .await
+            .unwrap();
+
+        let metrics = runner.status_reporter().metrics().unwrap();
+        let metrics = get_testable_metrics_snapshot(&metrics);
+        assert_eq!(
+            metrics.with_name::<u64>("rib_unit_num_insert_hard_failures"),
+            expected_counter_value
+        );
+    }
 }
 
 // --- Test helpers ------------------------------------------------------

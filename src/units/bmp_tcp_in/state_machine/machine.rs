@@ -717,7 +717,7 @@ where
     ) -> (SmallVec<[Payload; 8]>, usize, usize, usize) {
         let mut num_new_prefixes = 0;
         let num_announcements: usize = update.nlris().iter().count();
-        let mut num_withdrawals: usize = update.withdrawn_routes_len().into();
+        let mut num_withdrawals: usize = update.withdrawals().iter().count();
         let mut payloads =
             SmallVec::with_capacity(num_announcements + num_withdrawals);
 

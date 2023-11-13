@@ -798,7 +798,7 @@ impl RibUnitRunner {
             };
 
             if let Some(prefix) = prefix {
-                let is_withdraw = payload.value.is_withdrawn();
+                let is_announcement = !payload.value.is_withdrawn();
 
                 let pre_insert = Utc::now();
                 match insert_fn(&prefix, payload.value.clone(), &rib) {
@@ -824,7 +824,7 @@ impl RibUnitRunner {
                                     insert_delay,
                                     propagation_delay,
                                     num_retries,
-                                    is_withdraw,
+                                    is_announcement,
                                     1,
                                 );
                             }
@@ -841,7 +841,7 @@ impl RibUnitRunner {
                                             op_duration.num_microseconds().unwrap_or(i64::MAX)
                                                 as u64,
                                             item_count_total,
-                                            is_withdraw,
+                                            is_announcement,
                                         );
                                     }
                                 });

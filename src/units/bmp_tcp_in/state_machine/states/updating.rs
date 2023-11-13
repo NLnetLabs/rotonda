@@ -1,6 +1,7 @@
 use std::{collections::hash_map::Keys, ops::ControlFlow};
 
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 use roto::types::builtin::RouteStatus;
 use routecore::{
     addr::Prefix,
@@ -61,6 +62,7 @@ impl BmpStateDetails<Updating> {
     #[allow(dead_code)]
     pub fn process_msg(
         self,
+        received: DateTime<Utc>,
         bmp_msg: BmpMsg<Bytes>,
         trace_id: Option<u8>,
     ) -> ProcessingResult {
@@ -73,6 +75,7 @@ impl BmpStateDetails<Updating> {
             BmpMsg::PeerDownNotification(msg) => self.peer_down(msg),
 
             BmpMsg::RouteMonitoring(msg) => self.route_monitoring(
+                received,
                 msg,
                 RouteStatus::UpToDate,
                 trace_id,

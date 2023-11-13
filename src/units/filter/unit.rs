@@ -234,11 +234,12 @@ impl RotoFilterRunner {
             .with(|vm| {
                 payload
                     .filter(
-                        |value, trace_id| {
+                        |value, received, trace_id| {
                             self.roto_scripts.exec_with_tracer(
                                 vm,
                                 &self.filter_name.load(),
                                 value,
+                                received,
                                 tracer.clone(),
                                 trace_id,
                             )

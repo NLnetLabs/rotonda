@@ -17,7 +17,7 @@ use tokio::{io::AsyncRead, net::TcpStream};
 use crate::common::roto::{
     FilterName, FilterOutput, RotoScripts, ThreadLocalVM,
 };
-use crate::payload::SourceId;
+use crate::payload::{RouterId, SourceId};
 use crate::tracing::Tracer;
 use crate::{
     comms::{Gate, GateStatus},
@@ -177,6 +177,8 @@ impl RouterHandler {
                 }
 
                 Ok((Some(msg_buf), status, mut trace_id)) => {
+                    let received = Utc::now();
+
                     // We want the stream reading to abort as soon as the Gate
                     // is terminated so we handle status updates to the Gate in
                     // the stream reader. The last non-terminal status updates is
@@ -229,6 +231,7 @@ impl RouterHandler {
                             None
                         };
                         self.process_msg(
+                                received,
                             router_addr,
                             source_id.clone(),
                             bmp_msg,
@@ -258,6 +261,7 @@ impl RouterHandler {
 
     async fn process_msg(
         &self,
+        received: DateTime<Utc>,
         addr: SocketAddr,
         source_id: SourceId,
         msg: Message<Bytes>,
@@ -279,18 +283,20 @@ impl RouterHandler {
         self.status_reporter
             .bmp_message_received(bmp_state.router_id());
 
-        let next_state =
-            if let Ok(ControlFlow::Continue(FilterOutput { south, east })) =
-                Self::VM
+        let next_state = if let ControlFlow::Continue(FilterOutput {
+            south,
+            east,
+            received,
+        }) = Self::VM
                     .with(|vm| {
-                        let value =
-                            TypeValue::Builtin(BuiltinTypeValue::BmpMessage(
+                let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(
                                 Arc::new(BytesRecord(msg)),
                             ));
                         self.roto_scripts.exec_with_tracer(
                             vm,
                             &self.filter_name.load(),
                             value,
+                    received,
                             bound_tracer,
                             trace_id,
                         )
@@ -301,10 +307,8 @@ impl RouterHandler {
                     })
             {
                 if !south.is_empty() {
-                    let payload = Payload::from_output_stream_queue(
-                        &source_id, south, trace_id,
-                    )
-                    .into();
+                let payload =
+                    Payload::from_output_stream_queue(south, trace_id).into();
                     self.gate.update_data(payload).await;
                 }
 
@@ -317,7 +321,7 @@ impl RouterHandler {
                     self.status_reporter
                         .bmp_message_processed(bmp_state.router_id());
 
-                    let mut res = bmp_state.process_msg(msg, trace_id);
+                let mut res = bmp_state.process_msg(received, msg, trace_id);
 
                     match res.processing_result {
                         MessageType::InvalidMessage {

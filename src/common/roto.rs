@@ -3,6 +3,7 @@ use std::{
     path::PathBuf, sync::Arc, time::Instant,
 };
 
+use chrono::{DateTime, Utc};
 use log::{debug, info, trace};
 use roto::{
     ast::{AcceptReject, ShortString},
@@ -482,8 +483,9 @@ impl RotoScripts {
         vm_ref: &ThreadLocalVM,
         filter_name: &FilterName,
         rx: TypeValue,
+        received: DateTime<Utc>,
     ) -> FilterResult<RotoError> {
-        self.do_exec(vm_ref, filter_name, rx, None)
+        self.do_exec(vm_ref, filter_name, rx, received, None)
     }
 
     pub fn exec_with_tracer(
@@ -491,13 +493,26 @@ impl RotoScripts {
         vm_ref: &ThreadLocalVM,
         filter_name: &FilterName,
         rx: TypeValue,
+        received: DateTime<Utc>,
         tracer: BoundTracer,
         trace_id: Option<u8>,
     ) -> FilterResult<RotoError> {
         if let Some(trace_id) = trace_id {
-            self.do_exec(vm_ref, filter_name, rx, Some((tracer, trace_id)))
+            self.do_exec(
+                vm_ref,
+                filter_name,
+                rx,
+                received,
+                Some((tracer, trace_id)),
+            )
         } else {
-            self.do_exec(vm_ref, filter_name, rx, None)
+            self.do_exec(
+                vm_ref,
+                filter_name,
+                rx,
+                received,
+                None,
+            )
         }
     }
 
@@ -506,6 +521,7 @@ impl RotoScripts {
         vm_ref: &ThreadLocalVM,
         filter_name: &FilterName,
         rx: TypeValue,
+        received: DateTime<Utc>,
         trace_details: Option<(BoundTracer, u8)>,
     ) -> FilterResult<RotoError> {
         // Let the payload through if it is actually an output stream message as we don't filter those, we just forward them
@@ -526,7 +542,9 @@ impl RotoScripts {
                     );
                 }
             }
-            return Ok(ControlFlow::Continue(FilterOutput::from(rx)));
+            return Ok(ControlFlow::Continue(FilterOutput::from_east(
+                rx, received,
+            )));
         }
 
         // Initialize the VM if needed.
@@ -546,7 +564,9 @@ impl RotoScripts {
                     format!("Filtering result: Accepting message as filter name '{filter_name}' is not loaded. Message was:\n{rx:#?}"),
                 );
             }
-            return Ok(ControlFlow::Continue(FilterOutput::from(rx)));
+            return Ok(ControlFlow::Continue(FilterOutput::from_east(
+                rx, received,
+            )));
         }
 
         let was_initialized = was_initialized_res?;
@@ -616,20 +636,26 @@ impl RotoScripts {
                 rx,
                 tx: None,
                 output_stream_queue,
-            } => Ok(ControlFlow::Continue(FilterOutput::from((
-                rx,
-                output_stream_queue,
-            )))),
+            } => {
+                Ok(ControlFlow::Continue(FilterOutput::from_east_and_south(
+                    rx,
+                    output_stream_queue,
+                    received,
+                )))
+            }
 
             VmResult {
                 accept_reject: AcceptReject::Accept,
                 tx: Some(tx),
                 output_stream_queue,
                 ..
-            } => Ok(ControlFlow::Continue(FilterOutput::from((
-                tx,
-                output_stream_queue,
-            )))),
+            } => {
+                Ok(ControlFlow::Continue(FilterOutput::from_east_and_south(
+                    tx,
+                    output_stream_queue,
+                    Utc::now(),
+                )))
+            }
 
             VmResult {
                 accept_reject: AcceptReject::NoReturn,
@@ -707,20 +733,28 @@ pub type FilterResult<E> = Result<ControlFlow<(), FilterOutput>, E>;
 pub struct FilterOutput {
     pub east: TypeValue,
     pub south: OutputStreamQueue,
+    pub received: DateTime<Utc>,
 }
 
-impl From<TypeValue> for FilterOutput {
-    fn from(east: TypeValue) -> Self {
+impl FilterOutput {
+    pub fn from_east(east: TypeValue, received: DateTime<Utc>) -> Self {
         Self {
             east,
             south: Default::default(),
+            received,
         }
     }
-}
 
-impl From<(TypeValue, OutputStreamQueue)> for FilterOutput {
-    fn from((east, south): (TypeValue, OutputStreamQueue)) -> Self {
-        Self { east, south }
+    pub fn from_east_and_south(
+        east: TypeValue,
+        south: OutputStreamQueue,
+        received: DateTime<Utc>,
+    ) -> Self {
+        Self {
+            east,
+            south,
+            received,
+        }
     }
 }
 
@@ -742,9 +776,9 @@ mod tests {
         let in_payload = Payload::new("test", test_value.clone(), None);
         let out_payloads = in_payload
             .filter(
-                |payload, _trace_id| {
+                |payload, received, _trace_id| {
                     Result::<_, FilterError>::Ok(ControlFlow::Continue(
-                        payload.into(),
+                        FilterOutput::from_east(payload, received),
                     ))
                 },
                 |_source_id| { /* NO OP */ },
@@ -766,12 +800,13 @@ mod tests {
         output_stream_queue.push(test_output_stream_message.clone());
         let out_payloads = in_payload
             .filter(
-                move |payload, _trace_id| {
+                move |payload, received, _trace_id| {
                     Result::<_, FilterError>::Ok(ControlFlow::Continue(
-                        FilterOutput {
-                            east: payload,
-                            south: output_stream_queue.clone(),
-                        },
+                        FilterOutput::from_east_and_south(
+                            payload,
+                            output_stream_queue.clone(),
+                            received,
+                        ),
                     ))
                 },
                 |_source_id| { /* NO OP */ },
@@ -783,7 +818,7 @@ mod tests {
             matches!(&out_payloads[0], Payload { source_id, value, .. } if source_id.name() == Some("test") && *value == test_value)
         );
         assert!(
-            matches!(&out_payloads[1], Payload { source_id, value: TypeValue::OutputStreamMessage(osm), .. } if source_id.name() == Some("test") && **osm == test_output_stream_message)
+            matches!(&out_payloads[1], Payload { source_id, value: TypeValue::OutputStreamMessage(osm), .. } if source_id.name() == Some("generated") && **osm == test_output_stream_message)
         );
     }
 
@@ -796,9 +831,9 @@ mod tests {
         let in_payload = smallvec![payload1, payload2];
         let out_payloads = in_payload
             .filter(
-                |payload, _trace_id| {
+                |payload, received, _trace_id| {
                     Result::<_, FilterError>::Ok(ControlFlow::Continue(
-                        payload.into(),
+                        FilterOutput::from_east(payload, received),
                     ))
                 },
                 |_source_id| { /* NO OP */ },
@@ -827,12 +862,13 @@ mod tests {
         output_stream_queue.push(test_output_stream_message.clone());
         let out_payloads = in_payload
             .filter(
-                move |payload, _trace_id| {
+                move |payload, received, _trace_id| {
                     Result::<_, FilterError>::Ok(ControlFlow::Continue(
-                        FilterOutput {
-                            east: payload,
-                            south: output_stream_queue.clone(),
-                        },
+                        FilterOutput::from_east_and_south(
+                            payload,
+                            output_stream_queue.clone(),
+                            received,
+                        ),
                     ))
                 },
                 |_source_id| { /* NO OP */ },
@@ -844,13 +880,13 @@ mod tests {
             matches!(&out_payloads[0], Payload { source_id, value, .. } if source_id.name() == Some("test1") && *value == test_value1)
         );
         assert!(
-            matches!(&out_payloads[1], Payload { source_id, value: TypeValue::OutputStreamMessage(osm), .. } if source_id.name() == Some("test1") && **osm == test_output_stream_message)
+            matches!(&out_payloads[1], Payload { source_id, value: TypeValue::OutputStreamMessage(osm), .. } if source_id.name() == Some("generated") && **osm == test_output_stream_message)
         );
         assert!(
             matches!(&out_payloads[2], Payload { source_id, value, .. } if source_id.name() == Some("test2") && *value == test_value2)
         );
         assert!(
-            matches!(&out_payloads[3], Payload { source_id, value: TypeValue::OutputStreamMessage(osm), .. } if source_id.name() == Some("test2") && **osm == test_output_stream_message)
+            matches!(&out_payloads[3], Payload { source_id, value: TypeValue::OutputStreamMessage(osm), .. } if source_id.name() == Some("generated") && **osm == test_output_stream_message)
         );
     }
 

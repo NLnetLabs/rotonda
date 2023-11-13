@@ -1,7 +1,7 @@
 use std::{
     fmt::Display,
     sync::{atomic::Ordering::SeqCst, Arc},
-    time::Instant,
+    time::{Duration, Instant},
 };
 
 use log::{error, info, warn};
@@ -16,7 +16,7 @@ use crate::{
     payload::RouterId,
 };
 
-use super::metrics::RibUnitMetrics;
+use super::{metrics::RibUnitMetrics, rib::StoreInsertionEffect};
 
 #[derive(Debug, Default)]
 pub struct RibUnitStatusReporter {
@@ -55,70 +55,60 @@ impl RibUnitStatusReporter {
     pub fn insert_ok(
         &self,
         router_id: Arc<RouterId>,
-        insert_delay: i64,
-        propagation_delay: i64,
+        insert_delay: Duration,
+        propagation_delay: Duration,
         num_retries: u32,
-        is_announcement: bool,
-        num_items_delta: isize,
-        num_announcements_delta: isize,
-        num_withdrawals_delta: isize,
+        change: StoreInsertionEffect,
     ) {
-        self.metrics
-            .last_insert_duration
-            .store(insert_delay, SeqCst);
+        self.metrics.last_insert_duration_micros.store(
+            u64::try_from(insert_delay.as_micros()).unwrap_or(u64::MAX),
+            SeqCst,
+        );
 
         self.insert_or_update(
             router_id,
             propagation_delay,
             num_retries,
-            num_items_delta,
-            num_announcements_delta,
-            num_withdrawals_delta,
+            change,
         );
-
-        if !is_announcement {
-            self.metrics
-                .num_route_withdrawals_without_announcement
-                .fetch_add(1, SeqCst);
-        }
     }
 
     pub fn update_ok(
         &self,
         router_id: Arc<RouterId>,
-        insert_delay: i64,
-        propagation_delay: i64,
+        update_delay: Duration,
+        propagation_delay: Duration,
         num_retries: u32,
-        num_items_delta: isize,
-        num_announcements_delta: isize,
-        num_withdrawals_delta: isize,
+        change: StoreInsertionEffect,
     ) {
-        self.metrics
-            .last_update_duration
-            .store(insert_delay, SeqCst);
+        self.metrics.last_update_duration_micros.store(
+            u64::try_from(update_delay.as_micros()).unwrap_or(u64::MAX),
+            SeqCst,
+        );
 
         self.insert_or_update(
             router_id,
             propagation_delay,
             num_retries,
-            num_items_delta,
-            num_announcements_delta,
-            num_withdrawals_delta,
+            change,
         );
     }
 
     fn insert_or_update(
         &self,
         router_id: Arc<String>,
-        propagation_delay: i64,
+        propagation_delay: Duration,
         num_retries: u32,
-        num_items_delta: isize,
-        num_announcements_delta: isize,
-        num_withdrawals_delta: isize,
+        change: StoreInsertionEffect,
     ) {
-        let metrics = self.metrics.router_metrics(router_id);
-        metrics.last_e2e_delay.store(propagation_delay, SeqCst);
-        metrics.last_e2e_delay_at.store(Arc::new(Instant::now()));
+        let router_specific_metrics = self.metrics.router_metrics(router_id);
+        router_specific_metrics.last_e2e_delay_millis.store(
+            u64::try_from(propagation_delay.as_millis()).unwrap_or(u64::MAX),
+            SeqCst,
+        );
+        router_specific_metrics
+            .last_e2e_delay_at
+            .store(Arc::new(Instant::now()));
 
         if num_retries > 0 {
             self.metrics
@@ -126,55 +116,34 @@ impl RibUnitStatusReporter {
                 .fetch_add(num_retries as usize, SeqCst);
         }
 
-        if num_items_delta > 0 {
-            self.metrics
-                .num_items
-                .fetch_add(num_items_delta as usize, SeqCst);
-        } else {
-            self.metrics
-                .num_items
-                .fetch_sub(-num_items_delta as usize, SeqCst);
-        }
-        if num_announcements_delta > 0 {
-            self.metrics
-                .num_routes_announced
-                .fetch_add(num_announcements_delta as usize, SeqCst);
-        } else {
-            self.metrics
-                .num_routes_announced
-                .fetch_sub(-num_announcements_delta as usize, SeqCst);
-        }
-        if num_withdrawals_delta > 0 {
-            self.metrics
-                .num_routes_withdrawn
-                .fetch_add(num_withdrawals_delta as usize, SeqCst);
-        } else {
-            self.metrics
-                .num_routes_withdrawn
-                .fetch_sub(-num_withdrawals_delta as usize, SeqCst);
-        }
-    }
+        match change {
+            StoreInsertionEffect::RoutesWithdrawn(0)
+            | StoreInsertionEffect::RoutesRemoved(0) => {
+                self.metrics
+                    .num_route_withdrawals_without_announcement
+                    .fetch_add(1, SeqCst);
+            }
 
-    pub fn update_processed(
-        &self,
-        new_announcements: usize,
-        modified_announcements: usize,
-        new_withdrawals: usize,
-    ) {
-        if new_announcements > 0 {
-            self.metrics
-                .num_routes_announced
-                .fetch_add(new_announcements, SeqCst);
-        }
-        if modified_announcements > 0 {
-            self.metrics
-                .num_modified_route_announcements
-                .fetch_add(modified_announcements, SeqCst);
-        }
-        if new_withdrawals > 0 {
-            self.metrics
-                .num_routes_withdrawn
-                .fetch_add(new_withdrawals, SeqCst);
+            StoreInsertionEffect::RoutesWithdrawn(n) => {
+                self.metrics.num_routes_announced.fetch_sub(n, SeqCst);
+                self.metrics.num_routes_withdrawn.fetch_add(n, SeqCst);
+            }
+
+            StoreInsertionEffect::RoutesRemoved(n) => {
+                self.metrics.num_routes_announced.fetch_sub(n, SeqCst);
+                self.metrics.num_items.fetch_sub(n, SeqCst);
+            }
+
+            StoreInsertionEffect::RouteAdded => {
+                self.metrics.num_routes_announced.fetch_add(1, SeqCst);
+                self.metrics.num_items.fetch_add(1, SeqCst);
+            }
+
+            StoreInsertionEffect::RouteUpdated => {
+                self.metrics
+                    .num_modified_route_announcements
+                    .fetch_add(1, SeqCst);
+            }
         }
     }
 

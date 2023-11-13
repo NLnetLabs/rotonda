@@ -236,24 +236,15 @@ impl BmpState {
         }
     }
 
-    pub fn status_reporter(&self) -> Option<Arc<BmpStateMachineStatusReporter>> {
+    pub fn status_reporter(
+        &self,
+    ) -> Option<Arc<BmpStateMachineStatusReporter>> {
         match self {
             BmpState::Initiating(v) => Some(v.status_reporter.clone()),
             BmpState::Dumping(v) => Some(v.status_reporter.clone()),
             BmpState::Updating(v) => Some(v.status_reporter.clone()),
             BmpState::Terminated(v) => Some(v.status_reporter.clone()),
             BmpState::Aborted(_, _) => None,
-        }
-    }
-
-    #[rustfmt::skip]
-    pub fn terminate(self) -> ProcessingResult {
-        match self {
-            BmpState::Initiating(v) => v.terminate(Option::<TerminationMessage<Bytes>>::None),
-            BmpState::Dumping(v) => v.terminate(Option::<TerminationMessage<Bytes>>::None),
-            BmpState::Updating(v) => v.terminate(Option::<TerminationMessage<Bytes>>::None),
-            BmpState::Terminated(_) => BmpStateDetails::<Terminated>::mk_state_transition_result(self),
-            BmpState::Aborted(..) => BmpStateDetails::<Terminated>::mk_state_transition_result(self),
         }
     }
 }

@@ -105,14 +105,6 @@ impl BmpStateDetails<Initiating> {
             }
         }
     }
-
-    pub fn terminate(
-        self,
-        _msg: Option<TerminationMessage<Bytes>>,
-    ) -> ProcessingResult {
-        let next_state = BmpState::Terminated(self.into());
-        Self::mk_state_transition_result(next_state)
-    }
 }
 
 impl Initiable for Initiating {

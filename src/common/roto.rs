@@ -6,7 +6,7 @@ use std::{
 use log::{debug, info, trace};
 use roto::{
     ast::{AcceptReject, ShortString},
-    compile::{CompileError, Compiler, MirBlock, RotoPack, RotoPackArc},
+    compiler::{CompileError, Compiler, MirBlock, RotoPack, RotoPackArc},
     types::typevalue::TypeValue,
     vm::{
         ExtDataSource, LinearMemory, OutputStreamQueue, VirtualMachine,

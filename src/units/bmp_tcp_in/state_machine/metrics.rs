@@ -232,14 +232,14 @@ impl BmpStateMachineMetrics {
     // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_ANNOUNCEMENTS_METRIC: Metric = Metric::new(
         "bmp_state_num_announcements",
-        "the number of route announcements contained in the last BMP message",
+        "the number of route announcements seen from this router",
         MetricType::Gauge,
         MetricUnit::Total,
     );
     // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_WITHDRAWALS_METRIC: Metric = Metric::new(
         "bmp_state_num_withdrawals",
-        "the number of route withdrawals contained in the last BMP message",
+        "the number of route withdrawals seen from this router",
         MetricType::Gauge,
         MetricUnit::Total,
     );

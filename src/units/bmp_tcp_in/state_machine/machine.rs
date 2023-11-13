@@ -599,37 +599,35 @@ where
 
         let pph = msg.per_peer_header();
 
-        let known_peer;
+        let Some(peer_config) = self.details.get_peer_config(&pph) else {
+            self.status_reporter.peer_unknown(self.router_id.clone());
 
-        let mut chosen_peer_config = match self.details.get_peer_config(&pph)
-        {
-            Some(found_config) => {
-                known_peer = true;
-                *found_config
-            }
-
-            None => {
-                known_peer = false;
-                self.status_reporter.peer_unknown(self.router_id.clone());
-                generate_session_config_for_peer(&pph)
-            }
+            return self.mk_invalid_message_result(
+                format!(
+                    "RouteMonitoring message received for peer that is not 'up': {}",
+                    msg.per_peer_header()
+                ),
+                Some(false),
+                Some(Bytes::copy_from_slice(msg.as_ref())),
+            );
         };
+
+        let mut peer_config = *peer_config;
 
         let mut retry_due_to_err: Option<String> = None;
         loop {
-            let res = match msg.bgp_update(chosen_peer_config) {
+            let res = match msg.bgp_update(peer_config) {
                 Ok(update) => {
                     if let Some(err_str) = retry_due_to_err {
                         self.status_reporter.bgp_update_parse_soft_fail(
                             self.router_id.clone(),
-                            Some(known_peer),
+                            Some(true),
                             err_str,
                             Some(Bytes::copy_from_slice(msg.as_ref())),
                         );
 
-                        // use this config in future (#128)
-                        self.details
-                            .update_peer_config(&pph, chosen_peer_config);
+                        // use this config from now on
+                        self.details.update_peer_config(&pph, peer_config);
                     }
 
                     let mut saved_self =
@@ -686,12 +684,12 @@ where
                 }
 
                 Err(err) => {
-                    tried_peer_configs.push(chosen_peer_config);
+                    tried_peer_configs.push(peer_config);
                     if let Some(alt_config) =
-                        generate_alternate_config(&chosen_peer_config)
+                        generate_alternate_config(&peer_config)
                     {
                         if !tried_peer_configs.contains(&alt_config) {
-                            chosen_peer_config = alt_config;
+                            peer_config = alt_config;
                             if retry_due_to_err.is_none() {
                                 retry_due_to_err = Some(err.to_string());
                             }
@@ -701,7 +699,7 @@ where
 
                     self.mk_invalid_message_result(
                         format!("Invalid BMP RouteMonitoring BGP UPDATE message: {}", err),
-                        Some(known_peer),
+                        Some(true),
                         Some(Bytes::copy_from_slice(msg.as_ref())),
                     )
                 }
@@ -811,17 +809,6 @@ where
             num_withdrawals,
         )
     }
-}
-
-fn generate_session_config_for_peer(
-    pph: &PerPeerHeader<Bytes>,
-) -> SessionConfig {
-    let four_octet_asn = match pph.is_legacy_format() {
-        true => FourOctetAsn::Disabled,
-        false => FourOctetAsn::Enabled,
-    };
-
-    SessionConfig::new(four_octet_asn, AddPath::Disabled)
 }
 
 impl BmpState {
@@ -1083,247 +1070,4 @@ impl PeerAware for PeerStates {
             .get(pph)
             .map(|peer_state| peer_state.announced_prefixes.iter())
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    // From: https://www.rfc-editor.org/rfc/rfc7854.html#section-4.2
-    //
-    // 4.2.  Per-Peer Header
-    //
-    // The per-peer header follows the common header for most BMP messages.
-    // The rest of the data in a BMP message is dependent on the Message
-    // Type field in the common header.
-    //
-    //    0                   1                   2                   3
-    //    0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-    //   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    //   |   Peer Type   |  Peer Flags   |
-    //   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    //   |         Peer Distinguisher (present based on peer type)       |
-    //   |                                                               |
-    //   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    //   |                 Peer Address (16 bytes)                       |
-    //   ~                                                               ~
-    //   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    //   |                           Peer AS                             |
-    //   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    //   |                         Peer BGP ID                           |
-    //   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    //   |                    Timestamp (seconds)                        |
-    //   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    //   |                  Timestamp (microseconds)                     |
-    //   +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-    //
-    // And:
-    //
-    // *  The A flag, if set to 1, indicates that the message is
-    //    formatted using the legacy 2-byte AS_PATH format.  If set to 0,
-    //    the message is formatted using the 4-byte AS_PATH format
-    //    [RFC6793].  A BMP speaker MAY choose to propagate the AS_PATH
-    //    information as received from its peer, or it MAY choose to
-    //    reformat all AS_PATH information into a 4-byte format
-    //    regardless of how it was received from the peer.  In the latter
-    //    case, AS4_PATH or AS4_AGGREGATOR path attributes SHOULD NOT be
-    //    sent in the BMP UPDATE message.  This flag has no significance
-    //    when used with route mirroring messages (Section 4.7).
-
-    #[rustfmt::skip]
-    #[test]
-    fn generate_two_octet_session_config_for_bmp_peer_with_a_flag_set() {
-        static TEST_BYTES: [u8; 42] = [
-            0, // Peer Type: Global,
-            0b00_1_00000, // Peer Flags: A flag set
-            0, 0, 0, 0, // Peer Distinguisher
-            0, 0, 0, 0, // Peer Distinguisher
-            0, 0, 0, 0, // Peer Address
-            0, 0, 0, 0, // Peer Address
-            0, 0, 0, 0, // Peer Address
-            0, 0, 0, 0, // Peer Address
-            0, 0, 0, 0, // Peer AS
-            0, 0, 0, 0, // Peer BGP ID
-            0, 0, 0, 0, // Timestamp (seconds)
-            0, 0, 0, 0, // Timestamp (microseconds)
-        ];
-        let pph = routecore::bmp::message::PerPeerHeader::for_slice(
-            Bytes::from_static(&TEST_BYTES),
-        );
-        let config = generate_session_config_for_peer(&pph);
-        assert!(!config.has_four_octet_asn());
-    }
-
-    #[rustfmt::skip]
-    #[test]
-    fn generate_four_octet_session_config_for_bmp_peer_with_a_flag_cleared() {
-        static TEST_BYTES: [u8; 42] = [
-            0, // Peer Type: Global,
-            0b00_0_00000, // Peer Flags: A flag cleared
-            0, 0, 0, 0, // Peer Distinguisher
-            0, 0, 0, 0, // Peer Distinguisher
-            0, 0, 0, 0, // Peer Address
-            0, 0, 0, 0, // Peer Address
-            0, 0, 0, 0, // Peer Address
-            0, 0, 0, 0, // Peer Address
-            0, 0, 0, 0, // Peer AS
-            0, 0, 0, 0, // Peer BGP ID
-            0, 0, 0, 0, // Timestamp (seconds)
-            0, 0, 0, 0, // Timestamp (microseconds)
-        ];
-        let pph = routecore::bmp::message::PerPeerHeader::for_slice(
-            Bytes::from_static(&TEST_BYTES),
-        );
-        let config = generate_session_config_for_peer(&pph);
-        assert!(config.has_four_octet_asn());
-    }
-
-    //     /// This test replays data captured by BmpRawDumper.
-    //     #[tokio::test(flavor = "multi_thread")]
-    //     #[ignore]
-    //     async fn replay_test() {
-    //         const USIZE_BYTES: usize = (usize::BITS as usize) >> 3;
-    //         let bmp_metrics = Arc::new(BmpMetrics::default());
-    //         let status_reporter = Arc::new(BmpTcpInStatusReporter::new(
-    //             "some reporter",
-    //             bmp_metrics.clone(),
-    //         ));
-
-    // //         let mut inputs = Vec::new();
-    // //         for entry in std::fs::read_dir("bmp-dump").unwrap() {
-    // //             let entry = entry.unwrap();
-    // //             let path = entry.path();
-    // //             if path.extension() == Some(OsStr::new("bin")) {
-    // //                 inputs.push(path);
-    // //             }
-    // //         }
-
-    // //         let mut join_handles = Vec::new();
-
-    //         for path in inputs {
-    //             if let Some(fname) = path.file_name().and_then(OsStr::to_str) {
-    //                 let pieces: Vec<&str> = fname.splitn(3, '-').collect();
-    //                 let ip = pieces[1];
-    //                 let port = pieces[2].split('.').next().unwrap();
-    //                 let client_addr = SocketAddr::new(
-    //                     ip.parse().unwrap(),
-    //                     port.parse().unwrap(),
-    //                 );
-    //                 let router_id = Arc::new(format!(
-    //                     "{}-{}",
-    //                     client_addr.ip(),
-    //                     client_addr.port()
-    //                 ));
-    //                 let status_reporter = status_reporter.clone();
-    //                 let mut bmp_state = BmpState::new(
-    //                     SourceId::SocketAddr(client_addr),
-    //                     router_id.clone(),
-    //                     status_reporter.clone(),
-    //                     bmp_metrics.clone(),
-    //                 );
-
-    //                 let handle = tokio::task::spawn(async move {
-    //                     let mut file = File::open(path).unwrap();
-    //                     let mut ts_bytes: [u8; 16] = [0; 16];
-    //                     let mut num_bmp_bytes: [u8; USIZE_BYTES] =
-    //                         [0; USIZE_BYTES];
-    //                     let mut last_ts = None;
-    //                     let mut last_push = Instant::now();
-
-    //                     loop {
-    //                         let mut bmp_bytes =
-    //                             BytesMut::with_capacity(64 * 1024);
-
-    // //                         // Each line has the form <timestamp:u128><num bytes:usize><bmp bytes>
-    // //                         file.read_exact(&mut ts_bytes).unwrap();
-    // //                         let ts = u128::from_be_bytes(ts_bytes);
-
-    //                         file.read_exact(&mut num_bmp_bytes).unwrap();
-    //                         let num_bytes_to_read =
-    //                             usize::from_be_bytes(num_bmp_bytes);
-    //                         bmp_bytes.resize(num_bytes_to_read, 0);
-
-    // //                         file.read_exact(&mut bmp_bytes).unwrap();
-
-    //                         // Did the original stream contain the message at this
-    //                         // point in time or do we need to wait a bit so as to
-    //                         // more closely emulate the original rate at which the
-    //                         // data was seen?
-    //                         if let Some(last_ts) = last_ts {
-    //                             let millis_between_messages = ts - last_ts;
-    //                             let millis_since_last_push =
-    //                                 last_push.elapsed().as_millis();
-    //                             if millis_since_last_push
-    //                                 < millis_between_messages
-    //                             {
-    //                                 let _millis_to_sleep = millis_between_messages
-    //                                     - millis_since_last_push;
-    //                                 //sleep(Duration::from_millis(_millis_to_sleep.try_into().unwrap()));
-    //                             }
-    //                         }
-
-    //                         let bmp_msg =
-    //                             BmpMsg::from_octets(bmp_bytes.freeze()).unwrap();
-    //                         let mut res = bmp_state.process_msg(bmp_msg);
-
-    // //                         match res.processing_result {
-    // //                             MessageType::InvalidMessage { err, .. } => {
-    // //                                 log::warn!(
-    // //                                     "{}: Invalid message: {}",
-    // //                                     res.next_state.router_id(),
-    // //                                     err
-    // //                                 );
-    // //                             }
-
-    //                             MessageType::StateTransition => {
-    //                                 if let BmpState::Dumping(next_state) =
-    //                                     &mut res.next_state
-    //                                 {
-    //                                     next_state.router_id = Arc::new(
-    //                                         next_state.details.sys_name.clone(),
-    //                                     );
-
-    // //                                     // This will enable metrics to be stored for the router id.
-    // //                                     // status_reporter.router_id_changed(next_state.router_id.clone());
-    // //                                 }
-    // //                             }
-
-    //                             MessageType::Aborted => {
-    //                                 log::warn!(
-    //                                     "{}: Aborted",
-    //                                     res.next_state.router_id()
-    //                                 );
-    //                                 break;
-    //                             }
-
-    // //                             _ => {}
-    // //                         }
-
-    // //                         bmp_state = res.next_state;
-
-    // //                         last_ts = Some(ts);
-    // //                         last_push = Instant::now();
-    // //                     }
-    // //                 });
-
-    // //                 join_handles.push(handle);
-    // //             }
-    // //         }
-
-    // //         join_all(join_handles).await;
-
-    //         let mut metrics_target =
-    //             crate::metrics::Target::new(OutputFormat::Plain);
-    //         bmp_metrics.append("test", &mut metrics_target);
-    //         eprintln!("{}", metrics_target.into_string());
-
-    // //         // TODO
-    // //         // assert_eq!(
-    // //         //     bmp_metrics
-    // //         //         .num_receive_io_errors
-    // //         //         .iter()
-    // //         //         .fold(0, |acc, v| acc + v.value()),
-    // //         //     0
-    // //         // );
-    // //     }
 }

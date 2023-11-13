@@ -603,17 +603,11 @@ mod tests {
         let res = processor.process_msg(Utc::now(), peer_up_msg_2_buf, None);
 
         // Then
-        assert!(matches!(
-            res.processing_result,
-            MessageType::InvalidMessage { .. }
-        ));
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
-        if let MessageType::InvalidMessage { err, .. } = res.processing_result
-        {
-            assert!(err.starts_with(
-                "PeerUpNotification received for peer that is already 'up'"
-            ));
-        }
+        assert_invalid_msg_starts_with(
+            &res,
+            "PeerUpNotification received for peer that is already 'up'",
+        );
 
         // Check the metrics
         let processor = res.next_state;
@@ -626,7 +620,7 @@ mod tests {
     }
 
     #[test]
-    fn peer_up_peer_down() {
+    fn peer_up_route_monitoring_peer_down() {
         // Given a BMP state machine in the Dumping state with no known peers
         let processor = mk_test_processor();
         let initiation_msg_buf =
@@ -856,12 +850,10 @@ mod tests {
 
         // Then
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
-        if let MessageType::InvalidMessage { err, .. } = res.processing_result
-        {
-            assert!(err.starts_with(
-                "PeerDownNotification received for peer that was not 'up'"
-            ));
-        }
+        assert_invalid_msg_starts_with(
+            &res,
+            "PeerDownNotification received for peer that was not 'up'",
+        );
     }
 
     #[test]
@@ -908,23 +900,16 @@ mod tests {
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
 
         // And there should still be one known peer
-        let processor = res.next_state;
-        assert_eq!(get_unique_peer_up_count(&processor), 1);
+        assert_eq!(get_unique_peer_up_count(&res.next_state), 1);
 
         // And the message should be considered invalid
-        assert!(matches!(
-            res.processing_result,
-            MessageType::InvalidMessage { .. }
-        ));
-        if let MessageType::InvalidMessage { err, .. } =
-            &res.processing_result
-        {
-            assert!(err.starts_with(
-                "PeerDownNotification received for peer that was not 'up'"
-            ));
-        }
+        assert_invalid_msg_starts_with(
+            &res,
+            "PeerDownNotification received for peer that was not 'up'",
+        );
 
         // Check the metrics
+        let processor = res.next_state;
         assert_metrics(
             &processor,
             ("Dumping", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]),
@@ -1257,6 +1242,42 @@ mod tests {
     }
 
     #[test]
+    fn route_monitoring_from_unknown_peer() {
+        // Given
+        let processor = mk_test_processor();
+        let pph = mk_per_peer_header("127.0.0.1", 12345);
+        let route_mon_msg_buf = mk_route_monitoring_msg(&pph);
+        let initiation_msg_buf =
+            mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
+
+        // When a route announcement is received
+        let processor = processor
+            .process_msg(Utc::now(), initiation_msg_buf, None)
+            .next_state;
+        let res = processor.process_msg(Utc::now(), route_mon_msg_buf, None);
+
+        // Check the result of processing the message
+        assert!(matches!(res.next_state, BmpState::Dumping(_)));
+        assert_invalid_msg_starts_with(
+            &res,
+            "RouteMonitoring message received for peer that is not 'up'",
+        );
+
+        // Check the metrics
+        let processor = res.next_state;
+        assert_metrics(
+            &processor,
+            ("Dumping", [1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]),
+        );
+        //                  ^ 0 announcements because the msg was rejected!
+        //                        ^ 1 BGP UPDATE was processed
+        //                                 ^ 1 BGP UPDATE was from an unknown peer
+
+        // TODO: There isn't a BMP state machine metric that reflects that the above occurred.
+        // Should there be? Is there a bmp-tcp-in unit metric that reflects it?
+    }
+
+    #[test]
     #[ignore = "to do"]
     fn end_of_rib_ipv6_for_a_single_peer() {}
 
@@ -1313,12 +1334,14 @@ mod tests {
 
         // Then
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
-        let expected_err =
-            "Invalid BMP RouteMonitoring BGP UPDATE message: unimplemented AFI/SAFI".to_string();
-        assert!(matches!(
-            res.processing_result,
-            MessageType::InvalidMessage { err, .. } if err == expected_err
-        ));
+        assert_invalid_msg_starts_with(&res, "Invalid BMP RouteMonitoring BGP UPDATE message: unimplemented AFI/SAFI");
+
+        // TODO: There isn't a BMP state machine metric that reflects that the above occurred.
+        // Should there be? Is there a bmp-tcp-in unit metric that reflects it?
+
+        let metrics = res.next_state.status_reporter().unwrap().metrics().unwrap();
+        let actual = query_metrics(&metrics);
+        dbg!(&actual);
     }
 
     #[test]
@@ -1701,5 +1724,23 @@ mod tests {
         }
 
         assert_eq!(actual, expected, "actual (left) != expected (right)");
+    }
+
+    fn assert_invalid_msg_starts_with(
+        res: &ProcessingResult,
+        expected_start: &str,
+    ) {
+        if let MessageType::InvalidMessage { err, .. } =
+            &res.processing_result
+        {
+            if !err.starts_with(expected_start) {
+                assert_eq!(expected_start, err);
+            }
+        } else {
+            panic!(
+                "Expected an InvalidMessage result, instead got: {:?}",
+                res.processing_result
+            );
+        }
     }
 }

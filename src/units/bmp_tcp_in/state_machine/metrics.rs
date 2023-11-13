@@ -187,7 +187,7 @@ impl BmpStateMachineMetrics {
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_BGP_UPDATES_FOR_UNKNOWN_PEER_METRIC: Metric = Metric::new(
         "bmp_state_num_bgp_updates_with_unknown_peer",
         "the number of BGP UPDATE messages for which no Peer Up notification was seen",
@@ -201,7 +201,7 @@ impl BmpStateMachineMetrics {
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [x] makes sense? [ ] passes tests?
     const NUM_BGP_UPDATES_WITH_RECOVERABLE_PARSING_FAILURE_FOR_UNKNOWN_PEER: Metric = Metric::new(
         "bmp_state_num_bgp_updates_with_recoverable_parsing_failure_for_unknown_peer",
         "the number of BGP UPDATE messages from unknown peers that could not be parsed with the expected session config",
@@ -215,7 +215,7 @@ impl BmpStateMachineMetrics {
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [x] makes sense? [ ] passes tests?
     const NUM_BGP_UPDATES_WITH_UNRECOVERABLE_PARSING_FAILURE_FOR_UNKNOWN_PEER: Metric = Metric::new(
         "bmp_state_num_bgp_updates_with_unrecoverable_parsing_failure_for_unknown_peer",
         "the number of BGP UPDATE messages from unknown peers that could not be parsed with the expected or generated session config",

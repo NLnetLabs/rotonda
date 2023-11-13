@@ -39,7 +39,7 @@ use routecore::{
     bmp::message::{
         InformationTlvType, InitiationMessage, Message as BmpMsg,
         PeerDownNotification, PeerUpNotification, PerPeerHeader, RibType,
-        RouteMonitoring, TerminationMessage,
+        RouteMonitoring,
     },
 };
 use smallvec::SmallVec;
@@ -303,8 +303,17 @@ where
     }
 
     pub fn mk_state_transition_result(
+        prev_state: BmpStateIdx,
         next_state: BmpState,
     ) -> ProcessingResult {
+        if let Some(status_reporter) = next_state.status_reporter() {
+            status_reporter.change_state(
+                next_state.router_id(),
+                prev_state,
+                next_state.state_idx(),
+            );
+        }
+
         ProcessingResult::new(MessageType::StateTransition, next_state)
     }
 }
@@ -535,9 +544,9 @@ where
                 .peer_down(self.router_id.clone(), eor_capable);
 
             if withdrawals.is_empty() {
-            self.mk_other_result()
-        } else {
-            self.mk_routing_update_result(Update::Bulk(withdrawals))
+                self.mk_other_result()
+            } else {
+                self.mk_routing_update_result(Update::Bulk(withdrawals))
             }
         }
     }
@@ -847,7 +856,6 @@ impl BmpState {
     ) -> ProcessingResult {
         let saved_addr = self.source_id();
         let saved_router_id = self.router_id().clone();
-        let saved_state_idx = self.state_idx();
 
         // Attempt to prevent routecore BMP/BGP parsing code panics blowing up
         // process. However, there are two issues with this:
@@ -886,21 +894,8 @@ impl BmpState {
         });
 
         match may_panic_res {
-            Ok(process_res) => {
-                if process_res.next_state.state_idx() != saved_state_idx {
-                    if let Some(reporter) =
-                        process_res.next_state.status_reporter()
-                    {
-                        reporter.change_state(
-                            process_res.next_state.router_id(),
-                            saved_state_idx,
-                            process_res.next_state.state_idx(),
-                        );
-                    }
-                }
+            Ok(process_res) => process_res,
 
-                process_res
-            }
             Err(err) => {
                 let err = format!(
                     "Internal error while processing BMP message: {:?}",

@@ -15,7 +15,9 @@ use smallvec::SmallVec;
 
 use crate::{
     payload::{Payload, Update},
-    units::bmp_tcp_in::state_machine::machine::{PeerState, PeerStates},
+    units::bmp_tcp_in::state_machine::machine::{
+        BmpStateIdx, PeerState, PeerStates,
+    },
 };
 
 use super::initiating::Initiating;
@@ -246,9 +248,9 @@ impl BmpStateDetails<Dumping> {
                     num_pending_eors,
                 );
 
-                let next_state = BmpState::Updating(self.into());
                 return ControlFlow::Break(Self::mk_state_transition_result(
-                    next_state,
+                    BmpStateIdx::Dumping,
+                    BmpState::Updating(self.into()),
                 ));
             }
         }
@@ -272,7 +274,7 @@ impl BmpStateDetails<Dumping> {
             .collect();
         let next_state = BmpState::Terminated(self.into());
         if routes.is_empty() {
-            Self::mk_state_transition_result(next_state)
+            Self::mk_state_transition_result(BmpStateIdx::Dumping, next_state)
         } else {
             Self::mk_final_routing_update_result(
                 next_state,

@@ -1,9 +1,12 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use routecore::bmp::message::{Message as BmpMsg, TerminationMessage};
+use routecore::bmp::message::Message as BmpMsg;
 
-use crate::payload::{RouterId, SourceId};
+use crate::{
+    payload::{RouterId, SourceId},
+    units::bmp_tcp_in::state_machine::machine::BmpStateIdx,
+};
 
 use super::super::{
     machine::{BmpState, BmpStateDetails, Initiable},
@@ -74,8 +77,10 @@ impl BmpStateDetails<Initiating> {
                         // A newly connected router, once initiated, should then
                         // start its initial table dump.
                         if let BmpState::Initiating(state) = res.next_state {
-                            let next_state = BmpState::Dumping(state.into());
-                            Self::mk_state_transition_result(next_state)
+                            Self::mk_state_transition_result(
+                                BmpStateIdx::Initiating,
+                                BmpState::Dumping(state.into()),
+                            )
                         } else {
                             unreachable!(
                                 "We should still be in state Initiating"

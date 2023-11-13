@@ -149,6 +149,13 @@ pub struct RouterBmpMetrics {
 
 impl BmpMetrics {
     // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    const NUM_CONNECTED_ROUTERS_METRIC: Metric = Metric::new(
+        "bmp_num_connected_routers",
+        "the number of BMP routers connected to this unit",
+        MetricType::Gauge,
+        MetricUnit::Total,
+    );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const BMP_STATE_MACHINE_STATE_METRIC: Metric = Metric::new(
         "bmp_state_machine_state",
         "the current state machine state for this monitored router connection",
@@ -263,6 +270,12 @@ impl BmpMetrics {
 
 impl metrics::Source for BmpMetrics {
     fn append(&self, unit_name: &str, target: &mut metrics::Target) {
+        target.append_simple(
+            &Self::NUM_CONNECTED_ROUTERS_METRIC,
+            Some(unit_name),
+            self.routers.len(),
+        );
+
         for (router_id, metrics) in self.routers.guard().iter() {
             let router_id = router_id.as_str();
             append_per_router_metric(

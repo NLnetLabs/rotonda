@@ -21,7 +21,10 @@ pub struct BmpStateMachineStatusReporter {
 }
 
 impl BmpStateMachineStatusReporter {
-    pub fn new<T: Display>(name: T, metrics: Arc<BmpStateMachineMetrics>) -> Self {
+    pub fn new<T: Display>(
+        name: T,
+        metrics: Arc<BmpStateMachineMetrics>,
+    ) -> Self {
         Self {
             name: format!("{}", name),
             metrics,
@@ -85,20 +88,14 @@ impl BmpStateMachineStatusReporter {
     pub fn bgp_update_parse_soft_fail(
         &self,
         router_id: Arc<RouterId>,
-        known_peer: Option<bool>,
         err: String,
         bytes: Option<Bytes>,
     ) {
         let metrics = self.metrics.router_metrics(router_id);
-        if matches!(known_peer, Some(true)) {
-            metrics
-                .num_bgp_updates_with_recoverable_parsing_failures_for_known_peers
-                .fetch_add(1, SeqCst);
-        } else {
-            metrics
-                .num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers
-                .fetch_add(1, SeqCst);
-        }
+
+        metrics
+            .num_bgp_updates_with_recoverable_parsing_failures
+            .fetch_add(1, SeqCst);
 
         metrics.parse_errors.push(err, bytes, true);
     }
@@ -106,20 +103,14 @@ impl BmpStateMachineStatusReporter {
     pub fn bgp_update_parse_hard_fail(
         &self,
         router_id: Arc<RouterId>,
-        known_peer: Option<bool>,
         err: String,
         bytes: Option<Bytes>,
     ) {
         let metrics = self.metrics.router_metrics(router_id);
-        if matches!(known_peer, Some(true)) {
-            metrics
-                .num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers
-                .fetch_add(1, SeqCst);
-        } else {
-            metrics
-                .num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers
-                .fetch_add(1, SeqCst);
-        }
+
+        metrics
+            .num_bgp_updates_with_unrecoverable_parsing_failures
+            .fetch_add(1, SeqCst);
 
         metrics.parse_errors.push(err, bytes, false);
     }

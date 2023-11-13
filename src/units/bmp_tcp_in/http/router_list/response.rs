@@ -159,13 +159,9 @@ impl RouterListApi {
                                 0
                             };
                         let num_soft_parsing_failures = metrics
-                            .num_bgp_updates_with_recoverable_parsing_failures_for_known_peers
-                            .load(SeqCst)
-                            + metrics
-                                .num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers
-                                .load(SeqCst);
-                        let num_hard_parsing_failures = metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers.load(SeqCst) +
-                            metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers.load(SeqCst);
+                            .num_bgp_updates_with_recoverable_parsing_failures
+                            .load(SeqCst);
+                        let num_hard_parsing_failures = metrics.num_bgp_updates_with_unrecoverable_parsing_failures.load(SeqCst);
 
                         formatdoc! {
                             r#"

@@ -123,17 +123,11 @@ impl RouterInfoApi {
 
         let num_msg_issues: usize =
             router_conn_metrics.num_invalid_bmp_messages.load(SeqCst);
-        let num_retried_bgp_updates_known_peer: usize = router_bmp_metrics
-            .num_bgp_updates_with_recoverable_parsing_failures_for_known_peers
+        let num_retried_bgp_updates: usize = router_bmp_metrics
+            .num_bgp_updates_with_recoverable_parsing_failures
             .load(SeqCst);
-        let num_unusable_bgp_updates_known_peer: usize = router_bmp_metrics
-            .num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers
-            .load(SeqCst);
-        let num_retried_bgp_updates_unknown_peer: usize = router_bmp_metrics
-            .num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers
-            .load(SeqCst);
-        let num_unusable_bgp_updates_unknown_peer: usize = router_bmp_metrics
-            .num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers
+        let num_unusable_bgp_updates: usize = router_bmp_metrics
+            .num_bgp_updates_with_unrecoverable_parsing_failures
             .load(SeqCst);
         let num_prefixes: usize =
             router_bmp_metrics.num_stored_prefixes.load(SeqCst);
@@ -266,8 +260,8 @@ impl RouterInfoApi {
             Counters:
                 Problem Msgs : {num_msg_issues} issues (e.g. RFC violation, parsing retried/failed, etc)
                 BGP UPDATEs:
-                    Soft Fail: {num_retried_bgp_updates_known_peer}/{num_retried_bgp_updates_unknown_peer} (known/unknown peer)
-                    Hard Fail: {num_unusable_bgp_updates_known_peer}/{num_unusable_bgp_updates_unknown_peer} (known/unknown peer)
+                    Soft Fail: {num_retried_bgp_updates}
+                    Hard Fail: {num_unusable_bgp_updates}
                 Prefixes     : {num_prefixes}
                 Announce     : {num_announce}
                 Withdraw     : {num_withdraw}

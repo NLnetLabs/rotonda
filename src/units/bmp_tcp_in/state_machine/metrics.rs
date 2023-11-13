@@ -134,14 +134,8 @@ pub struct RouterBmpMetrics {
     pub num_stored_prefixes: Arc<AtomicUsize>,
     pub num_bgp_updates_processed: Arc<AtomicUsize>,
     pub num_bgp_updates_for_unknown_peer: Arc<AtomicUsize>,
-    pub num_bgp_updates_with_recoverable_parsing_failures_for_known_peers:
-        Arc<AtomicUsize>,
-    pub num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers:
-        Arc<AtomicUsize>,
-    pub num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers:
-        Arc<AtomicUsize>,
-    pub num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers:
-        Arc<AtomicUsize>,
+    pub num_bgp_updates_with_recoverable_parsing_failures: Arc<AtomicUsize>,
+    pub num_bgp_updates_with_unrecoverable_parsing_failures: Arc<AtomicUsize>,
     pub num_bgp_updates_filtered: Arc<AtomicUsize>,
     pub num_announcements: Arc<AtomicUsize>,
     pub num_withdrawals: Arc<AtomicUsize>,
@@ -195,30 +189,16 @@ impl BmpStateMachineMetrics {
         MetricUnit::Total,
     );
     // TEST STATUS: [/] makes sense? [/] passes tests?
-    const NUM_BGP_UPDATES_WITH_RECOVERABLE_PARSING_FAILURE_FOR_KNOWN_PEER: Metric = Metric::new(
-        "bmp_state_num_bgp_updates_with_recoverable_parsing_failure_for_known_peer",
-        "the number of BGP UPDATE messages from known peers that could not be parsed with the expected session config",
-        MetricType::Counter,
-        MetricUnit::Total,
-    );
-    // TEST STATUS: [x] makes sense? [ ] passes tests?
-    const NUM_BGP_UPDATES_WITH_RECOVERABLE_PARSING_FAILURE_FOR_UNKNOWN_PEER: Metric = Metric::new(
-        "bmp_state_num_bgp_updates_with_recoverable_parsing_failure_for_unknown_peer",
-        "the number of BGP UPDATE messages from unknown peers that could not be parsed with the expected session config",
-        MetricType::Counter,
-        MetricUnit::Total,
-    );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
-    const NUM_BGP_UPDATES_WITH_UNRECOVERABLE_PARSING_FAILURE_FOR_KNOWN_PEER: Metric = Metric::new(
-        "bmp_state_num_bgp_updates_with_unrecoverable_parsing_failure_for_known_peer",
+    const NUM_BGP_UPDATES_WITH_RECOVERABLE_PARSING_FAILURE: Metric = Metric::new(
+        "bmp_state_num_bgp_updates_with_recoverable_parsing_failure",
         "the number of BGP UPDATE messages from known peers that could not be parsed with the expected or generated session config",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [x] makes sense? [ ] passes tests?
-    const NUM_BGP_UPDATES_WITH_UNRECOVERABLE_PARSING_FAILURE_FOR_UNKNOWN_PEER: Metric = Metric::new(
-        "bmp_state_num_bgp_updates_with_unrecoverable_parsing_failure_for_unknown_peer",
-        "the number of BGP UPDATE messages from unknown peers that could not be parsed with the expected or generated session config",
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    const NUM_BGP_UPDATES_WITH_UNRECOVERABLE_PARSING_FAILURE: Metric = Metric::new(
+        "bmp_state_num_bgp_updates_with_unrecoverable_parsing_failure",
+        "the number of BGP UPDATE messages from known peers that could not be parsed with the expected or generated session config",
         MetricType::Counter,
         MetricUnit::Total,
     );
@@ -321,36 +301,18 @@ impl metrics::Source for BmpStateMachineMetrics {
                 unit_name,
                 target,
                 router_id,
-                Self::NUM_BGP_UPDATES_WITH_RECOVERABLE_PARSING_FAILURE_FOR_KNOWN_PEER,
+                Self::NUM_BGP_UPDATES_WITH_RECOVERABLE_PARSING_FAILURE,
                 metrics
-                    .num_bgp_updates_with_recoverable_parsing_failures_for_known_peers
+                    .num_bgp_updates_with_recoverable_parsing_failures
                     .load(SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 router_id,
-                Self::NUM_BGP_UPDATES_WITH_RECOVERABLE_PARSING_FAILURE_FOR_UNKNOWN_PEER,
+                Self::NUM_BGP_UPDATES_WITH_UNRECOVERABLE_PARSING_FAILURE,
                 metrics
-                    .num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers
-                    .load(SeqCst),
-            );
-            append_per_router_metric(
-                unit_name,
-                target,
-                router_id,
-                Self::NUM_BGP_UPDATES_WITH_UNRECOVERABLE_PARSING_FAILURE_FOR_KNOWN_PEER,
-                metrics
-                    .num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers
-                    .load(SeqCst),
-            );
-            append_per_router_metric(
-                unit_name,
-                target,
-                router_id,
-                Self::NUM_BGP_UPDATES_WITH_UNRECOVERABLE_PARSING_FAILURE_FOR_UNKNOWN_PEER,
-                metrics
-                    .num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers
+                    .num_bgp_updates_with_unrecoverable_parsing_failures
                     .load(SeqCst),
             );
             append_per_router_metric(

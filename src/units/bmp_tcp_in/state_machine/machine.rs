@@ -29,10 +29,7 @@ use routecore::{
     addr::Prefix,
     bgp::{
         message::{
-            nlri::Nlri,
-            open::CapabilityType,
-            update::{AddPath, FourOctetAsn},
-            SessionConfig, UpdateMessage,
+            nlri::Nlri, open::CapabilityType, SessionConfig, UpdateMessage,
         },
         types::{AFI, SAFI},
     },
@@ -621,7 +618,6 @@ where
                     if let Some(err_str) = retry_due_to_err {
                         self.status_reporter.bgp_update_parse_soft_fail(
                             self.router_id.clone(),
-                            Some(true),
                             err_str,
                             Some(Bytes::copy_from_slice(msg.as_ref())),
                         );

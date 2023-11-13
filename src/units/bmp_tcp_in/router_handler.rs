@@ -338,7 +338,7 @@ impl RouterHandler {
                 match res.processing_result {
                     MessageType::InvalidMessage {
                         err,
-                        known_peer,
+                        known_peer: _known_peer,
                         msg_bytes,
                     } => {
                         self.status_reporter.invalid_bmp_message_received(
@@ -349,7 +349,6 @@ impl RouterHandler {
                         {
                             reporter.bgp_update_parse_hard_fail(
                                 res.next_state.router_id(),
-                                known_peer,
                                 err,
                                 msg_bytes,
                             );

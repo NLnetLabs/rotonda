@@ -496,7 +496,7 @@ mod tests {
         let processor = res.next_state;
         assert_metrics(
             &processor,
-            ("Terminated", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+            ("Terminated", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
         );
         //                  ^ 1 connected router
     }
@@ -532,10 +532,10 @@ mod tests {
         let processor = res.next_state;
         assert_metrics(
             &processor,
-            ("Dumping", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]),
+            ("Dumping", [1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]),
         );
         //               ^ 1 connected router
-        //                                                ^ 1 up peer
+        //                                          ^ 1 up peer
     }
 
     #[test]
@@ -570,7 +570,7 @@ mod tests {
         let processor = res.next_state;
         assert_metrics(
             &processor,
-            ("Dumping", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0]),
+            ("Dumping", [1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0]),
         );
     }
 
@@ -613,9 +613,9 @@ mod tests {
         let processor = res.next_state;
         assert_metrics(
             &processor,
-            ("Dumping", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]),
+            ("Dumping", [1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]),
             //           ^ 1 connected router
-            //                                            ^ 1 peer up
+            //                                      ^ 1 peer up
         );
     }
 
@@ -663,10 +663,10 @@ mod tests {
         // Check the metrics
         assert_metrics(
             &processor,
-            ("Dumping", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0]),
+            ("Dumping", [1, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0]),
         );
         //               ^ 1 connected router
-        //                                                ^ 2 up peers
+        //                                          ^ 2 up peers
 
         // When the state machine processes a peer down notification for a peer that announced no routes
         let res =
@@ -681,9 +681,9 @@ mod tests {
         // Check the metrics
         assert_metrics(
             &processor,
-            ("Dumping", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]),
+            ("Dumping", [1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]),
         );
-        //                                                ^ now only 1 peer up
+        //                                          ^ now only 1 peer up
 
         // When the state machine processes a couple of route announcements
         let processor = processor
@@ -704,12 +704,12 @@ mod tests {
         // Check the metrics
         assert_metrics(
             &processor,
-            ("Dumping", [1, 2, 0, 2, 0, 0, 0, 0, 0, 2, 2, 1, 0, 0, 0]),
+            ("Dumping", [1, 2, 0, 2, 0, 0, 0, 2, 2, 1, 0, 0, 0]),
         );
         //                  ^ 2 routes announced
         //                        ^ from 2 BGP UPDATE messages
-        //                                          ^ for 2 prefixes
-        //                   both of which were stored ^
+        //                                    ^ for 2 prefixes
+        //             both of which were stored ^
 
         // And when one of the routes is withdrawn
         let res = processor.process_msg(
@@ -730,11 +730,11 @@ mod tests {
         // Check the metrics
         assert_metrics(
             &processor,
-            ("Dumping", [1, 2, 0, 3, 0, 0, 0, 0, 0, 2, 1, 1, 0, 0, 1]),
+            ("Dumping", [1, 2, 0, 3, 0, 0, 0, 2, 1, 1, 0, 0, 1]),
         );
         //                        ^ 1 more BGP UPDATE processed
-        //                            which contained a withdrawal ^
-        //             and now only 1 prefix is stored ^
+        //                      which contained a withdrawal ^
+        //       and now only 1 prefix is stored ^
 
         // Unless it is a not-before-announced/already-withdrawn route
         let res =
@@ -751,10 +751,10 @@ mod tests {
         // Check the metrics
         assert_metrics(
             &processor,
-            ("Dumping", [1, 2, 0, 4, 0, 0, 0, 0, 0, 2, 1, 1, 0, 0, 2]),
+            ("Dumping", [1, 2, 0, 4, 0, 0, 0, 2, 1, 1, 0, 0, 2]),
         );
         //                        ^ 1 more BGP UPDATE processed
-        //                       which also contained a withdrawal ^
+        //                 which also contained a withdrawal ^
 
         // And when a peer down notification for the other peer is received
         let res =
@@ -825,9 +825,9 @@ mod tests {
         // Check the metrics
         assert_metrics(
             &processor,
-            ("Dumping", [1, 2, 0, 4, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 2]),
+            ("Dumping", [1, 2, 0, 4, 0, 0, 0, 2, 0, 0, 0, 0, 2]),
         );
-        //                                                ^ all peers are down
+        //                                          ^ all peers are down
     }
 
     #[test]
@@ -912,10 +912,10 @@ mod tests {
         let processor = res.next_state;
         assert_metrics(
             &processor,
-            ("Dumping", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]),
+            ("Dumping", [1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]),
         );
         //               ^ 1 connected router
-        //                                                ^ 1 up peer
+        //                                          ^ 1 up peer
     }
 
     #[test]
@@ -1001,8 +1001,6 @@ mod tests {
                     NUM_PREFIXES, // Many announcements seen
                     0,
                     NUM_PREFIXES, // Many BGP UPDATE messages processed
-                    0,
-                    0,
                     0,
                     0,
                     0,
@@ -1136,18 +1134,16 @@ mod tests {
                     0,
                     0,
                     0,
-                    0,
-                    0,
                     NUM_PREFIXES, // Many prefixes received
                     0,            // But no longer stored
                     0,            // And no longer any peers up
                     0,
                     0,
-                    0, // And ZERO withdrawals seen because
-                       // we did not receive a BGP UPDATE
-                       // containing withdrawals but instead
-                       // withdrew the routes internally in
-                       // response to a peer down event.
+                    0,            // And ZERO withdrawals seen because
+                                  // we did not receive a BGP UPDATE
+                                  // containing withdrawals but instead
+                                  // withdrew the routes internally in
+                                  // response to a peer down event.
                 ],
             ),
         );
@@ -1182,11 +1178,11 @@ mod tests {
         let processor = res.next_state;
         assert_metrics(
             &processor,
-            ("Dumping", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0]),
+            ("Dumping", [1, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0]),
         );
         //               ^ 1 connected router
-        //                                                ^ 1 up peer
-        //                          and the peer is EoR capable ^
+        //                                          ^ 1 up peer
+        //                    and the peer is EoR capable ^
 
         // And when a route announcement is received
         let res = processor.process_msg(Utc::now(), route_mon_msg_buf, None);
@@ -1205,13 +1201,13 @@ mod tests {
         let processor = res.next_state;
         assert_metrics(
             &processor,
-            ("Dumping", [1, 1, 0, 1, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 0]),
+            ("Dumping", [1, 1, 0, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0]),
         );
         //                  ^ 1 announcement was received
         //                        ^ 1 BGP UPDATE was processed
-        //                    1 prefix was received ^
-        //                     and 1 prefix was stored ^
-        //                     and one peer has pending EoRs ^
+        //              1 prefix was received ^
+        //               and 1 prefix was stored ^
+        //            and one peer has pending EoRs ^
 
         // And when an EoR is received
         let res = processor.process_msg(Utc::now(), eor_msg_buf, None);
@@ -1234,11 +1230,11 @@ mod tests {
         let processor = res.next_state;
         assert_metrics(
             &processor,
-            ("Updating", [1, 1, 0, 2, 0, 0, 0, 0, 0, 1, 1, 1, 0, 1, 0]),
+            ("Updating", [1, 1, 0, 2, 0, 0, 0, 1, 1, 1, 0, 1, 0]),
         );
         //    ^ The phase changed
         //                         ^ We received another BGP UPDATE
-        //                And there are no more peers dumping ^
+        //               And no peers have pending EoRs ^
     }
 
     #[test]
@@ -1267,11 +1263,11 @@ mod tests {
         let processor = res.next_state;
         assert_metrics(
             &processor,
-            ("Dumping", [1, 0, 0, 1, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0]),
+            ("Dumping", [1, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 0]),
         );
         //                  ^ 0 announcements because the msg was rejected!
         //                        ^ 1 BGP UPDATE was processed
-        //                                 ^ 1 BGP UPDATE was from an unknown peer
+        //                              ^ 1 BGP UPDATE was from an unknown peer
 
         // TODO: There isn't a BMP state machine metric that reflects that the above occurred.
         // Should there be? Is there a bmp-tcp-in unit metric that reflects it?
@@ -1339,7 +1335,8 @@ mod tests {
         // TODO: There isn't a BMP state machine metric that reflects that the above occurred.
         // Should there be? Is there a bmp-tcp-in unit metric that reflects it?
 
-        let metrics = res.next_state.status_reporter().unwrap().metrics().unwrap();
+        let metrics =
+            res.next_state.status_reporter().unwrap().metrics().unwrap();
         let actual = query_metrics(&metrics);
         dbg!(&actual);
     }
@@ -1683,7 +1680,7 @@ mod tests {
 
     fn query_metrics(
         metrics: &Arc<dyn crate::metrics::Source>,
-    ) -> (String, [usize; 15]) {
+    ) -> (String, [usize; 13]) {
         let metrics = get_testable_metrics_snapshot(metrics);
         let label = ("router", "test-router");
         (
@@ -1693,11 +1690,9 @@ mod tests {
                 metrics.with_label::<usize>("bmp_state_num_announcements", label),
                 metrics.with_label::<usize>("bmp_state_num_bgp_updates_filtered", label),
                 metrics.with_label::<usize>("bmp_state_num_bgp_updates_processed", label),
-                metrics.with_label::<usize>("bmp_state_num_bgp_updates_with_recoverable_parsing_failure_for_known_peer", label),
-                metrics.with_label::<usize>("bmp_state_num_bgp_updates_with_recoverable_parsing_failure_for_unknown_peer", label),
+                metrics.with_label::<usize>("bmp_state_num_bgp_updates_with_recoverable_parsing_failure", label),
                 metrics.with_label::<usize>("bmp_state_num_bgp_updates_with_unknown_peer", label),
-                metrics.with_label::<usize>("bmp_state_num_bgp_updates_with_unrecoverable_parsing_failure_for_known_peer", label),
-                metrics.with_label::<usize>("bmp_state_num_bgp_updates_with_unrecoverable_parsing_failure_for_unknown_peer", label),
+                metrics.with_label::<usize>("bmp_state_num_bgp_updates_with_unrecoverable_parsing_failure", label),
                 metrics.with_label::<usize>("bmp_state_num_received_prefixes", label),
                 metrics.with_label::<usize>("bmp_state_num_stored_prefixes", label),
                 metrics.with_label::<usize>("bmp_state_num_up_peers", label),
@@ -1708,7 +1703,7 @@ mod tests {
         )
     }
 
-    fn assert_metrics(processor: &BmpState, expected: (&str, [usize; 15])) {
+    fn assert_metrics(processor: &BmpState, expected: (&str, [usize; 13])) {
         let metrics = processor.status_reporter().unwrap().metrics().unwrap();
         let actual = query_metrics(&metrics);
         let mut expected = (expected.0.to_string(), expected.1);

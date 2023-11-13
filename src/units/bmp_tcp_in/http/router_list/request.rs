@@ -228,13 +228,11 @@ impl RouterListApi {
                                 }
 
                                 Some("soft_parse_errors") => {
-                                    metrics.num_bgp_updates_with_recoverable_parsing_failures_for_known_peers.load(SeqCst) +
-                                    metrics.num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers.load(SeqCst)
+                                    metrics.num_bgp_updates_with_recoverable_parsing_failures.load(SeqCst)
                                 }
 
                                 Some("hard_parse_errors") => {
-                                    metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers.load(SeqCst) +
-                                    metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers.load(SeqCst)
+                                    metrics.num_bgp_updates_with_unrecoverable_parsing_failures.load(SeqCst)
                                 }
 
                                 _ => unreachable!()

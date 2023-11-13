@@ -417,7 +417,7 @@ impl Gate {
                 GateCommand::AttachClone { clone_id, tx } => {
                     match &self.state {
                         GateState::Normal(state) => {
-                            let _ = state.clone_senders.insert(clone_id, tx);
+                            state.clone_senders.insert(clone_id, tx);
                         }
                         GateState::Clone(_) => unreachable!(),
                     }
@@ -895,7 +895,7 @@ impl Clone for Gate {
         // Ask the real gate to add our command sender to the set it sends
         // command notifications to
         let cloned_name = self.name.clone();
-        let cloned_id = self.id().clone();
+        let copied_id = self.id();
         crate::tokio::spawn("gate-attach-clone", async move {
             let saved_clone_id = clone_id;
             if let Err(_err) = parent_command_sender
@@ -905,7 +905,7 @@ impl Clone for Gate {
                 let clone_txt = format!("{} clone of ", saved_clone_id);
                 error!(
                     "Gate[{} ({}{})]: Failed to attach clone to parent {}",
-                    cloned_name, clone_txt, cloned_id, clone_id
+                    cloned_name, clone_txt, copied_id, clone_id
                 );
             }
         });

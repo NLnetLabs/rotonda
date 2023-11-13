@@ -539,7 +539,7 @@ impl RibUnitRunner {
                                         arc_self
                                             .status_reporter
                                             .filter_name_changed(
-                                                &old_filter_name,
+                                                old_filter_name,
                                                 Some(&new_filter_name),
                                             );
                                         arc_self
@@ -554,7 +554,7 @@ impl RibUnitRunner {
                                         arc_self
                                             .status_reporter
                                             .filter_name_changed(
-                                                &old_filter_name,
+                                                old_filter_name,
                                                 None,
                                             );
                                         arc_self.filter_name.store(

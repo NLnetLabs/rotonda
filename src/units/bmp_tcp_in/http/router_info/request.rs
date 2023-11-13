@@ -34,6 +34,7 @@ pub struct RouterInfoApi {
 }
 
 impl RouterInfoApi {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         http_resources: http::Resources,
         http_api_path: Arc<String>,

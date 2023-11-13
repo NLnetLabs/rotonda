@@ -189,7 +189,7 @@ pub struct RawMetricKey {
     pub name: String,
     pub unit: MetricUnit,
     pub suffix: Option<String>,
-    pub label: Option<(String, String)>,
+    pub labels: Vec<(String, String)>,
 }
 
 #[cfg(test)]
@@ -203,7 +203,7 @@ impl RawMetricKey {
             name,
             unit,
             suffix,
-            label: None,
+            labels: Default::default(),
         }
     }
 
@@ -211,13 +211,13 @@ impl RawMetricKey {
         name: String,
         unit: MetricUnit,
         suffix: Option<String>,
-        label: (String, String),
+        labels: Vec<(String, String)>,
     ) -> Self {
         Self {
             name,
             unit,
             suffix,
-            label: Some(label),
+            labels,
         }
     }
 }
@@ -240,14 +240,14 @@ impl Ord for RawMetricKey {
             Ordering::Equal => {}
             ord => return ord,
         }
-        self.label.cmp(&other.label)
+        self.labels.cmp(&other.labels)
     }
 }
 
 /// Support creation of RawMetricKey from a '|' separated string of metric
 /// identification components. Currently supports two source formats:
 ///   - |name|unit type|suffix|
-///   - |name|unit type|suffix|labelkey=labelvalue|
+///   - |name|unit type|suffix|labelkey=labelvalue,...|
 #[cfg(test)]
 impl TryFrom<String> for RawMetricKey {
     type Error = String;
@@ -266,11 +266,10 @@ impl TryFrom<String> for RawMetricKey {
                 match parts.len() {
                     3 => Ok(RawMetricKey::named(name, unit, suffix)),
                     4 => {
-                        let label = {
-                            let (lhs, rhs) = parts[3].split_once('=').ok_or(format!("Expected label to be of the form k=v in '{value}'"))?;
-                            (lhs.to_string(), rhs.to_string())
-                        };
-                        Ok(RawMetricKey::labelled(name, unit, suffix, label))
+                        let labels = parts[3].split(',').filter_map(|v| {
+                            v.split_once('=').map(|(lhs, rhs)| (lhs.to_string(), rhs.to_string()))
+                        }).collect::<Vec<_>>();
+                        Ok(RawMetricKey::labelled(name, unit, suffix, labels))
                     }
                     _ => unreachable!(),
                 }
@@ -332,7 +331,7 @@ impl Target {
     {
         self.raw
             .iter()
-            .find(|(k, _v)| k.name == name && k.label.is_none())
+            .find(|(k, _v)| k.name == name && k.labels.is_empty())
             .map(|(_k, v)| v.clone())
             .unwrap()
             .parse()
@@ -344,20 +343,38 @@ impl Target {
         T: std::str::FromStr,
         <T as std::str::FromStr>::Err: Debug,
     {
-        self.raw
+        let label = (label.0.to_string(), label.1.to_string());
+        match self.raw
             .iter()
-            .find(|(k, _v)| {
-                k.name == name
-                    && k.label
-                        .as_ref()
-                        .filter(|(lk, lv)| {
-                            (lk.as_str(), lv.as_str()) == label
-                        })
-                        .is_some()
-            })
-            .map(|(_k, v)| v.clone())
-            .unwrap()
-            .parse()
+            .find(|(k, _v)| k.name == name && k.labels.contains(&label))
+            .map(|(_k, v)| v.clone()) {
+                Some(found) => found.parse(),
+                None => panic!("No metric {name} with label {label:?} found.\nAvailable metrics are:\n{:#?}", self.raw),
+            }
+    }
+
+    #[cfg(test)]
+    pub fn with_labels<T>(&self, name: &str, labels: &[(&str, &str)]) -> T
+    where
+        T: std::str::FromStr,
+        <T as std::str::FromStr>::Err: Debug,
+    {
+        'outer: for (k, v) in self.raw.iter().filter(|(k, _v)| k.name == name)
+        {
+            for needle in labels {
+                if !k
+                    .labels
+                    .iter()
+                    .map(|(name, value)| (name.as_str(), value.as_str()))
+                    .any(|haystack| &haystack == needle)
+                {
+                    continue 'outer;
+                }
+            }
+
+            return v.clone().parse();
+        }
+        panic!("No metric {name} found with {labels:?}\nAvailable metrics are:\n{:#?}", self.raw);
     }
 
     /// Converts the target into a string with the assembled output.
@@ -599,20 +616,21 @@ impl<'b, 'a: 'b> Records<'a> {
             }
             #[cfg(test)]
             OutputFormat::Test => {
-                for (label_name, label_value) in labels {
-                    let key = format!(
-                        "{}|{}|{}|{}={}",
-                        self.metric.name,
-                        self.metric.unit,
-                        suffix.unwrap_or("None"),
-                        label_name,
-                        label_value
-                    );
-                    self.target.raw.insert(
-                        key.try_into().unwrap(),
-                        value.clone().into(),
-                    );
-                }
+                let key = format!(
+                    "{}|{}|{}|{}",
+                    self.metric.name,
+                    self.metric.unit,
+                    suffix.unwrap_or("None"),
+                    labels
+                        .iter()
+                        .map(|(ln, lv)| format!("{ln}={lv}"))
+                        .collect::<Vec<_>>()
+                        .join(",")
+                );
+
+                self.target
+                    .raw
+                    .insert(key.try_into().unwrap(), value.into());
             }
         }
     }

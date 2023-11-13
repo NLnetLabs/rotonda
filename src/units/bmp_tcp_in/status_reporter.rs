@@ -87,7 +87,7 @@ impl BmpTcpInStatusReporter {
             .fetch_add(1, SeqCst);
     }
 
-    pub fn bmp_message_received(
+    pub fn message_received(
         &self,
         router_id: Arc<RouterId>,
         rfc_7854_msg_type_code: u8,
@@ -99,11 +99,19 @@ impl BmpTcpInStatusReporter {
             .fetch_add(1, SeqCst);
     }
 
-    pub fn bmp_message_processed(&self, router_id: Arc<RouterId>) {
+    pub fn message_processed(&self, router_id: Arc<RouterId>) {
         sr_log!(trace: self, "BMP message processed from router '{}'", router_id);
         self.metrics
             .router_metrics(router_id)
             .num_bmp_messages_processed
+            .fetch_add(1, SeqCst);
+    }
+
+    pub fn message_processing_failure(&self, router_id: Arc<RouterId>) {
+        sr_log!(trace: self, "BMP message processing failed for message from router '{}'", router_id);
+        self.metrics
+            .router_metrics(router_id)
+            .num_invalid_bmp_messages
             .fetch_add(1, SeqCst);
     }
 

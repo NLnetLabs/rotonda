@@ -453,11 +453,14 @@ mod tests {
         let mock_listener_factory_cb = move |_addr| {
             let old_count = accept_count_clone.fetch_add(1, Ordering::SeqCst);
             if old_count < 1 {
-                Ok(MockTcpListener::new(|| async {
-                    Err(std::io::ErrorKind::ConnectionRefused.into())
-                }))
-            } else {
                 Err(std::io::ErrorKind::PermissionDenied.into())
+            } else {
+                Ok(MockTcpListener::new(|| {
+                    std::future::ready(Ok((
+                        MockTcpStreamWrapper,
+                        "1.2.3.4:12345".parse().unwrap(),
+                    )))
+                }))
             }
         };
 

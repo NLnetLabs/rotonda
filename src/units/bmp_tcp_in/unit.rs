@@ -22,8 +22,8 @@ use crate::{
     common::{
         frim::FrimMap,
         net::{
-            StandardTcpListenerFactory, TcpListener, TcpListenerFactory,
-            TcpStreamWrapper,
+            StandardTcpListenerFactory, StandardTcpStream, TcpListener,
+            TcpListenerFactory, TcpStreamWrapper,
         },
         roto::{FilterName, RotoScripts},
         status_reporter::Chainable,
@@ -207,7 +207,9 @@ impl BmpTcpIn {
             tracer,
             tracing_mode,
         )
-        .run(Arc::new(StandardTcpListenerFactory))
+        .run::<_, _, StandardTcpStream, BmpTcpInRunner>(Arc::new(
+            StandardTcpListenerFactory,
+        ))
         .await?;
 
         Ok(())
@@ -223,6 +225,20 @@ impl BmpTcpIn {
 }
 
 //-------- BmpTcpInRunner ----------------------------------------------------
+
+trait ConfigAcceptor {
+    fn accept_config(
+        child_name: String,
+        router_handler: RouterHandler,
+        tcp_stream: impl TcpStreamWrapper,
+        router_addr: SocketAddr,
+        source_id: &SourceId,
+        router_states: &Arc<
+            FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
+        >, // Option is never None, instead Some is take()'n and replace()'d.
+        router_info: &Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
+    );
+}
 
 struct BmpTcpInRunner {
     component: Arc<RwLock<Component>>,
@@ -299,7 +315,9 @@ impl BmpTcpInRunner {
             state_machine_metrics: Default::default(),
             status_reporter: Default::default(),
             roto_scripts: Default::default(),
-            router_id_template: Default::default(),
+            router_id_template: Arc::new(ArcSwap::from_pointee(
+                BmpTcpIn::default_router_id_template(),
+            )),
             filter_name: Default::default(),
             tracer: Default::default(),
             tracing_mode: Default::default(),
@@ -308,7 +326,7 @@ impl BmpTcpInRunner {
         (runner, gate_agent)
     }
 
-    async fn run<T, U, V>(
+    async fn run<T, U, V, F>(
         mut self,
         listener_factory: Arc<T>,
     ) -> Result<(), crate::comms::Terminated>
@@ -316,6 +334,7 @@ impl BmpTcpInRunner {
         T: TcpListenerFactory<U>,
         U: TcpListener<V>,
         V: TcpStreamWrapper,
+        F: ConfigAcceptor,
     {
         // Loop until terminated, accepting TCP connections from routers and
         // spawning tasks to handle them.
@@ -407,23 +426,15 @@ impl BmpTcpInRunner {
                             self.bmp_metrics.clone(),
                         );
 
-                        let router_states = self.router_states.clone();
-                        let router_info = self.router_info.clone();
-
-                        // SAFETY: StandardTcpStream::into_inner() always returns Ok(...)
-                        let tcp_stream = tcp_stream.into_inner().unwrap();
-
-                        crate::tokio::spawn(&child_name, async move {
-                            router_handler
-                                .run(
-                                    tcp_stream,
-                                    client_addr,
-                                    source_id.clone(),
-                                )
-                                .await;
-                            router_states.remove(&source_id);
-                            router_info.remove(&source_id);
-                        });
+                        F::accept_config(
+                            child_name,
+                            router_handler,
+                            tcp_stream,
+                            client_addr,
+                            &source_id,
+                            &self.router_states,
+                            &self.router_info,
+                        );
                     }
                     ControlFlow::Continue(Err(_err)) => break 'inner,
                     ControlFlow::Break(Terminated) => return Err(Terminated),
@@ -602,6 +613,35 @@ impl BmpTcpInRunner {
     }
 }
 
+impl ConfigAcceptor for BmpTcpInRunner {
+    fn accept_config(
+        child_name: String,
+        router_handler: RouterHandler,
+        tcp_stream: impl TcpStreamWrapper,
+        client_addr: SocketAddr,
+        source_id: &SourceId,
+        router_states: &Arc<
+            FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
+        >, // Option is never None, instead Some is take()'n and replace()'d.
+        router_info: &Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
+    ) {
+        let source_id = source_id.clone();
+        let router_states = router_states.clone();
+        let router_info = router_info.clone();
+
+        // SAFETY: StandardTcpStream::into_inner() always returns Ok(...)
+        let tcp_stream = tcp_stream.into_inner().unwrap();
+
+        crate::tokio::spawn(&child_name, async move {
+            router_handler
+                .run(tcp_stream, client_addr, source_id.clone())
+                .await;
+            router_states.remove(&source_id);
+            router_info.remove(&source_id);
+        });
+    }
+}
+
 impl std::fmt::Debug for BmpTcpInRunner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("BmpTcpInRunner").finish()
@@ -612,28 +652,42 @@ impl std::fmt::Debug for BmpTcpInRunner {
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::Arc, time::Duration};
+    use std::{
+        net::SocketAddr,
+        sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        },
+        time::Duration,
+    };
 
-    use tokio::time::timeout;
+    use tokio::{sync::Mutex, time::timeout};
 
     use crate::{
-        common::status_reporter::AnyStatusReporter,
-        comms::{Gate, GateAgent},
+        common::{
+            frim::FrimMap, net::TcpStreamWrapper,
+            status_reporter::AnyStatusReporter,
+        },
+        comms::{Gate, GateAgent, Terminated},
+        payload::SourceId,
         tests::util::{
             internal::{enable_logging, get_testable_metrics_snapshot},
-            net::{MockTcpListener, MockTcpListenerFactory},
+            net::{
+                MockTcpListener, MockTcpListenerFactory, MockTcpStreamWrapper,
+            },
         },
         units::{
             bmp_tcp_in::{
-                metrics::BmpTcpInMetrics,
-                status_reporter::BmpTcpInStatusReporter,
+                metrics::BmpTcpInMetrics, router_handler::RouterHandler,
+                state_machine::BmpState,
+                status_reporter::BmpTcpInStatusReporter, types::RouterInfo,
                 unit::BmpTcpInRunner,
             },
             Unit,
         },
     };
 
-    use super::BmpTcpIn;
+    use super::{BmpTcpIn, ConfigAcceptor};
 
     #[test]
     fn listen_is_required() {
@@ -662,13 +716,15 @@ mod tests {
     async fn test_reconfigured_bind_address() {
         // Given an instance of the BMP TCP input unit that is configured to
         // listen for incoming connections on "localhost:8080":
-        let (runner, agent) = setup_test("1.2.3.4:12345");
+        let (runner, agent, _) = setup_test("1.2.3.4:12345");
         let status_reporter = runner.status_reporter.clone();
         let wait_forever =
             |_addr| Ok(MockTcpListener::new(|| std::future::pending()));
         let mock_listener_factory =
             Arc::new(MockTcpListenerFactory::new(wait_forever));
-        let task = runner.run(mock_listener_factory.clone());
+        let task = runner.run::<_, _, _, NoOpConfigAcceptor>(
+            mock_listener_factory.clone(),
+        );
         let join_handle = tokio::task::spawn(task);
 
         // Allow time for bind attempts to occur
@@ -727,13 +783,15 @@ mod tests {
     async fn test_unchanged_bind_address() {
         // Given an instance of the BMP TCP input unit that is configured to
         // listen for incoming connections on "localhost:8080":
-        let (runner, agent) = setup_test("127.0.0.1:11019");
+        let (runner, agent, _) = setup_test("127.0.0.1:11019");
         let status_reporter = runner.status_reporter.clone();
         let wait_forever =
             |_addr| Ok(MockTcpListener::new(|| std::future::pending()));
         let mock_listener_factory =
             Arc::new(MockTcpListenerFactory::new(wait_forever));
-        let task = runner.run(mock_listener_factory.clone());
+        let task = runner.run::<_, _, _, NoOpConfigAcceptor>(
+            mock_listener_factory.clone(),
+        );
         let join_handle = tokio::task::spawn(task);
 
         // Allow time for bind attempts to occur
@@ -798,11 +856,13 @@ mod tests {
                 Err(std::io::ErrorKind::PermissionDenied.into())
             }
         };
-        let (runner, agent) = setup_test("1.2.3.4:12345");
+        let (runner, agent, _) = setup_test("1.2.3.4:12345");
         let status_reporter = runner.status_reporter.clone();
         let mock_listener_factory =
             Arc::new(MockTcpListenerFactory::new(fail_on_bad_addr));
-        let task = runner.run(mock_listener_factory.clone());
+        let task = runner.run::<_, _, _, NoOpConfigAcceptor>(
+            mock_listener_factory.clone(),
+        );
         let join_handle = tokio::task::spawn(task);
 
         // Allow time for bind attempts to occur
@@ -855,9 +915,104 @@ mod tests {
         );
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore = "TCP accept panics and so the unit never responds to the terminate command."]
+    async fn retry_with_backoff_on_accept_error() {
+        let accept_count = Arc::new(AtomicUsize::new(0));
+        let accept_count_clone = accept_count.clone();
+
+        let mock_listener_factory_cb = move |_addr| {
+            let old_count = accept_count_clone.fetch_add(1, Ordering::SeqCst);
+            if old_count < 1 {
+                Err(std::io::ErrorKind::PermissionDenied.into())
+            } else {
+                Ok(MockTcpListener::new(|| {
+                    std::future::ready(Ok((
+                        MockTcpStreamWrapper,
+                        "1.2.3.4:12345".parse().unwrap(),
+                    )))
+                }))
+            }
+        };
+
+        let (runner, gate_agent, status_reporter) =
+            setup_test("1.2.3.4:12345");
+        let mock_listener_factory =
+            Arc::new(MockTcpListenerFactory::new(mock_listener_factory_cb));
+        let task = runner.run::<_, _, _, NoOpConfigAcceptor>(
+            mock_listener_factory.clone(),
+        );
+        let join_handle = tokio::task::spawn(task);
+
+        loop {
+            let metrics = get_testable_metrics_snapshot(
+                &status_reporter.metrics().unwrap(),
+            );
+            let count = metrics
+                .with_name::<usize>("bmp_tcp_in_connection_accepted_count");
+            if count > 0 {
+                break;
+            }
+        }
+
+        gate_agent.terminate().await;
+
+        let res = join_handle.await.unwrap();
+        assert_eq!(res, Err(Terminated));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn connection_accepted_count_metric_should_work() {
+        let conn_count = Arc::new(AtomicUsize::new(0));
+        let mock_listener_factory_cb = {
+            let conn_count = conn_count.clone();
+            move |_addr| {
+                let conn_count = conn_count.clone();
+                Ok(MockTcpListener::new(move || {
+                    std::future::ready({
+                        let old_count =
+                            conn_count.fetch_add(1, Ordering::SeqCst);
+                        if old_count < 1 {
+                            Ok((
+                                MockTcpStreamWrapper,
+                                "1.2.3.4:5".parse().unwrap(),
+                            ))
+                        } else {
+                            Err(std::io::ErrorKind::PermissionDenied.into())
+                        }
+                    })
+                }))
+            }
+        };
+
+        let (runner, gate_agent, status_reporter) = setup_test("1.2.3.4:5");
+        let mock_listener_factory =
+            Arc::new(MockTcpListenerFactory::new(mock_listener_factory_cb));
+        let task = runner.run::<_, _, _, NoOpConfigAcceptor>(
+            mock_listener_factory.clone(),
+        );
+        let join_handle = tokio::task::spawn(task);
+
+        let mut count = 0;
+        while count != 1 {
+            let metrics = get_testable_metrics_snapshot(
+                &status_reporter.metrics().unwrap(),
+            );
+            count = metrics
+                .with_name::<usize>("bmp_tcp_in_connection_accepted_count");
+        }
+
+        gate_agent.terminate().await;
+
+        let res = join_handle.await.unwrap();
+        assert_eq!(res, Err(Terminated));
+    }
+
     //-------- Test helpers --------------------------------------------------
 
-    fn setup_test(listen: &str) -> (BmpTcpInRunner, GateAgent) {
+    fn setup_test(
+        listen: &str,
+    ) -> (BmpTcpInRunner, GateAgent, Arc<BmpTcpInStatusReporter>) {
         enable_logging("trace");
 
         let (gate, gate_agent) = Gate::new(0);
@@ -873,7 +1028,7 @@ mod tests {
             bmp_metrics: Default::default(),
             bmp_in_metrics: metrics,
             state_machine_metrics: Default::default(),
-            status_reporter,
+            status_reporter: status_reporter.clone(),
             roto_scripts: Default::default(),
             router_id_template: Default::default(),
             filter_name: Default::default(),
@@ -881,6 +1036,23 @@ mod tests {
             tracer: Default::default(),
         };
 
-        (runner, gate_agent)
+        (runner, gate_agent, status_reporter)
+    }
+
+    struct NoOpConfigAcceptor;
+
+    impl ConfigAcceptor for NoOpConfigAcceptor {
+        fn accept_config(
+            _child_name: String,
+            _router_handler: RouterHandler,
+            _tcp_stream: impl TcpStreamWrapper,
+            _router_addr: SocketAddr,
+            _source_id: &SourceId,
+            _router_states: &Arc<
+                FrimMap<SourceId, Arc<Mutex<Option<BmpState>>>>,
+            >, // Option is never None, instead Some is take()'n and replace()'d.
+            _router_info: &Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
+        ) {
+        }
     }
 }

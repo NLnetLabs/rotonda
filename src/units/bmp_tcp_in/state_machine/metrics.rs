@@ -152,35 +152,35 @@ pub struct RouterBmpMetrics {
 }
 
 impl BmpStateMachineMetrics {
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_CONNECTED_ROUTERS_METRIC: Metric = Metric::new(
         "bmp_num_connected_routers",
         "the number of BMP routers connected to this unit",
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const BMP_STATE_MACHINE_STATE_METRIC: Metric = Metric::new(
         "bmp_state_machine_state",
         "the current state machine state for this monitored router connection",
         MetricType::Text,
         MetricUnit::State,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_RECEIVED_PREFIXES_METRIC: Metric = Metric::new(
         "bmp_state_num_received_prefixes",
         "the number of prefixes received from this router",
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_STORED_PREFIXES_METRIC: Metric = Metric::new(
         "bmp_state_num_stored_prefixes",
         "the number of prefixes stored for this router",
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_BGP_UPDATES_PROCESSED_METRIC: Metric = Metric::new(
         "bmp_state_num_bgp_updates_processed",
         "the number of processed BGP UPDATE messages",
@@ -194,7 +194,7 @@ impl BmpStateMachineMetrics {
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_BGP_UPDATES_WITH_RECOVERABLE_PARSING_FAILURE_FOR_KNOWN_PEER: Metric = Metric::new(
         "bmp_state_num_bgp_updates_with_recoverable_parsing_failure_for_known_peer",
         "the number of BGP UPDATE messages from known peers that could not be parsed with the expected session config",
@@ -222,42 +222,42 @@ impl BmpStateMachineMetrics {
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [ ] passes tests?
     const NUM_BGP_UPDATES_FILTERED: Metric = Metric::new(
         "bmp_state_num_bgp_updates_filtered",
         "the number of BGP UPDATE messages filtered out by accept/reject rules",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_ANNOUNCEMENTS_METRIC: Metric = Metric::new(
         "bmp_state_num_announcements",
         "the number of route announcements seen from this router",
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_WITHDRAWALS_METRIC: Metric = Metric::new(
         "bmp_state_num_withdrawals",
         "the number of route withdrawals seen from this router",
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_PEERS_UP_METRIC: Metric = Metric::new(
         "bmp_state_num_up_peers",
         "the number of peers connected and in the up state",
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_PEERS_UP_EOR_CAPABLE_METRIC: Metric = Metric::new(
         "bmp_state_num_up_peers_eor_capable",
         "the number of up peers that support the graceful restart capability and thus are expected to signal End-of-Rib",
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_PEERS_UP_WITH_PENDING_EORS_METRIC: Metric = Metric::new(
         "bmp_state_num_up_peers_with_pending_eors",
         "the number of up peers with at least one pending End-of-RIB signal",

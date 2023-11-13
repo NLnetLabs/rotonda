@@ -440,9 +440,14 @@ fn peer_down_without_peer_up() {
         "PeerDownNotification received for peer that was not 'up'",
     );
 
-    let metrics =
-        res.next_state.status_reporter().unwrap().metrics().unwrap();
-    dbg!(get_testable_metrics_snapshot(&metrics));
+    // Check the metrics
+    let processor = res.next_state;
+    assert_metrics(
+        &processor,
+        ("Dumping", [1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0]),
+    );
+    //               ^ 1 connected router
+    //                           ^ 1 unprocessable BMP message
 }
 
 #[test]

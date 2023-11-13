@@ -121,6 +121,10 @@ impl BmpMetrics {
             Arc::new(metrics)
         })
     }
+
+    pub fn remove_router_metrics(&self, router_id: &Arc<RouterId>) {
+        self.routers.remove(router_id);
+    }
 }
 
 #[derive(Debug, Default)]

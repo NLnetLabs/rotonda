@@ -438,12 +438,22 @@ impl BmpTcpInRunner {
                             self.tracer.clone(),
                             self.tracing_mode.clone(),
                             last_msg_at,
+                            self.bmp_metrics.clone(),
                         );
+
+                        let router_states = self.router_states.clone();
+                        let router_info = self.router_info.clone();
 
                         crate::tokio::spawn(&child_name, async move {
                             router_handler
-                                .run(tcp_stream, client_addr, source_id)
-                                .await
+                                .run(
+                                    tcp_stream,
+                                    client_addr,
+                                    source_id.clone(),
+                                )
+                                .await;
+                            router_states.remove(&source_id);
+                            router_info.remove(&source_id);
                         });
                     }
                     ControlFlow::Continue(Err(_err)) => break 'inner,
@@ -565,11 +575,6 @@ impl BmpTcpInRunner {
             child_status_reporter,
             metrics,
         )
-    }
-
-    fn router_disconnected(&self, source_id: &SourceId) {
-        self.router_states.remove(source_id);
-        self.router_info.remove(source_id);
     }
 
     // TODO: Should we tear these individual API endpoints down when the

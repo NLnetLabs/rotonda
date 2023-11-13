@@ -133,8 +133,8 @@ impl BmpTcpInMetrics {
             .or_insert_with(Default::default)
     }
 
-    pub fn remove_router(&self, router_id: Arc<RouterId>) {
-        self.routers.remove(&router_id);
+    pub fn remove_router(&self, router_id: &Arc<RouterId>) {
+        self.routers.remove(router_id);
     }
 }
 

@@ -51,8 +51,18 @@ impl BmpTcpInStatusReporter {
         sr_log!(warn: self, "Error while listening for connections: {}", err);
     }
 
-    pub fn router_connection_lost(&self, router_id: Arc<RouterId>) {
+    pub fn router_connection_lost(&self, router_id: &Arc<RouterId>) {
         sr_log!(debug: self, "Router connection lost: {}", router_id);
+        self.metrics.connection_lost_count.fetch_add(1, SeqCst);
+        self.metrics.remove_router(router_id);
+    }
+
+    pub fn router_connection_aborted<T: Display>(
+        &self,
+        router_id: &Arc<RouterId>,
+        err: T,
+    ) {
+        sr_log!(warn: self, "Router connection aborted: {}. Reason: {}", router_id, err);
         self.metrics.connection_lost_count.fetch_add(1, SeqCst);
         self.metrics.remove_router(router_id);
     }

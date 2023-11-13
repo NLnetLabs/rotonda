@@ -230,14 +230,20 @@ impl RouterHandler {
                         } else {
                             None
                         };
-                        self.process_msg(
+                        if let Err((router_id, err)) = self
+                            .process_msg(
                                 received,
                             router_addr,
                             source_id.clone(),
                             bmp_msg,
                             trace_id,
                         )
-                        .await;
+                            .await
+                        {
+                            self.status_reporter
+                                .router_connection_aborted(&router_id, err);
+                            break;
+                        }
                     }
                 }
             }
@@ -246,7 +252,7 @@ impl RouterHandler {
         let bmp_state_lock = self.state_machine.lock().await;
 
         self.status_reporter.router_connection_lost(
-            bmp_state_lock.as_ref().unwrap().router_id(),
+            &bmp_state_lock.as_ref().unwrap().router_id(),
         );
 
         // Notify downstream units that the data stream for this
@@ -266,7 +272,7 @@ impl RouterHandler {
         source_id: SourceId,
         msg: Message<Bytes>,
         trace_id: Option<u8>,
-    ) {
+    ) -> Result<(), (Arc<RouterId>, String)> {
         let mut bmp_state_lock = self.state_machine.lock().await;
 
         // SAFETY: Each connection should always have a state machine.
@@ -283,11 +289,11 @@ impl RouterHandler {
         self.status_reporter
             .bmp_message_received(bmp_state.router_id());
 
-        let next_state = if let Ok(ControlFlow::Continue(FilterOutput {
+        let next_state = if let ControlFlow::Continue(FilterOutput {
             south,
             east,
             received,
-        })) = Self::VM
+        }) = Self::VM
                     .with(|vm| {
                 let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(
                                 Arc::new(BytesRecord(msg)),
@@ -304,7 +310,7 @@ impl RouterHandler {
                     .map_err(|err| {
                         self.status_reporter.message_filtering_failure(&err);
                 (bmp_state.router_id(), err.to_string())
-            }) {
+            })? {
                 if !south.is_empty() {
                 let payload =
                     Payload::from_output_stream_queue(south, trace_id).into();
@@ -328,8 +334,7 @@ impl RouterHandler {
                             known_peer,
                             msg_bytes,
                         } => {
-                            self.status_reporter
-                                .invalid_bmp_message_received(
+                        self.status_reporter.invalid_bmp_message_received(
                                     res.next_state.router_id(),
                                 );
                             if let Some(reporter) =
@@ -374,8 +379,14 @@ impl RouterHandler {
                         }
 
                         MessageType::Aborted => {
-                            // Something went fatally wrong, the issue should already have
-                            // been logged so there's nothing more we can do here.
+                        // Something went fatally wrong and we've lost the BMP
+                        // state machine. The issue should already have been
+                        // logged so there's nothing more we can do here
+                        // except stop processing this BMP stream.
+                        return Err((
+                            res.next_state.router_id(),
+                            "Aborted".to_string(),
+                        ));
                         }
                     }
 
@@ -388,6 +399,7 @@ impl RouterHandler {
             };
 
         *bmp_state_lock = Some(next_state);
+        Ok(())
     }
 
     fn check_update_router_id(

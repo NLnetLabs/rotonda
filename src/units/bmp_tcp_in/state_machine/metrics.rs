@@ -258,9 +258,9 @@ impl BmpStateMachineMetrics {
         MetricUnit::Total,
     );
     // TEST STATUS: [ ] makes sense? [ ] passes tests?
-    const NUM_PEERS_UP_DUMPING_METRIC: Metric = Metric::new(
-        "bmp_state_num_up_peers_dumping",
-        "the number of up peers expected to but have not yet signalled End-of-RIB",
+    const NUM_PEERS_UP_WITH_PENDING_EORS_METRIC: Metric = Metric::new(
+        "bmp_state_num_up_peers_with_pending_eors",
+        "the number of up peers with at least one pending End-of-RIB signal",
         MetricType::Gauge,
         MetricUnit::Total,
     );
@@ -392,7 +392,7 @@ impl metrics::Source for BmpStateMachineMetrics {
                 unit_name,
                 target,
                 router_id,
-                Self::NUM_PEERS_UP_DUMPING_METRIC,
+                Self::NUM_PEERS_UP_WITH_PENDING_EORS_METRIC,
                 metrics.num_peers_up_dumping.load(SeqCst),
             );
         }

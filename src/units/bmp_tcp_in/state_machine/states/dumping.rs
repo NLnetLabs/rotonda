@@ -1226,7 +1226,7 @@ mod tests {
         //                        ^ 1 BGP UPDATE was processed
         //                    1 prefix was received ^
         //                     and 1 prefix was stored ^
-        //                      and one EoR should be pending ^
+        //                     and one peer has pending EoRs ^
 
         // And when an EoR is received
         let res = processor.process_msg(Utc::now(), eor_msg_buf, None);
@@ -1253,7 +1253,7 @@ mod tests {
         );
         //    ^ The phase changed
         //                         ^ We received another BGP UPDATE
-        //                   And the EoR is no longer pending ^
+        //                And there are no more peers dumping ^
     }
 
     #[test]
@@ -1678,7 +1678,7 @@ mod tests {
                 metrics.with_label::<usize>("bmp_state_num_received_prefixes", label),
                 metrics.with_label::<usize>("bmp_state_num_stored_prefixes", label),
                 metrics.with_label::<usize>("bmp_state_num_up_peers", label),
-                metrics.with_label::<usize>("bmp_state_num_up_peers_dumping", label),
+                metrics.with_label::<usize>("bmp_state_num_up_peers_with_pending_eors", label),
                 metrics.with_label::<usize>("bmp_state_num_up_peers_eor_capable", label),
                 metrics.with_label::<usize>("bmp_state_num_withdrawals", label)
             ]

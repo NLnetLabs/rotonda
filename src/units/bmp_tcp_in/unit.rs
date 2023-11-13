@@ -14,7 +14,6 @@ use futures::{future::select, pin_mut, Future};
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use tokio::{
-    net::TcpStream,
     sync::{Mutex, RwLock},
     time::sleep,
 };
@@ -22,6 +21,10 @@ use tokio::{
 use crate::{
     common::{
         frim::FrimMap,
+        net::{
+            StandardTcpListenerFactory, TcpListener, TcpListenerFactory,
+            TcpStreamWrapper,
+        },
         roto::{FilterName, RotoScripts},
         status_reporter::Chainable,
         unit::UnitActivity,
@@ -43,43 +46,6 @@ use super::{
     metrics::BmpTcpInMetrics, router_handler::RouterHandler,
     status_reporter::BmpTcpInStatusReporter, util::format_source_id,
 };
-
-//--- TCP listener traits ----------------------------------------------------
-//
-// These traits enable us to swap out the real TCP listener for a mock when
-// testing.
-
-#[async_trait::async_trait]
-trait TcpListenerFactory<T> {
-    async fn bind(&self, addr: SocketAddr) -> std::io::Result<T>;
-}
-
-#[async_trait::async_trait]
-trait TcpListener {
-    async fn accept(&self) -> std::io::Result<(TcpStream, SocketAddr)>;
-}
-
-struct StandardTcpListenerFactory;
-
-#[async_trait::async_trait]
-impl TcpListenerFactory<StandardTcpListener> for StandardTcpListenerFactory {
-    async fn bind(
-        &self,
-        addr: SocketAddr,
-    ) -> std::io::Result<StandardTcpListener> {
-        let listener = ::tokio::net::TcpListener::bind(addr).await?;
-        Ok(StandardTcpListener(listener))
-    }
-}
-
-struct StandardTcpListener(::tokio::net::TcpListener);
-
-#[async_trait::async_trait]
-impl TcpListener for StandardTcpListener {
-    async fn accept(&self) -> std::io::Result<(TcpStream, SocketAddr)> {
-        self.0.accept().await
-    }
-}
 
 //-------- BmpIn -------------------------------------------------------------
 
@@ -342,13 +308,14 @@ impl BmpTcpInRunner {
         (runner, gate_agent)
     }
 
-    async fn run<T, U>(
+    async fn run<T, U, V>(
         mut self,
         listener_factory: Arc<T>,
     ) -> Result<(), crate::comms::Terminated>
     where
         T: TcpListenerFactory<U>,
-        U: TcpListener,
+        U: TcpListener<V>,
+        V: TcpStreamWrapper,
     {
         // Loop until terminated, accepting TCP connections from routers and
         // spawning tasks to handle them.
@@ -360,7 +327,8 @@ impl BmpTcpInRunner {
             let bind_with_backoff = || async {
                 let mut wait = 1;
                 loop {
-                    match listener_factory.bind(*listen_addr).await {
+                    match listener_factory.bind(listen_addr.to_string()).await
+                    {
                         Err(err) => {
                             let err = format!(
                                 "{err}: Will retry in {wait} seconds."
@@ -441,6 +409,9 @@ impl BmpTcpInRunner {
 
                         let router_states = self.router_states.clone();
                         let router_info = self.router_info.clone();
+
+                        // SAFETY: StandardTcpStream::into_inner() always returns Ok(...)
+                        let tcp_stream = tcp_stream.into_inner().unwrap();
 
                         crate::tokio::spawn(&child_name, async move {
                             router_handler
@@ -641,76 +612,28 @@ impl std::fmt::Debug for BmpTcpInRunner {
 
 #[cfg(test)]
 mod tests {
-    use std::{
-        net::SocketAddr,
-        sync::{Arc, Mutex},
-        time::Duration,
-    };
+    use std::{sync::Arc, time::Duration};
 
-    use tokio::{net::TcpStream, time::timeout};
+    use tokio::time::timeout;
 
     use crate::{
         common::status_reporter::AnyStatusReporter,
         comms::{Gate, GateAgent},
-        tests::util::internal::{
-            enable_logging, get_testable_metrics_snapshot,
+        tests::util::{
+            internal::{enable_logging, get_testable_metrics_snapshot},
+            net::{MockTcpListener, MockTcpListenerFactory},
         },
         units::{
             bmp_tcp_in::{
                 metrics::BmpTcpInMetrics,
                 status_reporter::BmpTcpInStatusReporter,
-                unit::{BmpTcpInRunner, TcpListener, TcpListenerFactory},
+                unit::BmpTcpInRunner,
             },
             Unit,
         },
     };
 
     use super::BmpTcpIn;
-
-    struct MockTcpListener;
-
-    #[async_trait::async_trait]
-    impl TcpListener for MockTcpListener {
-        async fn accept(&self) -> std::io::Result<(TcpStream, SocketAddr)> {
-            // block forever
-            std::future::pending().await
-        }
-    }
-
-    struct MockTcpListenerFactory<T>
-    where
-        T: Fn(SocketAddr) -> std::io::Result<()> + Sync,
-    {
-        pub bind_cb: T,
-        pub binds: Arc<Mutex<Vec<SocketAddr>>>,
-    }
-
-    impl<T> MockTcpListenerFactory<T>
-    where
-        T: Fn(SocketAddr) -> std::io::Result<()> + Sync,
-    {
-        pub fn new(bind_cb: T) -> Self {
-            Self {
-                bind_cb,
-                binds: Arc::default(),
-            }
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl<T> TcpListenerFactory<MockTcpListener> for MockTcpListenerFactory<T>
-    where
-        T: Fn(SocketAddr) -> std::io::Result<()> + Sync,
-    {
-        async fn bind(
-            &self,
-            addr: SocketAddr,
-        ) -> std::io::Result<MockTcpListener> {
-            (self.bind_cb)(addr.clone())?;
-            self.binds.lock().unwrap().push(addr);
-            Ok(MockTcpListener)
-        }
-    }
 
     #[test]
     fn listen_is_required() {
@@ -741,8 +664,10 @@ mod tests {
         // listen for incoming connections on "localhost:8080":
         let (runner, agent) = setup_test("1.2.3.4:12345");
         let status_reporter = runner.status_reporter.clone();
+        let wait_forever =
+            |_addr| Ok(MockTcpListener::new(|| std::future::pending()));
         let mock_listener_factory =
-            Arc::new(MockTcpListenerFactory::new(|_| Ok(())));
+            Arc::new(MockTcpListenerFactory::new(wait_forever));
         let task = runner.run(mock_listener_factory.clone());
         let join_handle = tokio::task::spawn(task);
 
@@ -777,8 +702,8 @@ mod tests {
         // then to the second given URI and not to any other URI.
         let binds = mock_listener_factory.binds.lock().unwrap();
         assert_eq!(binds.len(), 2);
-        assert_eq!(binds[0], "1.2.3.4:12345".parse().unwrap());
-        assert_eq!(binds[1], "127.0.0.1:11019".parse().unwrap());
+        assert_eq!(binds[0], "1.2.3.4:12345");
+        assert_eq!(binds[1], "127.0.0.1:11019");
 
         let metrics = get_testable_metrics_snapshot(
             &status_reporter.metrics().unwrap(),
@@ -804,8 +729,10 @@ mod tests {
         // listen for incoming connections on "localhost:8080":
         let (runner, agent) = setup_test("127.0.0.1:11019");
         let status_reporter = runner.status_reporter.clone();
+        let wait_forever =
+            |_addr| Ok(MockTcpListener::new(|| std::future::pending()));
         let mock_listener_factory =
-            Arc::new(MockTcpListenerFactory::new(|_| Ok(())));
+            Arc::new(MockTcpListenerFactory::new(wait_forever));
         let task = runner.run(mock_listener_factory.clone());
         let join_handle = tokio::task::spawn(task);
 
@@ -839,7 +766,7 @@ mod tests {
         // And verify that the unit bound only once and only to the given URI:
         let binds = mock_listener_factory.binds.lock().unwrap();
         assert_eq!(binds.len(), 1);
-        assert_eq!(binds[0], "127.0.0.1:11019".parse().unwrap());
+        assert_eq!(binds[0], "127.0.0.1:11019");
 
         let metrics = get_testable_metrics_snapshot(
             &status_reporter.metrics().unwrap(),
@@ -863,10 +790,10 @@ mod tests {
     async fn test_overcoming_bind_failure() {
         // Given an instance of the BMP TCP input unit that is configured to
         // listen for incoming connections on "localhost:8080":
-        let fail_on_bad_addr = |addr: SocketAddr| {
+        let fail_on_bad_addr = |addr: String| {
             // Not technically a bad address, just one we can match on for test purposes
             if addr.to_string() != "1.2.3.4:12345" {
-                Ok(())
+                Ok(MockTcpListener::new(|| std::future::pending()))
             } else {
                 Err(std::io::ErrorKind::PermissionDenied.into())
             }
@@ -908,7 +835,7 @@ mod tests {
         // And verify that the unit bound only once and only to the given URI:
         let binds = mock_listener_factory.binds.lock().unwrap();
         assert_eq!(binds.len(), 1);
-        assert_eq!(binds[0], "127.0.0.1:11019".parse().unwrap());
+        assert_eq!(binds[0], "127.0.0.1:11019");
 
         let metrics = get_testable_metrics_snapshot(
             &status_reporter.metrics().unwrap(),

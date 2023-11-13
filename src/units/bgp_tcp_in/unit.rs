@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::net::{IpAddr, SocketAddr};
+use std::net::IpAddr;
 use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -10,10 +10,13 @@ use log::debug;
 use rotonda_fsm::bgp::session::Command;
 use routecore::asn::Asn;
 use serde::Deserialize;
-use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 
+use crate::common::net::{
+    StandardTcpListenerFactory, StandardTcpStream, TcpListener,
+    TcpListenerFactory, TcpStreamWrapper,
+};
 use crate::common::roto::{FilterName, RotoScripts};
 use crate::common::status_reporter::{Chainable, UnitStatusReporter};
 use crate::common::unit::UnitActivity;
@@ -26,64 +29,6 @@ use super::router_handler::handle_connection;
 use super::status_reporter::BgpTcpInStatusReporter;
 
 use super::peer_config::{CombinedConfig, PeerConfigs};
-
-// XXX copied from BmpTcpIn, we probably want to separate these out
-
-//--- TCP listener traits ----------------------------------------------------
-//
-// These traits enable us to swap out the real TCP listener for a mock when
-// testing.
-
-#[async_trait::async_trait]
-trait TcpListenerFactory<T> {
-    async fn bind(&self, addr: String) -> std::io::Result<T>;
-}
-
-#[async_trait::async_trait]
-trait TcpListener<T> {
-    async fn accept(&self) -> std::io::Result<(T, SocketAddr)>;
-}
-
-#[async_trait::async_trait]
-trait TcpStreamWrapper {
-    fn into_inner(self) -> std::io::Result<TcpStream>;
-}
-
-/// A thin wrapper around the real Tokio TcpListener.
-struct StandardTcpListenerFactory;
-
-#[async_trait::async_trait]
-impl TcpListenerFactory<StandardTcpListener> for StandardTcpListenerFactory {
-    async fn bind(
-        &self,
-        addr: String,
-    ) -> std::io::Result<StandardTcpListener> {
-        let listener = tokio::net::TcpListener::bind(addr).await?;
-        Ok(StandardTcpListener(listener))
-    }
-}
-
-struct StandardTcpListener(::tokio::net::TcpListener);
-
-/// A thin wrapper around the real Tokio TcpListener bind call.
-#[async_trait::async_trait]
-impl TcpListener<StandardTcpStream> for StandardTcpListener {
-    async fn accept(
-        &self,
-    ) -> std::io::Result<(StandardTcpStream, SocketAddr)> {
-        let (stream, addr) = self.0.accept().await?;
-        Ok((StandardTcpStream(stream), addr))
-    }
-}
-
-struct StandardTcpStream(::tokio::net::TcpStream);
-
-/// A thin wrapper around the Tokio TcpListener accept() call result.
-impl TcpStreamWrapper for StandardTcpStream {
-    fn into_inner(self) -> std::io::Result<TcpStream> {
-        Ok(self.0)
-    }
-}
 
 //----------- BgpTcpIn -------------------------------------------------------
 
@@ -449,12 +394,19 @@ mod tests {
 
     use futures::Future;
     use routecore::asn::Asn;
-    use tokio::net::TcpStream;
 
     use crate::{
-        common::{roto::RotoScripts, status_reporter::AnyStatusReporter},
+        common::{
+            net::TcpStreamWrapper, roto::RotoScripts,
+            status_reporter::AnyStatusReporter,
+        },
         comms::{Gate, GateAgent, Terminated},
-        tests::util::internal::get_testable_metrics_snapshot,
+        tests::util::{
+            internal::get_testable_metrics_snapshot,
+            net::{
+                MockTcpListener, MockTcpListenerFactory, MockTcpStreamWrapper,
+            },
+        },
         units::bgp_tcp_in::{
             peer_config::{PeerConfig, PrefixOrExact},
             status_reporter::BgpTcpInStatusReporter,
@@ -462,12 +414,10 @@ mod tests {
         },
     };
 
-    use super::{TcpListener, TcpListenerFactory, TcpStreamWrapper};
-
     #[tokio::test(flavor = "multi_thread")]
     async fn listener_bound_count_metric_should_work() {
-        let mock_listener_factory_cb = || {
-            Ok(MockTcpListener::new(|| {
+        let mock_listener_factory_cb = |_addr| {
+            Ok(MockTcpListener::new(|| async {
                 Err(std::io::ErrorKind::ConnectionRefused.into())
             }))
         };
@@ -500,10 +450,10 @@ mod tests {
         let accept_count = Arc::new(AtomicUsize::new(0));
         let accept_count_clone = accept_count.clone();
 
-        let mock_listener_factory_cb = move || {
+        let mock_listener_factory_cb = move |_addr| {
             let old_count = accept_count_clone.fetch_add(1, Ordering::SeqCst);
             if old_count < 1 {
-                Ok(MockTcpListener::new(|| {
+                Ok(MockTcpListener::new(|| async {
                     Err(std::io::ErrorKind::ConnectionRefused.into())
                 }))
             } else {
@@ -538,18 +488,21 @@ mod tests {
         let conn_count = Arc::new(AtomicUsize::new(0));
         let mock_listener_factory_cb = {
             let conn_count = conn_count.clone();
-            move || {
+            move |_addr| {
                 let conn_count = conn_count.clone();
                 Ok(MockTcpListener::new(move || {
-                    let old_count = conn_count.fetch_add(1, Ordering::SeqCst);
-                    if old_count < 1 {
-                        Ok((
-                            MockTcpStreamWrapper,
-                            "1.2.3.4:5".parse().unwrap(),
-                        ))
-                    } else {
-                        Err(std::io::ErrorKind::PermissionDenied.into())
-                    }
+                    std::future::ready({
+                        let old_count =
+                            conn_count.fetch_add(1, Ordering::SeqCst);
+                        if old_count < 1 {
+                            Ok((
+                                MockTcpStreamWrapper,
+                                "1.2.3.4:5".parse().unwrap(),
+                            ))
+                        } else {
+                            Err(std::io::ErrorKind::PermissionDenied.into())
+                        }
+                    })
                 }))
             }
         };
@@ -576,7 +529,7 @@ mod tests {
 
     //-------- Test helpers --------------------------------------------------
 
-    fn setup_test<T, U>(
+    fn setup_test<T, U, Fut>(
         mock_listener_factory_cb: T,
     ) -> (
         impl Future<Output = Result<(), Terminated>>,
@@ -584,9 +537,11 @@ mod tests {
         Arc<BgpTcpInStatusReporter>,
     )
     where
-        T: Fn() -> std::io::Result<MockTcpListener<U>> + std::marker::Sync,
-        U: Fn() -> std::io::Result<(MockTcpStreamWrapper, SocketAddr)>
-            + std::marker::Sync,
+        T: Fn(String) -> std::io::Result<MockTcpListener<U, Fut>> + Sync,
+        U: Fn() -> Fut + Send + Sync,
+        Fut: Future<
+                Output = std::io::Result<(MockTcpStreamWrapper, SocketAddr)>,
+            > + Send,
     {
         let mock_listener_factory =
             MockTcpListenerFactory::new(mock_listener_factory_cb);
@@ -620,82 +575,6 @@ mod tests {
             _child_status_reporter: Arc<BgpTcpInStatusReporter>,
             _live_sessions: Arc<std::sync::Mutex<LiveSessions>>,
         ) {
-        }
-    }
-
-    /// A mock TcpListenerFactory that stores a callback supplied by the
-    /// unit test thereby allowing the unit test to determine if binding to
-    /// the given address should succeed or not, and on success delegates to
-    /// MockTcpListener.
-    struct MockTcpListenerFactory<T, U>(T)
-    where
-        U: Fn() -> std::io::Result<(MockTcpStreamWrapper, SocketAddr)>,
-        T: Fn() -> std::io::Result<MockTcpListener<U>>;
-
-    impl<T, U> MockTcpListenerFactory<T, U>
-    where
-        U: Fn() -> std::io::Result<(MockTcpStreamWrapper, SocketAddr)>,
-        T: Fn() -> std::io::Result<MockTcpListener<U>>,
-    {
-        pub fn new(cb: T) -> Self {
-            Self(cb)
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl<T, U> TcpListenerFactory<MockTcpListener<U>>
-        for MockTcpListenerFactory<T, U>
-    where
-        T: Fn() -> std::io::Result<MockTcpListener<U>> + std::marker::Sync,
-        U: Fn() -> std::io::Result<(MockTcpStreamWrapper, SocketAddr)>,
-    {
-        async fn bind(
-            &self,
-            _addr: String,
-        ) -> std::io::Result<MockTcpListener<U>> {
-            self.0()
-        }
-    }
-
-    /// A mock TcpListener that stores a callback supplied by the unit test
-    /// thereby allowing the unit test to determine if accepting incoming
-    /// connections should appear to succeed or fail, and on success delegates
-    /// to MockTcpStreamWrapper.
-    struct MockTcpListener<T>(T)
-    where
-        T: Fn() -> std::io::Result<(MockTcpStreamWrapper, SocketAddr)>;
-
-    impl<T> MockTcpListener<T>
-    where
-        T: Fn() -> std::io::Result<(MockTcpStreamWrapper, SocketAddr)>,
-    {
-        pub fn new(cb: T) -> Self {
-            Self(cb)
-        }
-    }
-
-    #[async_trait::async_trait]
-    impl<T> TcpListener<MockTcpStreamWrapper> for MockTcpListener<T>
-    where
-        T: Fn() -> std::io::Result<(MockTcpStreamWrapper, SocketAddr)>
-            + std::marker::Sync,
-    {
-        async fn accept(
-            &self,
-        ) -> std::io::Result<(MockTcpStreamWrapper, SocketAddr)> {
-            self.0()
-        }
-    }
-
-    /// A mock TcpStreamWraper that is not actually usable, but can be passed
-    /// in place of a StandardTcpStream in order to avoid needing to create a
-    /// real TcpStream which would interact with the actual operating system
-    /// network stack.
-    struct MockTcpStreamWrapper;
-
-    impl TcpStreamWrapper for MockTcpStreamWrapper {
-        fn into_inner(self) -> std::io::Result<TcpStream> {
-            Err(std::io::ErrorKind::Unsupported.into())
         }
     }
 }

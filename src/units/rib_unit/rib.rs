@@ -289,13 +289,19 @@ impl MergeUpdate for RibValue {
             }
 
             _ => {
-                item_count_delta = 1;
-
                 // For all other cases, just use the Eq/Hash impls to replace matching or insert new.
-                self.per_prefix_items
+                let out_items: HashedSet<Arc<PreHashedTypeValue>> = self
+                    .per_prefix_items
                     .union(&update_meta.per_prefix_items)
                     .cloned()
-                    .collect::<_>()
+                    .collect::<_>();
+
+                item_count_delta = out_items
+                    .len()
+                    .checked_sub(self.per_prefix_items.len())
+                    .unwrap_or(0) as isize;
+
+                out_items
             }
         };
 

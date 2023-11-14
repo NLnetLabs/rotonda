@@ -73,7 +73,7 @@ impl TryFrom<String> for Destination {
         };
 
         if host.is_empty() {
-            Err("Host port of MQTT server address must not be empty"
+            Err("Host part of MQTT server address must not be empty"
                 .to_string())
         } else {
             Ok(Self { host, port })

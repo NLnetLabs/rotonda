@@ -13,7 +13,7 @@ use crate::{
 
 #[derive(Debug, Default)]
 pub struct MqttMetrics {
-    pub connection_established: AtomicBool,
+    pub connection_state: AtomicBool,
     pub connection_lost_count: AtomicUsize,
     pub in_flight_count: AtomicUsize,
     pub transmit_error_count: AtomicUsize,
@@ -35,7 +35,7 @@ pub struct TopicMetrics {
 
 impl GraphStatus for MqttMetrics {
     fn status_text(&self) -> String {
-        match self.connection_established.load(SeqCst) {
+        match self.connection_state.load(SeqCst) {
             true => {
                 format!(
                     "in-flight: {}\npublished: {}\nerrors: {}",
@@ -50,17 +50,17 @@ impl GraphStatus for MqttMetrics {
     }
 
     fn okay(&self) -> Option<bool> {
-        Some(self.connection_established.load(SeqCst))
+        Some(self.connection_state.load(SeqCst))
     }
 }
 
 impl MqttMetrics {
     // TEST STATUS: [ ] makes sense? [ ] passes tests?
-    const UP_METRIC: Metric = Metric::new(
-        "mqtt_target_connection_established_count",
-        "the number of times the connection to the MQTT broker was established",
+    const CONNECTION_STATE_METRIC: Metric = Metric::new(
+        "mqtt_target_connection_state",
+        "the state of the connection to the MQTT broker: 0=down, 1=up",
         MetricType::Gauge,
-        MetricUnit::Total,
+        MetricUnit::State,
     );
     // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const CONNECTION_LOST_COUNT_METRIC: Metric = Metric::new(
@@ -108,9 +108,9 @@ impl MqttMetrics {
 impl metrics::Source for MqttMetrics {
     fn append(&self, unit_name: &str, target: &mut metrics::Target) {
         target.append_simple(
-            &Self::UP_METRIC,
+            &Self::CONNECTION_STATE_METRIC,
             Some(unit_name),
-            self.connection_established.load(SeqCst) as u8,
+            self.connection_state.load(SeqCst) as u8,
         );
         target.append_simple(
             &Self::CONNECTION_LOST_COUNT_METRIC,

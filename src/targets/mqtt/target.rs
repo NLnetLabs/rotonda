@@ -120,7 +120,7 @@ impl MqttRunner {
                         match cmd {
                             Some(TargetCommand::Reconfigure { new_config: Target::Mqtt(new_config) }) => {
                                 if arc_self.reconfigure(&mut sources, new_config, &mut connection).await.is_break() {
-                                    connection.reconnect();
+                                    connection.disconnect();
                                 }
                             }
 

@@ -60,7 +60,7 @@ impl Connection {
         }
     }
 
-    pub fn reconnect(&mut self) {
+    pub fn disconnect(&mut self) {
         self.state = Disconnected;
     }
 

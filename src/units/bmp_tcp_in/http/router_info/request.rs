@@ -13,10 +13,7 @@ use crate::{
     payload::SourceId,
     units::bmp_tcp_in::{
         metrics::BmpTcpInMetrics,
-        state_machine::{
-            machine::{BmpState, BmpStateDetails},
-            metrics::BmpMetrics,
-        },
+        state_machine::{BmpState, BmpStateMachineMetrics, BmpStateDetails},
     },
 };
 
@@ -27,7 +24,7 @@ pub struct RouterInfoApi {
     http_api_path: Arc<String>,
     source_id: SourceId,
     conn_metrics: Arc<BmpTcpInMetrics>,
-    bmp_metrics: Arc<BmpMetrics>,
+    bmp_metrics: Arc<BmpStateMachineMetrics>,
     connected_at: DateTime<Utc>,
     last_message_at: Arc<RwLock<DateTime<Utc>>>,
     state_machine: Weak<Mutex<Option<BmpState>>>,
@@ -40,7 +37,7 @@ impl RouterInfoApi {
         http_api_path: Arc<String>,
         source_id: SourceId,
         conn_metrics: Arc<BmpTcpInMetrics>,
-        bmp_metrics: Arc<BmpMetrics>,
+        bmp_metrics: Arc<BmpStateMachineMetrics>,
         connected_at: DateTime<Utc>,
         last_message_at: Arc<RwLock<DateTime<Utc>>>,
         state_machine: Weak<Mutex<Option<BmpState>>>,

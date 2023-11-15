@@ -6,14 +6,14 @@ use super::machine::BmpState;
 
 #[derive(Debug)]
 pub struct ProcessingResult {
-    pub processing_result: MessageType,
+    pub message_type: MessageType,
     pub next_state: BmpState,
 }
 
 impl ProcessingResult {
-    pub fn new(processing_result: MessageType, next_state: BmpState) -> Self {
+    pub fn new(message_type: MessageType, next_state: BmpState) -> Self {
         Self {
-            processing_result,
+            message_type,
             next_state,
         }
     }

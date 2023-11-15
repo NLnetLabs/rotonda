@@ -72,7 +72,7 @@ impl BmpTcpInMetrics {
     ///    *  Type = 6: Route Mirroring Message
     const BMP_RFC_7854_MSG_TYPE_NAMES: [&'static str; 7] = [
         "Route Monitoring",
-        "Statistics Reporr",
+        "Statistics Report",
         "Peer Down Notification",
         "Peer Up Notification",
         "Initiation Message",
@@ -80,49 +80,42 @@ impl BmpTcpInMetrics {
         "Route Mirroring Message",
     ];
 
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const LISTENER_BOUND_COUNT_METRIC: Metric = Metric::new(
         "bmp_tcp_in_listener_bound_count",
         "the number of times the TCP listen port was bound to",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [/] makes sense? [ ] passes tests?
     const CONNECTION_ACCEPTED_COUNT_METRIC: Metric = Metric::new(
         "bmp_tcp_in_connection_accepted_count",
         "the number of times a connection from a router was accepted",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const CONNECTION_LOST_COUNT_METRIC: Metric = Metric::new(
         "bmp_tcp_in_connection_lost_count",
         "the number of times the connection to a router was lost",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_BMP_MESSAGES_RECEIVED_METRIC: Metric = Metric::new(
         "bmp_tcp_in_num_bmp_messages_received",
         "the number of BMP messages successfully received by RFC 7854 message type code",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_BMP_MESSAGES_PROCESSED_METRIC: Metric = Metric::new(
         "bmp_tcp_in_num_bmp_messages_processed",
-        "the number of BMP messages successfully processed",
+        "the number of BMP messages passed to the BMP state machine for processing",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_RECEIVE_IO_ERRORS_METRIC: Metric = Metric::new(
         "bmp_tcp_in_num_receive_io_errors",
         "the number of BMP messages that could not be received due to an I/O error",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_INVALID_BMP_MESSAGES_METRIC: Metric = Metric::new(
         "bmp_in_num_invalid_bmp_messages",
         "the number of received BMP messages that were invalid (e.g. not RFC compliant, could not be parsed, etc)",

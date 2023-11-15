@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use roto::{types::typevalue::TypeValue, vm::OutputStreamQueue};
 use rotonda_store::QueryResult;
 
@@ -40,6 +41,10 @@ impl Default for SourceId {
 }
 
 impl SourceId {
+    pub fn generated() -> Self {
+        Self::from("generated")
+    }
+
     pub fn socket_addr(&self) -> Option<&SocketAddr> {
         match self {
             SourceId::SocketAddr(addr) => Some(addr),
@@ -112,7 +117,8 @@ pub trait Filterable {
         filtered_fn: U,
     ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
-        T: Fn(TypeValue, Option<u8>) -> FilterResult<E> + Clone,
+        T: Fn(TypeValue, DateTime<Utc>, Option<u8>) -> FilterResult<E>
+            + Clone,
         U: Fn(SourceId) + Clone,
         FilterError: From<E>;
 }
@@ -143,11 +149,19 @@ impl Display for FilterError {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq)]
 pub struct Payload {
     pub source_id: SourceId,
     pub value: TypeValue,
     pub trace_id: Option<u8>,
+    pub received: DateTime<Utc>,
+}
+
+impl PartialEq for Payload {
+    fn eq(&self, other: &Self) -> bool {
+        // Don't compare the received timestamp
+        self.source_id == other.source_id && self.value == other.value && self.trace_id == other.trace_id // && self.received == other.received
+    }
 }
 
 impl Payload {
@@ -160,6 +174,25 @@ impl Payload {
             source_id: source_id.into(),
             value: value.into(),
             trace_id,
+            received: Utc::now(),
+        }
+    }
+
+    pub fn with_received<S, T>(
+        source_id: S,
+        value: T,
+        trace_id: Option<u8>,
+        received: DateTime<Utc>,
+    ) -> Self
+    where
+        S: Into<SourceId>,
+        T: Into<TypeValue>,
+    {
+        Self {
+            source_id: source_id.into(),
+            value: value.into(),
+            trace_id,
+            received,
         }
     }
 
@@ -179,12 +212,13 @@ impl Filterable for Payload {
         filtered_fn: U,
     ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
-        T: Fn(TypeValue, Option<u8>) -> FilterResult<E> + Clone,
+        T: Fn(TypeValue, DateTime<Utc>, Option<u8>) -> FilterResult<E>
+            + Clone,
         U: Fn(SourceId) + Clone,
         FilterError: From<E>,
     {
         if let ControlFlow::Continue(filter_output) =
-            filter_fn(self.value, self.trace_id)?
+            filter_fn(self.value, self.received, self.trace_id)?
         {
             Ok(Payload::from_filter_output(
                 self.source_id.clone(),
@@ -205,7 +239,8 @@ impl Filterable for SmallVec<[Payload; 8]> {
         filtered_fn: U,
     ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
-        T: Fn(TypeValue, Option<u8>) -> FilterResult<E> + Clone,
+        T: Fn(TypeValue, DateTime<Utc>, Option<u8>) -> FilterResult<E>
+            + Clone,
         U: Fn(SourceId) + Clone,
         FilterError: From<E>,
     {
@@ -230,31 +265,33 @@ impl Payload {
         let mut out_payloads = smallvec![];
 
         // Make a payload out of it
-        let new_payload =
-            Payload::new(source_id.clone(), filter_output.east, trace_id);
+        let new_payload = Payload::with_received(
+            source_id,
+            filter_output.east,
+            trace_id,
+            filter_output.received,
+        );
 
         // Add the payload to the result
         out_payloads.push(new_payload);
 
         // Add output stream messages to the result
         if !filter_output.south.is_empty() {
-            out_payloads.extend(
-                filter_output.south.into_iter().map(|osm| {
-                    Payload::new(source_id.clone(), osm, trace_id)
-                }),
-            );
+            out_payloads.extend(Self::from_output_stream_queue(
+                filter_output.south,
+                trace_id,
+            ));
         }
 
         out_payloads
     }
 
     pub fn from_output_stream_queue(
-        source_id: &SourceId,
         osq: OutputStreamQueue,
         trace_id: Option<u8>,
     ) -> SmallVec<[Payload; 8]> {
         osq.into_iter()
-            .map(|osm| Payload::new(source_id.clone(), osm, trace_id))
+            .map(|osm| Payload::new(SourceId::generated(), osm, trace_id))
             .collect()
     }
 }

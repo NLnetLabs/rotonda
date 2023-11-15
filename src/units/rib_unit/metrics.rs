@@ -1,6 +1,6 @@
 use std::{
     sync::{
-        atomic::{AtomicI64, AtomicUsize, Ordering::SeqCst},
+        atomic::{AtomicU64, AtomicUsize, Ordering::SeqCst},
         Arc,
     },
     time::{Duration, Instant},
@@ -30,8 +30,8 @@ pub struct RibUnitMetrics {
     pub num_modified_route_announcements: AtomicUsize,
     pub num_routes_withdrawn: AtomicUsize,
     pub num_route_withdrawals_without_announcement: AtomicUsize,
-    pub last_insert_duration: AtomicI64,
-    pub last_update_duration: AtomicI64,
+    pub last_insert_duration_micros: AtomicU64,
+    pub last_update_duration_micros: AtomicU64,
     routers: Arc<FrimMap<Arc<RouterId>, Arc<RouterMetrics>>>,
     pub rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
 }
@@ -50,14 +50,14 @@ impl RibUnitMetrics {
 
 #[derive(Debug)]
 pub struct RouterMetrics {
-    pub last_e2e_delay: Arc<AtomicI64>,
+    pub last_e2e_delay_millis: Arc<AtomicU64>,
     pub last_e2e_delay_at: Arc<ArcSwap<Instant>>,
 }
 
 impl Default for RouterMetrics {
     fn default() -> Self {
         Self {
-            last_e2e_delay: Arc::new(Default::default()),
+            last_e2e_delay_millis: Arc::new(Default::default()),
             last_e2e_delay_at: Arc::new(ArcSwapAny::new(Arc::new(
                 Instant::now(),
             ))),
@@ -66,77 +66,66 @@ impl Default for RouterMetrics {
 }
 
 impl RibUnitMetrics {
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_UNIQUE_PREFIXES_METRIC: Metric = Metric::new(
         "rib_unit_num_unique_prefixes",
-        "the number of unique prefixes processed",
+        "the number of unique prefixes seen by the rib",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_ITEMS_METRIC: Metric = Metric::new(
         "rib_unit_num_items",
-        "the total number of items (e.g. routes) stored (and not withdrawn) in the rib",
+        "the total number of items (e.g. routes) stored (withdrawn or not) in the rib",
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_INSERT_RETRIES_METRIC: Metric = Metric::new(
         "rib_unit_num_insert_retries",
         "the number of times prefix insertions had to be retried due to contention",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_INSERT_HARD_FAILURES_METRIC: Metric = Metric::new(
         "rib_unit_num_insert_hard_failures",
         "the number of prefix insertions that were given up after exhausting all retries",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_ROUTES_ANNOUNCED_METRIC: Metric = Metric::new(
         "rib_unit_num_routes_announced",
-        "the number of routes announced",
+        "the number of announced routes stored in the rib",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_MODIFIED_ROUTE_ANNOUNCEMENTS_METRIC: Metric = Metric::new(
         "rib_unit_num_modified_route_announcements",
         "the number of modified route announcements processed",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_ROUTES_WITHDRAWN_METRIC: Metric = Metric::new(
-        "rib_unit_num_routes_withdrawan",
-        "the number of routes withdrawan",
+        "rib_unit_num_routes_withdrawn",
+        "the number of withdrawn routes stored in the rib",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_WITHDRAWN_ROUTES_WITHOUT_ANNOUNCEMENTS_METRIC: Metric = Metric::new(
         "rib_unit_num_route_withdrawals_without_announcements",
         "the number of route withdrawals processed without a corresponding announcement",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const LAST_INSERT_DURATION_METRIC: Metric = Metric::new(
         "rib_unit_insert_duration",
         "the time taken to insert the last prefix inserted into the RIB unit store",
         MetricType::Gauge,
         MetricUnit::Microsecond,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const LAST_UPDATE_DURATION_METRIC: Metric = Metric::new(
         "rib_unit_update_duration",
         "the time taken to update the last prefix modified in the RIB unit store",
         MetricType::Gauge,
         MetricUnit::Microsecond,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const LAST_END_TO_END_DELAY_PER_ROUTER_METRIC: Metric = Metric::new(
         "rib_unit_e2e_duration",
         "the time taken from initial receipt to completed insertion for a prefix into the RIB unit store",
@@ -205,12 +194,12 @@ impl metrics::Source for RibUnitMetrics {
         target.append_simple(
             &Self::LAST_INSERT_DURATION_METRIC,
             Some(unit_name),
-            self.last_insert_duration.load(SeqCst),
+            self.last_insert_duration_micros.load(SeqCst),
         );
         target.append_simple(
             &Self::LAST_UPDATE_DURATION_METRIC,
             Some(unit_name),
-            self.last_update_duration.load(SeqCst),
+            self.last_update_duration_micros.load(SeqCst),
         );
 
         let max_age = Duration::from_secs(60);
@@ -225,7 +214,7 @@ impl metrics::Source for RibUnitMetrics {
                 target,
                 router_id,
                 Self::LAST_END_TO_END_DELAY_PER_ROUTER_METRIC,
-                metrics.last_e2e_delay.load(SeqCst),
+                metrics.last_e2e_delay_millis.load(SeqCst),
             );
         }
 

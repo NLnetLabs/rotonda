@@ -20,7 +20,7 @@ mod bmp_tcp_out;
 mod mqtt;
 mod null;
 
-pub use self::mqtt::target::DEF_MQTT_PORT;
+pub use mqtt::DEF_MQTT_PORT;
 
 use tokio::sync::mpsc;
 

@@ -7,7 +7,6 @@ use crate::manager::TargetCommand;
 use super::status_reporter::TargetStatusReporter;
 
 pub enum TargetActivity<E, O> {
-    Terminated,
     CommandReceived(TargetCommand),
     InputError(E),
     InputReceived(O),
@@ -28,7 +27,7 @@ where
             // If None, the sender dropped, which in this case is the
             // manager. Probably a good time to terminate.
             status_reporter.terminated();
-            TargetActivity::Terminated
+            TargetActivity::CommandReceived(TargetCommand::Terminate)
         }
         Either::Left((Some(cmd), _next_fut)) => {
             status_reporter.command_received(&cmd);

@@ -12,35 +12,23 @@ use crate::{
     payload::RouterId,
 };
 
-use super::{machine::BmpStateIdx, metrics::BmpMetrics};
+use super::{machine::BmpStateIdx, metrics::BmpStateMachineMetrics};
 
 #[derive(Debug, Default)]
-pub struct BmpTcpInStatusReporter {
+pub struct BmpStateMachineStatusReporter {
     name: String,
-    metrics: Arc<BmpMetrics>,
+    metrics: Arc<BmpStateMachineMetrics>,
 }
 
-impl BmpTcpInStatusReporter {
-    pub fn new<T: Display>(name: T, metrics: Arc<BmpMetrics>) -> Self {
+impl BmpStateMachineStatusReporter {
+    pub fn new<T: Display>(
+        name: T,
+        metrics: Arc<BmpStateMachineMetrics>,
+    ) -> Self {
         Self {
             name: format!("{}", name),
             metrics,
         }
-    }
-
-    // This is done by the owner of the metrics, BmpInRunner, directly via
-    // the BmpMetrics interface, so it isn't needed here. However, someone has
-    // to make sure they call it so leaving this here as a reminder of why it
-    // ISN'T done here.
-    // pub fn init_per_proxy_metrics(&self, router_id: Arc<RouterId>) {
-    //     self.metrics.init_per_proxy_metrics(router_id);
-    // }
-
-    pub fn bmp_update_message_processed(&self, router_id: Arc<RouterId>) {
-        self.metrics
-            .router_metrics(router_id)
-            .num_bgp_updates_processed
-            .fetch_add(1, SeqCst);
     }
 
     pub fn change_state(
@@ -78,27 +66,21 @@ impl BmpTcpInStatusReporter {
     pub fn peer_unknown(&self, router_id: Arc<RouterId>) {
         self.metrics
             .router_metrics(router_id)
-            .num_bgp_updates_for_unknown_peer
+            .num_bmp_route_monitoring_msgs_with_unknown_peer
             .fetch_add(1, SeqCst);
     }
 
     pub fn bgp_update_parse_soft_fail(
         &self,
         router_id: Arc<RouterId>,
-        known_peer: Option<bool>,
         err: String,
         bytes: Option<Bytes>,
     ) {
         let metrics = self.metrics.router_metrics(router_id);
-        if matches!(known_peer, Some(true)) {
-            metrics
-                .num_bgp_updates_with_recoverable_parsing_failures_for_known_peers
-                .fetch_add(1, SeqCst);
-        } else {
-            metrics
-                .num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers
-                .fetch_add(1, SeqCst);
-        }
+
+        metrics
+            .num_bgp_updates_reparsed_due_to_incorrect_header_flags
+            .fetch_add(1, SeqCst);
 
         metrics.parse_errors.push(err, bytes, true);
     }
@@ -106,20 +88,14 @@ impl BmpTcpInStatusReporter {
     pub fn bgp_update_parse_hard_fail(
         &self,
         router_id: Arc<RouterId>,
-        known_peer: Option<bool>,
         err: String,
         bytes: Option<Bytes>,
     ) {
         let metrics = self.metrics.router_metrics(router_id);
-        if matches!(known_peer, Some(true)) {
-            metrics
-                .num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers
-                .fetch_add(1, SeqCst);
-        } else {
-            metrics
-                .num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers
-                .fetch_add(1, SeqCst);
-        }
+
+        metrics
+            .num_unprocessable_bmp_messages
+            .fetch_add(1, SeqCst);
 
         metrics.parse_errors.push(err, bytes, false);
     }
@@ -153,21 +129,21 @@ impl BmpTcpInStatusReporter {
     }
 }
 
-impl UnitStatusReporter for BmpTcpInStatusReporter {}
+impl UnitStatusReporter for BmpStateMachineStatusReporter {}
 
-impl AnyStatusReporter for BmpTcpInStatusReporter {
+impl AnyStatusReporter for BmpStateMachineStatusReporter {
     fn metrics(&self) -> Option<Arc<dyn crate::metrics::Source>> {
         Some(self.metrics.clone())
     }
 }
 
-impl Chainable for BmpTcpInStatusReporter {
+impl Chainable for BmpStateMachineStatusReporter {
     fn add_child<T: Display>(&self, child_name: T) -> Self {
         Self::new(self.link_names(child_name), self.metrics.clone())
     }
 }
 
-impl Named for BmpTcpInStatusReporter {
+impl Named for BmpStateMachineStatusReporter {
     fn name(&self) -> &str {
         &self.name
     }

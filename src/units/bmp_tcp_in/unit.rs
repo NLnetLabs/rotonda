@@ -36,14 +36,12 @@ use crate::{
 
 use super::{
     http::{RouterInfoApi, RouterListApi},
+    state_machine::{BmpState, BmpStateMachineMetrics},
     types::RouterInfo,
 };
 use super::{
-    metrics::BmpTcpInMetrics,
-    router_handler::RouterHandler,
-    state_machine::{machine::BmpState, metrics::BmpMetrics},
-    status_reporter::BmpTcpInStatusReporter,
-    util::format_source_id,
+    metrics::BmpTcpInMetrics, router_handler::RouterHandler,
+    status_reporter::BmpTcpInStatusReporter, util::format_source_id,
 };
 
 //--- TCP listener traits ----------------------------------------------------
@@ -164,7 +162,7 @@ impl BmpTcpIn {
         let bmp_in_metrics = Arc::new(BmpTcpInMetrics::new(&gate));
         component.register_metrics(bmp_in_metrics.clone());
 
-        let bmp_metrics = Arc::new(BmpMetrics::new());
+        let bmp_metrics = Arc::new(BmpStateMachineMetrics::new());
         component.register_metrics(bmp_metrics.clone());
 
         let state_machine_metrics = Arc::new(TokioTaskMetrics::new());
@@ -268,7 +266,7 @@ struct BmpTcpInRunner {
     router_states:
         Arc<FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>, // Option is never None, instead Some is take()'n and replace()'d.
     router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
-    bmp_metrics: Arc<BmpMetrics>,
+    bmp_metrics: Arc<BmpStateMachineMetrics>,
     bmp_in_metrics: Arc<BmpTcpInMetrics>,
     state_machine_metrics: Arc<TokioTaskMetrics>,
     status_reporter: Arc<BmpTcpInStatusReporter>,
@@ -290,7 +288,7 @@ impl BmpTcpInRunner {
             FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
         >, // Option is never None, instead Some is take()'n and replace()'d.
         router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
-        bmp_metrics: Arc<BmpMetrics>,
+        bmp_metrics: Arc<BmpStateMachineMetrics>,
         bmp_in_metrics: Arc<BmpTcpInMetrics>,
         state_machine_metrics: Arc<TokioTaskMetrics>,
         status_reporter: Arc<BmpTcpInStatusReporter>,
@@ -438,12 +436,22 @@ impl BmpTcpInRunner {
                             self.tracer.clone(),
                             self.tracing_mode.clone(),
                             last_msg_at,
+                            self.bmp_metrics.clone(),
                         );
+
+                        let router_states = self.router_states.clone();
+                        let router_info = self.router_info.clone();
 
                         crate::tokio::spawn(&child_name, async move {
                             router_handler
-                                .run(tcp_stream, client_addr, source_id)
-                                .await
+                                .run(
+                                    tcp_stream,
+                                    client_addr,
+                                    source_id.clone(),
+                                )
+                                .await;
+                            router_states.remove(&source_id);
+                            router_info.remove(&source_id);
                         });
                     }
                     ControlFlow::Continue(Err(_err)) => break 'inner,
@@ -565,11 +573,6 @@ impl BmpTcpInRunner {
             child_status_reporter,
             metrics,
         )
-    }
-
-    fn router_disconnected(&self, source_id: &SourceId) {
-        self.router_states.remove(source_id);
-        self.router_info.remove(source_id);
     }
 
     // TODO: Should we tear these individual API endpoints down when the

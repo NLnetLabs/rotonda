@@ -51,7 +51,7 @@ async fn process_non_route_update() {
     assert_eq!(runner.rib().store().unwrap().prefixes_count(), 0);
 
     // And check that recorded metrics are correct
-    assert_eq!(check_metrics(&runner.status_reporter()), (0, 0, 0, 0, 0));
+    assert_eq!(query_metrics(&runner.status_reporter()), (0, 0, 0, 0, 0));
 }
 
 #[tokio::test]
@@ -73,7 +73,7 @@ async fn process_update_single_route() {
     assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
 
     // And check that recorded metrics are correct
-    assert_eq!(check_metrics(&runner.status_reporter()), (1, 0, 1, 0, 1));
+    assert_eq!(query_metrics(&runner.status_reporter()), (1, 0, 1, 0, 1));
 }
 
 #[tokio::test]
@@ -95,7 +95,7 @@ async fn process_update_withdraw_unannounced_route() {
     assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
 
     // And check that recorded metrics are correct
-    assert_eq!(check_metrics(&runner.status_reporter()), (0, 1, 0, 0, 1));
+    assert_eq!(query_metrics(&runner.status_reporter()), (0, 1, 0, 0, 1));
 
     // When it is processed again by this unit it should not be filtered
     assert!(!is_filtered(&runner, update).await);
@@ -104,7 +104,7 @@ async fn process_update_withdraw_unannounced_route() {
     assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
 
     // And check that recorded metrics are correct
-    assert_eq!(check_metrics(&runner.status_reporter()), (0, 2, 0, 0, 1));
+    assert_eq!(query_metrics(&runner.status_reporter()), (0, 2, 0, 0, 1));
 }
 
 #[tokio::test]
@@ -132,7 +132,7 @@ async fn process_update_same_route_twice() {
     assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
 
     // And check that recorded metrics are correct
-    assert_eq!(check_metrics(&runner.status_reporter()), (1, 0, 1, 0, 1));
+    assert_eq!(query_metrics(&runner.status_reporter()), (1, 0, 1, 0, 1));
 
     // But when withdrawn
     let update = mk_route_update(&prefix, None);
@@ -144,7 +144,7 @@ async fn process_update_same_route_twice() {
     assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
 
     // And check that recorded metrics are correct
-    assert_eq!(check_metrics(&runner.status_reporter()), (1, 0, 0, 1, 1));
+    assert_eq!(query_metrics(&runner.status_reporter()), (1, 0, 0, 1, 1));
 }
 
 #[tokio::test]
@@ -170,7 +170,7 @@ async fn process_update_equivalent_route_twice() {
     assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
 
     // And check that recorded metrics are correct
-    assert_eq!(check_metrics(&runner.status_reporter()), (1, 0, 1, 0, 1));
+    assert_eq!(query_metrics(&runner.status_reporter()), (1, 0, 1, 0, 1));
 
     let metrics = runner.status_reporter().metrics().unwrap();
     let metrics = get_testable_metrics_snapshot(&metrics);
@@ -280,7 +280,7 @@ async fn process_update_equivalent_route_twice() {
     };
 
     // And check that recorded metrics are correct
-    assert_eq!(check_metrics(&runner.status_reporter()), (1, 0, 1, 0, 1));
+    assert_eq!(query_metrics(&runner.status_reporter()), (1, 0, 1, 0, 1));
 
     let metrics = runner.status_reporter().metrics().unwrap();
     let metrics = get_testable_metrics_snapshot(&metrics);
@@ -300,7 +300,7 @@ async fn process_update_equivalent_route_twice() {
     assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
 
     // And check that recorded metrics are correct
-    assert_eq!(check_metrics(&runner.status_reporter()), (1, 0, 0, 1, 1));
+    assert_eq!(query_metrics(&runner.status_reporter()), (1, 0, 0, 1, 1));
 }
 
 #[tokio::test]
@@ -320,7 +320,7 @@ async fn process_update_two_routes_to_the_same_prefix() {
         assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
 
         // And check that recorded metrics are correct
-        assert_eq!(check_metrics(&runner.status_reporter()), (2, 0, 2, 0, 1));
+        assert_eq!(query_metrics(&runner.status_reporter()), (2, 0, 2, 0, 1));
 
         // And at that prefix there should be one RibValue containing two routes
         let match_options = MatchOptions {
@@ -383,7 +383,7 @@ async fn process_update_two_routes_to_the_same_prefix() {
         assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
 
         // And check that recorded metrics are correct
-        assert_eq!(check_metrics(&runner.status_reporter()), (2, 0, 0, 2, 1));
+        assert_eq!(query_metrics(&runner.status_reporter()), (2, 0, 0, 2, 1));
 
         (match_result, match_result2)
     };
@@ -442,7 +442,7 @@ async fn process_update_two_routes_to_different_prefixes() {
     }
 
     // And check that recorded metrics are correct
-    assert_eq!(check_metrics(&runner.status_reporter()), (2, 0, 2, 0, 2));
+    assert_eq!(query_metrics(&runner.status_reporter()), (2, 0, 2, 0, 2));
 
     // And when one prefix is withdrawn
     let update = mk_route_update(&prefix1, None);
@@ -454,7 +454,7 @@ async fn process_update_two_routes_to_different_prefixes() {
     assert_eq!(runner.rib().store().unwrap().prefixes_count(), 2);
 
     // And check that recorded metrics are correct
-    assert_eq!(check_metrics(&runner.status_reporter()), (2, 0, 1, 1, 2));
+    assert_eq!(query_metrics(&runner.status_reporter()), (2, 0, 1, 1, 2));
 }
 
 #[tokio::test]
@@ -585,7 +585,10 @@ async fn count_insert_retries_during_forced_contention() {
         }));
     }
 
-    eprintln!("WAITING IN THEREAD {:?} FOR STORE UPDATES TO COMPLETE", std::thread::current().id());
+    eprintln!(
+        "WAITING IN THREAD {:?} FOR STORE UPDATES TO COMPLETE",
+        std::thread::current().id()
+    );
     join_all(join_handles).await;
 
     eprintln!("STORE UPDATES ARE COMPLETE");
@@ -702,19 +705,18 @@ async fn is_filtered(runner: &RibUnitRunner, update: Update) -> bool {
     num_dropped_updates == 0 && num_updates == 0
 }
 
-fn check_metrics(
+fn query_metrics(
     status_reporter: &Arc<RibUnitStatusReporter>,
 ) -> (usize, usize, usize, usize, usize) {
     let metrics =
         get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
-    let num_items = metrics.with_name::<usize>("rib_unit_num_items");
-    let num_orphan = metrics.with_name::<usize>(
-        "rib_unit_num_route_withdrawals_without_announcements",
-    );
-    let num_ann = metrics.with_name::<usize>("rib_unit_num_routes_announced");
-    let num_wit = metrics.with_name::<usize>("rib_unit_num_routes_withdrawn");
-    let num_unique =
-        metrics.with_name::<usize>("rib_unit_num_unique_prefixes");
-
-    (num_items, num_orphan, num_ann, num_wit, num_unique)
+    (
+        metrics.with_name::<usize>("rib_unit_num_items"),
+        metrics.with_name::<usize>(
+            "rib_unit_num_route_withdrawals_without_announcements",
+        ),
+        metrics.with_name::<usize>("rib_unit_num_routes_announced"),
+        metrics.with_name::<usize>("rib_unit_num_routes_withdrawn"),
+        metrics.with_name::<usize>("rib_unit_num_unique_prefixes"),
+    )
 }

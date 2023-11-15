@@ -50,13 +50,36 @@ impl GraphStatus for BmpTcpInMetrics {
 
 #[derive(Debug, Default)]
 pub struct RouterMetrics {
-    pub connection_count: Arc<AtomicUsize>,
     pub num_receive_io_errors: Arc<AtomicUsize>,
-    pub num_bmp_messages_received: AtomicUsize,
+    pub num_bmp_messages_received: [AtomicUsize; 7], // One counter per RFC 7854 BMP message type
+    pub num_bmp_messages_processed: AtomicUsize,
     pub num_invalid_bmp_messages: AtomicUsize,
 }
 
 impl BmpTcpInMetrics {
+    /// From: https://www.rfc-editor.org/rfc/rfc7854.html#section-4.1
+    ///
+    /// o  Message Type (1 byte): This identifies the type of the BMP
+    ///    message.  A BMP implementation MUST ignore unrecognized message
+    ///    types upon receipt.
+    ///    
+    ///    *  Type = 0: Route Monitoring
+    ///    *  Type = 1: Statistics Report
+    ///    *  Type = 2: Peer Down Notification
+    ///    *  Type = 3: Peer Up Notification
+    ///    *  Type = 4: Initiation Message
+    ///    *  Type = 5: Termination Message
+    ///    *  Type = 6: Route Mirroring Message
+    const BMP_RFC_7854_MSG_TYPE_NAMES: [&'static str; 7] = [
+        "Route Monitoring",
+        "Statistics Reporr",
+        "Peer Down Notification",
+        "Peer Up Notification",
+        "Initiation Message",
+        "Termination Message",
+        "Route Mirroring Message",
+    ];
+
     // TEST STATUS: [/] makes sense? [/] passes tests?
     const LISTENER_BOUND_COUNT_METRIC: Metric = Metric::new(
         "bmp_tcp_in_listener_bound_count",
@@ -78,17 +101,17 @@ impl BmpTcpInMetrics {
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [/] makes sense? [ ] passes tests?
-    const CONNECTION_COUNT_METRIC: Metric = Metric::new(
-        "bmp_tcp_in_connection_count",
-        "the number of router initiation messages seen per router",
-        MetricType::Gauge,
-        MetricUnit::Total,
-    );
     // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_BMP_MESSAGES_RECEIVED_METRIC: Metric = Metric::new(
         "bmp_tcp_in_num_bmp_messages_received",
-        "the number of BMP messages successfully received",
+        "the number of BMP messages successfully received by RFC 7854 message type code",
+        MetricType::Counter,
+        MetricUnit::Total,
+    );
+    // TEST STATUS: [/] makes sense? [/] passes tests?
+    const NUM_BMP_MESSAGES_PROCESSED_METRIC: Metric = Metric::new(
+        "bmp_tcp_in_num_bmp_messages_processed",
+        "the number of BMP messages successfully processed",
         MetricType::Counter,
         MetricUnit::Total,
     );
@@ -133,8 +156,8 @@ impl BmpTcpInMetrics {
             .or_insert_with(Default::default)
     }
 
-    pub fn remove_router(&self, router_id: Arc<RouterId>) {
-        self.routers.remove(&router_id);
+    pub fn remove_router(&self, router_id: &Arc<RouterId>) {
+        self.routers.remove(router_id);
     }
 }
 
@@ -164,13 +187,28 @@ impl metrics::Source for BmpTcpInMetrics {
 
         for (router_id, metrics) in self.routers.guard().iter() {
             let router_id = router_id.as_str();
-            append_per_router_metric(
-                unit_name,
-                target,
-                router_id,
-                Self::CONNECTION_COUNT_METRIC,
-                metrics.connection_count.load(SeqCst),
-            );
+
+            for (msg_type_code, metric_value) in
+                metrics.num_bmp_messages_received.iter().enumerate()
+            {
+                let router_label = ("router", router_id.as_ref());
+                let msg_type_label = (
+                    "msg_type",
+                    Self::BMP_RFC_7854_MSG_TYPE_NAMES[msg_type_code],
+                );
+
+                target.append(
+                    &Self::NUM_BMP_MESSAGES_RECEIVED_METRIC,
+                    Some(unit_name),
+                    |records| {
+                        records.label_value(
+                            &[router_label, msg_type_label],
+                            metric_value.load(SeqCst),
+                        )
+                    },
+                );
+            }
+
             append_per_router_metric(
                 unit_name,
                 target,
@@ -182,8 +220,8 @@ impl metrics::Source for BmpTcpInMetrics {
                 unit_name,
                 target,
                 router_id,
-                Self::NUM_BMP_MESSAGES_RECEIVED_METRIC,
-                metrics.num_bmp_messages_received.load(SeqCst),
+                Self::NUM_BMP_MESSAGES_PROCESSED_METRIC,
+                metrics.num_bmp_messages_processed.load(SeqCst),
             );
             append_per_router_metric(
                 unit_name,

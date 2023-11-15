@@ -5,6 +5,7 @@ use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 use log::{debug, error};
 use roto::types::builtin::{
     BgpUpdateMessage, /*IpAddress,*/
@@ -244,23 +245,23 @@ impl Processor {
                             // established session, so not having a
                             // NegotiatedConfig should never happen.
                             if let Some(_negotiated) = session.negotiated() {
-                                if let Ok(ControlFlow::Continue(FilterOutput { south, east })) = Self::VM.with(|vm| {
+                                if let Ok(ControlFlow::Continue(FilterOutput { south, east, received })) = Self::VM.with(|vm| {
                                     let delta_id = (RotondaId(0), 0); // TODO
                                     let roto_update_msg = roto::types::builtin::UpdateMessage(pdu);
                                     let msg = BgpUpdateMessage::new(delta_id, roto_update_msg);
                                     let msg = Arc::new(msg);
                                     let value: TypeValue = TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(msg));
-                                    self.roto_scripts.exec(vm, &self.unit_cfg.filter_name, value)
+                                    self.roto_scripts.exec(vm, &self.unit_cfg.filter_name, value, Utc::now())
                                 }) {
                                     if !south.is_empty() {
-                                        let source_id = SourceId::from("TODO");
-                                        let update = Payload::from_output_stream_queue(&source_id, south, None).into();
+                                        let update = Payload::from_output_stream_queue(south, None).into();
                                         self.gate.update_data(update).await;
                                     }
                                     if let TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(pdu)) = east {
                                         let pdu = Arc::into_inner(pdu).unwrap(); // This should succeed
                                         let pdu = pdu.raw_message().0.clone(); // Bytes is cheap to clone
                                         let update = self.process_update(
+                                            received,
                                             pdu,
                                             //negotiated.remote_addr(),
                                             //negotiated.remote_asn()
@@ -375,11 +376,13 @@ impl Processor {
     // unit.
     async fn process_update(
         &mut self,
+        received: DateTime<Utc>,
         pdu: UpdatePdu<Bytes>,
         //peer_ip: IpAddr,
         //peer_asn: Asn
     ) -> Update {
         fn mk_payload(
+            received: DateTime<Utc>,
             prefix: Prefix,
             msg: &Arc<BgpUpdateMessage>,
             source_id: &SourceId,
@@ -392,7 +395,7 @@ impl Processor {
                 route_status,
             );
             let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
-            Payload::new(source_id.clone(), typval, None)
+            Payload::with_received(source_id.clone(), typval, None, received)
         }
 
         // When sending both v4 and v6 nlri using exabgp, exa sends a v4
@@ -447,6 +450,7 @@ impl Processor {
                 })
                 .map(|prefix| {
                     mk_payload(
+                        received,
                         prefix,
                         &msg,
                         &source_id,
@@ -470,6 +474,7 @@ impl Processor {
                 })
                 .map(|prefix| {
                     mk_payload(
+                        received,
                         prefix,
                         &msg,
                         &source_id,

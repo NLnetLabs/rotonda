@@ -373,25 +373,6 @@ impl RotoScripts {
         // live in the Global scope, so these all have filter names.
         let new_filter_maps = rotolo.clean_packs_to_owned();
 
-        // Check if any of the compiled filters have the same name as one that
-        // we've already seen. If so, abort, as each Filter(Map) name must be
-        // unique across all loaded roto scripts so that they can referenced
-        // unambiguously by their name.
-        for filter_map in &new_filter_maps {
-            let filter_name = filter_map.get_filter_map_name();
-
-            if let Some(found) =
-                self.scripts_by_filter.get(&filter_name.clone().into())
-            {
-                let err = CompileError::from(format!(
-                    "Filter {filter_name} in {origin} is already defined \
-                        in {}",
-                    found.parent_script.origin
-                ));
-                return Err(RotoError::CompileError { origin, err });
-            }
-        }
-
         // Create the new RotoScript for these packs.
         let new_script = Arc::new(RotoScript {
             origin: origin.clone(),

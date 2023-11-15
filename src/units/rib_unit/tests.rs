@@ -586,7 +586,7 @@ async fn count_insert_retries_during_forced_contention() {
     }
 
     eprintln!(
-        "WAITING IN THEREAD {:?} FOR STORE UPDATES TO COMPLETE",
+        "WAITING IN THREAD {:?} FOR STORE UPDATES TO COMPLETE",
         std::thread::current().id()
     );
     join_all(join_handles).await;

@@ -445,7 +445,6 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    #[ignore = "TCP accept panics and so the unit never responds to the terminate command."]
     async fn retry_with_backoff_on_accept_error() {
         let accept_count = Arc::new(AtomicUsize::new(0));
         let accept_count_clone = accept_count.clone();

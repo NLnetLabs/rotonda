@@ -82,6 +82,8 @@ impl RouterHandler {
 
     #[cfg(test)]
     pub fn mock() -> (Self, crate::comms::GateAgent, Gate) {
+        use crate::units::bmp_tcp_in::unit::BmpTcpIn;
+
         use super::metrics::BmpTcpInMetrics;
 
         let (parent_gate, gate_agent) = Gate::new(0);
@@ -108,7 +110,9 @@ impl RouterHandler {
         let mock = Self {
             gate: parent_gate.clone(),
             roto_scripts: Default::default(),
-            router_id_template: Default::default(),
+            router_id_template: Arc::new(ArcSwap::from_pointee(
+                BmpTcpIn::default_router_id_template(),
+            )),
             filter_name: Default::default(),
             status_reporter: parent_status_reporter,
             state_machine,
@@ -289,7 +293,7 @@ impl RouterHandler {
 
         let bound_tracer = self.tracer.bind(self.gate.id());
 
-        self.status_reporter.bmp_message_received(
+        self.status_reporter.message_received(
             bmp_state.router_id(),
             msg.common_header().msg_type().into(),
         );
@@ -329,15 +333,15 @@ impl RouterHandler {
                 let msg = msg.0;
 
                 self.status_reporter
-                    .bmp_message_processed(bmp_state.router_id());
+                    .message_processed(bmp_state.router_id());
 
                 let mut res = bmp_state.process_msg(received, msg, trace_id);
 
                 match res.message_type {
                     MessageType::InvalidMessage { .. } => {
-                        // This issue has already been handled by a status
-                        // reporter, no futher processing is needed here
-                        // at the moment.
+                        self.status_reporter.message_processing_failure(
+                            res.next_state.router_id(),
+                        );
                     }
 
                     MessageType::StateTransition => {
@@ -441,13 +445,23 @@ mod tests {
     use tokio::{io::ReadBuf, time::timeout};
 
     use crate::{
+        bgp::encode::{
+            mk_initiation_msg,
+            mk_invalid_initiation_message_that_lacks_information_tlvs,
+            mk_peer_down_notification_msg, mk_per_peer_header,
+        },
         common::status_reporter::AnyStatusReporter,
+        metrics::Target,
         tests::util::internal::{
             enable_logging, get_testable_metrics_snapshot,
         },
     };
 
     use super::*;
+
+    const SYS_NAME: &str = "some-sys-name";
+    const SYS_DESCR: &str = "some-sys-desc";
+    const OTHER_SYS_NAME: &str = "other-sys-name";
 
     #[tokio::test(flavor = "multi_thread")]
     async fn terminate_on_loss_of_parent_gate() {
@@ -564,110 +578,132 @@ mod tests {
     // Note: The tests below assume that the default router id template
     // includes the BMP sysName.
 
-    // #[tokio::test(flavor = "multi_thread")]
-    // #[should_panic]
-    // async fn counters_for_expected_sys_name_should_not_exist() {
-    //     let (runner, _, _) = RouterHandler::mock();
-    //     let initiation_msg =
-    //         BmpMessage::from_octets(mk_initiation_msg(SYS_NAME, SYS_DESCR))
-    //             .unwrap();
+    #[tokio::test(flavor = "multi_thread")]
+    async fn num_invalid_bmp_messages_counter_should_increase() {
+        let (runner, _, _) = RouterHandler::mock();
 
-    //     runner
-    //         .process_msg(
-    //             "127.0.0.1".parse().unwrap(),
-    //             "unknown".into(),
-    //             initiation_msg,
-    //             None,
-    //         )
-    //         .await;
+        // A BMP Initiation message that lacks required fields
+        let bad_initiation_msg = BmpMessage::from_octets(
+            mk_invalid_initiation_message_that_lacks_information_tlvs(),
+        )
+        .unwrap();
 
-    // // let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
-    // // assert_eq!(
-    // //     metrics.with_label::<usize>("bmp_in_num_invalid_bmp_messages", ("router", SYS_NAME)),
-    // //     0,
-    // // );
-    // }
+        // A BMP Peer Down Notification message without a corresponding Peer
+        // Up Notification message.
+        let pph = mk_per_peer_header("10.0.0.1", 12345);
+        let bad_peer_down_msg =
+            BmpMessage::from_octets(mk_peer_down_notification_msg(&pph))
+                .unwrap();
 
-    // #[tokio::test(flavor = "multi_thread")]
-    // #[should_panic]
-    // async fn counters_for_other_sys_name_should_not_exist() {
-    //     let (runner, _) = BmpInRunner::mock();
-    //     let initiation_msg = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
+        process_msg(&runner, bad_initiation_msg).await.unwrap();
+        process_msg(&runner, bad_peer_down_msg).await.unwrap();
 
-    //     runner.process_update(initiation_msg).await;
+        let metrics = get_testable_metrics_snapshot(
+            &runner.status_reporter.metrics().unwrap(),
+        );
+        assert_eq!(
+            metrics.with_label::<usize>(
+                "bmp_in_num_invalid_bmp_messages",
+                ("router", "unknown")
+            ),
+            2,
+        );
+    }
 
-    //     let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
-    //     assert_eq!(
-    //         metrics.with_label::<usize>(
-    //             "bmp_in_num_invalid_bmp_messages",
-    //             ("router", OTHER_SYS_NAME)
-    //         ),
-    //         0,
-    //     );
-    // }
+    #[rustfmt::skip]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn new_counters_should_be_started_if_the_router_id_changes() {
+        let (runner, ..) = RouterHandler::mock();
+        let initiation_msg =
+            BmpMessage::from_octets(mk_initiation_msg(SYS_NAME, SYS_DESCR))
+                .unwrap();
+        let pph = mk_per_peer_header("10.0.0.1", 12345);
+        let bad_peer_down_msg =
+            BmpMessage::from_octets(mk_peer_down_notification_msg(&pph))
+                .unwrap();
+        let reinitiation_msg = BmpMessage::from_octets(mk_initiation_msg(
+            OTHER_SYS_NAME,
+            SYS_DESCR,
+        ))
+        .unwrap();
 
-    // #[tokio::test(flavor = "multi_thread")]
-    // async fn num_invalid_bmp_messages_counter_should_increase() {
-    //     let (runner, _) = BmpInRunner::mock();
+        // router id is "unknown" at this point
+        process_msg(&runner, bad_peer_down_msg.clone()).await.unwrap(); // 1
+        process_msg(&runner, initiation_msg).await.unwrap(); // 2
 
-    //     // A BMP Initiation message that lacks required fields
-    //     let bad_initiation_msg =
-    //         mk_update(mk_invalid_initiation_message_that_lacks_information_tlvs());
+        // messages after this point are counted under router id SYS_NAME
+        process_msg(&runner, bad_peer_down_msg.clone()).await.unwrap(); // 3
+        process_msg(&runner, reinitiation_msg).await.unwrap(); // 4
 
-    //     // A BMP Peer Down Notification message without a corresponding Peer
-    //     // Up Notification message.
-    //     let pph = mk_per_peer_header("10.0.0.1", 12345);
-    //     let bad_peer_down_msg = mk_update(mk_peer_down_notification_msg(&pph));
+        // messages after this point are counted under router id OTHER_SYS_NAME
+        process_msg(&runner, bad_peer_down_msg).await.unwrap(); // 5
 
-    //     runner.process_update(bad_initiation_msg).await;
-    //     runner.process_update(bad_peer_down_msg).await;
+        let metrics = get_testable_metrics_snapshot(
+            &runner.status_reporter.metrics().unwrap(),
+        );
 
-    //     let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
-    //     assert_eq!(
-    //         metrics.with_label::<usize>(
-    //             "bmp_in_num_invalid_bmp_messages",
-    //             ("router", UNKNOWN_ROUTER_SYSNAME)
-    //         ),
-    //         2,
-    //     );
-    // }
+        // router id is only determined AFTER the message has been processed
+        // by the BMP state machine, but messages are counted by type as soon
+        // as they are received i.e. under the last known router id. Thus the
+        // sysName value carried by a BMP Initiation Message does NOT
+        // influence the router id of the metric counter which the receipt of
+        // the BMP Initiation Message causes us to increment.
 
-    // #[tokio::test(flavor = "multi_thread")]
-    // async fn new_counters_should_be_started_if_the_router_id_changes() {
-    //     let (runner, _) = BmpInRunner::mock();
-    //     let initiation_msg = mk_update(mk_initiation_msg(SYS_NAME, SYS_DESCR));
-    //     let pph = mk_per_peer_header("10.0.0.1", 12345);
-    //     let bad_peer_down_msg = mk_update(mk_peer_down_notification_msg(&pph));
-    //     let reinitiation_msg = mk_update(mk_initiation_msg(OTHER_SYS_NAME, SYS_DESCR));
-    //     let another_bad_peer_down_msg = mk_update(mk_peer_down_notification_msg(&pph));
+        assert_metric_label_value(&metrics, "unknown", "bmp_tcp_in_num_bmp_messages_received", "msg_type", "Peer Down Notification", 1); // from 1
+        assert_metric_value(&metrics, "unknown", "bmp_in_num_invalid_bmp_messages", 1); // from 1
+        assert_metric_label_value(&metrics, "unknown", "bmp_tcp_in_num_bmp_messages_received", "msg_type", "Initiation Message", 1); // from 2
 
-    //     runner.process_update(initiation_msg).await;
-    //     runner.process_update(bad_peer_down_msg).await;
-    //     runner.process_update(reinitiation_msg).await;
-    //     runner.process_update(another_bad_peer_down_msg).await;
+        assert_metric_label_value(&metrics, SYS_NAME, "bmp_tcp_in_num_bmp_messages_received", "msg_type", "Peer Down Notification", 1); // from 3
+        assert_metric_value(&metrics, SYS_NAME, "bmp_in_num_invalid_bmp_messages", 1); // from 3
+        assert_metric_label_value(&metrics, SYS_NAME, "bmp_tcp_in_num_bmp_messages_received", "msg_type", "Initiation Message", 1); // from 4
 
-    //     let metrics = get_testable_metrics_snapshot(&runner.status_reporter.metrics().unwrap());
-    //     assert_eq!(
-    //         metrics.with_label::<usize>("bmp_in_num_invalid_bmp_messages", ("router", SYS_NAME)),
-    //         1,
-    //     );
-    //     assert_eq!(
-    //         metrics.with_label::<usize>(
-    //             "bmp_in_num_invalid_bmp_messages",
-    //             ("router", OTHER_SYS_NAME)
-    //         ),
-    //         1,
-    //     );
-    // }
+        assert_metric_value(&metrics, OTHER_SYS_NAME, "bmp_in_num_invalid_bmp_messages", 1); // from 5
+        assert_metric_label_value(&metrics, OTHER_SYS_NAME, "bmp_tcp_in_num_bmp_messages_received", "msg_type", "Peer Down Notification", 1); // from 5
+    }
 
     // --- Test helpers ------------------------------------------------------
 
-    // fn mk_update(msg_buf: Bytes) -> Update {
-    //     let source_id =
-    //         SourceId::SocketAddr("127.0.0.1:8080".parse().unwrap());
-    //     let bmp_msg =
-    //         Arc::new(BytesRecord(BmpMessage::from_octets(msg_buf).unwrap()));
-    //     let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
-    //     Update::Single(Payload::new(source_id, value))
-    // }
+    async fn process_msg(
+        router_handler: &RouterHandler,
+        msg: BmpMessage,
+    ) -> Result<(), (Arc<String>, String)> {
+        router_handler
+            .process_msg(
+                Utc::now(),
+                "1.2.3.4:12345".parse().unwrap(),
+                "unknown".into(),
+                msg,
+                None,
+            )
+            .await
+    }
+
+    fn assert_metric_value(
+        metrics: &Target,
+        router: &str,
+        metric_name: &str,
+        expected_value: usize,
+    ) {
+        assert_eq!(
+            metrics.with_label::<usize>(metric_name, ("router", router)),
+            expected_value,
+        );
+    }
+
+    fn assert_metric_label_value(
+        metrics: &Target,
+        router: &str,
+        metric_name: &str,
+        label_name: &str,
+        label_value: &str,
+        expected_value: usize,
+    ) {
+        assert_eq!(
+            metrics.with_labels::<usize>(
+                metric_name,
+                &[("router", router), (label_name, label_value)],
+            ),
+            expected_value,
+        );
+    }
 }

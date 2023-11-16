@@ -39,6 +39,8 @@ jobs:
           filename: cobertura.xml
           format: markdown
           output: both
+          hide_complexity: true
+          indicators: false
       
       - name: Add Markdown coverage report to workflow summary
         run: |

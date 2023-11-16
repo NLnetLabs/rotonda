@@ -20,11 +20,6 @@ jobs:
           # at the time of writing workflow_run.head_commit.id appears to be
           # the commit that triggered the CI workflow which then triggered us.
           ref: ${{ github.event.workflow_run.head_commit.id }}
-
-      - name: Ensure correct Rust toolchain version
-        uses: hecrj/setup-rust-action@v2
-        with:
-          rust-version: stable
           
       - run: cargo install cargo-tarpaulin
 

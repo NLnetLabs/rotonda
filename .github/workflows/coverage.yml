@@ -21,18 +21,25 @@ jobs:
           # the commit that triggered the CI workflow which then triggered us.
           ref: ${{ github.event.workflow_run.head_commit.id }}
 
-      - run: |
-          whoami
-          echo $PATH
-          pwd
-          which cargo
-        
-      - run: cargo install --locked cargo-tarpaulin
+      - name: Install cargo-tarpaulin if needed
+        run: cargo install --locked cargo-tarpaulin
 
-      - run: cargo tarpaulin --verbose --out Html
+      - name: Generate cargo-tarpaulin code coverage reports
+        run: cargo tarpaulin --verbose --out Html --out Xml
 
-      - name: Archive code coverage results
+      - name: Upload HTML report to GH Actions workflow artifacts
         uses: actions/upload-artifact@v3
         with:
           name: code-coverage-report
           path: tarpaulin-report.html
+
+      - name: Generate Markdown coverage report
+        uses: irongut/CodeCoverageSummary@v1.3.0
+        with:
+          filename: cobertura.xml
+          format: markdown
+          output: both
+      
+      - name: Add Markdown coverage report to workflow summary
+        run: |
+          cat code-coverage-results.md >> $GITHUB_STEP_SUMMARY

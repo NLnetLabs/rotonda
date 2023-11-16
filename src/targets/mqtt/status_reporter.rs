@@ -51,6 +51,7 @@ impl MqttStatusReporter {
             connect_retry_secs.as_secs()
         );
         self.metrics.connection_established_state.store(false, SeqCst);
+        self.metrics.connection_lost_count.fetch_add(1, SeqCst);
     }
 
     pub fn publishing<T: Display, C: Display>(&self, topic: T, content: C) {

@@ -1,25 +1,15 @@
 name: coverage
 
 on:
-  workflow_run:
-    workflows: [coverage]
-    types:
-      - completed
-
   workflow_dispatch:
 
 jobs:
   coverage:
     name: coverage
-    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     runs-on: self-hosted
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          # at the time of writing workflow_run.head_commit.id appears to be
-          # the commit that triggered the CI workflow which then triggered us.
-          ref: ${{ github.event.workflow_run.head_commit.id }}
 
       - name: Install cargo-tarpaulin if needed
         run: cargo install --locked cargo-tarpaulin

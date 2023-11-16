@@ -249,3 +249,22 @@ fn mk_mqtt_runner() -> MqttRunner {
 fn mk_config_from_toml(toml: &str) -> Result<Config, toml::de::Error> {
     toml::from_str::<Config>(toml)
 }
+
+fn mk_roto_output_stream_payload() -> Arc<OutputStreamMessage> {
+    let typedef = TypeDef::new_record_type(vec![
+        ("name", Box::new(TypeDef::StringLiteral)),
+        ("topic", Box::new(TypeDef::StringLiteral)),
+        ("some-str", Box::new(TypeDef::StringLiteral)),
+        ("some-asn", Box::new(TypeDef::Asn)),
+    ])
+    .unwrap();
+
+    let fields = vec![
+        ("name", "MOCK".into()),
+        ("topic", "my-topic".into()),
+        ("some-str", "some-value".into()),
+        ("some-asn", routecore::asn::Asn::from_u32(1818).into()),
+    ];
+    let record = Record::create_instance_with_sort(&typedef, fields).unwrap();
+    Arc::new(OutputStreamMessage::from(record))
+}

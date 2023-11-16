@@ -15,23 +15,23 @@ jobs:
     runs-on: self-hosted
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           # at the time of writing workflow_run.head_commit.id appears to be
           # the commit that triggered the CI workflow which then triggered us.
           ref: ${{ github.event.workflow_run.head_commit.id }}
 
       - name: Ensure correct Rust toolchain version
-        uses: actions-rs/toolchain@v1
+        uses: hecrj/setup-rust-action@v2
         with:
-          toolchain: stable
+          rust-version: stable
           
       - run: cargo install cargo-tarpaulin
 
       - run: cargo tarpaulin --verbose --out Html
 
       - name: Archive code coverage results
-        uses: actions/upload-artifact@v2
+        uses: actions/upload-artifact@v3
         with:
           name: code-coverage-report
           path: tarpaulin-report.html

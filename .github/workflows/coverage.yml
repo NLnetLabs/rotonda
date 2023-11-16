@@ -21,7 +21,7 @@ jobs:
           # the commit that triggered the CI workflow which then triggered us.
           ref: ${{ github.event.workflow_run.head_commit.id }}
           
-      - run: cargo install cargo-tarpaulin
+      - run: cargo install --locked cargo-tarpaulin
 
       - run: cargo tarpaulin --verbose --out Html
 

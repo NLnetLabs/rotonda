@@ -1,41 +1,21 @@
-use std::{net::IpAddr, str::FromStr, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
-use bytes::Bytes;
 use mqtt::{ClientError, ConnectionError, Event, MqttOptions, Packet, QoS};
 use roto::types::{
-    builtin::{
-        BgpUpdateMessage, BuiltinTypeValue, RawRouteWithDeltas, RotondaId,
-        RouteStatus, UpdateMessage,
-    },
-    collections::{BytesRecord, Record},
-    outputs::OutputStreamMessage,
-    typedef::TypeDef,
-    typevalue::TypeValue,
-};
-use routecore::{
-    addr::Prefix,
-    asn::Asn,
-    bgp::message::SessionConfig,
-    bmp::message::{Message as BmpMsg, PeerType},
+    collections::Record, outputs::OutputStreamMessage, typedef::TypeDef,
 };
 use serde_json::json;
 use tokio::{sync::mpsc, time::Instant};
 
 use crate::{
-    bgp::encode::{
-        mk_bgp_update, mk_initiation_msg, mk_route_monitoring_msg,
-        Announcements, MyPeerType, PerPeerHeader, Prefixes,
-    },
     comms::Terminated,
-    manager::{Component, TargetCommand},
-    payload::{Payload, SourceId},
     targets::mqtt::config::ClientId,
     tests::util::{
         assert_json_eq,
         internal::{enable_logging, get_testable_metrics_snapshot},
-    },
+    }, manager::{TargetCommand, Component},
 };
 
 use super::{

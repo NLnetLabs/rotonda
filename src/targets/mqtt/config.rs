@@ -5,6 +5,8 @@ use serde_with::serde_as;
 
 pub const DEF_MQTT_PORT: u16 = 1883;
 
+// -------- Destination ------------------------------------------------------
+
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
 #[serde(try_from = "String")]
 pub struct Destination {
@@ -48,6 +50,42 @@ impl Display for Destination {
     }
 }
 
+// -------- ClientId ---------------------------------------------------------
+
+/// MQTT client ID
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(try_from = "String")]
+pub struct ClientId(pub String);
+
+impl std::ops::Deref for ClientId {
+    type Target = String;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl TryFrom<String> for ClientId {
+    type Error = &'static str;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        if value.starts_with(' ') {
+            Err("MQTT client id must not contain leading whitespace")
+        } else if value.is_empty() {
+            Err("MQTT client id must not be empty")
+        } else {
+            Ok(Self(value))
+        }
+    }
+}
+
+impl Into<String> for ClientId {
+    fn into(self) -> String {
+        self.0
+    }
+}
+
+
 #[serde_as]
 #[derive(Debug, Default, Deserialize)]
 pub struct Config {
@@ -57,8 +95,7 @@ pub struct Config {
     #[serde(default = "Config::default_qos")]
     pub qos: i32,
 
-    #[serde(default)]
-    pub client_id: String,
+    pub client_id: ClientId,
 
     #[serde(default = "Config::default_topic_template")]
     pub topic_template: String,

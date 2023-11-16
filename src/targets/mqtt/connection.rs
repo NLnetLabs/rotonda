@@ -1,12 +1,14 @@
 use std::{sync::Arc, time::Duration};
 
+use async_trait::async_trait;
 use mqtt::{
-    ConnAck, ConnectReturnCode, ConnectionError, Event, EventLoop, Incoming,
+    ClientError, ConnAck, ConnectReturnCode, ConnectionError, Event,
+    Incoming, MqttOptions, QoS,
 };
 use tokio::time::{interval, Interval};
 use ConnectionState::*;
 
-use super::status_reporter::MqttStatusReporter;
+use super::{config::Config, status_reporter::MqttStatusReporter};
 
 #[derive(Debug)]
 pub enum ConnectionState {
@@ -22,21 +24,39 @@ impl PartialEq for ConnectionState {
     }
 }
 
-pub struct Connection {
-    event_loop: mqtt::EventLoop,
+#[async_trait]
+pub trait EventLoop {
+    async fn poll(&mut self) -> Result<Event, ConnectionError>;
+
+    fn mqtt_options(&self) -> &MqttOptions;
+}
+
+#[async_trait]
+impl EventLoop for mqtt::EventLoop {
+    async fn poll(&mut self) -> Result<Event, ConnectionError> {
+        mqtt::EventLoop::poll(self).await
+    }
+
+    fn mqtt_options(&self) -> &MqttOptions {
+        &self.mqtt_options
+    }
+}
+
+pub struct Connection<T: EventLoop> {
+    event_loop: T,
     retry_delay: Duration,
     status_reporter: Arc<MqttStatusReporter>,
     state: ConnectionState,
 }
 
-impl Connection {
+impl<T: EventLoop> Connection<T> {
     pub fn new(
-        event_loop: EventLoop,
+        event_loop: T,
         retry_delay: Duration,
         status_reporter: Arc<MqttStatusReporter>,
     ) -> Self {
         status_reporter
-            .connecting(&event_loop.mqtt_options.broker_address().into());
+            .connecting(&event_loop.mqtt_options().broker_address().into());
 
         Self {
             event_loop,
@@ -79,7 +99,7 @@ impl Connection {
             }))) => {
                 self.state = Connected;
                 self.status_reporter.connected(
-                    &self.event_loop.mqtt_options.broker_address().into(),
+                    &self.event_loop.mqtt_options().broker_address().into(),
                 );
             }
 
@@ -110,4 +130,46 @@ impl Connection {
     pub fn set_retry_delay(&mut self, retry_delay: Duration) {
         self.retry_delay = retry_delay;
     }
+}
+
+#[async_trait]
+pub trait Client: Clone {
+    async fn publish<S, V>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: V,
+    ) -> Result<(), ClientError>
+    where
+        S: Into<String> + Send,
+        V: Into<Vec<u8>> + Send;
+}
+
+#[async_trait]
+impl Client for mqtt::AsyncClient {
+    async fn publish<S, V>(
+        &self,
+        topic: S,
+        qos: QoS,
+        retain: bool,
+        payload: V,
+    ) -> Result<(), ClientError>
+    where
+        S: Into<String> + Send,
+        V: Into<Vec<u8>> + Send,
+    {
+        mqtt::AsyncClient::publish(&self, topic, qos, retain, payload).await
+    }
+}
+
+pub trait ConnectionFactory {
+    type EventLoopType: EventLoop;
+
+    type ClientType: Client;
+
+    fn connect(
+        config: &Config,
+        status_reporter: Arc<MqttStatusReporter>,
+    ) -> (Self::ClientType, Connection<Self::EventLoopType>);
 }

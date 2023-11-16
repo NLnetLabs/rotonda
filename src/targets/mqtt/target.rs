@@ -1,8 +1,11 @@
 use std::{ops::ControlFlow, sync::Arc, time::Duration};
 
 use super::{
-    config::Config, connection::Connection, error::MqttError,
-    metrics::MqttMetrics, status_reporter::MqttStatusReporter,
+    config::Config,
+    connection::{Client, Connection, ConnectionFactory, EventLoop},
+    error::MqttError,
+    metrics::MqttMetrics,
+    status_reporter::MqttStatusReporter,
 };
 
 use crate::{
@@ -16,7 +19,7 @@ use crate::{
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use mqtt::{AsyncClient, MqttOptions, QoS};
+use mqtt::{MqttOptions, QoS};
 use non_empty_vec::NonEmpty;
 use roto::types::{outputs::OutputStreamMessage, typevalue::TypeValue};
 use serde::Deserialize;
@@ -76,16 +79,33 @@ impl MqttRunner {
         }
     }
 
+    #[cfg(test)]
+    pub fn mock(config: Arc<ArcSwap<Config>>) -> (Self, Arc<MqttStatusReporter>) {
+        let metrics = Arc::new(MqttMetrics::new());
+
+        let status_reporter =
+            Arc::new(MqttStatusReporter::new("mock", metrics));
+
+        let res = Self {
+            component: Default::default(),
+            config,
+            sender: None,
+            status_reporter: status_reporter.clone(),
+        };
+
+        (res, status_reporter)
+    }
+
     pub async fn run(
         mut self,
         mut sources: NonEmpty<DirectLink>,
-        mut cmd_rx: mpsc::Receiver<TargetCommand>,
+        cmd_rx: mpsc::Receiver<TargetCommand>,
         waitpoint: WaitPoint,
     ) -> Result<(), Terminated> {
         let component = &mut self.component;
         let _unit_name = component.name().clone();
 
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::unbounded_channel();
         self.sender = Some(tx);
 
         let arc_self = Arc::new(self);
@@ -100,96 +120,132 @@ impl MqttRunner {
         // component is not yet ready to accept it.
         waitpoint.running().await;
 
-        'run: loop {
-            let connect = arc_self.connect();
-            let (client, mut connection) = connect;
+        arc_self
+            .do_run::<MqttRunner>(Some(sources), cmd_rx, rx)
+            .await
+    }
 
-            while connection.connected() {
-                tokio::select! {
-                    biased; // Disable tokio::select!() random branch selection
+    pub async fn do_run<F: ConnectionFactory>(
+        self: &Arc<Self>,
+        mut sources: Option<NonEmpty<DirectLink>>,
+        mut cmd_rx: mpsc::Receiver<TargetCommand>,
+        mut rx: mpsc::UnboundedReceiver<SenderMsg>,
+    ) -> Result<(), Terminated> {
+        loop {
+            let (client, connection) =
+                F::connect(&self.config.load(), self.status_reporter.clone());
 
-                    _ = connection.process() => { }
+            if let Err(Terminated) = self
+                .process_events(
+                    client,
+                    connection,
+                    &mut sources,
+                    &mut cmd_rx,
+                    &mut rx,
+                )
+                .await
+            {
+                self.status_reporter.terminated();
+                return Err(Terminated);
+            }
+        }
+    }
 
-                    // If nothing happened above, check for new internal Rotonda target commands
-                    // to handle.
-                    cmd = cmd_rx.recv() => {
-                        if let Some(cmd) = &cmd {
-                            arc_self.status_reporter.command_received(cmd);
-                        }
+    pub async fn process_events<T: EventLoop, C: Client>(
+        self: &Arc<Self>,
+        client: C,
+        mut connection: Connection<T>,
+        sources: &mut Option<NonEmpty<DirectLink>>,
+        cmd_rx: &mut mpsc::Receiver<TargetCommand>,
+        rx: &mut mpsc::UnboundedReceiver<SenderMsg>,
+    ) -> Result<(), Terminated> {
+        while connection.connected() {
+            tokio::select! {
+                biased; // Disable tokio::select!() random branch selection
 
-                        match cmd {
-                            Some(TargetCommand::Reconfigure { new_config: Target::Mqtt(new_config) }) => {
-                                if arc_self.reconfigure(&mut sources, new_config, &mut connection).await.is_break() {
-                                    connection.disconnect();
-                                }
-                            }
+                _ = connection.process() => { }
 
-                            Some(TargetCommand::Reconfigure { .. }) => unreachable!(),
-
-                            Some(TargetCommand::ReportLinks { report }) => {
-                                report.set_sources(&sources);
-                                report.set_graph_status(
-                                    arc_self.status_reporter.metrics(),
-                                );
-                            }
-
-                            None | Some(TargetCommand::Terminate) => break 'run,
-                        }
+                // If nothing happened above, check for new internal Rotonda target commands
+                // to handle.
+                cmd = cmd_rx.recv() => {
+                    if let Some(cmd) = &cmd {
+                        self.status_reporter.command_received(cmd);
                     }
 
-                    // And finally if not doing anything else we can process messages
-                    // waiting in our internal queue to be published, which were
-                    // enqueued by the direct_update() method below.
-                    msg = rx.recv() => {
-                        match msg {
-                            Some(SenderMsg {
-                                received,
-                                content,
-                                topic,
-                            }) => {
-                                Self::publish_msg(
-                                    arc_self.status_reporter.clone(),
-                                    Some(client.clone()),
-                                    topic,
-                                    received,
-                                    content,
-                                    arc_self.config.load().qos,
-                                    arc_self.config.load().publish_max_secs,
-                                    None::<fn() -> Result<(), MqttError>>,
-                                )
-                                .await;
-                            }
-
-                            None => {
-                                break 'run;
+                    match cmd {
+                        Some(TargetCommand::Reconfigure { new_config: Target::Mqtt(new_config) }) => {
+                            if self.reconfigure(sources, new_config, &mut connection).await.is_break() {
+                                connection.disconnect();
                             }
                         }
+
+                        Some(TargetCommand::Reconfigure { .. }) => unreachable!(),
+
+                        Some(TargetCommand::ReportLinks { report }) => {
+                            if let Some(sources) = sources {
+                                report.set_sources(&sources);
+                            }
+                            report.set_graph_status(
+                                self.status_reporter.metrics(),
+                            );
+                        }
+
+                        None | Some(TargetCommand::Terminate) => return Err(Terminated),
+                    }
+                }
+
+                // And finally if not doing anything else we can process messages
+                // waiting in our internal queue to be published, which were
+                // enqueued by the direct_update() method below.
+                msg = rx.recv() => {
+                    match msg {
+                        Some(SenderMsg {
+                            received,
+                            content,
+                            topic,
+                        }) => {
+                            Self::publish_msg(
+                                self.status_reporter.clone(),
+                                Some(client.clone()),
+                                topic,
+                                received,
+                                content,
+                                self.config.load().qos,
+                                self.config.load().publish_max_secs,
+                                None::<fn() -> Result<(), MqttError>>,
+                            )
+                            .await;
+                        }
+
+                        None => return Err(Terminated),
                     }
                 }
             }
         }
 
-        arc_self.status_reporter.terminated();
-        Err(Terminated)
+        Ok(())
     }
 
-    async fn reconfigure(
+    async fn reconfigure<T: EventLoop>(
         self: &Arc<Self>,
-        sources: &mut NonEmpty<DirectLink>,
+        sources: &mut Option<NonEmpty<DirectLink>>,
         Mqtt {
             sources: new_sources,
             config: new_config,
         }: Mqtt,
-        connection: &mut Connection,
+        connection: &mut Connection<T>,
     ) -> ControlFlow<()> {
-        // Register as a direct update receiver with the new
-        // set of linked gates.
-        self.status_reporter
-            .upstream_sources_changed(sources.len(), new_sources.len());
-        *sources = new_sources;
+        if let Some(sources) = sources {
+            self.status_reporter
+                .upstream_sources_changed(sources.len(), new_sources.len());
 
-        for link in sources.iter_mut() {
-            link.connect(self.clone(), false).await.unwrap();
+            *sources = new_sources;
+
+            // Register as a direct update receiver with the new
+            // set of linked gates.
+            for link in sources.iter_mut() {
+                link.connect(self.clone(), false).await.unwrap();
+            }
         }
 
         // Check if the config changes impact the MQTT client
@@ -210,7 +266,7 @@ impl MqttRunner {
         if reconnect {
             // Advise the caller to stop using the current MQTT client
             // and instead to re-create it using the new config
-            return ControlFlow::Break(());
+            ControlFlow::Break(())
         } else {
             // Advise the caller to keep using the current MQTT client
             ControlFlow::Continue(())
@@ -218,9 +274,9 @@ impl MqttRunner {
     }
 
     #[allow(clippy::too_many_arguments)]
-    async fn publish_msg<F>(
+    async fn publish_msg<F, C>(
         status_reporter: Arc<MqttStatusReporter>,
-        client: Option<AsyncClient>,
+        client: Option<C>,
         topic: String,
         received: DateTime<Utc>,
         content: String,
@@ -229,6 +285,7 @@ impl MqttRunner {
         test_publish: Option<F>,
     ) where
         F: Fn() -> Result<(), MqttError> + Send + 'static,
+        C: Client,
     {
         status_reporter.publishing(&topic, &content);
 
@@ -251,8 +308,8 @@ impl MqttRunner {
         }
     }
 
-    async fn do_publish<F>(
-        client: Option<AsyncClient>,
+    async fn do_publish<F, C>(
+        client: Option<C>,
         topic: &str,
         content: String,
         qos: i32,
@@ -261,6 +318,7 @@ impl MqttRunner {
     ) -> Result<(), MqttError>
     where
         F: Fn() -> Result<(), MqttError> + Send + 'static,
+        C: Client,
     {
         let qos = match qos {
             0 => QoS::AtMostOnce,
@@ -315,10 +373,17 @@ impl MqttRunner {
 
         None
     }
+}
 
-    fn connect(self: &Arc<Self>) -> (AsyncClient, Connection) {
-        let config = self.config.load();
+impl ConnectionFactory for MqttRunner {
+    type EventLoopType = mqtt::EventLoop;
 
+    type ClientType = mqtt::AsyncClient;
+
+    fn connect(
+        config: &Config,
+        status_reporter: Arc<MqttStatusReporter>,
+    ) -> (mqtt::AsyncClient, Connection<mqtt::EventLoop>) {
         let mut create_opts = MqttOptions::new(
             config.client_id.clone(),
             config.destination.host.clone(),
@@ -331,7 +396,7 @@ impl MqttRunner {
 
         // Create the MQTT client & initiate connecting to the MQTT broker
         let (client, mut raw_connection) =
-            AsyncClient::new(create_opts, config.queue_size.into());
+            mqtt::AsyncClient::new(create_opts, config.queue_size.into());
 
         let mut conn_opts = raw_connection.network_options();
         conn_opts.set_connection_timeout(1);
@@ -340,7 +405,7 @@ impl MqttRunner {
         let connection = Connection::new(
             raw_connection,
             config.connect_retry_secs,
-            self.status_reporter.clone(),
+            status_reporter,
         );
 
         (client, connection)

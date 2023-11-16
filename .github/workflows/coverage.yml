@@ -20,7 +20,13 @@ jobs:
           # at the time of writing workflow_run.head_commit.id appears to be
           # the commit that triggered the CI workflow which then triggered us.
           ref: ${{ github.event.workflow_run.head_commit.id }}
-          
+
+      - run: |
+          whoami
+          echo $PATH
+          pwd
+          which cargo
+        
       - run: cargo install --locked cargo-tarpaulin
 
       - run: cargo tarpaulin --verbose --out Html

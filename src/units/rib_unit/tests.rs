@@ -156,7 +156,7 @@ async fn process_update_equivalent_route_twice() {
     );
 
     // Given a BGP update containing a single route announcement
-    let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
+    let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
     let update = mk_route_update_with_communities(
         &prefix,
         Some("[111,222,333]"),
@@ -542,7 +542,7 @@ async fn count_insert_retries_during_forced_contention() {
     let runner = Arc::new(runner);
 
     // Given a BGP update containing a single route announcement
-    let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
+    let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
     let update = mk_route_update(&prefix, Some("[111,222,333]"));
 
     // Insert it.

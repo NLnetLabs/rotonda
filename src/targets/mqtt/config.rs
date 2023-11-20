@@ -79,12 +79,11 @@ impl TryFrom<String> for ClientId {
     }
 }
 
-impl Into<String> for ClientId {
-    fn into(self) -> String {
-        self.0
+impl From<ClientId> for String {
+    fn from(val: ClientId) -> Self {
+        val.0
     }
 }
-
 
 #[serde_as]
 #[derive(Debug, Default, Deserialize)]

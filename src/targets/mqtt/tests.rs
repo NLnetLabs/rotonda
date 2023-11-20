@@ -11,11 +11,12 @@ use tokio::{sync::mpsc, time::Instant};
 
 use crate::{
     comms::Terminated,
+    manager::{Component, TargetCommand},
     targets::mqtt::config::ClientId,
     tests::util::{
         assert_json_eq,
         internal::{enable_logging, get_testable_metrics_snapshot},
-    }, manager::{TargetCommand, Component},
+    },
 };
 
 use super::{
@@ -27,31 +28,31 @@ use super::{
 
 #[test]
 fn destination_and_client_id_config_settings_must_be_provided() {
-    let empty = r###""###;
-    let empty_destination = r###"
+    let empty = r#""#;
+    let empty_destination = r#"
         client_id = "some-client-id"
         destination = ""
-    "###;
-    let empty_client_id = r###"
+    "#;
+    let empty_client_id = r#"
         client_id = ""
         destination = "some_host_name"
-    "###;
-    let leading_whitespace_client_id = r###"
+    "#;
+    let leading_whitespace_client_id = r#"
         client_id = " "
         destination = "some_host_name"
-    "###;
-    let destination_with_host_only = r###"
+    "#;
+    let destination_with_host_only = r#"
         client_id = "some-client-id"
         destination = "some_host_name"
-    "###;
-    let destination_with_host_and_invalid_port = r###"
+    "#;
+    let destination_with_host_and_invalid_port = r#"
         client_id = "some-client-id"
         destination = "some_host_name:invalid_port"
-    "###;
-    let destination_with_host_and_port = r###"
+    "#;
+    let destination_with_host_and_port = r#"
         client_id = "some-client-id"
         destination = "some_host_name:12345"
-    "###;
+    "#;
 
     assert!(mk_config_from_toml(empty).is_err());
     assert!(mk_config_from_toml(empty_client_id).is_err());
@@ -93,8 +94,10 @@ fn generate_correct_json_for_publishing_from_output_stream_roto_type_value() {
 #[tokio::test]
 async fn connection_refused() {
     enable_logging("trace");
-    let mut config = Config::default();
-    config.client_id = ClientId("conn-refused".to_string());
+    let config = Config {
+        client_id: ClientId("conn-refused".to_string()),
+        ..Default::default()
+    };
     let config = Arc::new(ArcSwap::from_pointee(config));
     let (runner, status_reporter) = MqttRunner::mock(config);
     let runner = Arc::new(runner);

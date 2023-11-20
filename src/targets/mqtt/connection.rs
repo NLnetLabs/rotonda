@@ -159,7 +159,7 @@ impl Client for mqtt::AsyncClient {
         S: Into<String> + Send,
         V: Into<Vec<u8>> + Send,
     {
-        mqtt::AsyncClient::publish(&self, topic, qos, retain, payload).await
+        mqtt::AsyncClient::publish(self, topic, qos, retain, payload).await
     }
 }
 

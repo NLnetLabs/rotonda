@@ -27,7 +27,7 @@ use crate::{
 };
 
 use super::{
-    config::Config,
+    config::{Config, Destination},
     connection::{Client, Connection, ConnectionFactory, EventLoop},
     status_reporter::MqttStatusReporter,
     target::*,
@@ -430,6 +430,7 @@ fn mk_mqtt_runner() -> (MqttRunner, Arc<MqttStatusReporter>) {
     let config = Config {
         client_id,
         connect_retry_secs: Duration::from_secs(2),
+        destination: Destination::try_from("mockhost".to_string()).unwrap(),
         publish_max_secs: Duration::from_secs(3),
         queue_size: Config::default_queue_size(),
         topic_template: Config::default_topic_template(),

@@ -161,7 +161,9 @@ impl RouterListApi {
                         let num_soft_parsing_failures = metrics
                             .num_bgp_updates_reparsed_due_to_incorrect_header_flags
                             .load(SeqCst);
-                        let num_hard_parsing_failures = metrics.num_unprocessable_bmp_messages.load(SeqCst);
+                        let num_hard_parsing_failures = metrics
+                            .num_unprocessable_bmp_messages
+                            .load(SeqCst);
 
                         formatdoc! {
                             r#"

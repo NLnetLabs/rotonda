@@ -183,10 +183,7 @@ mod tests {
         let res = processor.process_msg(bmp_msg, None);
 
         // Then
-        assert!(matches!(
-            res.message_type,
-            MessageType::StateTransition
-        ));
+        assert!(matches!(res.message_type, MessageType::StateTransition));
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
         if let BmpState::Dumping(next_state) = res.next_state {
             assert_eq!(next_state.router_id.deref(), TEST_ROUTER_ID);
@@ -220,8 +217,7 @@ mod tests {
             MessageType::InvalidMessage { .. }
         ));
         assert!(matches!(res.next_state, BmpState::Initiating(_)));
-        if let MessageType::InvalidMessage { err, .. } = res.message_type
-        {
+        if let MessageType::InvalidMessage { err, .. } = res.message_type {
             assert_eq!(
                 err,
                 "Invalid BMP InitiationMessage: Missing or empty sysName Information TLV"
@@ -245,8 +241,7 @@ mod tests {
             MessageType::InvalidMessage { .. }
         ));
         assert!(matches!(res.next_state, BmpState::Initiating(_)));
-        if let MessageType::InvalidMessage { err, .. } = res.message_type
-        {
+        if let MessageType::InvalidMessage { err, .. } = res.message_type {
             assert_eq!(err, "RFC 7854 4.3 violation: Expected BMP Initiation Message but received: PeerUpNotification");
         }
     }

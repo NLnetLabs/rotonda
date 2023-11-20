@@ -13,7 +13,7 @@ use crate::{
     payload::SourceId,
     units::bmp_tcp_in::{
         metrics::BmpTcpInMetrics,
-        state_machine::{BmpState, BmpStateMachineMetrics, BmpStateDetails},
+        state_machine::{BmpState, BmpStateDetails, BmpStateMachineMetrics},
     },
 };
 

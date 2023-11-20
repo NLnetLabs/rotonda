@@ -85,7 +85,7 @@ async fn process_update_withdraw_unannounced_route() {
     );
 
     // Given a BGP update containing a single route withdrawal
-    let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
+    let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
     let update = mk_route_update(&prefix, None);
 
     // When it is processed by this unit it should not be filtered
@@ -218,7 +218,7 @@ async fn process_update_equivalent_route_twice() {
     // When a route that is identical by key but different by value then the
     // new route should not be filtered, where the default key is peer IP,
     // peer ASN and AS path (see RibUnit::default_rib_keys()).
-    let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
+    let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
     let update = mk_route_update_with_communities(
         &prefix,
         Some("[111,222,333]"),

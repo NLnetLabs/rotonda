@@ -146,6 +146,11 @@ async fn connection_established() {
         metrics.with_name::<u8>("mqtt_target_connection_established"),
         0
     );
+    // We never lost the connection because we disconnected cleanly.
+    assert_eq!(
+        metrics.with_name::<u8>("mqtt_target_connection_lost_count"),
+        0
+    );
 }
 
 #[tokio::test]
@@ -154,11 +159,11 @@ async fn connection_refused() {
 
     // Simulate 3 critical MQTT issues in a row in the first MQTT client
     // instance that we create.
-    static MOCK_POLL_RESULTS: &'static [MockMqttPollResults] = &[&[
-        Err(MockCriticalConnectionError),
-        Err(MockCriticalConnectionError),
-        Err(MockCriticalConnectionError),
-    ]];
+    static MOCK_POLL_RESULTS: &'static [MockMqttPollResults] = &[
+        &[Err(MockCriticalConnectionError)],
+        &[Err(MockCriticalConnectionError)],
+        &[Err(MockCriticalConnectionError)],
+    ];
 
     let (join_handle, status_reporter, cmd_tx, _tx) =
         mk_mqtt_runner_task(MOCK_POLL_RESULTS);
@@ -169,6 +174,7 @@ async fn connection_refused() {
     while Instant::now().duration_since(start_time) < MAX_WAIT {
         let metrics =
             get_testable_metrics_snapshot(&status_reporter.metrics());
+        dbg!(metrics.with_name::<usize>("mqtt_target_connection_error_count"));
         if metrics.with_name::<usize>("mqtt_target_connection_error_count")
             == 3
         {
@@ -189,6 +195,78 @@ async fn connection_refused() {
     assert_eq!(
         metrics.with_name::<u8>("mqtt_target_connection_established"),
         0
+    );
+    // We never lost the connection because we never successfully connected.
+    assert_eq!(
+        metrics.with_name::<u8>("mqtt_target_connection_lost_count"),
+        0
+    );
+}
+
+#[tokio::test]
+async fn connection_loss_and_reconnect() {
+    enable_logging("trace");
+
+    // Simulate connection establishment, then a critical error, then reconnection.
+    static MOCK_POLL_RESULTS: &'static [MockMqttPollResults] = &[
+        &[
+            // First connection, connection established.
+            Ok(Event::Incoming(Packet::ConnAck(ConnAck {
+                code: ConnectReturnCode::Success,
+                session_present: false,
+            }))),
+            // First connection, connection lost.
+            Err(MockCriticalConnectionError),
+        ],
+        &[
+            // Second connection, connection established.
+            Ok(Event::Incoming(Packet::ConnAck(ConnAck {
+                code: ConnectReturnCode::Success,
+                session_present: false,
+            }))),
+        ],
+    ];
+
+    let (join_handle, status_reporter, cmd_tx, _tx) =
+        mk_mqtt_runner_task(MOCK_POLL_RESULTS);
+
+    const MAX_WAIT: Duration = Duration::from_secs(3);
+    let start_time = Instant::now();
+
+    while Instant::now().duration_since(start_time) < MAX_WAIT {
+        let metrics =
+            get_testable_metrics_snapshot(&status_reporter.metrics());
+        // dbg!(&metrics);
+        if metrics.with_name::<usize>("mqtt_target_connection_established")
+            == 1
+        {
+            break;
+        } else {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    let metrics = get_testable_metrics_snapshot(&status_reporter.metrics());
+    assert_eq!(
+        metrics.with_name::<u8>("mqtt_target_connection_established"),
+        1
+    );
+
+    cmd_tx.send(TargetCommand::Terminate).await.unwrap();
+    assert_eq!(join_handle.await.unwrap(), Err(Terminated));
+
+    let metrics = get_testable_metrics_snapshot(&status_reporter.metrics());
+    assert_eq!(
+        metrics.with_name::<usize>("mqtt_target_connection_error_count"),
+        1
+    );
+    assert_eq!(
+        metrics.with_name::<u8>("mqtt_target_connection_established"),
+        0
+    );
+    assert_eq!(
+        metrics.with_name::<u8>("mqtt_target_connection_lost_count"),
+        1
     );
 }
 
@@ -351,6 +429,9 @@ fn mk_mqtt_runner() -> (MqttRunner, Arc<MqttStatusReporter>) {
     let client_id = ClientId("mock".to_string());
     let config = Config {
         client_id,
+        connect_retry_secs: Duration::from_secs(2),
+        publish_max_secs: Duration::from_secs(3),
+        queue_size: Config::default_queue_size(),
         topic_template: Config::default_topic_template(),
         ..Default::default()
     };

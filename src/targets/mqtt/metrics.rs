@@ -70,7 +70,7 @@ impl MqttMetrics {
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const CONNECTION_ERROR_COUNT_METRIC: Metric = Metric::new(
         "mqtt_target_connection_error_count",
         "the number of times an error occurred with the connection to the MQTT broker",

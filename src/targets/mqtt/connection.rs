@@ -22,7 +22,7 @@ use super::tests::MockMqttPollResults;
 #[derive(Debug)]
 pub enum ConnectionState<C: Client> {
     New,
-    Running(C, JoinHandle<()>),
+    Running(C, JoinHandle<bool>),
     RetryBackoff(Interval),
     Stopped,
 }
@@ -157,12 +157,23 @@ impl<C: Client> Connection<C> {
                 // This is cancel safe, if cancelled the task keeps running
                 // and we can await it again next time we are called.
                 match join_handle.await {
-                    Ok(()) => {
+                    Ok(connected) => {
+                        if connected {
+                            self.status_reporter
+                                .reconnecting(self.retry_delay);
+                        }
+
                         // Connection failed!
                         // Put us into the retrying state with the current
                         // retry_delay as the amount of time to wait between
                         // subsequent connection attempts.
-                        self.state = RetryBackoff(interval(self.retry_delay));
+                        let mut interval = interval(self.retry_delay);
+
+                        // Consume the first tick as it always completes
+                        // immediately (per the docs).
+                        interval.tick().await;
+
+                        self.state = RetryBackoff(interval);
                     }
 
                     Err(err) => {
@@ -184,10 +195,9 @@ impl<C: Client> Connection<C> {
                 // called.
                 let _ = delay.tick().await;
 
-                // Once the wait is complete move back to the New state so
-                // that we will initiate a connection attempt when next
-                // called.
-                self.state = New;
+                // Once the wait is complete move back to the Stopped state so
+                // that we will discard this connection and create a new one.
+                self.disconnect().await;
             }
 
             // If we're disconnected, we shouldn't try to connect or to
@@ -206,7 +216,8 @@ impl<C: Client> Connection<C> {
             if let Err(err) = client.disconnect().await {
                 self.status_reporter.connection_error(err);
             }
-            self.status_reporter.disconnected(&self.mqtt_options.broker_address().into());
+            self.status_reporter
+                .disconnected(&self.mqtt_options.broker_address().into());
             join_handle.abort();
         }
 
@@ -230,12 +241,13 @@ impl<C: Client> Connection<C> {
 }
 
 impl<C: Client> Connection<C> {
+    /// Returns false if the initial connection never succeeded, true otherwise.
     async fn mqtt_event_loop(
         mqtt_options: MqttOptions,
         client_handover_tx: oneshot::Sender<C>,
         status_reporter: Arc<MqttStatusReporter>,
         #[cfg(test)] mock_poll_results: MockMqttPollResults,
-    ) {
+    ) -> bool {
         let broker_address = mqtt_options.broker_address().into();
 
         let cap = mqtt_options.request_channel_capacity();
@@ -249,13 +261,14 @@ impl<C: Client> Connection<C> {
 
         if client_handover_tx.send(client).is_err() {
             // Abort
-            return;
+            return false;
         }
 
         let mut conn_opts = event_loop.network_options();
         conn_opts.set_connection_timeout(1);
         event_loop.set_network_options(conn_opts);
 
+        let mut connected = false;
         loop {
             match event_loop.poll().await {
                 Ok(cow_event) => {
@@ -266,6 +279,7 @@ impl<C: Client> Connection<C> {
                         })) => {
                             // Great!
                             status_reporter.connected(&broker_address);
+                            connected = true;
                         }
 
                         Event::Incoming(Incoming::ConnAck(ConnAck {
@@ -275,7 +289,7 @@ impl<C: Client> Connection<C> {
                             // Connection failed
                             status_reporter
                                 .connection_error(format!("{code:?}"));
-                            break;
+                            return connected;
                         }
 
                         _ => {
@@ -285,7 +299,15 @@ impl<C: Client> Connection<C> {
                 }
 
                 Err(err) => {
+                    // Any error reported by rumqttc already resulted in it
+                    // calling its own `clean()` fn internally which forgets
+                    // the network connection causing the next call to `poll()`
+                    // to reconnect. However, we don't want to reconnect
+                    // immediately and potentially repeatedly, we want to have
+                    // a reconnection backoff strategy. So break out of here
+                    // to allow the caller to wait before reconnecting.
                     status_reporter.connection_error(err);
+                    return connected;
                 }
             }
         }

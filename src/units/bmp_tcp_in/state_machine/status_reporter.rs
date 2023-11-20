@@ -93,9 +93,7 @@ impl BmpStateMachineStatusReporter {
     ) {
         let metrics = self.metrics.router_metrics(router_id);
 
-        metrics
-            .num_unprocessable_bmp_messages
-            .fetch_add(1, SeqCst);
+        metrics.num_unprocessable_bmp_messages.fetch_add(1, SeqCst);
 
         metrics.parse_errors.push(err, bytes, false);
     }

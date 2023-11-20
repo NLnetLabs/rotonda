@@ -37,7 +37,9 @@ impl MqttStatusReporter {
 
     pub fn connected(&self, broker_address: &Destination) {
         sr_log!(info: self, "Connected to MQTT server at {}", broker_address);
-        self.metrics.connection_established_state.store(true, SeqCst);
+        self.metrics
+            .connection_established_state
+            .store(true, SeqCst);
     }
 
     pub fn disconnected(&self, broker_address: &Destination) {
@@ -56,7 +58,9 @@ impl MqttStatusReporter {
             "Reconnecting in {} seconds",
             connect_retry_secs.as_secs()
         );
-        self.metrics.connection_established_state.store(false, SeqCst);
+        self.metrics
+            .connection_established_state
+            .store(false, SeqCst);
         self.metrics.connection_lost_count.fetch_add(1, SeqCst);
     }
 

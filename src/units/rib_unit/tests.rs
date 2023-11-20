@@ -116,7 +116,7 @@ async fn process_update_same_route_twice() {
     );
 
     // Given a BGP update containing a single route announcement
-    let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
+    let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
     let update = mk_route_update(&prefix, Some("[111,222,333]"));
 
     // When it is processed by this unit it should not be filtered
@@ -410,8 +410,8 @@ async fn process_update_two_routes_to_different_prefixes() {
     );
 
     // Given BGP updates for two different routes to two different prefixes
-    let prefix1 = Prefix::from_str("127.0.0.1/32").unwrap();
-    let prefix2 = Prefix::from_str("127.0.0.2/32").unwrap();
+    let prefix1 = Prefix::from_str("127.0.0.1/32").unwrap().into();
+    let prefix2 = Prefix::from_str("127.0.0.2/32").unwrap().into();
 
     let update = mk_route_update(&prefix1, Some("[111,222,333]"));
     assert!(!is_filtered(&runner, update.clone()).await);

@@ -7,7 +7,7 @@ use crate::{
     common::frim::FrimMap,
     comms::GraphStatus,
     metrics::{
-        self, util::append_per_router_metric, Metric, MetricType, MetricUnit,
+        self, util::append_labelled_metric, Metric, MetricType, MetricUnit,
     },
 };
 
@@ -142,16 +142,18 @@ impl metrics::Source for MqttMetrics {
         );
         for (topic, metrics) in self.topics.guard().iter() {
             let topic = topic.as_str();
-            append_per_router_metric(
+            append_labelled_metric(
                 unit_name,
                 target,
+                "topic",
                 topic,
                 Self::PUBLISH_COUNT_PER_TOPIC_METRIC,
                 metrics.publish_counts.load(SeqCst),
             );
-            append_per_router_metric(
+            append_labelled_metric(
                 unit_name,
                 target,
+                "topic",
                 topic,
                 Self::LAST_END_TO_END_DELAY_PER_ROUTER_METRIC,
                 metrics.last_e2e_delay.load(SeqCst),

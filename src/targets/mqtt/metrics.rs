@@ -77,14 +77,14 @@ impl MqttMetrics {
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const PUBLISH_COUNT_PER_TOPIC_METRIC: Metric = Metric::new(
         "mqtt_target_publish_count",
         "the number of messages published to the MQTT broker per topic",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const IN_FLIGHT_COUNT_PER_TOPIC_METRIC: Metric = Metric::new(
         "mqtt_target_in_flight_count",
         "the number of messages currently in flight",

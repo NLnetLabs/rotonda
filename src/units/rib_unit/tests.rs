@@ -1,5 +1,5 @@
 use crate::common::status_reporter::AnyStatusReporter;
-use crate::tests::util::internal::get_testable_metrics_snapshot;
+use crate::tests::util::internal::{get_testable_metrics_snapshot, MOCK_ROUTER_ID};
 use crate::units::rib_unit::rib::{
     StoreEvictionPolicy, StoreMergeUpdateSettings,
 };
@@ -30,8 +30,6 @@ use std::time::Duration;
 use std::{str::FromStr, sync::Arc};
 
 use super::status_reporter::RibUnitStatusReporter;
-
-const MOCK_ROUTER_ID: &str = "mock-router";
 
 #[tokio::test]
 async fn process_non_route_update() {

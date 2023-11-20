@@ -87,6 +87,7 @@ impl MqttRunner {
     #[cfg(test)]
     pub fn mock(
         config: Arc<ArcSwap<Config>>,
+        pub_q_tx: Option<mpsc::UnboundedSender<SenderMsg>>,
     ) -> (Self, Arc<MqttStatusReporter>) {
         let metrics = Arc::new(MqttMetrics::new());
 
@@ -96,7 +97,7 @@ impl MqttRunner {
         let res = Self {
             component: Default::default(),
             config,
-            pub_q_tx: None,
+            pub_q_tx,
             status_reporter: status_reporter.clone(),
         };
 

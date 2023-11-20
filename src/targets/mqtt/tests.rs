@@ -6,19 +6,23 @@ use mqtt::{
     ClientError, ConnAck, ConnectReturnCode, ConnectionError, Event,
     MqttOptions, NetworkOptions, Packet, QoS,
 };
-use roto::types::{
-    collections::Record, outputs::OutputStreamMessage, typedef::TypeDef,
+use roto::{
+    types::{
+        collections::Record, outputs::OutputStreamMessage, typedef::TypeDef,
+    },
+    vm::OutputStreamQueue,
 };
 use serde_json::json;
 use tokio::{
-    sync::mpsc::{self, Sender, UnboundedSender},
+    sync::mpsc::{self, Sender},
     task::JoinHandle,
     time::Instant,
 };
 
 use crate::{
-    comms::Terminated,
+    comms::{DirectUpdate, Terminated},
     manager::TargetCommand,
+    payload::Payload,
     targets::mqtt::config::ClientId,
     tests::util::{
         assert_json_eq,
@@ -79,7 +83,7 @@ fn generate_correct_json_for_publishing_from_output_stream_roto_type_value() {
     let (runner, _) = mk_mqtt_runner();
 
     // And a payload that should be published
-    let output_stream = mk_roto_output_stream_payload();
+    let output_stream = Arc::new(mk_roto_output_stream_payload());
 
     // Then the candidate should be selected for publication
     let SenderMsg { content, topic, .. } =
@@ -109,7 +113,7 @@ async fn connection_established() {
             session_present: false,
         })))]];
 
-    let (join_handle, status_reporter, cmd_tx, _tx) =
+    let (join_handle, _, status_reporter, cmd_tx) =
         mk_mqtt_runner_task(MOCK_POLL_RESULTS);
 
     const MAX_WAIT: Duration = Duration::from_secs(3);
@@ -154,6 +158,102 @@ async fn connection_established() {
 }
 
 #[tokio::test]
+async fn publish_msg() {
+    enable_logging("trace");
+
+    // Simulate connection establishment.
+    static MOCK_POLL_RESULTS: &'static [MockMqttPollResults] =
+        &[&[Ok(Event::Incoming(Packet::ConnAck(ConnAck {
+            code: ConnectReturnCode::Success,
+            session_present: false,
+        })))]];
+
+    let (join_handle, runner, status_reporter, cmd_tx) =
+        mk_mqtt_runner_task(MOCK_POLL_RESULTS);
+
+    const MAX_WAIT: Duration = Duration::from_secs(3);
+    let start_time = Instant::now();
+
+    while Instant::now().duration_since(start_time) < MAX_WAIT {
+        let metrics =
+            get_testable_metrics_snapshot(&status_reporter.metrics());
+        // dbg!(&metrics);
+        if metrics.with_name::<usize>("mqtt_target_connection_established")
+            == 1
+        {
+            break;
+        } else {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    let metrics = get_testable_metrics_snapshot(&status_reporter.metrics());
+    assert_eq!(
+        metrics.with_name::<u8>("mqtt_target_connection_established"),
+        1
+    );
+
+    let test_output_stream_message = mk_roto_output_stream_payload();
+    let mut output_stream_queue = OutputStreamQueue::new();
+    output_stream_queue.push(test_output_stream_message.clone());
+    let payload =
+        Payload::from_output_stream_queue(output_stream_queue, None);
+    runner.direct_update(payload.into()).await;
+
+    while Instant::now().duration_since(start_time) < MAX_WAIT {
+        let metrics =
+            get_testable_metrics_snapshot(&status_reporter.metrics());
+        if metrics.with_name::<usize>("mqtt_target_in_flight_count") == 1 {
+            break;
+        } else {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    while Instant::now().duration_since(start_time) < MAX_WAIT {
+        let metrics =
+            get_testable_metrics_snapshot(&status_reporter.metrics());
+        if metrics.with_labels::<usize>(
+            "mqtt_target_publish_count",
+            &[("topic", "rotonda/my-topic")],
+        ) == 1
+        {
+            break;
+        } else {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    let metrics = get_testable_metrics_snapshot(&status_reporter.metrics());
+    assert_eq!(metrics.with_name::<usize>("mqtt_target_in_flight_count"), 0);
+    assert_eq!(
+        metrics.with_labels::<usize>(
+            "mqtt_target_publish_count",
+            &[("topic", "rotonda/my-topic")],
+        ),
+        1
+    );
+
+    cmd_tx.send(TargetCommand::Terminate).await.unwrap();
+    assert_eq!(join_handle.await.unwrap(), Err(Terminated));
+
+    let metrics = get_testable_metrics_snapshot(&status_reporter.metrics());
+    assert_eq!(
+        metrics.with_name::<usize>("mqtt_target_connection_error_count"),
+        0
+    );
+    assert_eq!(
+        metrics.with_name::<u8>("mqtt_target_connection_established"),
+        0
+    );
+    // We never lost the connection because we disconnected cleanly.
+    assert_eq!(
+        metrics.with_name::<u8>("mqtt_target_connection_lost_count"),
+        0
+    );
+}
+
+#[tokio::test]
 async fn connection_refused() {
     enable_logging("trace");
 
@@ -165,7 +265,7 @@ async fn connection_refused() {
         &[Err(MockCriticalConnectionError)],
     ];
 
-    let (join_handle, status_reporter, cmd_tx, _tx) =
+    let (join_handle, _, status_reporter, cmd_tx) =
         mk_mqtt_runner_task(MOCK_POLL_RESULTS);
 
     const MAX_WAIT: Duration = Duration::from_secs(3);
@@ -227,7 +327,7 @@ async fn connection_loss_and_reconnect() {
         ],
     ];
 
-    let (join_handle, status_reporter, cmd_tx, _tx) =
+    let (join_handle, _, status_reporter, cmd_tx) =
         mk_mqtt_runner_task(MOCK_POLL_RESULTS);
 
     const MAX_WAIT: Duration = Duration::from_secs(3);
@@ -330,7 +430,7 @@ impl Client for MockClient {
         S: Into<String> + Send,
         V: Into<Vec<u8>> + Send,
     {
-        todo!()
+        Ok(())
     }
 
     async fn disconnect(&self) -> Result<(), ClientError> {
@@ -425,9 +525,9 @@ impl ConnectionFactory for MockConnectionFactory {
     }
 }
 
-fn mk_mqtt_runner() -> (MqttRunner, Arc<MqttStatusReporter>) {
+fn mk_mqtt_runner_config() -> Config {
     let client_id = ClientId("mock".to_string());
-    let config = Config {
+    Config {
         client_id,
         connect_retry_secs: Duration::from_secs(2),
         destination: Destination::try_from("mockhost".to_string()).unwrap(),
@@ -435,9 +535,13 @@ fn mk_mqtt_runner() -> (MqttRunner, Arc<MqttStatusReporter>) {
         queue_size: Config::default_queue_size(),
         topic_template: Config::default_topic_template(),
         ..Default::default()
-    };
+    }
+}
+
+fn mk_mqtt_runner() -> (MqttRunner, Arc<MqttStatusReporter>) {
+    let config = mk_mqtt_runner_config();
     let config = Arc::new(ArcSwap::from_pointee(config));
-    MqttRunner::mock(config)
+    MqttRunner::mock(config, None)
 }
 
 #[allow(clippy::type_complexity)]
@@ -445,40 +549,42 @@ fn mk_mqtt_runner_task(
     mock_poll_results: &'static [MockMqttPollResults],
 ) -> (
     JoinHandle<Result<(), Terminated>>,
+    Arc<MqttRunner>,
     Arc<MqttStatusReporter>,
     Sender<TargetCommand>,
-    UnboundedSender<SenderMsg>,
 ) {
-    let (runner, status_reporter) = mk_mqtt_runner();
-
     // Warning: If either tx or cmd_tx are dropped the spawned runner will
     // exit, so hold on to them, don't do `let _ =` as that will drop them
     // immediately.
-    let (tx, rx) = mpsc::unbounded_channel();
+    let (pub_q_tx, pub_q_rx) = mpsc::unbounded_channel();
     let (cmd_tx, cmd_rx) = mpsc::channel(100);
 
-    let runner = Arc::new(runner);
-    let spawned_runner = runner.clone();
+    let config = mk_mqtt_runner_config();
+    let config = Arc::new(ArcSwap::from_pointee(config));
 
+    let (runner, status_reporter) = MqttRunner::mock(config, Some(pub_q_tx));
+    let runner = Arc::new(runner);
+
+    let spawned_runner = runner.clone();
     let join_handle = tokio::spawn(async move {
         spawned_runner
             .do_run::<MockConnectionFactory>(
                 None,
                 cmd_rx,
-                rx,
+                pub_q_rx,
                 mock_poll_results,
             )
             .await
     });
 
-    (join_handle, status_reporter, cmd_tx, tx)
+    (join_handle, runner, status_reporter, cmd_tx)
 }
 
 fn mk_config_from_toml(toml: &str) -> Result<Config, toml::de::Error> {
     toml::from_str::<Config>(toml)
 }
 
-fn mk_roto_output_stream_payload() -> Arc<OutputStreamMessage> {
+fn mk_roto_output_stream_payload() -> OutputStreamMessage {
     let typedef = TypeDef::new_record_type(vec![
         ("name", Box::new(TypeDef::StringLiteral)),
         ("topic", Box::new(TypeDef::StringLiteral)),
@@ -494,5 +600,5 @@ fn mk_roto_output_stream_payload() -> Arc<OutputStreamMessage> {
         ("some-asn", routecore::asn::Asn::from_u32(1818).into()),
     ];
     let record = Record::create_instance_with_sort(&typedef, fields).unwrap();
-    Arc::new(OutputStreamMessage::from(record))
+    OutputStreamMessage::from(record)
 }

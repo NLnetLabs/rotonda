@@ -80,7 +80,9 @@ impl MqttRunner {
     }
 
     #[cfg(test)]
-    pub fn mock(config: Arc<ArcSwap<Config>>) -> (Self, Arc<MqttStatusReporter>) {
+    pub fn mock(
+        config: Arc<ArcSwap<Config>>,
+    ) -> (Self, Arc<MqttStatusReporter>) {
         let metrics = Arc::new(MqttMetrics::new());
 
         let status_reporter =

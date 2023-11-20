@@ -40,6 +40,11 @@ impl MqttStatusReporter {
         self.metrics.connection_established_state.store(true, SeqCst);
     }
 
+    pub fn disconnected(&self, broker_address: &Destination) {
+        sr_log!(info: self, "Disconnected from MQTT server at {}", broker_address);
+        self.metrics.connection_established_state.store(false, SeqCst);
+    }
+
     pub fn connection_error<T: Display>(&self, err: T) {
         sr_log!(warn: self, "MQTT connection error: {}", err);
         self.metrics.connection_error_count.fetch_add(1, SeqCst);

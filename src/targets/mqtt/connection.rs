@@ -1,4 +1,4 @@
-use std::{sync::Arc, time::Duration};
+use std::{borrow::Cow, sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use mqtt::{
@@ -35,7 +35,7 @@ impl<C: Client> PartialEq for ConnectionState<C> {
 
 #[async_trait]
 pub trait EventLoop: Send {
-    async fn poll(&mut self) -> Result<Event, ConnectionError>;
+    async fn poll(&mut self) -> Result<Cow<Event>, ConnectionError>;
 
     fn mqtt_options(&self) -> &MqttOptions;
 
@@ -49,8 +49,8 @@ pub trait EventLoop: Send {
 
 #[async_trait]
 impl EventLoop for mqtt::EventLoop {
-    async fn poll(&mut self) -> Result<Event, ConnectionError> {
-        self.poll().await
+    async fn poll(&mut self) -> Result<Cow<Event>, ConnectionError> {
+        self.poll().await.map(|v| Cow::Owned(v))
     }
 
     fn mqtt_options(&self) -> &MqttOptions {
@@ -206,6 +206,7 @@ impl<C: Client> Connection<C> {
             if let Err(err) = client.disconnect().await {
                 self.status_reporter.connection_error(err);
             }
+            self.status_reporter.disconnected(&self.mqtt_options.broker_address().into());
             join_handle.abort();
         }
 
@@ -257,29 +258,34 @@ impl<C: Client> Connection<C> {
 
         loop {
             match event_loop.poll().await {
-                Ok(Event::Incoming(Incoming::ConnAck(ConnAck {
-                    code: ConnectReturnCode::Success,
-                    ..
-                }))) => {
-                    // Great!
-                    status_reporter.connected(&broker_address);
-                }
+                Ok(cow_event) => {
+                    match *cow_event {
+                        Event::Incoming(Incoming::ConnAck(ConnAck {
+                            code: ConnectReturnCode::Success,
+                            ..
+                        })) => {
+                            // Great!
+                            status_reporter.connected(&broker_address);
+                        }
 
-                Ok(Event::Incoming(Incoming::ConnAck(ConnAck {
-                    code,
-                    ..
-                }))) => {
-                    // Connection failed
-                    status_reporter.connection_error(format!("{code:?}"));
-                    break;
+                        Event::Incoming(Incoming::ConnAck(ConnAck {
+                            code,
+                            ..
+                        })) => {
+                            // Connection failed
+                            status_reporter
+                                .connection_error(format!("{code:?}"));
+                            break;
+                        }
+
+                        _ => {
+                            // Ignored for now
+                        }
+                    }
                 }
 
                 Err(err) => {
                     status_reporter.connection_error(err);
-                }
-
-                _ => {
-                    // Ignored for now
                 }
             }
         }

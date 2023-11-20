@@ -1,3 +1,5 @@
+#[cfg(test)]
+use std::ops::Deref;
 use std::{ops::ControlFlow, sync::Arc, time::Duration};
 
 use super::{
@@ -141,7 +143,7 @@ impl MqttRunner {
         mut sources: Option<NonEmpty<DirectLink>>,
         mut cmd_rx: mpsc::Receiver<TargetCommand>,
         mut pub_q_rx: mpsc::UnboundedReceiver<SenderMsg>,
-        #[cfg(test)] mock_poll_results: MockMqttPollResults,
+        #[cfg(test)] mock_poll_results: &'static [MockMqttPollResults],
     ) -> Result<(), Terminated>
     where
         <F as ConnectionFactory>::EventLoopType: 'static,
@@ -151,16 +153,16 @@ impl MqttRunner {
 
         loop {
             #[cfg(test)]
-            let mock_poll_results = Self::get_mock_poll_results::<F>(
-                mock_poll_results,
-                this_conn_idx,
-            );
+            let this_conn_mock_poll_results = mock_poll_results
+                .get(this_conn_idx)
+                .map(Deref::deref)
+                .unwrap_or_default();
 
             let connection = F::connect(
                 &self.config.load(),
                 self.status_reporter.clone(),
                 #[cfg(test)]
-                mock_poll_results,
+                this_conn_mock_poll_results,
             );
 
             if let Err(Terminated) = self
@@ -409,33 +411,6 @@ impl MqttRunner {
         }
 
         None
-    }
-
-    #[cfg(test)]
-    fn get_mock_poll_results<F: ConnectionFactory>(
-        mock_poll_results: MockMqttPollResults,
-        this_conn_idx: usize,
-    ) -> MockMqttPollResults
-    where
-        <F as ConnectionFactory>::EventLoopType: 'static,
-    {
-        // Find the first mock result for the specified connection index
-        if let Some(start) = mock_poll_results
-            .iter()
-            .position(|(conn_idx, _)| *conn_idx == this_conn_idx)
-        {
-            // Find the last mock result for the specified connection index
-            if let Some(end) = mock_poll_results[start + 1..]
-                .iter()
-                .position(|(conn_idx, _)| *conn_idx > this_conn_idx)
-            {
-                return &mock_poll_results[start..end];
-            } else {
-                return &mock_poll_results[start..];
-            }
-        }
-
-        &[]
     }
 }
 

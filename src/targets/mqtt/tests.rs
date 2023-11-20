@@ -1,9 +1,10 @@
-use std::{sync::Arc, time::Duration};
+use std::{borrow::Cow, sync::Arc, time::Duration};
 
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use mqtt::{
-    ClientError, ConnectionError, Event, MqttOptions, NetworkOptions, QoS,
+    ClientError, ConnAck, ConnectReturnCode, ConnectionError, Event,
+    MqttOptions, NetworkOptions, Packet, QoS,
 };
 use roto::types::{
     collections::Record, outputs::OutputStreamMessage, typedef::TypeDef,
@@ -98,16 +99,66 @@ fn generate_correct_json_for_publishing_from_output_stream_roto_type_value() {
 }
 
 #[tokio::test]
+async fn connection_established() {
+    enable_logging("trace");
+
+    // Simulate connection establishment.
+    static MOCK_POLL_RESULTS: &'static [MockMqttPollResults] =
+        &[&[Ok(Event::Incoming(Packet::ConnAck(ConnAck {
+            code: ConnectReturnCode::Success,
+            session_present: false,
+        })))]];
+
+    let (join_handle, status_reporter, cmd_tx, _tx) =
+        mk_mqtt_runner_task(MOCK_POLL_RESULTS);
+
+    const MAX_WAIT: Duration = Duration::from_secs(3);
+    let start_time = Instant::now();
+
+    while Instant::now().duration_since(start_time) < MAX_WAIT {
+        let metrics =
+            get_testable_metrics_snapshot(&status_reporter.metrics());
+        // dbg!(&metrics);
+        if metrics.with_name::<usize>("mqtt_target_connection_established")
+            == 1
+        {
+            break;
+        } else {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    let metrics = get_testable_metrics_snapshot(&status_reporter.metrics());
+    assert_eq!(
+        metrics.with_name::<u8>("mqtt_target_connection_established"),
+        1
+    );
+
+    cmd_tx.send(TargetCommand::Terminate).await.unwrap();
+    assert_eq!(join_handle.await.unwrap(), Err(Terminated));
+
+    let metrics = get_testable_metrics_snapshot(&status_reporter.metrics());
+    assert_eq!(
+        metrics.with_name::<usize>("mqtt_target_connection_error_count"),
+        0
+    );
+    assert_eq!(
+        metrics.with_name::<u8>("mqtt_target_connection_established"),
+        0
+    );
+}
+
+#[tokio::test]
 async fn connection_refused() {
     enable_logging("trace");
 
     // Simulate 3 critical MQTT issues in a row in the first MQTT client
     // instance that we create.
-    static MOCK_POLL_RESULTS: MockMqttPollResults = &[
-        (0usize, Err(MockCriticalConnectionError)),
-        (0usize, Err(MockCriticalConnectionError)),
-        (0usize, Err(MockCriticalConnectionError)),
-    ];
+    static MOCK_POLL_RESULTS: &'static [MockMqttPollResults] = &[&[
+        Err(MockCriticalConnectionError),
+        Err(MockCriticalConnectionError),
+        Err(MockCriticalConnectionError),
+    ]];
 
     let (join_handle, status_reporter, cmd_tx, _tx) =
         mk_mqtt_runner_task(MOCK_POLL_RESULTS);
@@ -161,7 +212,7 @@ async fn connection_refused() {
 /// results to send after a deliberate termination of the MQTT client due to
 /// target reconfiguration with changed MQTT client settings.
 pub(crate) type MockMqttPollResults =
-    &'static [(usize, Result<Event, MockCriticalConnectionError>)];
+    &'static [Result<Event, MockCriticalConnectionError>];
 
 // rumqttc ConnectionError is neither Copy, Clone, Send or Sync so we can't
 // pass it between threads or Tokio tasks at all. However, as the rustdoc
@@ -233,16 +284,21 @@ impl MockEventLoop {
 
 #[async_trait]
 impl EventLoop for MockEventLoop {
-    async fn poll(&mut self) -> Result<Event, ConnectionError> {
-        if let Some((_, Err(MockCriticalConnectionError))) =
-            self.mock_poll_results.get(self.last_mock_res_idx)
-        {
-            self.last_mock_res_idx += 1;
-            // Create any ConnectionError, they are all "critical" according
-            // to the rustdoc on ConnectionError.
-            std::future::ready(Err(ConnectionError::NetworkTimeout)).await
-        } else {
-            std::future::pending().await
+    async fn poll(&mut self) -> Result<Cow<Event>, ConnectionError> {
+        match self.mock_poll_results.get(self.last_mock_res_idx) {
+            Some(Ok(mock_result)) => {
+                self.last_mock_res_idx += 1;
+                std::future::ready(Ok(Cow::Borrowed(mock_result))).await
+            }
+
+            Some(Err(MockCriticalConnectionError)) => {
+                self.last_mock_res_idx += 1;
+                // Create any ConnectionError, they are all "critical" according
+                // to the rustdoc on ConnectionError.
+                std::future::ready(Err(ConnectionError::NetworkTimeout)).await
+            }
+
+            None => std::future::pending().await,
         }
     }
 
@@ -304,7 +360,7 @@ fn mk_mqtt_runner() -> (MqttRunner, Arc<MqttStatusReporter>) {
 
 #[allow(clippy::type_complexity)]
 fn mk_mqtt_runner_task(
-    mock_poll_results: MockMqttPollResults,
+    mock_poll_results: &'static [MockMqttPollResults],
 ) -> (
     JoinHandle<Result<(), Terminated>>,
     Arc<MqttStatusReporter>,

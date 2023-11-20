@@ -646,6 +646,7 @@ mod tests {
 
     //-------- Test helpers --------------------------------------------------
 
+    #[allow(clippy::type_complexity)]
     fn setup_test() -> (
         JoinHandle<(MockBgpSession, mpsc::Receiver<Message>)>,
         Arc<BgpTcpInStatusReporter>,
@@ -702,8 +703,8 @@ mod tests {
         async fn tick(&mut self) -> Result<(), session::Error> {
             // Don't tick too fast otherwise process() spends all its time
             // handling ticks and won't do anything else.
-            Ok(tokio::time::sleep(std::time::Duration::from_millis(100))
-                .await)
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            Ok(())
         }
     }
 }

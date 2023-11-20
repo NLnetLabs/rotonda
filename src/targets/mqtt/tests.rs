@@ -257,8 +257,7 @@ async fn publish_msg() {
 async fn connection_refused() {
     enable_logging("trace");
 
-    // Simulate 3 critical MQTT issues in a row in the first MQTT client
-    // instance that we create.
+    // Simulate 3 critical MQTT issues in a row.
     static MOCK_POLL_RESULTS: &'static [MockMqttPollResults] = &[
         &[Err(MockCriticalConnectionError)],
         &[Err(MockCriticalConnectionError)],

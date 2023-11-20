@@ -1,5 +1,7 @@
 use crate::common::status_reporter::AnyStatusReporter;
-use crate::tests::util::internal::{get_testable_metrics_snapshot, MOCK_ROUTER_ID};
+use crate::tests::util::internal::{
+    get_testable_metrics_snapshot, MOCK_ROUTER_ID,
+};
 use crate::units::rib_unit::rib::{
     StoreEvictionPolicy, StoreMergeUpdateSettings,
 };

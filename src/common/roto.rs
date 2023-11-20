@@ -506,13 +506,7 @@ impl RotoScripts {
                 Some((tracer, trace_id)),
             )
         } else {
-            self.do_exec(
-                vm_ref,
-                filter_name,
-                rx,
-                received,
-                None,
-            )
+            self.do_exec(vm_ref, filter_name, rx, received, None)
         }
     }
 

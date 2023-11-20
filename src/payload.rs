@@ -160,7 +160,9 @@ pub struct Payload {
 impl PartialEq for Payload {
     fn eq(&self, other: &Self) -> bool {
         // Don't compare the received timestamp
-        self.source_id == other.source_id && self.value == other.value && self.trace_id == other.trace_id // && self.received == other.received
+        self.source_id == other.source_id
+            && self.value == other.value
+            && self.trace_id == other.trace_id // && self.received == other.received
     }
 }
 

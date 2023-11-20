@@ -16,8 +16,9 @@ use crate::{
     payload::SourceId,
     units::bmp_tcp_in::{
         metrics::BmpTcpInMetrics,
+        state_machine::{BmpState, BmpStateDetails, BmpStateMachineMetrics},
         types::RouterInfo,
-        util::{calc_u8_pc, format_source_id}, state_machine::{BmpStateMachineMetrics, BmpState, BmpStateDetails},
+        util::{calc_u8_pc, format_source_id},
     },
 };
 

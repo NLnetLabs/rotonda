@@ -811,7 +811,7 @@ fn insert_routes(
             .with_peer_asn(Asn::from_u32(1000 + (n as u32)))
             .with_router_id(Arc::new(format!("router{n}")));
 
-            loaded_rib.insert(&prefix, raw_route).unwrap();
+            loaded_rib.insert(prefix, raw_route).unwrap();
         }
     }
 }

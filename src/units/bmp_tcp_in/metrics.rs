@@ -184,7 +184,7 @@ impl metrics::Source for BmpTcpInMetrics {
             for (msg_type_code, metric_value) in
                 metrics.num_bmp_messages_received.iter().enumerate()
             {
-                let router_label = ("router", router_id.as_ref());
+                let router_label = ("router", router_id);
                 let msg_type_label = (
                     "msg_type",
                     Self::BMP_RFC_7854_MSG_TYPE_NAMES[msg_type_code],

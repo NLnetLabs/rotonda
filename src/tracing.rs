@@ -441,7 +441,7 @@ mod tests {
         let tracer = Tracer::new();
         let trace_id: u8 = 0;
         let gate_id: Uuid = Uuid::new_v4();
-        let msg = format!("some msg");
+        let msg = "some msg".to_string();
         tracer.note_gate_event(trace_id, gate_id, msg.clone());
         assert!(!tracer.get_trace(trace_id).msgs().is_empty());
         assert_eq!(

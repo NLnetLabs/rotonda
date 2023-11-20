@@ -97,7 +97,7 @@ fn generate_correct_json_for_publishing_from_output_stream_roto_type_value() {
     assert_json_eq(actual_json, expected_json);
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn connection_refused() {
     enable_logging("trace");
 

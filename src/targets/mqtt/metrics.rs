@@ -63,7 +63,7 @@ impl MqttMetrics {
         MetricType::Gauge,
         MetricUnit::State,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const CONNECTION_LOST_COUNT_METRIC: Metric = Metric::new(
         "mqtt_target_connection_lost_count",
         "the number of times the connection to the MQTT broker was lost",

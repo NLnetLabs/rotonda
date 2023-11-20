@@ -719,7 +719,7 @@ mod tests {
         let (runner, agent, _) = setup_test("1.2.3.4:12345");
         let status_reporter = runner.status_reporter.clone();
         let wait_forever =
-            |_addr| Ok(MockTcpListener::new(|| std::future::pending()));
+            |_addr| Ok(MockTcpListener::new(std::future::pending));
         let mock_listener_factory =
             Arc::new(MockTcpListenerFactory::new(wait_forever));
         let task = runner.run::<_, _, _, NoOpConfigAcceptor>(

@@ -112,6 +112,12 @@ pub struct Config {
     /// How many messages to buffer if publishing encounters delays
     #[serde(default = "Config::default_queue_size")]
     pub queue_size: u16,
+
+    #[serde(default)]
+    pub username: Option<String>,
+
+    #[serde(default)]
+    pub password: Option<String>,
 }
 
 impl Config {

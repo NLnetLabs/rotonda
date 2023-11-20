@@ -42,6 +42,7 @@ impl MqttStatusReporter {
 
     pub fn connection_error<T: Display>(&self, err: T) {
         sr_log!(warn: self, "MQTT connection error: {}", err);
+        self.metrics.connection_error_count.fetch_add(1, SeqCst);
     }
 
     pub fn reconnecting(&self, connect_retry_secs: Duration) {

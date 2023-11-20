@@ -2,7 +2,7 @@ use std::{ops::ControlFlow, sync::Arc, time::Duration};
 
 use super::{
     config::Config,
-    connection::{Client, Connection, ConnectionFactory, EventLoop},
+    connection::{Client, Connection, ConnectionFactory},
     error::MqttError,
     metrics::MqttMetrics,
     status_reporter::MqttStatusReporter,
@@ -15,6 +15,9 @@ use crate::{
     payload::{Payload, Update, UpstreamStatus},
     targets::Target,
 };
+
+#[cfg(test)]
+use super::tests::MockMqttPollResults;
 
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
@@ -57,7 +60,7 @@ impl Mqtt {
 pub(super) struct MqttRunner {
     component: Component,
     config: Arc<ArcSwap<Config>>,
-    sender: Option<mpsc::UnboundedSender<SenderMsg>>,
+    pub_q_tx: Option<mpsc::UnboundedSender<SenderMsg>>,
     status_reporter: Arc<MqttStatusReporter>,
 }
 
@@ -74,13 +77,15 @@ impl MqttRunner {
         Self {
             component,
             config,
-            sender: None,
+            pub_q_tx: None,
             status_reporter,
         }
     }
 
     #[cfg(test)]
-    pub fn mock(config: Arc<ArcSwap<Config>>) -> (Self, Arc<MqttStatusReporter>) {
+    pub fn mock(
+        config: Arc<ArcSwap<Config>>,
+    ) -> (Self, Arc<MqttStatusReporter>) {
         let metrics = Arc::new(MqttMetrics::new());
 
         let status_reporter =
@@ -89,7 +94,7 @@ impl MqttRunner {
         let res = Self {
             component: Default::default(),
             config,
-            sender: None,
+            pub_q_tx: None,
             status_reporter: status_reporter.clone(),
         };
 
@@ -105,8 +110,8 @@ impl MqttRunner {
         let component = &mut self.component;
         let _unit_name = component.name().clone();
 
-        let (tx, rx) = mpsc::unbounded_channel();
-        self.sender = Some(tx);
+        let (pub_q_tx, pub_q_rx) = mpsc::unbounded_channel();
+        self.pub_q_tx = Some(pub_q_tx);
 
         let arc_self = Arc::new(self);
 
@@ -121,7 +126,13 @@ impl MqttRunner {
         waitpoint.running().await;
 
         arc_self
-            .do_run::<MqttRunner>(Some(sources), cmd_rx, rx)
+            .do_run::<MqttRunner>(
+                Some(sources),
+                cmd_rx,
+                pub_q_rx,
+                #[cfg(test)]
+                &[],
+            )
             .await
     }
 
@@ -129,37 +140,57 @@ impl MqttRunner {
         self: &Arc<Self>,
         mut sources: Option<NonEmpty<DirectLink>>,
         mut cmd_rx: mpsc::Receiver<TargetCommand>,
-        mut rx: mpsc::UnboundedReceiver<SenderMsg>,
-    ) -> Result<(), Terminated> {
+        mut pub_q_rx: mpsc::UnboundedReceiver<SenderMsg>,
+        #[cfg(test)] mock_poll_results: MockMqttPollResults,
+    ) -> Result<(), Terminated>
+    where
+        <F as ConnectionFactory>::EventLoopType: 'static,
+    {
+        #[cfg(test)]
+        let mut this_conn_idx = 0;
+
         loop {
-            let (client, connection) =
-                F::connect(&self.config.load(), self.status_reporter.clone());
+            #[cfg(test)]
+            let mock_poll_results = Self::get_mock_poll_results::<F>(
+                mock_poll_results,
+                this_conn_idx,
+            );
+
+            let connection = F::connect(
+                &self.config.load(),
+                self.status_reporter.clone(),
+                #[cfg(test)]
+                mock_poll_results,
+            );
 
             if let Err(Terminated) = self
                 .process_events(
-                    client,
                     connection,
                     &mut sources,
                     &mut cmd_rx,
-                    &mut rx,
+                    &mut pub_q_rx,
                 )
                 .await
             {
                 self.status_reporter.terminated();
                 return Err(Terminated);
             }
+
+            #[cfg(test)]
+            {
+                this_conn_idx += 1;
+            }
         }
     }
 
-    pub async fn process_events<T: EventLoop, C: Client>(
+    pub async fn process_events<C: Client>(
         self: &Arc<Self>,
-        client: C,
-        mut connection: Connection<T>,
+        mut connection: Connection<C>,
         sources: &mut Option<NonEmpty<DirectLink>>,
         cmd_rx: &mut mpsc::Receiver<TargetCommand>,
-        rx: &mut mpsc::UnboundedReceiver<SenderMsg>,
+        pub_q_rx: &mut mpsc::UnboundedReceiver<SenderMsg>,
     ) -> Result<(), Terminated> {
-        while connection.connected() {
+        while connection.active() {
             tokio::select! {
                 biased; // Disable tokio::select!() random branch selection
 
@@ -175,7 +206,7 @@ impl MqttRunner {
                     match cmd {
                         Some(TargetCommand::Reconfigure { new_config: Target::Mqtt(new_config) }) => {
                             if self.reconfigure(sources, new_config, &mut connection).await.is_break() {
-                                connection.disconnect();
+                                connection.disconnect().await;
                             }
                         }
 
@@ -190,14 +221,17 @@ impl MqttRunner {
                             );
                         }
 
-                        None | Some(TargetCommand::Terminate) => return Err(Terminated),
+                        None | Some(TargetCommand::Terminate) => {
+                            connection.disconnect().await;
+                            return Err(Terminated);
+                        }
                     }
                 }
 
                 // And finally if not doing anything else we can process messages
                 // waiting in our internal queue to be published, which were
                 // enqueued by the direct_update() method below.
-                msg = rx.recv() => {
+                msg = pub_q_rx.recv() => {
                     match msg {
                         Some(SenderMsg {
                             received,
@@ -206,7 +240,7 @@ impl MqttRunner {
                         }) => {
                             Self::publish_msg(
                                 self.status_reporter.clone(),
-                                Some(client.clone()),
+                                connection.client(),
                                 topic,
                                 received,
                                 content,
@@ -217,7 +251,10 @@ impl MqttRunner {
                             .await;
                         }
 
-                        None => return Err(Terminated),
+                        None => {
+                            connection.disconnect().await;
+                            return Err(Terminated);
+                        }
                     }
                 }
             }
@@ -226,14 +263,14 @@ impl MqttRunner {
         Ok(())
     }
 
-    async fn reconfigure<T: EventLoop>(
+    async fn reconfigure<C: Client>(
         self: &Arc<Self>,
         sources: &mut Option<NonEmpty<DirectLink>>,
         Mqtt {
             sources: new_sources,
             config: new_config,
         }: Mqtt,
-        connection: &mut Connection<T>,
+        connection: &mut Connection<C>,
     ) -> ControlFlow<()> {
         if let Some(sources) = sources {
             self.status_reporter
@@ -373,6 +410,33 @@ impl MqttRunner {
 
         None
     }
+
+    #[cfg(test)]
+    fn get_mock_poll_results<F: ConnectionFactory>(
+        mock_poll_results: MockMqttPollResults,
+        this_conn_idx: usize,
+    ) -> MockMqttPollResults
+    where
+        <F as ConnectionFactory>::EventLoopType: 'static,
+    {
+        // Find the first mock result for the specified connection index
+        if let Some(start) = mock_poll_results
+            .iter()
+            .position(|(conn_idx, _)| *conn_idx == this_conn_idx)
+        {
+            // Find the last mock result for the specified connection index
+            if let Some(end) = mock_poll_results[start + 1..]
+                .iter()
+                .position(|(conn_idx, _)| *conn_idx > this_conn_idx)
+            {
+                return &mock_poll_results[start..end];
+            } else {
+                return &mock_poll_results[start..];
+            }
+        }
+
+        &[]
+    }
 }
 
 impl ConnectionFactory for MqttRunner {
@@ -383,7 +447,8 @@ impl ConnectionFactory for MqttRunner {
     fn connect(
         config: &Config,
         status_reporter: Arc<MqttStatusReporter>,
-    ) -> (mqtt::AsyncClient, Connection<mqtt::EventLoop>) {
+        #[cfg(test)] mock_poll_results: MockMqttPollResults,
+    ) -> Connection<Self::ClientType> {
         let mut create_opts = MqttOptions::new(
             config.client_id.clone(),
             config.destination.host.clone(),
@@ -394,21 +459,13 @@ impl ConnectionFactory for MqttRunner {
         create_opts.set_inflight(1000);
         create_opts.set_keep_alive(Duration::from_secs(20));
 
-        // Create the MQTT client & initiate connecting to the MQTT broker
-        let (client, mut raw_connection) =
-            mqtt::AsyncClient::new(create_opts, config.queue_size.into());
-
-        let mut conn_opts = raw_connection.network_options();
-        conn_opts.set_connection_timeout(1);
-        raw_connection.set_network_options(conn_opts);
-
-        let connection = Connection::new(
-            raw_connection,
+        Connection::new(
+            create_opts,
             config.connect_retry_secs,
             status_reporter,
-        );
-
-        (client, connection)
+            #[cfg(test)]
+            mock_poll_results,
+        )
     }
 }
 
@@ -427,7 +484,8 @@ impl DirectUpdate for MqttRunner {
                 ..
             }) => {
                 if let Some(msg) = self.output_stream_message_to_msg(osm) {
-                    if let Err(_err) = self.sender.as_ref().unwrap().send(msg)
+                    if let Err(_err) =
+                        self.pub_q_tx.as_ref().unwrap().send(msg)
                     {
                         // TODO
                     }
@@ -445,7 +503,7 @@ impl DirectUpdate for MqttRunner {
                             self.output_stream_message_to_msg(osm)
                         {
                             if let Err(_err) =
-                                self.sender.as_ref().unwrap().send(msg)
+                                self.pub_q_tx.as_ref().unwrap().send(msg)
                             {
                                 // TODO
                             }

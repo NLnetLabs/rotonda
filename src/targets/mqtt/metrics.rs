@@ -15,6 +15,7 @@ use crate::{
 pub struct MqttMetrics {
     pub connection_established_state: AtomicBool,
     pub connection_lost_count: AtomicUsize,
+    pub connection_error_count: AtomicUsize,
     pub in_flight_count: AtomicUsize,
     pub transmit_error_count: AtomicUsize,
     topics: Arc<FrimMap<Arc<String>, Arc<TopicMetrics>>>,
@@ -55,7 +56,7 @@ impl GraphStatus for MqttMetrics {
 }
 
 impl MqttMetrics {
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // TEST STATUS: [/] makes sense? [/] passes tests?
     const CONNECTION_ESTABLISHED_METRIC: Metric = Metric::new(
         "mqtt_target_connection_established",
         "the state of the connection to the MQTT broker: 0=down, 1=up",
@@ -66,6 +67,13 @@ impl MqttMetrics {
     const CONNECTION_LOST_COUNT_METRIC: Metric = Metric::new(
         "mqtt_target_connection_lost_count",
         "the number of times the connection to the MQTT broker was lost",
+        MetricType::Counter,
+        MetricUnit::Total,
+    );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    const CONNECTION_ERROR_COUNT_METRIC: Metric = Metric::new(
+        "mqtt_target_connection_error_count",
+        "the number of times an error occurred with the connection to the MQTT broker",
         MetricType::Counter,
         MetricUnit::Total,
     );
@@ -116,6 +124,11 @@ impl metrics::Source for MqttMetrics {
             &Self::CONNECTION_LOST_COUNT_METRIC,
             Some(unit_name),
             self.connection_lost_count.load(SeqCst),
+        );
+        target.append_simple(
+            &Self::CONNECTION_ERROR_COUNT_METRIC,
+            Some(unit_name),
+            self.connection_error_count.load(SeqCst),
         );
         target.append_simple(
             &Self::IN_FLIGHT_COUNT_PER_TOPIC_METRIC,

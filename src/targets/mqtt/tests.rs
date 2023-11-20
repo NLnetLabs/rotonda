@@ -2,16 +2,22 @@ use std::{sync::Arc, time::Duration};
 
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
-use mqtt::{ClientError, ConnectionError, Event, MqttOptions, Packet, QoS};
+use mqtt::{
+    ClientError, ConnectionError, Event, MqttOptions, NetworkOptions, QoS,
+};
 use roto::types::{
     collections::Record, outputs::OutputStreamMessage, typedef::TypeDef,
 };
 use serde_json::json;
-use tokio::{sync::mpsc, time::Instant};
+use tokio::{
+    sync::mpsc::{self, Sender, UnboundedSender},
+    task::JoinHandle,
+    time::Instant,
+};
 
 use crate::{
     comms::Terminated,
-    manager::{Component, TargetCommand},
+    manager::TargetCommand,
     targets::mqtt::config::ClientId,
     tests::util::{
         assert_json_eq,
@@ -69,7 +75,7 @@ fn destination_and_client_id_config_settings_must_be_provided() {
 #[test]
 fn generate_correct_json_for_publishing_from_output_stream_roto_type_value() {
     // Given an MQTT target runner
-    let runner = mk_mqtt_runner();
+    let (runner, _) = mk_mqtt_runner();
 
     // And a payload that should be published
     let output_stream = mk_roto_output_stream_payload();
@@ -91,37 +97,29 @@ fn generate_correct_json_for_publishing_from_output_stream_roto_type_value() {
     assert_json_eq(actual_json, expected_json);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn connection_refused() {
     enable_logging("trace");
-    let config = Config {
-        client_id: ClientId("conn-refused".to_string()),
-        ..Default::default()
-    };
-    let config = Arc::new(ArcSwap::from_pointee(config));
-    let (runner, status_reporter) = MqttRunner::mock(config);
-    let runner = Arc::new(runner);
 
-    // If either tx or cmd_tx are dropped the spawned runner will exit, so
-    // we don't do let (_, ..) here as that would drop them immediately.
-    let (_tx, rx) = mpsc::unbounded_channel();
-    let (cmd_tx, cmd_rx) = mpsc::channel(100);
+    // Simulate 3 critical MQTT issues in a row in the first MQTT client
+    // instance that we create.
+    static MOCK_POLL_RESULTS: MockMqttPollResults = &[
+        (0usize, Err(MockCriticalConnectionError)),
+        (0usize, Err(MockCriticalConnectionError)),
+        (0usize, Err(MockCriticalConnectionError)),
+    ];
 
-    let spawned_runner = runner.clone();
+    let (join_handle, status_reporter, cmd_tx, _tx) =
+        mk_mqtt_runner_task(MOCK_POLL_RESULTS);
 
-    let join_handle = tokio::spawn(async move {
-        spawned_runner
-            .do_run::<MockConnectionFactory>(None, cmd_rx, rx)
-            .await
-    });
-
-    const MAX_WAIT: Duration = Duration::from_secs(10);
+    const MAX_WAIT: Duration = Duration::from_secs(3);
     let start_time = Instant::now();
 
     while Instant::now().duration_since(start_time) < MAX_WAIT {
         let metrics =
             get_testable_metrics_snapshot(&status_reporter.metrics());
-        if metrics.with_name::<usize>("mqtt_target_connection_lost_count") > 0
+        if metrics.with_name::<usize>("mqtt_target_connection_error_count")
+            == 3
         {
             break;
         } else {
@@ -133,8 +131,9 @@ async fn connection_refused() {
     assert_eq!(join_handle.await.unwrap(), Err(Terminated));
 
     let metrics = get_testable_metrics_snapshot(&status_reporter.metrics());
-    assert!(
-        metrics.with_name::<usize>("mqtt_target_connection_lost_count") > 0
+    assert_eq!(
+        metrics.with_name::<usize>("mqtt_target_connection_error_count"),
+        3
     );
     assert_eq!(
         metrics.with_name::<u8>("mqtt_target_connection_established"),
@@ -144,11 +143,53 @@ async fn connection_refused() {
 
 // --- Test helpers -----------------------------------------------------------------------------------------------
 
-#[derive(Clone, Debug)]
+/// Zero or more results to return from a mocked MQTT clients event loop.
+/// Each result is paired with a connection index which should start at zero.
+/// Results are returned in sequence for the current connection index until
+/// there are none left and then the mock client will return a pending future
+/// indicating that it is waiting for more results (which will never come).
+///
+/// If results exist for a connection index higher than zero they should be
+/// grouped together in the array and come after the results for lower
+/// connection indices. Each connection index represents a single MQTT client
+/// session.
+///
+/// As the MQTT event loop is self-healing if there is a critical error (as
+/// the real MQTT event loop automatically attempts to reconnect to the broker
+/// if needed) these additional connection indices are not about results after
+/// the broker connection is lost and re-established. Instead they represent
+/// results to send after a deliberate termination of the MQTT client due to
+/// target reconfiguration with changed MQTT client settings.
+pub(crate) type MockMqttPollResults =
+    &'static [(usize, Result<Event, MockCriticalConnectionError>)];
+
+// rumqttc ConnectionError is neither Copy, Clone, Send or Sync so we can't
+// pass it between threads or Tokio tasks at all. However, as the rustdoc
+// comment on ConnectionError says "Critical errors during eventloop polling"
+// it doesn't really matter which error we simulate as they are all critical.
+// So this type is used to instruct the mock event loop to raise a
+// ConnectionError and we don't care which one so there's no additional data
+// stored with this type. This type does however support passing it across
+// thread/task boundaries which means we can specify it in the test thread
+// and handle it in the MQTT event loop task.
+#[derive(Clone, Copy, Debug)]
+pub struct MockCriticalConnectionError;
+
+#[derive(Clone, Debug, Default)]
 struct MockClient;
 
 #[async_trait]
 impl Client for MockClient {
+    type EventLoopType = MockEventLoop;
+
+    fn new(
+        options: MqttOptions,
+        _cap: usize,
+        #[cfg(test)] mock_poll_results: MockMqttPollResults,
+    ) -> (Self, Self::EventLoopType) {
+        (Self, MockEventLoop::new(options, mock_poll_results))
+    }
+
     async fn publish<S, V>(
         &self,
         topic: S,
@@ -162,33 +203,63 @@ impl Client for MockClient {
     {
         todo!()
     }
+
+    async fn disconnect(&self) -> Result<(), ClientError> {
+        // NO OP
+        Ok(())
+    }
 }
 
-#[derive(Debug)]
 struct MockEventLoop {
     options: MqttOptions,
+    network_options: NetworkOptions,
+    mock_poll_results: MockMqttPollResults,
+    last_mock_res_idx: usize,
 }
 
 impl MockEventLoop {
-    fn new(options: MqttOptions) -> Self {
-        Self { options }
+    fn new(
+        options: MqttOptions,
+        mock_poll_results: MockMqttPollResults,
+    ) -> Self {
+        Self {
+            options,
+            network_options: Default::default(),
+            last_mock_res_idx: 0,
+            mock_poll_results,
+        }
     }
 }
 
 #[async_trait]
 impl EventLoop for MockEventLoop {
     async fn poll(&mut self) -> Result<Event, ConnectionError> {
-        match self.options.client_id().as_str() {
-            "conn-refused" => Err(ConnectionError::ConnectionRefused(
-                mqtt::ConnectReturnCode::ServiceUnavailable,
-            )),
-
-            _ => Ok(Event::Incoming(Packet::PingReq)),
+        if let Some((_, Err(MockCriticalConnectionError))) =
+            self.mock_poll_results.get(self.last_mock_res_idx)
+        {
+            self.last_mock_res_idx += 1;
+            // Create any ConnectionError, they are all "critical" according
+            // to the rustdoc on ConnectionError.
+            std::future::ready(Err(ConnectionError::NetworkTimeout)).await
+        } else {
+            std::future::pending().await
         }
     }
 
     fn mqtt_options(&self) -> &MqttOptions {
         &self.options
+    }
+
+    fn network_options(&self) -> NetworkOptions {
+        self.network_options.clone()
+    }
+
+    fn set_network_options(
+        &mut self,
+        network_options: NetworkOptions,
+    ) -> &mut Self {
+        self.network_options = network_options;
+        self
     }
 }
 
@@ -202,31 +273,67 @@ impl ConnectionFactory for MockConnectionFactory {
     fn connect(
         config: &Config,
         status_reporter: Arc<MqttStatusReporter>,
-    ) -> (MockClient, Connection<MockEventLoop>) {
-        let client = MockClient;
-
+        #[cfg(test)] mock_poll_results: MockMqttPollResults,
+    ) -> Connection<MockClient> {
         let options = MqttOptions::new(
             config.client_id.clone(),
             config.destination.host.clone(),
             config.destination.port,
         );
 
-        let connection = Connection::new(
-            MockEventLoop::new(options),
+        Connection::new(
+            options,
             Duration::from_secs(1),
             status_reporter,
-        );
-
-        (client, connection)
+            #[cfg(test)]
+            mock_poll_results,
+        )
     }
 }
 
-fn mk_mqtt_runner() -> MqttRunner {
+fn mk_mqtt_runner() -> (MqttRunner, Arc<MqttStatusReporter>) {
+    let client_id = ClientId("mock".to_string());
     let config = Config {
+        client_id,
         topic_template: Config::default_topic_template(),
         ..Default::default()
     };
-    MqttRunner::new(config, Component::default())
+    let config = Arc::new(ArcSwap::from_pointee(config));
+    MqttRunner::mock(config)
+}
+
+#[allow(clippy::type_complexity)]
+fn mk_mqtt_runner_task(
+    mock_poll_results: MockMqttPollResults,
+) -> (
+    JoinHandle<Result<(), Terminated>>,
+    Arc<MqttStatusReporter>,
+    Sender<TargetCommand>,
+    UnboundedSender<SenderMsg>,
+) {
+    let (runner, status_reporter) = mk_mqtt_runner();
+
+    // Warning: If either tx or cmd_tx are dropped the spawned runner will
+    // exit, so hold on to them, don't do `let _ =` as that will drop them
+    // immediately.
+    let (tx, rx) = mpsc::unbounded_channel();
+    let (cmd_tx, cmd_rx) = mpsc::channel(100);
+
+    let runner = Arc::new(runner);
+    let spawned_runner = runner.clone();
+
+    let join_handle = tokio::spawn(async move {
+        spawned_runner
+            .do_run::<MockConnectionFactory>(
+                None,
+                cmd_rx,
+                rx,
+                mock_poll_results,
+            )
+            .await
+    });
+
+    (join_handle, status_reporter, cmd_tx, tx)
 }
 
 fn mk_config_from_toml(toml: &str) -> Result<Config, toml::de::Error> {

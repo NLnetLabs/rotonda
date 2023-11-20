@@ -469,7 +469,7 @@ async fn time_store_op_durations() {
     let (runner, _) = RibUnitRunner::mock("", RibType::Physical, settings);
 
     // Given a BGP update containing a single route announcement
-    let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
+    let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
     let update = mk_route_update(&prefix, Some("[111,222,333]"));
     let started_at = Utc::now();
 

@@ -851,7 +851,7 @@ mod tests {
         let fail_on_bad_addr = |addr: String| {
             // Not technically a bad address, just one we can match on for test purposes
             if addr != "1.2.3.4:12345" {
-                Ok(MockTcpListener::new(|| std::future::pending()))
+                Ok(MockTcpListener::new(std::future::pending))
             } else {
                 Err(std::io::ErrorKind::PermissionDenied.into())
             }

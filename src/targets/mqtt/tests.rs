@@ -254,6 +254,30 @@ async fn publish_msg() {
 }
 
 #[tokio::test]
+#[ignore = "to do"]
+async fn publishing_resumes_after_reconnect() {
+
+}
+
+#[tokio::test]
+#[ignore = "to do"]
+async fn publishing_errors_are_counted() {
+
+}
+
+#[tokio::test]
+#[ignore = "to do"]
+async fn retryable_publishing_error_is_retried() {
+
+}
+
+#[tokio::test]
+#[ignore = "to do"]
+async fn end_to_end_time_metric_is_reported_correctly() {
+    
+}
+
+#[tokio::test]
 async fn connection_refused() {
     enable_logging("trace");
 

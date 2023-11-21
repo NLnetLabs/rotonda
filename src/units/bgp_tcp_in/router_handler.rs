@@ -5,7 +5,7 @@ use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
-use log::{debug, error};
+use log::{debug, error, info};
 use roto::types::builtin::{
     BgpUpdateMessage, /*IpAddress,*/
     RotondaId, RouteStatus, UpdateMessage,
@@ -255,7 +255,7 @@ impl Processor {
                                 }) {
                                     if !south.is_empty() {
                                         let source_id = SourceId::from("TODO");
-                                        let update = Payload::from_output_stream_queue(&source_id, south, None).into();
+                                        let update = Ok(Payload::from_output_stream_queue(&source_id, south, None).into());
                                         self.gate.update_data(update).await;
                                     }
                                     if let TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(pdu)) = east {
@@ -356,7 +356,7 @@ impl Processor {
                     source_id,
                 );
 
-                self.gate.update_data(Update::Bulk(payloads)).await;
+                self.gate.update_data(Ok(Update::Bulk(payloads))).await;
             }
         }
 
@@ -379,7 +379,7 @@ impl Processor {
         pdu: UpdatePdu<Bytes>,
         //peer_ip: IpAddr,
         //peer_asn: Asn
-    ) -> Update {
+    ) -> Result<Update, session::Error> {
         fn mk_payload(
             prefix: Prefix,
             msg: &Arc<BgpUpdateMessage>,
@@ -434,7 +434,7 @@ impl Processor {
         ));
 
         payloads.extend(
-            pdu.unicast_announcements_vec().unwrap().iter()
+            pdu.unicast_announcements_vec()?.iter()
                 .inspect(|nlri| {
                     self.observed_prefixes.insert(nlri.prefix);
                 })
@@ -450,7 +450,7 @@ impl Processor {
         );
 
         payloads.extend(
-            pdu.unicast_withdrawals_vec().unwrap().iter()
+            pdu.unicast_withdrawals_vec()?.iter()
                 .inspect(|nlri| {
                     self.observed_prefixes.remove(&nlri.prefix);
                 })
@@ -465,7 +465,7 @@ impl Processor {
                 .collect::<Vec<_>>()
         );
 
-        payloads.into()
+        Ok(payloads.into())
     }
 }
 

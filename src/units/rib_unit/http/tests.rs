@@ -798,7 +798,7 @@ fn insert_routes(
             let roto_update_msg = roto::types::builtin::UpdateMessage::new(
                 bgp_update_bytes.clone(),
                 SessionConfig::modern(),
-            );
+            ).unwrap();
             let bgp_update_msg =
                 Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
             let raw_route = RawRouteWithDeltas::new_with_message_ref(

@@ -612,7 +612,8 @@ mod tests {
 
     fn mk_raw_route_with_deltas_payload(prefix: Prefix) -> Payload {
         let bytes = bgp_route_announce(prefix);
-        let update_msg = UpdateMessage::new(bytes, SessionConfig::modern());
+        let update_msg = UpdateMessage::new(bytes, SessionConfig::modern())
+            .unwrap();
         let delta_id = (RotondaId(0), 0);
         let bgp_update_msg =
             Arc::new(BgpUpdateMessage::new(delta_id, update_msg));

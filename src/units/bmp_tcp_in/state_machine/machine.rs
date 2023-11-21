@@ -3,6 +3,7 @@ use bytes::Bytes;
 use log::warn;
 use roto::types::builtin::RouteStatus;
 
+use rotonda_fsm::bgp::session;
 /// RFC 7854 BMP processing.
 ///
 /// This module includes a BMP state machine and handling of cases defined in
@@ -68,7 +69,7 @@ use super::{
         dumping::Dumping, initiating::Initiating, terminated::Terminated,
         updating::Updating,
     },
-    status_reporter::BmpTcpInStatusReporter,
+    status_reporter::{BmpTcpInStatusReporter, UpdateReportMessage},
 };
 
 //use octseq::Octets;
@@ -459,16 +460,7 @@ where
         msg: PeerUpNotification<Bytes>,
     ) -> ProcessingResult {
         let pph = msg.per_peer_header();
-        let (config, inconsistent) = msg.pph_session_config();
-
-        if let Some((pph_4, bgp_4)) = inconsistent {
-            warn!(
-                "Four-Octet-ASN capability in encapsulated BGP OPEN message \
-                is '{:?}', but conflicts with the Per Peer Header. Ignoring \
-                BGP OPEN. Setting Four-Octet-ASN to '{:?}' for this BMP session.",
-                bgp_4, pph_4
-            );
-        }
+        let config = msg.session_config();
 
         // Will this peer send End-of-RIB?
         let eor_capable = msg
@@ -633,45 +625,63 @@ where
                             ControlFlow::Continue(saved_self) => saved_self,
                         };
 
-                    let (
-                        payloads,
-                        n_new_prefixes,
-                        n_announcements,
-                        n_withdrawals,
-                    ) = saved_self.extract_route_monitoring_routes(
+                    if let Ok((payloads, update_report_msg)) = saved_self.extract_route_monitoring_routes(
                         pph.clone(),
                         &update,
                         route_status,
                         trace_id,
-                    );
-
-                    if n_announcements > 0
-                        && saved_self.details.is_peer_eor_capable(&pph)
-                            == Some(true)
-                    {
-                        // We are only looking at the (AFI,SAFI) of the first
-                        // NLRI we can find!
-                        if let Ok(mut nlris) = update.announcements() {
-                            if let Some(Ok(afi_safi)) = nlris.next().map(|n| n.map(|n| n.afi_safi())) {
-                                saved_self.details.add_pending_eor(
-                                    &pph,
-                                    afi_safi.0,
-                                    afi_safi.1,
-                                );
-                            };
+                    ) {
+                        if let Some(err) = update_report_msg.get_last_invalid_announcement() {
+                            return saved_self.mk_invalid_message_result(
+                                format!("Invalid BMP RouteMonitoring BGP UPDATE message. One or more parts of the NLRI sections cannot be parsed: {}", err),
+                                Some(known_peer),
+                                Some(Bytes::copy_from_slice(msg.as_ref())),
+                            );
                         }
+
+                        if let Some(err) = update_report_msg.get_last_invalid_withdrawal() {
+                            return saved_self.mk_invalid_message_result(
+                                format!("Invalid BMP RouteMonitoring BGP UPDATE message. One or more parts of the NLRI sections cannot be parsed: {}", err),
+                                Some(known_peer),
+                                Some(Bytes::copy_from_slice(msg.as_ref())),
+                            );
+                        }
+
+                        if update_report_msg.get_n_valid_announcements() > 0
+                            && saved_self.details.is_peer_eor_capable(&pph)
+                                == Some(true)
+                        {
+                            // We are only looking at the (AFI,SAFI) of the first
+                            // NLRI we can find!
+                            if let Ok(mut nlris) = update.announcements() {
+                                if let Some(Ok(afi_safi)) = nlris.next().map(|n| n.map(|n| n.afi_safi())) {
+                                    saved_self.details.add_pending_eor(
+                                        &pph,
+                                        afi_safi.0,
+                                        afi_safi.1,
+                                    );
+                                };
+                            }
+                        }
+
+                        saved_self.status_reporter.routing_update(
+                            // saved_self.router_id.clone(),
+                            // n_new_prefixes,
+                            // n_valid_announcements,
+                            // n_valid_withdrawals,
+                            // 0, //self.details.get_stored_routes().prefixes_len(), // TODO
+                            update_report_msg
+                        );
+
+                        saved_self
+                            .mk_routing_update_result(Update::Bulk(payloads))
+                    } else {
+                        return saved_self.mk_invalid_message_result(
+                            "Invalid BMP RouteMonitoring BGP UPDATE message. The PDU cannot be parsed.",
+                            Some(known_peer),
+                            Some(Bytes::copy_from_slice(msg.as_ref())),
+                        );
                     }
-
-                    saved_self.status_reporter.routing_update(
-                        saved_self.router_id.clone(),
-                        n_new_prefixes,
-                        n_announcements,
-                        n_withdrawals,
-                        0, //self.details.get_stored_routes().prefixes_len(), // TODO
-                    );
-
-                    saved_self
-                        .mk_routing_update_result(Update::Bulk(payloads))
                 }
 
                 Err(err) => {
@@ -706,94 +716,103 @@ where
         update: &UpdateMessage<Bytes>,
         route_status: RouteStatus,
         trace_id: Option<u8>,
-    ) -> (SmallVec<[Payload; 8]>, usize, usize, usize) {
-        let mut num_new_prefixes = 0;
-        let valid_announcements = update.announcements().unwrap().filter_map(|a| a.ok()).collect::<Vec<_>>();
-
-        let mut num_withdrawals: usize = update.withdrawn_routes_len();
+    ) -> Result<(SmallVec<[Payload; 8]>, UpdateReportMessage), session::Error> {
         let mut payloads: SmallVec<[Payload; 8]> = SmallVec::new();
+        let mut update_report_msg = UpdateReportMessage::new(self.router_id.clone());
 
-        for nlri in &valid_announcements {
-            // If we want to process multicast here, use a `match nlri { }`:
-            //      match nlri {
-            //          Nlri::Unicast(b) | Nlri::Multicast(b) => {
-            //          }
-            //          _ => unimplemented!()
-            //
-            // For unicast only, the `if let` suffices, at the cost of hiding
-            // any possibly unprocessed non-unicast NLRI.
-            if let Nlri::Unicast(nlri) = nlri {
-                let prefix = nlri.prefix;
-                if self.details.add_announced_prefix(&pph, prefix) {
-                    num_new_prefixes += 1;
-                }
-
-                // clone is cheap due to use of Bytes
-                let route = mk_route_for_prefix(
-                    self.router_id.clone(),
-                    update.clone(),
-                    pph.address(),
-                    pph.asn(),
-                    prefix,
-                    route_status,
-                );
-
-                payloads.push(Payload::new(
-                    self.source_id.clone(),
-                    route,
-                    trace_id,
-                ));
-            }
-        }
-
-        for nlri in update.withdrawals().unwrap().filter_map(|a| a.ok()).collect::<Vec<_>>() {
-            if let Nlri::Unicast(wd) = nlri {
-                let prefix = wd.prefix();
-
-                // RFC 4271 section "4.3 UPDATE Message Format" states:
-                //
-                // "An UPDATE message SHOULD NOT include the same address prefix in the
-                //  WITHDRAWN ROUTES and Network Layer Reachability Information fields.
-                //  However, a BGP speaker MUST be able to process UPDATE messages in
-                //  this form.  A BGP speaker SHOULD treat an UPDATE message of this form
-                //  as though the WITHDRAWN ROUTES do not contain the address prefix.
-
-                if valid_announcements.iter().all(|nlri| {
-                    if let Nlri::Unicast(a) = nlri {
-                        a.prefix() != prefix
-                    } else {
-                        true
+        for a in update.announcements()? {
+            match a {
+                Ok(a) => {
+                    match a {
+                        Nlri::Unicast(nlri) | Nlri::Multicast(nlri) => {
+                            let prefix = nlri.prefix;
+                            if self.details.add_announced_prefix(&pph, prefix) {
+                                update_report_msg.inc_new_prefixes();
+                            }
+            
+                            // clone is cheap due to use of Bytes
+                            let route = mk_route_for_prefix(
+                                self.router_id.clone(),
+                                update.clone(),
+                                pph.address(),
+                                pph.asn(),
+                                prefix,
+                                route_status,
+                            );
+            
+                            payloads.push(Payload::new(
+                                self.source_id.clone(),
+                                route,
+                                trace_id,
+                            ));
+                            update_report_msg.inc_valid_announcements();
+                        },
+                        _ => {
+                            // We'll count 'em, but we don't do anything with 'em.
+                            // Also, LOG HERE!
+                            update_report_msg.inc_valid_announcements();
+                        }
                     }
-                }) {
-                    // clone is cheap due to use of Bytes
-                    let route = mk_route_for_prefix(
-                        self.router_id.clone(),
-                        update.clone(),
-                        pph.address(),
-                        pph.asn(),
-                        prefix,
-                        RouteStatus::Withdrawn,
-                    );
-
-                    payloads.push(Payload::new(
-                        self.source_id.clone(),
-                        route,
-                        trace_id,
-                    ));
-
-                    self.details.remove_announced_prefix(&pph, &prefix);
-                } else {
-                    num_withdrawals -= 1;
+                },
+                Err(err) => { 
+                    // LOG HERE!
+                    update_report_msg.inc_invalid_announcements();
+                    update_report_msg.set_invalid_announcement(err);
                 }
             }
         }
 
-        (
+        for nlri in update.withdrawals()? {
+            match nlri {
+                Ok(nlri) => {
+                    if let Nlri::Unicast(wd) = nlri {
+                        let prefix = wd.prefix();
+
+                        // RFC 4271 section "4.3 UPDATE Message Format" states:
+                        //
+                        // "An UPDATE message SHOULD NOT include the same address prefix in the
+                        //  WITHDRAWN ROUTES and Network Layer Reachability Information fields.
+                        //  However, a BGP speaker MUST be able to process UPDATE messages in
+                        //  this form.  A BGP speaker SHOULD treat an UPDATE message of this form
+                        //  as though the WITHDRAWN ROUTES do not contain the address prefix.
+
+                        // RFC7606 though? What a can of worms this is.
+
+                        if update.unicast_announcements_vec().unwrap().iter().all(|nlri| {
+                            nlri.prefix != prefix
+                        }) {
+                            // clone is cheap due to use of Bytes
+                            let route = mk_route_for_prefix(
+                                self.router_id.clone(),
+                                update.clone(),
+                                pph.address(),
+                                pph.asn(),
+                                prefix,
+                                RouteStatus::Withdrawn,
+                            );
+
+                            payloads.push(Payload::new(
+                                self.source_id.clone(),
+                                route,
+                                trace_id,
+                            ));
+
+                            self.details.remove_announced_prefix(&pph, &prefix);
+                            update_report_msg.inc_valid_withdrawals();
+                        }
+                    }
+                },
+                Err(err) => {
+                    update_report_msg.inc_invalid_withdrawals();
+                    update_report_msg.set_invalid_withdrawal(err);
+                }
+            }
+        }
+
+        Ok((
             payloads,
-            num_new_prefixes,
-            valid_announcements.len(),
-            num_withdrawals,
-        )
+            update_report_msg
+        ))
     }
 }
 

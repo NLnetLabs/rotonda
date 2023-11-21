@@ -410,7 +410,7 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                                 });
                             peer_configs.insert(
                                 pph_hash,
-                                (msg.pph_session_config().0, has_gr_cap),
+                                (msg.session_config(), has_gr_cap),
                             );
 
                             (

@@ -255,7 +255,7 @@ impl RouterHandler {
             source_id: router_addr.into(),
         };
         self.gate
-            .update_data(Update::UpstreamStatusChange(new_status))
+            .update_data(Ok(Update::UpstreamStatusChange(new_status)))
             .await;
     }
 
@@ -308,7 +308,7 @@ impl RouterHandler {
                         &source_id, south, trace_id,
                     )
                     .into();
-                    self.gate.update_data(payload).await;
+                    self.gate.update_data(Ok(payload)).await;
                 }
 
                 if let TypeValue::Builtin(BuiltinTypeValue::BmpMessage(msg)) =
@@ -360,7 +360,7 @@ impl RouterHandler {
                         MessageType::RoutingUpdate { update } => {
                             // Pass the routing update on to downstream units and/or targets.
                             // This is where we send an update down the pipeline.
-                            self.gate.update_data(update).await;
+                            self.gate.update_data(Ok(update)).await;
                         }
 
                         MessageType::Other => {

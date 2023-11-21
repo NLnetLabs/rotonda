@@ -847,7 +847,8 @@ mod tests {
 
         // When it is processed by this unit
         let roto_update_msg =
-            UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+            UpdateMessage::new(bgp_update_bytes, SessionConfig::modern())
+            .unwrap();
         let bgp_update_msg =
             Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
         let mut route = RawRouteWithDeltas::new_with_message_ref(
@@ -883,7 +884,7 @@ mod tests {
 
         // When it is processed by this unit
         let roto_update_msg =
-            UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+            UpdateMessage::new(bgp_update_bytes, SessionConfig::modern()).unwrap();
         let bgp_update_msg =
             Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
         let mut route = RawRouteWithDeltas::new_with_message_ref(

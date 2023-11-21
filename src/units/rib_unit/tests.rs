@@ -48,7 +48,8 @@ async fn process_update_single_route() {
         mk_bgp_update(&Prefixes::default(), &announcements, &[]);
 
     let roto_update_msg =
-        UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        UpdateMessage::new(bgp_update_bytes, SessionConfig::modern())
+        .unwrap();
     let bgp_update_msg =
         Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
     let route = RawRouteWithDeltas::new_with_message_ref(
@@ -85,7 +86,8 @@ async fn process_update_same_route_twice() {
         mk_bgp_update(&Prefixes::default(), &announcements, &[]);
 
     let roto_update_msg =
-        UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+        UpdateMessage::new(bgp_update_bytes, SessionConfig::modern())
+        .unwrap();
     let bgp_update_msg =
         Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
     let route = RawRouteWithDeltas::new_with_message_ref(
@@ -130,7 +132,8 @@ async fn process_update_two_routes_to_the_same_prefix() {
 
         // When they are processed by this unit
         for bgp_update_bytes in [bgp_update_bytes1, bgp_update_bytes2] {
-            let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+            let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern())
+                .unwrap();
             let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
             let route = RawRouteWithDeltas::new_with_message_ref(
                 delta_id,
@@ -242,7 +245,8 @@ async fn process_update_two_routes_to_different_prefixes() {
         [(prefix1, bgp_update_bytes1), (prefix2, bgp_update_bytes2)]
     {
         let roto_update_msg =
-            UpdateMessage::new(bgp_update_bytes, SessionConfig::modern());
+            UpdateMessage::new(bgp_update_bytes, SessionConfig::modern())
+            .unwrap();
         let bgp_update_msg =
             Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
         let route = RawRouteWithDeltas::new_with_message_ref(

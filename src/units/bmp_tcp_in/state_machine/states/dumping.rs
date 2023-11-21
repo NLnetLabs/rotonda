@@ -694,10 +694,10 @@ mod tests {
                         let materialized_route =
                             MaterializedRoute::from(route);
                         let found_pfx =
-                            materialized_route.route.prefix.as_ref().unwrap();
+                            materialized_route.route.unwrap().prefix;
                         let position = expected_roto_prefixes
                             .iter()
-                            .position(|pfx| pfx == found_pfx)
+                            .position(|pfx| pfx == found_pfx.as_ref().unwrap())
                             .unwrap();
                         expected_roto_prefixes.remove(position);
                         assert_eq!(
@@ -949,10 +949,10 @@ mod tests {
                         let materialized_route =
                             MaterializedRoute::from(route);
                         let found_pfx =
-                            materialized_route.route.prefix.as_ref().unwrap();
+                            materialized_route.route.unwrap().prefix;
                         let position = expected_roto_prefixes
                             .iter()
-                            .position(|pfx| pfx == found_pfx)
+                            .position(|pfx| pfx == found_pfx.as_ref().unwrap())
                             .unwrap();
                         expected_roto_prefixes.remove(position);
                         assert_eq!(
@@ -1097,6 +1097,7 @@ mod tests {
             processor.process_msg(peer_up_msg_buf, None).next_state;
         let res = processor.process_msg(route_mon_msg_buf, None);
 
+        println!("{:?}", res.processing_result);
         // Then
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
         let expected_err =

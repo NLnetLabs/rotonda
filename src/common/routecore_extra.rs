@@ -76,28 +76,25 @@ where
 
     // create a new UpdateBuilder and insert all the withdrawals
     let mut builder = UpdateBuilder::new_bytes();
-    let _ = builder.append_withdrawals(&mut withdrawals);
+    builder.append_withdrawals(&mut withdrawals).unwrap();
 
     // turn all the withdrawals into possibly several PDUs (if the amount of
     // withdrawals will exceed the max PDU size). We only care about these
     // PDUs since we want to reference them in our routes.
-    if let Ok(pdus) = builder.into_messages() {
-        for pdu in pdus {
-            for nlri in pdu.withdrawals().unwrap().flatten() {
-                if let Nlri::Unicast(BasicNlri { prefix, .. }) = nlri {
-                    let route = mk_route_for_prefix(
-                        router_id.clone(),
-                        pdu.clone(),
-                        peer_address,
-                        peer_asn,
-                        prefix,
-                        RouteStatus::Withdrawn,
-                    );
-                    let payload =
-                        Payload::new(source_id.clone(), route, None);
-                    payloads.push(payload);
-                }
-            }
+    for pdu in builder.into_iter().flatten() {
+        for basic_nlri in pdu.unicast_withdrawals_vec().unwrap() {
+            let route = mk_route_for_prefix(
+                router_id.clone(),
+                pdu.clone(),
+                peer_address,
+                peer_asn,
+                basic_nlri.prefix,
+                RouteStatus::Withdrawn,
+            );
+
+            let payload =
+                Payload::new(source_id.clone(), route, None);
+            payloads.push(payload);
         }
     }
 

@@ -830,28 +830,8 @@ impl BmpState {
         bmp_msg: BmpMsg<Bytes>,
         trace_id: Option<u8>,
     ) -> ProcessingResult {
-        let saved_addr = self.source_id();
-        let saved_router_id = self.router_id().clone();
-        let saved_state_idx = self.state_idx();
 
-        // Attempt to prevent routecore BMP/BGP parsing code panics blowing up
-        // process. However, there are two issues with this:
-        //   1. We don't keep a copy of the BMP message and we pass ownership
-        //      of it to the code that can panic, so we lose the ability on
-        //      catching the panic to say which bytes couldn't be processed.
-        //      This could be improved by moving the panic catching closer to
-        //      the invocation of the routecore code, but ideally routecore
-        //      shouldn't panic on parsing failure anyway.
-        //   2. I don't know if the panic blows up an entire process thread.
-        //      If that happens it will also presumably kill any tokio async
-        //      task management happening in that thread and thus we don't
-        //      know for sure what state we are in, even though we caught the
-        //      panic. This could be worked around by running the logic below
-        //      in a tokio worker thread instead of on its core threads.
-        //   3. If someone, with good intentions, adds 'panic = "abort"' to
-        //      Cargo.toml we will no longer be able to catch this panic and
-        //      this defensive logic will become useless.
-        let may_panic_res = std::panic::catch_unwind(|| match self {
+        match self {
             BmpState::Initiating(inner) => {
                 inner.process_msg(bmp_msg, trace_id)
             }
@@ -864,47 +844,6 @@ impl BmpState {
                 MessageType::Aborted,
                 BmpState::Aborted(source_id, router_id),
             ),
-        });
-
-        match may_panic_res {
-            Ok(process_res) => {
-                if process_res.next_state.state_idx() != saved_state_idx {
-                    if let Some(reporter) =
-                        process_res.next_state.status_reporter()
-                    {
-                        reporter.change_state(
-                            process_res.next_state.router_id(),
-                            saved_state_idx,
-                            process_res.next_state.state_idx(),
-                        );
-                    }
-                }
-
-                process_res
-            }
-            Err(err) => {
-                let err = format!(
-                    "Internal error while processing BMP message: {:?}",
-                    err
-                );
-                // We've lost the bmp state machine and associated state...
-                // including things like detected peer configurations which we
-                // need in order to be able to process subsequent messages.
-                // With the current design it is difficult to recover from
-                // this, on the other hand we don't know what we've missed by
-                // a panic occuring in the first place so maybe it's just
-                // better to blow up at this point (just without a panic that
-                // will take out other Tokio tasks being handled by the same
-                // worker thread!).
-                ProcessingResult::new(
-                    MessageType::InvalidMessage {
-                        err,
-                        known_peer: None,
-                        msg_bytes: None,
-                    },
-                    BmpState::Aborted(saved_addr, saved_router_id.clone()),
-                )
-            }
         }
     }
 }

@@ -5,8 +5,7 @@ use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
-use log::{debug, error};
+use log::{debug, error, info};
 use roto::types::builtin::{
     BgpUpdateMessage, /*IpAddress,*/
     RotondaId, RouteStatus, UpdateMessage,
@@ -255,7 +254,8 @@ impl Processor {
                                     self.roto_scripts.exec(vm, &self.unit_cfg.filter_name, value, Utc::now())
                                 }) {
                                     if !south.is_empty() {
-                                        let update = Payload::from_output_stream_queue(south, None).into();
+                                        let source_id = SourceId::from("TODO");
+                                        let update = Ok(Payload::from_output_stream_queue(&source_id, south, None).into());
                                         self.gate.update_data(update).await;
                                     }
                                     if let TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(pdu)) = east {
@@ -357,7 +357,7 @@ impl Processor {
                     source_id,
                 );
 
-                self.gate.update_data(Update::Bulk(payloads)).await;
+                self.gate.update_data(Ok(Update::Bulk(payloads))).await;
             }
         }
 
@@ -381,7 +381,7 @@ impl Processor {
         pdu: UpdatePdu<Bytes>,
         //peer_ip: IpAddr,
         //peer_asn: Asn
-    ) -> Update {
+    ) -> Result<Update, session::Error> {
         fn mk_payload(
             received: DateTime<Utc>,
             prefix: Prefix,
@@ -437,7 +437,7 @@ impl Processor {
         ));
 
         payloads.extend(
-            pdu.unicast_announcements_vec().unwrap().iter()
+            pdu.unicast_announcements_vec()?.iter()
                 .inspect(|nlri| {
                     self.observed_prefixes.insert(nlri.prefix);
                 })
@@ -453,7 +453,7 @@ impl Processor {
         );
 
         payloads.extend(
-            pdu.unicast_withdrawals_vec().unwrap().iter()
+            pdu.unicast_withdrawals_vec()?.iter()
                 .inspect(|nlri| {
                     self.observed_prefixes.remove(&nlri.prefix);
                 })
@@ -468,7 +468,7 @@ impl Processor {
                 .collect::<Vec<_>>()
         );
 
-        payloads.into()
+        Ok(payloads.into())
     }
 }
 

@@ -208,7 +208,7 @@ impl RotoFilterRunner {
                 ..
             }) => {
                 // Nothing to do, pass it on
-                self.gate.update_data(update).await;
+                self.gate.update_data(Ok(update)).await;
             }
 
             Update::Single(payload) => self.filter_payload(payload).await?,
@@ -263,7 +263,7 @@ impl RotoFilterRunner {
                 err
             })?
         {
-            self.gate.update_data(filtered_update).await;
+            self.gate.update_data(Ok(filtered_update)).await;
         }
 
         Ok(())

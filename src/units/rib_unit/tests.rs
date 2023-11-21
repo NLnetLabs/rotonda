@@ -63,8 +63,31 @@ async fn process_update_single_route() {
     );
 
     // Given a BGP update containing a single route announcement
-    let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
-    let update = mk_route_update(&prefix, Some("[111,222,333]"));
+    let delta_id = (RotondaId(0), 0);
+    let prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32)
+        .unwrap()
+        .into();
+    let announcements = Announcements::from_str(
+        "e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32",
+    )
+    .unwrap();
+    let bgp_update_bytes =
+        mk_bgp_update(&Prefixes::default(), &announcements, &[]);
+
+    let roto_update_msg =
+        UpdateMessage::new(bgp_update_bytes, SessionConfig::modern())
+        .unwrap();
+    let bgp_update_msg =
+        Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+    let route = RawRouteWithDeltas::new_with_message_ref(
+        delta_id,
+        prefix,
+        &bgp_update_msg,
+        RouteStatus::InConvergence,
+    );
+    let update = Update::from(Payload::from(TypeValue::from(
+        BuiltinTypeValue::Route(route),
+    )));
 
     // When it is processed by this unit it should not be filtered
     assert!(!is_filtered(&runner, update).await);
@@ -116,8 +139,31 @@ async fn process_update_same_route_twice() {
     );
 
     // Given a BGP update containing a single route announcement
-    let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
-    let update = mk_route_update(&prefix, Some("[111,222,333]"));
+    let delta_id = (RotondaId(0), 0);
+    let prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32)
+        .unwrap()
+        .into();
+    let announcements = Announcements::from_str(
+        "e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32",
+    )
+    .unwrap();
+    let bgp_update_bytes =
+        mk_bgp_update(&Prefixes::default(), &announcements, &[]);
+
+    let roto_update_msg =
+        UpdateMessage::new(bgp_update_bytes, SessionConfig::modern())
+        .unwrap();
+    let bgp_update_msg =
+        Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+    let route = RawRouteWithDeltas::new_with_message_ref(
+        delta_id,
+        prefix,
+        &bgp_update_msg,
+        RouteStatus::InConvergence,
+    );
+    let update = Update::from(Payload::from(TypeValue::from(
+        BuiltinTypeValue::Route(route),
+    )));
 
     // When it is processed by this unit it should not be filtered
     assert!(!is_filtered(&runner, update.clone()).await);
@@ -310,9 +356,32 @@ async fn process_update_two_routes_to_the_same_prefix() {
         let (runner, _) = RibUnitRunner::mock("", RibType::Physical, StoreEvictionPolicy::UpdateStatusOnWithdraw.into());
 
         // Given BGP updates for two different routes to the same prefix
-        let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
-        for as_path_str in ["[111,222,333]", "[111,444,333]"] {
-            let update = mk_route_update(&prefix, Some(as_path_str));
+        let delta_id = (RotondaId(0), 0);
+        let raw_prefix = Prefix::new("127.0.0.1".parse().unwrap(), 32).unwrap();
+        let prefix = raw_prefix.into();
+        let announcements1 =
+            Announcements::from_str("e [111,222,333] 10.0.0.1 none 127.0.0.1/32").unwrap();
+        let announcements2 =
+            Announcements::from_str("e [111,444,333] 10.0.0.1 none 127.0.0.1/32").unwrap();
+        let bgp_update_bytes1 = mk_bgp_update(&Prefixes::default(), &announcements1, &[]);
+        let bgp_update_bytes2 = mk_bgp_update(&Prefixes::default(), &announcements2, &[]);
+
+        // When they are processed by this unit
+        for bgp_update_bytes in [bgp_update_bytes1, bgp_update_bytes2] {
+            let roto_update_msg = UpdateMessage::new(bgp_update_bytes, SessionConfig::modern())
+                .unwrap();
+            let bgp_update_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+            let route = RawRouteWithDeltas::new_with_message_ref(
+                delta_id,
+                prefix,
+                &bgp_update_msg,
+                RouteStatus::InConvergence,
+            );
+
+            // When it is processed by this unit it should not be filtered
+            let update = Update::from(Payload::from(TypeValue::from(BuiltinTypeValue::Route(
+                route,
+            ))));
             assert!(!is_filtered(&runner, update.clone()).await);
         }
 
@@ -410,14 +479,44 @@ async fn process_update_two_routes_to_different_prefixes() {
     );
 
     // Given BGP updates for two different routes to two different prefixes
-    let prefix1 = Prefix::from_str("127.0.0.1/32").unwrap().into();
-    let prefix2 = Prefix::from_str("127.0.0.2/32").unwrap().into();
+    let delta_id = (RotondaId(0), 0);
+    let raw_prefix1 = Prefix::new("127.0.0.1".parse().unwrap(), 32).unwrap();
+    let raw_prefix2 = Prefix::new("127.0.0.2".parse().unwrap(), 32).unwrap();
+    let prefix1 = raw_prefix1.into();
+    let prefix2 = raw_prefix2.into();
+    let announcements1 =
+        Announcements::from_str("e [111,222,333] 10.0.0.1 none 127.0.0.1/32")
+            .unwrap();
+    let announcements2 =
+        Announcements::from_str("e [111,444,333] 10.0.0.1 none 127.0.0.2/32")
+            .unwrap();
+    let bgp_update_bytes1 =
+        mk_bgp_update(&Prefixes::default(), &announcements1, &[]);
+    let bgp_update_bytes2 =
+        mk_bgp_update(&Prefixes::default(), &announcements2, &[]);
 
-    let update = mk_route_update(&prefix1, Some("[111,222,333]"));
-    assert!(!is_filtered(&runner, update.clone()).await);
+    // When they are processed by this unit
+    for (prefix, bgp_update_bytes) in
+        [(prefix1, bgp_update_bytes1), (prefix2, bgp_update_bytes2)]
+    {
+        let roto_update_msg =
+            UpdateMessage::new(bgp_update_bytes, SessionConfig::modern())
+            .unwrap();
+        let bgp_update_msg =
+            Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        let route = RawRouteWithDeltas::new_with_message_ref(
+            delta_id,
+            prefix,
+            &bgp_update_msg,
+            RouteStatus::InConvergence,
+        );
 
-    let update = mk_route_update(&prefix2, Some("[111,444,333]"));
-    assert!(!is_filtered(&runner, update.clone()).await);
+        // When it is processed by this unit it should not be filtered
+        let update = Update::from(Payload::from(TypeValue::from(
+            BuiltinTypeValue::Route(route),
+        )));
+        assert!(!is_filtered(&runner, update.clone()).await);
+    }
 
     // Then two separate prefixes SHOULD be added to the route store
     assert_eq!(runner.rib().store().unwrap().prefixes_count(), 2);

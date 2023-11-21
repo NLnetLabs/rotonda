@@ -4,6 +4,7 @@ use std::{
 };
 
 use bytes::Bytes;
+use routecore::bgp::ParseError;
 
 use crate::{
     common::status_reporter::{
@@ -111,19 +112,105 @@ impl BmpStateMachineStatusReporter {
 
     pub fn routing_update(
         &self,
-        router_id: Arc<RouterId>,
-        n_new_prefixes: usize,
-        n_announcements: usize,
-        n_withdrawals: usize,
-        n_total_prefixes: usize,
+        update_report_msg: UpdateReportMessage,
+        // router_id: Arc<RouterId>,
+        // n_new_prefixes: usize,
+        // n_announcements: usize,
+        // n_withdrawals: usize,
+        // n_total_prefixes: usize,
     ) {
-        let metrics = self.metrics.router_metrics(router_id);
+        let n_valid_announcements = update_report_msg.get_n_valid_announcements();
+        let n_valid_withdrawals = update_report_msg.get_n_valid_withdrawals();
+        let n_new_prefixes = update_report_msg.get_n_new_prefixes();
+        let metrics = self.metrics.router_metrics(update_report_msg.router_id);
         metrics
             .num_received_prefixes
-            .fetch_add(n_new_prefixes, SeqCst);
-        metrics.num_stored_prefixes.store(n_total_prefixes, SeqCst);
-        metrics.num_announcements.fetch_add(n_announcements, SeqCst);
-        metrics.num_withdrawals.fetch_add(n_withdrawals, SeqCst);
+            .fetch_add(update_report_msg.n_new_prefixes, SeqCst);
+        metrics.num_stored_prefixes.store(n_new_prefixes, SeqCst);
+        metrics.num_announcements.fetch_add(n_valid_announcements, SeqCst);
+        metrics.num_withdrawals.fetch_add(n_valid_withdrawals, SeqCst);
+    }
+}
+
+pub struct UpdateReportMessage {
+    router_id: Arc<RouterId>,
+    n_new_prefixes: usize,
+    n_valid_announcements: usize,
+    n_valid_withdrawals: usize,
+    n_invalid_announcements: usize,
+    n_invalid_withdrawals: usize,
+    last_invalid_announcement: Option<ParseError>,
+    last_invalid_withdrawal: Option<ParseError>
+}
+
+impl UpdateReportMessage {
+    pub fn new(router_id: Arc<RouterId>) -> Self {
+        Self {
+            router_id,
+            n_new_prefixes: 0,
+            n_valid_announcements: 0,
+            n_valid_withdrawals: 0,
+            n_invalid_announcements: 0,
+            n_invalid_withdrawals: 0,
+            last_invalid_announcement: None,
+            last_invalid_withdrawal: None
+        }
+    }
+
+    pub fn inc_new_prefixes(&mut self) {
+        self.n_new_prefixes += 1;
+    }
+
+    pub fn inc_valid_announcements(&mut self) {
+        self.n_valid_announcements += 1;
+    }
+
+    pub fn inc_invalid_announcements(&mut self) {
+        self.n_invalid_announcements += 1;
+    }
+
+    pub fn inc_valid_withdrawals(&mut self) {
+        self.n_valid_withdrawals += 1;
+    }
+
+    pub fn inc_invalid_withdrawals(&mut self) {
+        self.n_invalid_withdrawals += 1;
+    }
+
+    pub fn set_invalid_announcement(&mut self, err: ParseError) {
+        self.last_invalid_announcement = Some(err);
+    }
+
+    pub fn set_invalid_withdrawal(&mut self, err: ParseError) {
+        self.last_invalid_announcement = Some(err);
+    }
+
+    pub fn get_n_new_prefixes(&self) -> usize {
+        self.n_new_prefixes
+    }
+
+    pub fn get_n_valid_announcements(&self) -> usize {
+        self.n_valid_announcements
+    }
+
+    pub fn get_n_invalid_announcements(&self) -> usize {
+        self.n_invalid_announcements
+    }
+
+    pub fn get_n_valid_withdrawals(&self) -> usize {
+        self.n_valid_withdrawals
+    }
+
+    pub fn get_n_invalid_withdrawals(&self) -> usize {
+        self.n_invalid_withdrawals
+    }
+
+    pub fn get_last_invalid_announcement(&self) -> Option<ParseError> {
+        self.last_invalid_announcement
+    }
+
+    pub fn get_last_invalid_withdrawal(&self) -> Option<ParseError> {
+        self.last_invalid_withdrawal
     }
 }
 

@@ -2,6 +2,7 @@ use std::{cmp::Ordering, sync::Arc};
 
 use hyper::{Body, Response};
 
+use log::debug;
 use roto::types::{
     builtin::BuiltinTypeValue, collections::ElementTypeValue,
     typevalue::TypeValue,
@@ -263,7 +264,12 @@ impl PrefixesApi {
         match ***item {
             TypeValue::Builtin(BuiltinTypeValue::Route(ref route)) => {
                 let mut route = route.clone();
-                let attrs = route.get_latest_attrs();
+                let attrs = if let Ok(attrs) = route.get_latest_attrs() {
+                    attrs
+                } else {
+                    debug!("Ignoring AS path matching for {:?} with {:?}", route, filter_as_path);
+                    return false;
+                };
                 let as_path = attrs.as_path.as_routecore_hops_vec();
                 let mut actual_it = as_path.iter();
                 let mut wanted_it = filter_as_path.iter();
@@ -294,13 +300,17 @@ impl PrefixesApi {
         match ***item {
             TypeValue::Builtin(BuiltinTypeValue::Route(ref route)) => {
                 let mut route = route.clone();
-                let attrs = route.get_latest_attrs();
-                attrs.communities.as_vec().iter().any(|item| {
-                    matches!(
-                        item,
-                        ElementTypeValue::Primitive(TypeValue::Builtin(possible_c)) if *possible_c == wanted_c
-                    )
-                })
+                if let Ok(attrs) = route.get_latest_attrs() {
+                    attrs.communities.as_vec().iter().any(|item| {
+                        matches!(
+                            item,
+                            ElementTypeValue::Primitive(TypeValue::Builtin(possible_c)) if *possible_c == wanted_c
+                        )
+                    })
+                } else {
+                    debug!("Ignoring community matching for {:?} with {:?}", route, community);
+                    false
+                }
             }
             _ => false,
         }
@@ -344,7 +354,7 @@ mod test {
         let roto_update_msg = roto::types::builtin::UpdateMessage::new(
             bgp_update_bytes,
             SessionConfig::modern(),
-        );
+        ).unwrap();
         let bgp_update_msg =
             Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
         let raw_route = RawRouteWithDeltas::new_with_message_ref(

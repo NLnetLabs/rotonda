@@ -75,7 +75,8 @@ use chrono::{DateTime, Utc};
 use crossbeam_utils::atomic::AtomicCell;
 use futures::future::{select, Either, Future};
 use futures::pin_mut;
-use log::{error, log_enabled, trace, Level};
+use log::{error, log_enabled, trace, Level, warn};
+use rotonda_fsm::bgp::session;
 use rotonda_store::MatchOptions;
 use routecore::addr::Prefix;
 use serde::Deserialize;
@@ -652,105 +653,109 @@ impl Gate {
     ///
     /// Returns true if the update was sent to a downstream unit, false
     /// otherwise.
-    pub async fn update_data(&self, update: Update) {
+    pub async fn update_data(&self, update: Result<Update, session::Error>) {
         // let mut sender_lost = false;
-        let mut sent_at_least_once = false;
+        if let Ok(update) = update {
+            let mut sent_at_least_once = false;
 
-        if log_enabled!(Level::Trace) {
-            let clone_txt = if self.is_clone() {
-                format!("{} clone of ", self.clone_id())
-            } else {
-                String::new()
-            };
-            trace!(
-                "Gate[{} ({}{})]: Starting update",
-                self.name,
-                clone_txt,
-                self.id()
-            );
-        }
-        for (uuid, item) in self.updates.guard().iter() {
-            match (&item.queue, &item.direct) {
-                (Some(sender), None) => {
-                    if let Some(tracer) = &self.tracer {
-                        for payload in update.trace_ids() {
-                            tracer.note_gate_event(
-                                payload.trace_id().unwrap(),
-                                self.id(),
-                                format!("Sent by queue from gate {} to slot {uuid}: {payload:#?}", self.id()),
-                            );
+            if log_enabled!(Level::Trace) {
+                let clone_txt = if self.is_clone() {
+                    format!("{} clone of ", self.clone_id())
+                } else {
+                    String::new()
+                };
+                trace!(
+                    "Gate[{} ({}{})]: Starting update",
+                    self.name,
+                    clone_txt,
+                    self.id()
+                );
+            }
+            for (uuid, item) in self.updates.guard().iter() {
+                match (&item.queue, &item.direct) {
+                    (Some(sender), None) => {
+                        if let Some(tracer) = &self.tracer {
+                            for payload in update.trace_ids() {
+                                tracer.note_gate_event(
+                                    payload.trace_id().unwrap(),
+                                    self.id(),
+                                    format!("Sent by queue from gate {} to slot {uuid}: {payload:#?}", self.id()),
+                                );
+                            }
+                        }
+                        if sender.send(Ok(update.clone())).await.is_ok() {
+                            sent_at_least_once = true;
+                            continue;
                         }
                     }
-                    if sender.send(Ok(update.clone())).await.is_ok() {
-                        sent_at_least_once = true;
+                    (None, Some(direct)) => {
+                        if log_enabled!(log::Level::Trace) {
+                            let clone_txt = if self.is_clone() {
+                                format!("{} clone of ", self.clone_id())
+                            } else {
+                                String::new()
+                            };
+                            trace!(
+                                "Gate[{} ({}{})]: Sending direct update for slot {}",
+                                self.name,
+                                clone_txt,
+                                self.id(),
+                                uuid
+                            );
+                        }
+                        if let Some(tracer) = &self.tracer {
+                            for payload in update.trace_ids() {
+                                tracer.note_gate_event(
+                                    payload.trace_id().unwrap(),
+                                    self.id(),
+                                    format!(
+                                        "Sent by direct update from gate {} to slot {uuid}: {payload:#?}",
+                                        self.id()
+                                    ),
+                                );
+                            }
+                        }
+                        if let Some(direct) = direct.upgrade() {
+                            direct.direct_update(update.clone()).await;
+                            sent_at_least_once = true;
+                        }
                         continue;
                     }
+                    _ => {}
                 }
-                (None, Some(direct)) => {
-                    if log_enabled!(log::Level::Trace) {
-                        let clone_txt = if self.is_clone() {
-                            format!("{} clone of ", self.clone_id())
-                        } else {
-                            String::new()
-                        };
-                        trace!(
-                            "Gate[{} ({}{})]: Sending direct update for slot {}",
-                            self.name,
-                            clone_txt,
-                            self.id(),
-                            uuid
-                        );
-                    }
-                    if let Some(tracer) = &self.tracer {
-                        for payload in update.trace_ids() {
-                            tracer.note_gate_event(
-                                payload.trace_id().unwrap(),
-                                self.id(),
-                                format!(
-                                    "Sent by direct update from gate {} to slot {uuid}: {payload:#?}",
-                                    self.id()
-                                ),
-                            );
-                        }
-                    }
-                    if let Some(direct) = direct.upgrade() {
-                        direct.direct_update(update.clone()).await;
-                        sent_at_least_once = true;
-                    }
-                    continue;
-                }
-                _ => {}
+                // We don't actually have any usage of queue based sending at present
+                // so we can skip doing this for now.
+                // item.queue = None;
+                // sender_lost = true;
             }
-            // We don't actually have any usage of queue based sending at present
-            // so we can skip doing this for now.
-            // item.queue = None;
-            // sender_lost = true;
-        }
-        if log_enabled!(Level::Trace) {
-            let clone_txt = if self.is_clone() {
-                format!("{} clone of ", self.clone_id())
-            } else {
-                String::new()
-            };
-            trace!(
-                "Gate[{} ({}{})]: Finished update",
-                self.name,
-                clone_txt,
-                self.id()
+            if log_enabled!(Level::Trace) {
+                let clone_txt = if self.is_clone() {
+                    format!("{} clone of ", self.clone_id())
+                } else {
+                    String::new()
+                };
+                trace!(
+                    "Gate[{} ({}{})]: Finished update",
+                    self.name,
+                    clone_txt,
+                    self.id()
+                );
+            }
+
+            // if sender_lost {
+            //     let updates = self.updates.load();
+            //     updates.retain(|_, item| item.queue.is_some());
+            //     self.updates_len.store(updates.len(), SeqCst);
+            // }
+
+            self.metrics.update(
+                &update,
+                self.updates.clone(),
+                sent_at_least_once,
             );
+        } else {
+            // TODO: log error here!
         }
-
-        // if sender_lost {
-        //     let updates = self.updates.load();
-        //     updates.retain(|_, item| item.queue.is_some());
-        //     self.updates_len.store(updates.len(), SeqCst);
-        // }
-
-        self.metrics.update(
-            &update,
-            self.updates.clone(),
-            sent_at_least_once,
-        );
     }
 
     /// Returns the current gate status.
@@ -1957,7 +1962,7 @@ mod tests {
 
         // Build an update to send
         let update = Update::Single(mk_test_payload());
-        gate_clone.update_data(update).await;
+        gate_clone.update_data(Ok(update)).await;
 
         let metrics = get_testable_metrics_snapshot(&gate_clone.metrics());
         assert_eq!(metrics.with_name::<usize>("num_updates"), 1);
@@ -1979,7 +1984,7 @@ mod tests {
 
         // Send the update through the gate
         eprintln!("SENDING PAYLOAD");
-        gate_clone.update_data(update).await;
+        gate_clone.update_data(Ok(update)).await;
 
         eprintln!("WAITING FOR PAYLOAD TO BE RECEIVED BY THE TEST TARGET");
         let timeout = Box::pin(tokio::time::sleep(Duration::from_secs(3)));

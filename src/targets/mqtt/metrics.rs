@@ -56,42 +56,36 @@ impl GraphStatus for MqttMetrics {
 }
 
 impl MqttMetrics {
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const CONNECTION_ESTABLISHED_METRIC: Metric = Metric::new(
         "mqtt_target_connection_established",
         "the state of the connection to the MQTT broker: 0=down, 1=up",
         MetricType::Gauge,
         MetricUnit::State,
     );
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const CONNECTION_LOST_COUNT_METRIC: Metric = Metric::new(
         "mqtt_target_connection_lost_count",
         "the number of times the connection to the MQTT broker was lost",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const CONNECTION_ERROR_COUNT_METRIC: Metric = Metric::new(
         "mqtt_target_connection_error_count",
         "the number of times an error occurred with the connection to the MQTT broker",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const PUBLISH_COUNT_PER_TOPIC_METRIC: Metric = Metric::new(
         "mqtt_target_publish_count",
         "the number of messages requested for publication to the MQTT broker per topic",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const PUBLISH_ERROR_COUNT_PER_TOPIC_METRIC: Metric = Metric::new(
         "mqtt_target_publish_error_count",
         "the number of messages that could not be queued for publication",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const IN_FLIGHT_COUNT_PER_TOPIC_METRIC: Metric = Metric::new(
         "mqtt_target_in_flight_count",
         "the number of messages requested for publication but not yet sent to the MQTT broker per topic",
@@ -99,14 +93,12 @@ impl MqttMetrics {
         MetricUnit::Total,
     );
     // The rumqttc library has this count internally but doesn't expose it to us.
-    // // TEST STATUS: [ ] makes sense? [ ] passes tests?
     // const PUBLISH_NOT_ACKNOWLEDGED_COUNT_METRIC: Metric = Metric::new(
     //     "mqtt_target_published_not_acknowledged_count",
     //     "the number of QoS 1 or QoS 2 messages for which confirmation by the MQTT broker is pending (QoS 1) or incomplete (QoS 2)",
     //     MetricType::Counter,
     //     MetricUnit::Total,
     // );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
 }
 
 impl MqttMetrics {

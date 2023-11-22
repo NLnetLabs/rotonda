@@ -10,7 +10,7 @@ use super::{
 
 use crate::{
     common::status_reporter::{AnyStatusReporter, TargetStatusReporter},
-    comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated, Link, Gate},
+    comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
     manager::{Component, TargetCommand, WaitPoint},
     payload::{Payload, Update, UpstreamStatus},
     targets::Target,
@@ -37,13 +37,10 @@ pub struct Mqtt {
 #[cfg(test)]
 impl From<Config> for Mqtt {
     fn from(config: Config) -> Self {
-        let (gate, mut gate_agent) = Gate::new(0);
+        let (_gate, mut gate_agent) = crate::comms::Gate::new(0);
         let link = gate_agent.create_link();
         let sources = NonEmpty::new(link.into());
-        Self {
-            sources,
-            config,
-        }
+        Self { sources, config }
     }
 }
 
@@ -317,7 +314,7 @@ where
         status_reporter: Arc<MqttStatusReporter>,
         client: Option<C>,
         topic: String,
-        received: DateTime<Utc>,
+        _received: DateTime<Utc>,
         content: String,
         qos: i32,
         duration: Duration,
@@ -338,7 +335,7 @@ where
         .await
         {
             Ok(_) => {
-                status_reporter.publish_ok(topic, received);
+                status_reporter.publish_ok(topic);
             }
             Err(err) => {
                 status_reporter.publish_error(err);

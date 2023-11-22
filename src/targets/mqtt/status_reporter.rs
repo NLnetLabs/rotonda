@@ -4,7 +4,6 @@ use std::{
     time::Duration,
 };
 
-use chrono::{DateTime, Utc};
 use log::{debug, info, trace, warn};
 
 use crate::common::status_reporter::{
@@ -74,9 +73,7 @@ impl MqttStatusReporter {
         );
     }
 
-    pub fn publish_ok(&self, topic: String, received: DateTime<Utc>) {
-        let delay = Utc::now() - received;
-
+    pub fn publish_ok(&self, topic: String) {
         sr_log!(
             debug: self,
             "Published message to topic {}",
@@ -84,11 +81,7 @@ impl MqttStatusReporter {
         );
 
         let metrics = self.metrics.topic_metrics(Arc::new(topic));
-
         metrics.publish_counts.fetch_add(1, SeqCst);
-        metrics
-            .last_e2e_delay
-            .store(delay.num_milliseconds(), SeqCst);
     }
 
     pub fn publish_error<T: Display>(&self, err: T) {

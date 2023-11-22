@@ -1,7 +1,5 @@
 use std::sync::{
-    atomic::{
-        AtomicBool, AtomicI64, AtomicU16, AtomicUsize, Ordering::SeqCst,
-    },
+    atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering::SeqCst},
     Arc,
 };
 
@@ -34,7 +32,6 @@ impl MqttMetrics {
 #[derive(Debug, Default)]
 pub struct TopicMetrics {
     pub publish_counts: Arc<AtomicUsize>,
-    pub last_e2e_delay: Arc<AtomicI64>,
 }
 
 impl GraphStatus for MqttMetrics {
@@ -110,12 +107,6 @@ impl MqttMetrics {
     //     MetricUnit::Total,
     // );
     // TEST STATUS: [ ] makes sense? [ ] passes tests?
-    const LAST_END_TO_END_DELAY_PER_ROUTER_METRIC: Metric = Metric::new(
-        "mqtt_target_e2e_duration",
-        "the time taken from initial receipt to completed publication for a prefix to the MQTT server",
-        MetricType::Gauge,
-        MetricUnit::Millisecond,
-    );
 }
 
 impl MqttMetrics {
@@ -165,14 +156,6 @@ impl metrics::Source for MqttMetrics {
                 topic,
                 Self::PUBLISH_COUNT_PER_TOPIC_METRIC,
                 metrics.publish_counts.load(SeqCst),
-            );
-            append_labelled_metric(
-                unit_name,
-                target,
-                "topic",
-                topic,
-                Self::LAST_END_TO_END_DELAY_PER_ROUTER_METRIC,
-                metrics.last_e2e_delay.load(SeqCst),
             );
         }
     }

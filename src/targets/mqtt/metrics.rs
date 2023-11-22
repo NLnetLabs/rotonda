@@ -18,7 +18,7 @@ pub struct MqttMetrics {
     pub connection_error_count: AtomicUsize,
     pub publish_error_count: AtomicUsize,
     pub in_flight_count: AtomicU16,
-    pub not_acknowledged_count: AtomicUsize,
+    // pub not_acknowledged_count: AtomicUsize,
     topics: Arc<FrimMap<Arc<String>, Arc<TopicMetrics>>>,
 }
 
@@ -39,11 +39,11 @@ impl GraphStatus for MqttMetrics {
         match self.connection_established_state.load(SeqCst) {
             true => {
                 format!(
-                    "in-flight: {}\npublished: {}\nnot ack'd: {}",
+                    "in-flight: {}\npublished: {}\nerrors: {}",
                     self.in_flight_count.load(SeqCst),
                     self.topics.guard().iter().fold(0, |acc, v| acc
                         + v.1.publish_counts.load(SeqCst)),
-                    self.not_acknowledged_count.load(SeqCst),
+                    self.publish_error_count.load(SeqCst),
                 )
             }
             false => "N/A".to_string(),

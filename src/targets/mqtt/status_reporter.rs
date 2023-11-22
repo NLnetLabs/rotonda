@@ -67,8 +67,6 @@ impl MqttStatusReporter {
     }
 
     pub fn publishing<T: Display, C: Display>(&self, topic: T, content: C) {
-        self.metrics.in_flight_count.fetch_add(1, SeqCst);
-
         sr_log!(
             trace: self,
             "Publishing message {} to topic {}",
@@ -91,14 +89,15 @@ impl MqttStatusReporter {
         metrics
             .last_e2e_delay
             .store(delay.num_milliseconds(), SeqCst);
-
-        self.metrics.in_flight_count.fetch_sub(1, SeqCst);
     }
 
     pub fn publish_error<T: Display>(&self, err: T) {
         sr_log!(warn: self, "Publishing failed: {}", err);
         self.metrics.transmit_error_count.fetch_add(1, SeqCst);
-        self.metrics.in_flight_count.fetch_sub(1, SeqCst);
+    }
+
+    pub fn inflight_update(&self, inflight: u16) {
+        self.metrics.in_flight_count.store(inflight, SeqCst);
     }
 }
 

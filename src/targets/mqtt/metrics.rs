@@ -1,5 +1,5 @@
 use std::sync::{
-    atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering::SeqCst},
+    atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering::SeqCst, AtomicU16},
     Arc,
 };
 
@@ -16,7 +16,7 @@ pub struct MqttMetrics {
     pub connection_established_state: AtomicBool,
     pub connection_lost_count: AtomicUsize,
     pub connection_error_count: AtomicUsize,
-    pub in_flight_count: AtomicUsize,
+    pub in_flight_count: AtomicU16,
     pub transmit_error_count: AtomicUsize,
     topics: Arc<FrimMap<Arc<String>, Arc<TopicMetrics>>>,
 }

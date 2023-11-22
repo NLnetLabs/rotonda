@@ -1,4 +1,4 @@
-use std::{borrow::Cow, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use async_trait::async_trait;
 use mqtt::{
@@ -13,9 +13,6 @@ use tokio::{
 use ConnectionState::*;
 
 use super::{config::Config, status_reporter::MqttStatusReporter};
-
-#[cfg(test)]
-use super::tests::MockMqttPollResults;
 
 // TODO: Add a state transition diagram here.
 // TODO: Is RetryBackoff also needed once connected?
@@ -33,9 +30,11 @@ impl<C: Client> PartialEq for ConnectionState<C> {
     }
 }
 
+pub type MqttPollResult = Result<Event, ConnectionError>;
+
 #[async_trait]
 pub trait EventLoop: Send {
-    async fn poll(&mut self) -> Result<Cow<Event>, ConnectionError>;
+    async fn poll(&mut self) -> MqttPollResult;
 
     fn mqtt_options(&self) -> &MqttOptions;
 
@@ -45,12 +44,14 @@ pub trait EventLoop: Send {
         &mut self,
         network_options: NetworkOptions,
     ) -> &mut Self;
+
+    fn inflight(&self) -> u16;
 }
 
 #[async_trait]
 impl EventLoop for mqtt::EventLoop {
-    async fn poll(&mut self) -> Result<Cow<Event>, ConnectionError> {
-        self.poll().await.map(|v| Cow::Owned(v))
+    async fn poll(&mut self) -> MqttPollResult {
+        self.poll().await
     }
 
     fn mqtt_options(&self) -> &MqttOptions {
@@ -67,6 +68,16 @@ impl EventLoop for mqtt::EventLoop {
     ) -> &mut Self {
         self.set_network_options(network_options)
     }
+
+    fn inflight(&self) -> u16 {
+        self.state.inflight()
+    }
+}
+
+pub enum ClientState<C: Client> {
+    Acquired(C),
+    Unchanged,
+    Stale,
 }
 
 pub struct Connection<C: Client> {
@@ -74,8 +85,6 @@ pub struct Connection<C: Client> {
     retry_delay: Duration,
     status_reporter: Arc<MqttStatusReporter>,
     state: ConnectionState<C>,
-    #[cfg(test)]
-    mock_poll_results: MockMqttPollResults,
 }
 
 impl<C: Client> Connection<C> {
@@ -83,19 +92,16 @@ impl<C: Client> Connection<C> {
         mqtt_options: MqttOptions,
         retry_delay: Duration,
         status_reporter: Arc<MqttStatusReporter>,
-        #[cfg(test)] mock_poll_results: MockMqttPollResults,
     ) -> Self {
         Self {
             mqtt_options,
             retry_delay,
             status_reporter,
             state: New,
-            #[cfg(test)]
-            mock_poll_results,
         }
     }
 
-    pub async fn process(&mut self) {
+    pub async fn process(&mut self) -> ClientState<C> {
         match &mut self.state {
             New => {
                 let broker_address =
@@ -128,8 +134,6 @@ impl<C: Client> Connection<C> {
                 let status_reporter = self.status_reporter.clone();
                 let (client_handover_tx, client_handover_rx) =
                     oneshot::channel();
-                #[cfg(test)]
-                let mock_poll_results = self.mock_poll_results;
 
                 let join_handle = crate::tokio::spawn(
                     "MQTT Event Loop",
@@ -137,18 +141,20 @@ impl<C: Client> Connection<C> {
                         mqtt_options,
                         client_handover_tx,
                         status_reporter,
-                        #[cfg(test)]
-                        mock_poll_results,
                     ),
                 );
 
                 match client_handover_rx.await {
                     Ok(client) => {
-                        self.state = Running(client, join_handle);
+                        self.state = Running(client.clone(), join_handle);
+                        return ClientState::Acquired(client);
                     }
                     Err(err) => {
                         self.status_reporter.connection_error(err);
                         self.disconnect().await;
+
+                        // Caller should stop using any reference it has to the client
+                        return ClientState::Stale;
                     }
                 }
             }
@@ -159,11 +165,13 @@ impl<C: Client> Connection<C> {
                 match join_handle.await {
                     Ok(connected) => {
                         if connected {
+                            // An established connection terminated
                             self.status_reporter
                                 .reconnecting(self.retry_delay);
+                        } else {
+                            // A connection attempt failed
                         }
 
-                        // Connection failed!
                         // Put us into the retrying state with the current
                         // retry_delay as the amount of time to wait between
                         // subsequent connection attempts.
@@ -174,10 +182,13 @@ impl<C: Client> Connection<C> {
                         interval.tick().await;
 
                         self.state = RetryBackoff(interval);
+
+                        // Caller should stop using any reference it has to the client
+                        return ClientState::Stale;
                     }
 
                     Err(err) => {
-                        // There was an internal problem with the task
+                        // There was an internal Tokio problem
                         self.status_reporter.connection_error(err);
                         self.disconnect().await;
                     }
@@ -198,15 +209,21 @@ impl<C: Client> Connection<C> {
                 // Once the wait is complete move back to the Stopped state so
                 // that we will discard this connection and create a new one.
                 self.disconnect().await;
+
+                // Caller should stop using any reference it has to the client
+                return ClientState::Stale;
             }
 
             // If we're disconnected, we shouldn't try to connect or to
             // exchange MQTT protocol messages, i.e. we shouldn't run the
             // rumqttc event loop, in fact we shouldn't do anything.
             Stopped => {
-                // NO OP
+                // Caller should stop using any reference it has to the client
+                return ClientState::Stale;
             }
         };
+
+        ClientState::Unchanged // No change in client status
     }
 
     pub async fn disconnect(&mut self) {
@@ -246,18 +263,12 @@ impl<C: Client> Connection<C> {
         mqtt_options: MqttOptions,
         client_handover_tx: oneshot::Sender<C>,
         status_reporter: Arc<MqttStatusReporter>,
-        #[cfg(test)] mock_poll_results: MockMqttPollResults,
     ) -> bool {
         let broker_address = mqtt_options.broker_address().into();
 
         let cap = mqtt_options.request_channel_capacity();
 
-        let (client, mut event_loop) = C::new(
-            mqtt_options,
-            cap,
-            #[cfg(test)]
-            mock_poll_results,
-        );
+        let (client, mut event_loop) = C::new(mqtt_options, cap);
 
         if client_handover_tx.send(client).is_err() {
             // Abort
@@ -271,8 +282,8 @@ impl<C: Client> Connection<C> {
         let mut connected = false;
         loop {
             match event_loop.poll().await {
-                Ok(cow_event) => {
-                    match *cow_event {
+                Ok(event) => {
+                    match event {
                         Event::Incoming(Incoming::ConnAck(ConnAck {
                             code: ConnectReturnCode::Success,
                             ..
@@ -310,19 +321,17 @@ impl<C: Client> Connection<C> {
                     return connected;
                 }
             }
+
+            status_reporter.inflight_update(event_loop.inflight());
         }
     }
 }
 
 #[async_trait]
-pub trait Client: Clone + Send + 'static {
+pub trait Client: Clone + Send + Sync + 'static {
     type EventLoopType: EventLoop;
 
-    fn new(
-        options: MqttOptions,
-        cap: usize,
-        #[cfg(test)] mock_poll_results: MockMqttPollResults,
-    ) -> (Self, Self::EventLoopType);
+    fn new(options: MqttOptions, cap: usize) -> (Self, Self::EventLoopType);
 
     async fn publish<S, V>(
         &self,
@@ -336,24 +345,13 @@ pub trait Client: Clone + Send + 'static {
         V: Into<Vec<u8>> + Send;
 
     async fn disconnect(&self) -> Result<(), ClientError>;
-
-    #[cfg(test)]
-    async fn set_mock_poll_results(
-        &mut self,
-        _mock_poll_results: MockMqttPollResults,
-    ) {
-    }
 }
 
 #[async_trait]
 impl Client for mqtt::AsyncClient {
     type EventLoopType = mqtt::EventLoop;
 
-    fn new(
-        options: MqttOptions,
-        cap: usize,
-        #[cfg(test)] _mock_poll_results: MockMqttPollResults,
-    ) -> (Self, Self::EventLoopType) {
+    fn new(options: MqttOptions, cap: usize) -> (Self, Self::EventLoopType) {
         Self::new(options, cap)
     }
 
@@ -384,6 +382,5 @@ pub trait ConnectionFactory {
     fn connect(
         config: &Config,
         status_reporter: Arc<MqttStatusReporter>,
-        #[cfg(test)] mock_poll_results: MockMqttPollResults,
     ) -> Connection<Self::ClientType>;
 }

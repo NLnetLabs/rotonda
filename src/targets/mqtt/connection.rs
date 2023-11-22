@@ -12,7 +12,6 @@ use ConnectionState::*;
 use super::{config::Config, status_reporter::MqttStatusReporter};
 
 // TODO: Add a state transition diagram here.
-// TODO: Is RetryBackoff also needed once connected?
 #[derive(Debug)]
 pub enum ConnectionState<C: Client> {
     New,
@@ -181,6 +180,8 @@ impl<C: Client> Connection<C> {
             }
             self.status_reporter
                 .disconnected(&self.mqtt_options.broker_address().into());
+            // TODO: Shutdown gracefully allowing in-flight messages in the
+            // rumqqtc library time to be sent?
             join_handle.abort();
         }
 

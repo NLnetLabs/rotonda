@@ -13,7 +13,7 @@ use crate::{
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
     manager::{Component, TargetCommand, WaitPoint},
     payload::{Payload, Update, UpstreamStatus},
-    targets::{mqtt::connection::ClientState, Target},
+    targets::Target,
 };
 
 use arc_swap::{ArcSwap, ArcSwapOption};
@@ -179,22 +179,8 @@ where
             tokio::select! {
                 biased; // Disable tokio::select!() random branch selection
 
-                client_state = connection.process() => {
-                    match client_state {
-                        ClientState::Acquired(new_client) => {
-                            // there's a new client that should be used
-                            self.client.store(Some(Arc::new(new_client)));
-                        }
-
-                        ClientState::Stale => {
-                            // client should no longer be used
-                            self.client.store(None);
-                        }
-
-                        ClientState::Unchanged => {
-                            // no change in client,
-                        }
-                    }
+                client = connection.process() => {
+                    self.client.store(client.map(Arc::new));
                 }
 
                 // If nothing happened above, check for new internal Rotonda target commands

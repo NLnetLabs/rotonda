@@ -1,15 +1,12 @@
 use std::{sync::Arc, time::Duration};
 
+use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use mqtt::{
     ClientError, ConnAck, ConnectReturnCode, ConnectionError, Event,
     Incoming, MqttOptions, NetworkOptions, QoS,
 };
-use tokio::{
-    sync::oneshot,
-    task::JoinHandle,
-    time::{interval, Interval},
-};
+use tokio::{sync::oneshot, task::JoinHandle, time::interval};
 use ConnectionState::*;
 
 use super::{config::Config, status_reporter::MqttStatusReporter};
@@ -19,8 +16,7 @@ use super::{config::Config, status_reporter::MqttStatusReporter};
 #[derive(Debug)]
 pub enum ConnectionState<C: Client> {
     New,
-    Running(C, JoinHandle<bool>),
-    RetryBackoff(Interval),
+    Running(C, JoinHandle<()>),
     Stopped,
 }
 
@@ -74,15 +70,9 @@ impl EventLoop for mqtt::EventLoop {
     }
 }
 
-pub enum ClientState<C: Client> {
-    Acquired(C),
-    Unchanged,
-    Stale,
-}
-
 pub struct Connection<C: Client> {
     mqtt_options: MqttOptions,
-    retry_delay: Duration,
+    retry_delay: Arc<ArcSwap<Duration>>,
     status_reporter: Arc<MqttStatusReporter>,
     state: ConnectionState<C>,
 }
@@ -95,13 +85,13 @@ impl<C: Client> Connection<C> {
     ) -> Self {
         Self {
             mqtt_options,
-            retry_delay,
+            retry_delay: Arc::new(ArcSwap::from_pointee(retry_delay)),
             status_reporter,
             state: New,
         }
     }
 
-    pub async fn process(&mut self) -> ClientState<C> {
+    pub async fn process(&mut self) -> Option<C> {
         match &mut self.state {
             New => {
                 let broker_address =
@@ -140,6 +130,7 @@ impl<C: Client> Connection<C> {
                     Self::mqtt_event_loop(
                         mqtt_options,
                         client_handover_tx,
+                        self.retry_delay.clone(),
                         status_reporter,
                     ),
                 );
@@ -147,14 +138,12 @@ impl<C: Client> Connection<C> {
                 match client_handover_rx.await {
                     Ok(client) => {
                         self.state = Running(client.clone(), join_handle);
-                        return ClientState::Acquired(client);
+                        return Some(client);
                     }
+
                     Err(err) => {
                         self.status_reporter.connection_error(err);
                         self.disconnect().await;
-
-                        // Caller should stop using any reference it has to the client
-                        return ClientState::Stale;
                     }
                 }
             }
@@ -162,68 +151,25 @@ impl<C: Client> Connection<C> {
             Running(_, join_handle) => {
                 // This is cancel safe, if cancelled the task keeps running
                 // and we can await it again next time we are called.
-                match join_handle.await {
-                    Ok(connected) => {
-                        if connected {
-                            // An established connection terminated
-                            self.status_reporter
-                                .reconnecting(self.retry_delay);
-                        } else {
-                            // A connection attempt failed
-                        }
-
-                        // Put us into the retrying state with the current
-                        // retry_delay as the amount of time to wait between
-                        // subsequent connection attempts.
-                        let mut interval = interval(self.retry_delay);
-
-                        // Consume the first tick as it always completes
-                        // immediately (per the docs).
-                        interval.tick().await;
-
-                        self.state = RetryBackoff(interval);
-
-                        // Caller should stop using any reference it has to the client
-                        return ClientState::Stale;
-                    }
-
-                    Err(err) => {
-                        // There was an internal Tokio problem
-                        self.status_reporter.connection_error(err);
-                        self.disconnect().await;
-                    }
+                if let Err(err) = join_handle.await {
+                    // There was an internal Tokio problem
+                    self.status_reporter.connection_error(err);
+                    self.disconnect().await;
                 }
-            }
 
-            // If the initial connection failed with an error we will move
-            // from the Connecting state to the RetryBackoff state. In this
-            // state we don't want to run the rumqttc event loop as that would
-            // immediately try and connect to the MQTT broker again. Instead
-            // we want to wait a bit before trying to connect again.
-            RetryBackoff(ref mut delay) => {
-                // This is cancel safe, if cancelled any tick will not be
-                // consumed and we just call tick() again next time we are
-                // called.
-                let _ = delay.tick().await;
-
-                // Once the wait is complete move back to the Stopped state so
-                // that we will discard this connection and create a new one.
-                self.disconnect().await;
-
-                // Caller should stop using any reference it has to the client
-                return ClientState::Stale;
+                self.state = Stopped;
             }
 
             // If we're disconnected, we shouldn't try to connect or to
             // exchange MQTT protocol messages, i.e. we shouldn't run the
             // rumqttc event loop, in fact we shouldn't do anything.
             Stopped => {
-                // Caller should stop using any reference it has to the client
-                return ClientState::Stale;
+                // NO OP
             }
-        };
+        }
 
-        ClientState::Unchanged // No change in client status
+        // Caller should stop using any reference it has to the client
+        None
     }
 
     pub async fn disconnect(&mut self) {
@@ -253,7 +199,7 @@ impl<C: Client> Connection<C> {
     }
 
     pub fn set_retry_delay(&mut self, retry_delay: Duration) {
-        self.retry_delay = retry_delay;
+        self.retry_delay.store(Arc::new(retry_delay));
     }
 }
 
@@ -262,24 +208,24 @@ impl<C: Client> Connection<C> {
     async fn mqtt_event_loop(
         mqtt_options: MqttOptions,
         client_handover_tx: oneshot::Sender<C>,
+        retry_delay: Arc<ArcSwap<Duration>>,
         status_reporter: Arc<MqttStatusReporter>,
-    ) -> bool {
+    ) {
         let broker_address = mqtt_options.broker_address().into();
-
         let cap = mqtt_options.request_channel_capacity();
-
         let (client, mut event_loop) = C::new(mqtt_options, cap);
 
         if client_handover_tx.send(client).is_err() {
             // Abort
-            return false;
+            return;
         }
 
         let mut conn_opts = event_loop.network_options();
         conn_opts.set_connection_timeout(1);
         event_loop.set_network_options(conn_opts);
 
-        let mut connected = false;
+        let mut conn_count = 0;
+        let mut retry = false;
         loop {
             match event_loop.poll().await {
                 Ok(event) => {
@@ -290,7 +236,7 @@ impl<C: Client> Connection<C> {
                         })) => {
                             // Great!
                             status_reporter.connected(&broker_address);
-                            connected = true;
+                            conn_count += 1;
                         }
 
                         Event::Incoming(Incoming::ConnAck(ConnAck {
@@ -300,7 +246,7 @@ impl<C: Client> Connection<C> {
                             // Connection failed
                             status_reporter
                                 .connection_error(format!("{code:?}"));
-                            return connected;
+                            retry = true;
                         }
 
                         _ => {
@@ -318,11 +264,28 @@ impl<C: Client> Connection<C> {
                     // a reconnection backoff strategy. So break out of here
                     // to allow the caller to wait before reconnecting.
                     status_reporter.connection_error(err);
-                    return connected;
+                    retry = true;
                 }
             }
 
             status_reporter.inflight_update(event_loop.inflight());
+
+            if retry {
+                let retry_delay = **retry_delay.load();
+
+                if conn_count > 0 {
+                    status_reporter.reconnecting(retry_delay);
+                }
+
+                // Delay until polling as .poll() will attempt to
+                // reconnect. Consume the first tick as it always
+                // completes immediately (per the docs).
+                let mut interval = interval(retry_delay);
+                interval.tick().await;
+                interval.tick().await;
+
+                retry = false;
+            }
         }
     }
 }

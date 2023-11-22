@@ -1,5 +1,7 @@
 use std::sync::{
-    atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering::SeqCst, AtomicU16},
+    atomic::{
+        AtomicBool, AtomicI64, AtomicU16, AtomicUsize, Ordering::SeqCst,
+    },
     Arc,
 };
 
@@ -16,8 +18,9 @@ pub struct MqttMetrics {
     pub connection_established_state: AtomicBool,
     pub connection_lost_count: AtomicUsize,
     pub connection_error_count: AtomicUsize,
+    pub publish_error_count: AtomicUsize,
     pub in_flight_count: AtomicU16,
-    pub transmit_error_count: AtomicUsize,
+    pub not_acknowledged_count: AtomicUsize,
     topics: Arc<FrimMap<Arc<String>, Arc<TopicMetrics>>>,
 }
 
@@ -39,11 +42,11 @@ impl GraphStatus for MqttMetrics {
         match self.connection_established_state.load(SeqCst) {
             true => {
                 format!(
-                    "in-flight: {}\npublished: {}\nerrors: {}",
+                    "in-flight: {}\npublished: {}\nnot ack'd: {}",
                     self.in_flight_count.load(SeqCst),
                     self.topics.guard().iter().fold(0, |acc, v| acc
                         + v.1.publish_counts.load(SeqCst)),
-                    self.transmit_error_count.load(SeqCst),
+                    self.not_acknowledged_count.load(SeqCst),
                 )
             }
             false => "N/A".to_string(),
@@ -80,24 +83,32 @@ impl MqttMetrics {
     // TEST STATUS: [/] makes sense? [/] passes tests?
     const PUBLISH_COUNT_PER_TOPIC_METRIC: Metric = Metric::new(
         "mqtt_target_publish_count",
-        "the number of messages published to the MQTT broker per topic",
+        "the number of messages requested for publication to the MQTT broker per topic",
+        MetricType::Counter,
+        MetricUnit::Total,
+    );
+    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    const PUBLISH_ERROR_COUNT_PER_TOPIC_METRIC: Metric = Metric::new(
+        "mqtt_target_publish_error_count",
+        "the number of messages that could not be queued for publication",
         MetricType::Counter,
         MetricUnit::Total,
     );
     // TEST STATUS: [/] makes sense? [/] passes tests?
     const IN_FLIGHT_COUNT_PER_TOPIC_METRIC: Metric = Metric::new(
         "mqtt_target_in_flight_count",
-        "the number of messages currently in flight",
+        "the number of messages requested for publication but not yet sent to the MQTT broker per topic",
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
-    const TRANSMIT_ERROR_COUNT_METRIC: Metric = Metric::new(
-        "mqtt_target_transmit_error_count",
-        "the number of messages that could not be published to the MQTT broker",
-        MetricType::Counter,
-        MetricUnit::Total,
-    );
+    // The rumqttc library has this count internally but doesn't expose it to us.
+    // // TEST STATUS: [ ] makes sense? [ ] passes tests?
+    // const PUBLISH_NOT_ACKNOWLEDGED_COUNT_METRIC: Metric = Metric::new(
+    //     "mqtt_target_published_not_acknowledged_count",
+    //     "the number of QoS 1 or QoS 2 messages for which confirmation by the MQTT broker is pending (QoS 1) or incomplete (QoS 2)",
+    //     MetricType::Counter,
+    //     MetricUnit::Total,
+    // );
     // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const LAST_END_TO_END_DELAY_PER_ROUTER_METRIC: Metric = Metric::new(
         "mqtt_target_e2e_duration",
@@ -136,10 +147,15 @@ impl metrics::Source for MqttMetrics {
             self.in_flight_count.load(SeqCst),
         );
         target.append_simple(
-            &Self::TRANSMIT_ERROR_COUNT_METRIC,
+            &Self::PUBLISH_ERROR_COUNT_PER_TOPIC_METRIC,
             Some(unit_name),
-            self.transmit_error_count.load(SeqCst),
+            self.publish_error_count.load(SeqCst),
         );
+        // target.append_simple(
+        //     &Self::PUBLISH_NOT_ACKNOWLEDGED_COUNT_METRIC,
+        //     Some(unit_name),
+        //     self.not_acknowledged_count.load(SeqCst),
+        // );
         for (topic, metrics) in self.topics.guard().iter() {
             let topic = topic.as_str();
             append_labelled_metric(

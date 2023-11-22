@@ -140,6 +140,17 @@ async fn connection_established() {
     assert_metrics(&metrics, (0, 0, 0));
 }
 
+// MQTT message publication can be done in one of three ways depending on the
+// QoS setting:
+//   - QoS 0: "At most once delivery" - Fire and forget, there is no 
+//            confirmation that the message was actually published. The best
+//            we could do is detect if it has been sent by the rumqttc library
+//            and not just queued for sending.
+//   - QoS 1: "At least once delivery" - The remote MQTT broker should confirm
+//            receipt of the packet by sending back a PUBACK message.
+//   - QoS 2: "Exactly once delivery" - The remote MQTT broker should confirm
+//            receipt of the message with a PUBREC message and a PUBCOMP
+//            message.
 #[tokio::test]
 async fn publish_msg() {
     enable_logging("trace");

@@ -93,7 +93,7 @@ impl MqttStatusReporter {
 
     pub fn publish_error<T: Display>(&self, err: T) {
         sr_log!(warn: self, "Publishing failed: {}", err);
-        self.metrics.transmit_error_count.fetch_add(1, SeqCst);
+        self.metrics.publish_error_count.fetch_add(1, SeqCst);
     }
 
     pub fn inflight_update(&self, inflight: u16) {

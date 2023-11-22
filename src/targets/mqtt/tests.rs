@@ -31,7 +31,7 @@ use crate::{
     manager::TargetCommand,
     metrics::Target,
     payload::Payload,
-    targets::mqtt::config::ClientId,
+    targets::{mqtt::config::ClientId, Target::Mqtt},
     tests::util::{
         assert_json_eq,
         internal::{enable_logging, get_testable_metrics_snapshot},
@@ -209,21 +209,78 @@ async fn publish_msg() {
     assert_metrics(&metrics, (0, 0, 0));
 }
 
-#[tokio::test]
-#[ignore = "to do"]
-async fn publishing_resumes_after_reconnect() {}
-
-#[tokio::test]
-#[ignore = "to do"]
-async fn publishing_errors_are_counted() {}
-
-#[tokio::test]
-#[ignore = "to do"]
-async fn retryable_publishing_error_is_retried() {}
+// Not tested here because the real rumqttc library event loop saves unsent
+// messages on connection error and sends them once it reconnects, there's
+// nothing to unit test without the real rumqttc library event loop and that
+// cannot be made to run without making a real outbound connection.
+// #[tokio::test]
+// async fn publishing_resumes_after_reconnect() {}
+//
+// #[tokio::test]
+// #[ignore = "to do"]
+// async fn publishing_errors_are_counted() {}
+//
+// #[tokio::test]
+// #[ignore = "to do"]
+// async fn retryable_publishing_error_is_retried() {}
 
 #[tokio::test]
 #[ignore = "to do"]
 async fn end_to_end_time_metric_is_reported_correctly() {}
+
+#[tokio::test]
+async fn mqtt_target_can_be_reconfigured_while_running() {
+    enable_logging("trace");
+
+    let (join_handle, runner, status_reporter, cmd_tx) =
+        mk_mqtt_runner_task();
+
+    let metrics = status_reporter.metrics();
+
+    assert_metrics(&metrics, (0, 0, 0));
+
+    // Simulate a successful connection to the MQTT broker
+    let client = assert_client_becomes_available(&runner).await;
+    client.simulate_connect_ack(ConnectReturnCode::Success);
+    assert_eq!(client.broker_addr(), &("mockhost".to_string(), 1883));
+
+    assert_metric(
+        &metrics,
+        |m| m.with_name::<usize>("mqtt_target_connection_established") == 1,
+        "mqtt_target_connection_established != 1",
+    )
+    .await;
+
+    // Reconfigure the MQTT target
+    let mut config = mk_mqtt_runner_config();
+    config.destination = Destination::try_from("othermockhost:12345".to_string()).unwrap();
+    let new_config = Mqtt(config.into());
+    cmd_tx.send(TargetCommand::Reconfigure { new_config }).await.unwrap();
+
+    assert_metric(
+        &metrics,
+        |m| m.with_name::<usize>("mqtt_target_connection_established") == 0,
+        "mqtt_target_connection_established != 0",
+    )
+    .await;
+
+    // Simulate a successful connection to the MQTT broker
+    let client = assert_client_becomes_available(&runner).await;
+    client.simulate_connect_ack(ConnectReturnCode::Success);
+    assert_eq!(client.broker_addr(), &("othermockhost".to_string(), 12345));
+
+    assert_metric(
+        &metrics,
+        |m| m.with_name::<usize>("mqtt_target_connection_established") == 1,
+        "mqtt_target_connection_established != 1",
+    )
+    .await;
+
+    cmd_tx.send(TargetCommand::Terminate).await.unwrap();
+    assert_eq!(join_handle.await.unwrap(), Err(Terminated));
+
+    assert_metrics(&metrics, (0, 0, 0));
+}
 
 #[tokio::test]
 async fn connection_refused() {
@@ -342,6 +399,7 @@ async fn connection_loss_and_reconnect() {
 
 #[derive(Clone, Debug)]
 struct MockClient {
+    broker_addr: (String, u16),
     mock_poll_result_sender: Arc<mpsc::UnboundedSender<MqttPollResult>>,
 }
 
@@ -350,11 +408,16 @@ impl Client for MockClient {
     type EventLoopType = MockEventLoop;
 
     fn new(options: MqttOptions, _cap: usize) -> (Self, Self::EventLoopType) {
+        let broker_addr = options.broker_address();
+
         let (event_loop, mock_poll_result_sender) =
             MockEventLoop::new(options);
+
         let res = Self {
+            broker_addr,
             mock_poll_result_sender: Arc::new(mock_poll_result_sender),
         };
+
         (res, event_loop)
     }
 
@@ -409,6 +472,10 @@ impl MockClient {
             Ok(Event::Incoming(Incoming::PubAck(PubAck { pkid: 0 })));
         self.mock_poll_result_sender.send(pub_ack_event).unwrap();
     }
+
+    fn broker_addr(&self) -> &(String, u16) {
+        &self.broker_addr
+    }
 }
 
 struct MockEventLoop {
@@ -437,17 +504,17 @@ impl MockEventLoop {
 impl EventLoop for MockEventLoop {
     async fn poll(&mut self) -> MqttPollResult {
         self.mock_poll_result_rx.recv().await.unwrap().map(|event| {
-                match event {
-                    Event::Outgoing(Outgoing::Publish(_)) => {
-                        self.inflight.fetch_add(1, Ordering::SeqCst);
-                    }
-                    Event::Incoming(Incoming::PubAck(PubAck { .. })) => {
-                        self.inflight.fetch_sub(1, Ordering::SeqCst);
-                    }
-                    _ => { /* NO OP */ }
+            match event {
+                Event::Outgoing(Outgoing::Publish(_)) => {
+                    self.inflight.fetch_add(1, Ordering::SeqCst);
                 }
+                Event::Incoming(Incoming::PubAck(PubAck { .. })) => {
+                    self.inflight.fetch_sub(1, Ordering::SeqCst);
+                }
+                _ => { /* NO OP */ }
+            }
             event
-            })
+        })
     }
 
     fn mqtt_options(&self) -> &MqttOptions {

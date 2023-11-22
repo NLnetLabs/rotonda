@@ -10,7 +10,7 @@ use super::{
 
 use crate::{
     common::status_reporter::{AnyStatusReporter, TargetStatusReporter},
-    comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
+    comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated, Link, Gate},
     manager::{Component, TargetCommand, WaitPoint},
     payload::{Payload, Update, UpstreamStatus},
     targets::Target,
@@ -32,6 +32,19 @@ pub struct Mqtt {
 
     #[serde(flatten)]
     config: Config,
+}
+
+#[cfg(test)]
+impl From<Config> for Mqtt {
+    fn from(config: Config) -> Self {
+        let (gate, mut gate_agent) = Gate::new(0);
+        let link = gate_agent.create_link();
+        let sources = NonEmpty::new(link.into());
+        Self {
+            sources,
+            config,
+        }
+    }
 }
 
 pub(super) struct SenderMsg {

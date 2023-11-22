@@ -140,7 +140,7 @@ impl HashedRib {
         };
         field_indices
             .iter()
-            .map(|idx| RouteToken::from(idx[0]))
+            .map(|idx| RouteToken::try_from(idx[0]).unwrap())
             .collect()
     }
 }

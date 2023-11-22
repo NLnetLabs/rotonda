@@ -1297,15 +1297,6 @@ dependencies = [
 
 [[package]]
 name = "octseq"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5190e3482f38446ee3f3ab50b049a16b072b6111cba008381b816598478ba65d"
-dependencies = [
- "bytes",
-]
-
-[[package]]
-name = "octseq"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd09a3d18c298e5d9b66cf65db82e2e1694b94fbc032f83e304a5cbc87bcc3bb"
@@ -1666,15 +1657,15 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0"
-source = "git+https://github.com/NLnetLabs/roto.git?branch=main#2d0e68d48a3c4e4d2697a5e492e99d3cba91bf66"
+source = "git+https://github.com/NLnetLabs/roto.git?branch=compose-messages-ng#64404cc4220136dc23b668e62408c211f23f06ca"
 dependencies = [
  "arc-swap",
  "bytes",
  "log",
  "nom",
  "paste",
- "rotonda-store 0.3.0-pre.3 (git+https://github.com/NLnetLabs/rotonda-store.git?branch=compose-messages-ng)",
- "routecore 0.4.0-dev (git+https://github.com/NLnetLabs/routecore.git?branch=compose-messages-ng)",
+ "rotonda-store",
+ "routecore",
  "serde",
  "smallvec",
 ]
@@ -1716,8 +1707,8 @@ dependencies = [
  "reqwest",
  "roto",
  "rotonda-fsm",
- "rotonda-store 0.3.0-pre.3 (git+https://github.com/NLnetLabs/rotonda-store.git?branch=compose-messages-nlri-v2)",
- "routecore 0.4.0-dev (git+https://github.com/NLnetLabs/routecore.git?branch=compose-messages-nlri-v2)",
+ "rotonda-store",
+ "routecore",
  "rumqttc",
  "rumqttd",
  "sanitise-file-name",
@@ -1742,7 +1733,7 @@ dependencies = [
  "bytes",
  "log",
  "octseq 0.3.2-dev",
- "routecore 0.4.0-dev (git+https://github.com/NLnetLabs/routecore.git?branch=compose-messages-ng)",
+ "routecore",
  "tokio",
 ]
 
@@ -1765,21 +1756,7 @@ dependencies = [
  "crossbeam-utils",
  "log",
  "rotonda-macros",
- "routecore 0.4.0-dev (git+https://github.com/NLnetLabs/routecore.git?branch=compose-messages-ng)",
- "rustc_version",
-]
-
-[[package]]
-name = "rotonda-store"
-version = "0.3.0-pre.3"
-source = "git+https://github.com/NLnetLabs/rotonda-store.git?branch=compose-messages-nlri-v2#1d3c56bbecc8cb82651ca9676326dab52d61148f"
-dependencies = [
- "arc-swap",
- "crossbeam-epoch",
- "crossbeam-utils",
- "log",
- "rotonda-macros",
- "routecore 0.4.0-dev (git+https://github.com/NLnetLabs/routecore.git?branch=compose-messages-nlri-v2)",
+ "routecore",
  "rustc_version",
 ]
 
@@ -1793,19 +1770,6 @@ dependencies = [
  "const-str",
  "log",
  "octseq 0.3.1",
- "serde",
-]
-
-[[package]]
-name = "routecore"
-version = "0.4.0-dev"
-source = "git+https://github.com/NLnetLabs/routecore.git?branch=compose-messages-nlri-v2#dcc7f0d03d10e5a1bdb6b731bfeeabe3f0bc827e"
-dependencies = [
- "bytes",
- "chrono",
- "const-str",
- "log",
- "octseq 0.2.0",
  "serde",
 ]
 

@@ -8,12 +8,12 @@ use std::{
 
 use chrono::{Duration, Utc};
 use hash_hasher::{HashBuildHasher, HashedSet};
-use roto::types::{
+use roto::{types::{
     builtin::{BuiltinTypeValue, RotondaId, RouteStatus, RouteToken},
     datasources::Rib,
     typedef::{RibTypeDef, TypeDef},
     typevalue::TypeValue,
-};
+}, vm::FieldIndex};
 use rotonda_store::{
     custom_alloc::Upsert,
     prelude::{multi::PrefixStoreError, MergeUpdate},
@@ -75,7 +75,7 @@ impl HashedRib {
 
     pub fn with_custom_type(
         ty: TypeDef,
-        ty_keys: Vec<SmallVec<[usize; 8]>>,
+        ty_keys: Vec<FieldIndex>,
         physical: bool,
     ) -> Self {
         let rib = match physical {
@@ -134,7 +134,7 @@ impl HashedRib {
         };
         field_indices
             .iter()
-            .map(|idx| RouteToken::try_from(idx[0]).unwrap())
+            .map(|idx| RouteToken::try_from(idx.first().unwrap()).unwrap())
             .collect()
     }
 }

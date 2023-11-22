@@ -436,11 +436,7 @@ impl MockEventLoop {
 #[async_trait]
 impl EventLoop for MockEventLoop {
     async fn poll(&mut self) -> MqttPollResult {
-        self.mock_poll_result_rx
-            .recv()
-            .await
-            .unwrap()
-            .and_then(|event| {
+        self.mock_poll_result_rx.recv().await.unwrap().map(|event| {
                 match event {
                     Event::Outgoing(Outgoing::Publish(_)) => {
                         self.inflight.fetch_add(1, Ordering::SeqCst);
@@ -450,7 +446,7 @@ impl EventLoop for MockEventLoop {
                     }
                     _ => { /* NO OP */ }
                 }
-                Ok(event)
+            event
             })
     }
 
@@ -577,7 +573,7 @@ async fn assert_metric<D: Display, F: Fn(&Target) -> bool>(
         },
         format!(
             "Metric check failed: {msg}\nAvailable metrics are:\n{:#?}",
-            get_testable_metrics_snapshot(&metrics)
+            get_testable_metrics_snapshot(metrics)
         ),
     )
     .await;

@@ -1,3 +1,4 @@
+#![cfg(not(tarpaulin_include))]
 mod router_info;
 mod router_list;
 

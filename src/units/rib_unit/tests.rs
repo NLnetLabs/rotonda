@@ -531,6 +531,7 @@ async fn time_store_op_durations() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(tarpaulin))]
 async fn count_insert_retries_during_forced_contention() {
     const DELAY: Duration = Duration::from_millis(10);
     let mut settings = StoreMergeUpdateSettings::new(

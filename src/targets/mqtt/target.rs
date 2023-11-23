@@ -353,6 +353,7 @@ where
     ) -> Result<(), MqttError>
     where
         F: Fn() -> Result<(), MqttError> + Send + 'static,
+        C: Client,
     {
         let qos = match qos {
             0 => QoS::AtMostOnce,

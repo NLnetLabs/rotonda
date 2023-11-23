@@ -445,6 +445,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[cfg(not(tarpaulin))]
     async fn retry_with_backoff_on_accept_error() {
         let accept_count = Arc::new(AtomicUsize::new(0));
         let accept_count_clone = accept_count.clone();

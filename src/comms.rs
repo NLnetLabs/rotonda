@@ -1835,6 +1835,7 @@ mod tests {
     use super::*;
 
     #[tokio::test(flavor = "multi_thread")]
+    #[cfg(not(tarpaulin))]
     async fn gate_link_lifecycle_test() {
         // Lifecycle of a connected gate and link:
         //

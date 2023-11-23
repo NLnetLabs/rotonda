@@ -1,0 +1,49 @@
+name: coverage
+
+on:
+  workflow_run:
+    workflows: ["ci"]
+    types:
+      - completed
+
+  workflow_dispatch:
+
+jobs:
+  coverage:
+    name: coverage
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    runs-on: self-hosted
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # at the time of writing workflow_run.head_commit.id appears to be
+          # the commit that triggered the CI workflow which then triggered us.
+          ref: ${{ github.event.workflow_run.head_commit.id }}
+
+      - name: Install cargo-tarpaulin if needed
+        run: cargo install --locked cargo-tarpaulin
+
+      - name: Generate cargo-tarpaulin code coverage reports
+        run: cargo tarpaulin --verbose --out Html --out Xml
+
+      - name: Upload HTML report to GH Actions workflow artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: code-coverage-report
+          path: tarpaulin-report.html
+
+      - name: Generate Markdown coverage report
+        uses: irongut/CodeCoverageSummary@v1.3.0
+        with:
+          filename: cobertura.xml
+          format: markdown
+          output: both
+          hide_complexity: true
+          indicators: false
+      
+      - name: Add Markdown coverage report to workflow summary
+        run: |
+          cat code-coverage-results.md >> $GITHUB_STEP_SUMMARY
+          echo >> $GITHUB_STEP_SUMMARY
+          echo "See the HTML report for more details (see the code-coverage-report workflow artifact)">> $GITHUB_STEP_SUMMARY

@@ -25,7 +25,7 @@ jobs:
         run: cargo install --locked cargo-tarpaulin
 
       - name: Generate cargo-tarpaulin code coverage reports
-        run: cargo tarpaulin --verbose --out Html --out Xml
+        run: cargo tarpaulin --verbose --out Html --out Xml --timeout 300
 
       - name: Upload HTML report to GH Actions workflow artifacts
         uses: actions/upload-artifact@v3

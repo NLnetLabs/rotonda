@@ -4,7 +4,6 @@ use std::{
     time::Duration,
 };
 
-use chrono::{DateTime, Utc};
 use log::{debug, info, trace, warn};
 
 use crate::common::status_reporter::{
@@ -42,8 +41,16 @@ impl MqttStatusReporter {
             .store(true, SeqCst);
     }
 
+    pub fn disconnected(&self, broker_address: &Destination) {
+        sr_log!(info: self, "Disconnected from MQTT server at {}", broker_address);
+        self.metrics
+            .connection_established_state
+            .store(false, SeqCst);
+    }
+
     pub fn connection_error<T: Display>(&self, err: T) {
         sr_log!(warn: self, "MQTT connection error: {}", err);
+        self.metrics.connection_error_count.fetch_add(1, SeqCst);
     }
 
     pub fn reconnecting(&self, connect_retry_secs: Duration) {
@@ -59,8 +66,6 @@ impl MqttStatusReporter {
     }
 
     pub fn publishing<T: Display, C: Display>(&self, topic: T, content: C) {
-        self.metrics.in_flight_count.fetch_add(1, SeqCst);
-
         sr_log!(
             trace: self,
             "Publishing message {} to topic {}",
@@ -68,9 +73,7 @@ impl MqttStatusReporter {
         );
     }
 
-    pub fn publish_ok(&self, topic: String, received: DateTime<Utc>) {
-        let delay = Utc::now() - received;
-
+    pub fn publish_ok(&self, topic: String) {
         sr_log!(
             debug: self,
             "Published message to topic {}",
@@ -78,19 +81,16 @@ impl MqttStatusReporter {
         );
 
         let metrics = self.metrics.topic_metrics(Arc::new(topic));
-
         metrics.publish_counts.fetch_add(1, SeqCst);
-        metrics
-            .last_e2e_delay
-            .store(delay.num_milliseconds(), SeqCst);
-
-        self.metrics.in_flight_count.fetch_sub(1, SeqCst);
     }
 
     pub fn publish_error<T: Display>(&self, err: T) {
         sr_log!(warn: self, "Publishing failed: {}", err);
-        self.metrics.transmit_error_count.fetch_add(1, SeqCst);
-        self.metrics.in_flight_count.fetch_sub(1, SeqCst);
+        self.metrics.publish_error_count.fetch_add(1, SeqCst);
+    }
+
+    pub fn inflight_update(&self, inflight: u16) {
+        self.metrics.in_flight_count.store(inflight, SeqCst);
     }
 }
 

@@ -831,9 +831,33 @@ pub mod util {
         metric: Metric,
         metric_value: V,
     ) {
+        append_labelled_metric(
+            unit_name,
+            target,
+            "router",
+            router_id,
+            metric,
+            metric_value,
+        )
+    }
+
+    pub fn append_labelled_metric<
+        J: AsRef<str>,
+        K: AsRef<str>,
+        V: Display + Clone,
+    >(
+        unit_name: &str,
+        target: &mut Target,
+        label_id: J,
+        label_value: K,
+        metric: Metric,
+        metric_value: V,
+    ) {
         target.append(&metric, Some(unit_name), |records| {
-            records
-                .label_value(&[("router", router_id.as_ref())], metric_value)
+            records.label_value(
+                &[(label_id.as_ref(), label_value.as_ref())],
+                metric_value,
+            )
         });
     }
 }

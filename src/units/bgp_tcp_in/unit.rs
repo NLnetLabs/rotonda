@@ -487,6 +487,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
+    #[cfg(not(tarpaulin))]
     async fn connection_accepted_count_metric_should_work() {
         let conn_count = Arc::new(AtomicUsize::new(0));
         let mock_listener_factory_cb = {

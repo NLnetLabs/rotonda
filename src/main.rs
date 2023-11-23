@@ -390,7 +390,7 @@ mod tests {
             // verify that there is no MQTT connection yet
             assert_metric_ne(
                 manager.metrics(),
-                "mqtt_target_connection_established_count_total",
+                "mqtt_target_connection_established_state",
                 Some(("component", "local-broker")),
                 0,
             )
@@ -425,7 +425,7 @@ mod tests {
             // verify that there is now an MQTT connection
             assert_metric_eq(
                 manager.metrics(),
-                "mqtt_target_connection_established_count_total",
+                "mqtt_target_connection_established_state",
                 Some(("component", "local-broker")),
                 1,
             )

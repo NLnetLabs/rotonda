@@ -1,5 +1,7 @@
 use crate::common::status_reporter::AnyStatusReporter;
-use crate::tests::util::internal::get_testable_metrics_snapshot;
+use crate::tests::util::internal::{
+    get_testable_metrics_snapshot, MOCK_ROUTER_ID,
+};
 use crate::units::rib_unit::rib::{
     StoreEvictionPolicy, StoreMergeUpdateSettings,
 };
@@ -30,8 +32,6 @@ use std::time::Duration;
 use std::{str::FromStr, sync::Arc};
 
 use super::status_reporter::RibUnitStatusReporter;
-
-const MOCK_ROUTER_ID: &str = "mock-router";
 
 #[tokio::test]
 async fn process_non_route_update() {
@@ -116,7 +116,7 @@ async fn process_update_same_route_twice() {
     );
 
     // Given a BGP update containing a single route announcement
-    let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
+    let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
     let update = mk_route_update(&prefix, Some("[111,222,333]"));
 
     // When it is processed by this unit it should not be filtered
@@ -410,8 +410,8 @@ async fn process_update_two_routes_to_different_prefixes() {
     );
 
     // Given BGP updates for two different routes to two different prefixes
-    let prefix1 = Prefix::from_str("127.0.0.1/32").unwrap();
-    let prefix2 = Prefix::from_str("127.0.0.2/32").unwrap();
+    let prefix1 = Prefix::from_str("127.0.0.1/32").unwrap().into();
+    let prefix2 = Prefix::from_str("127.0.0.2/32").unwrap().into();
 
     let update = mk_route_update(&prefix1, Some("[111,222,333]"));
     assert!(!is_filtered(&runner, update.clone()).await);

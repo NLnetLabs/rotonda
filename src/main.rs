@@ -187,16 +187,18 @@ mod tests {
     use prometheus_parse::Value;
     use rotonda::{
         bgp::encode::{
-            mk_initiation_msg, mk_peer_up_notification_msg,
-            mk_route_monitoring_msg, Announcements, MyPeerType,
-            PerPeerHeader, Prefixes,
+            mk_initiation_msg, mk_peer_down_notification_msg,
+            mk_peer_up_notification_msg, mk_route_monitoring_msg,
+            Announcements, MyPeerType, PerPeerHeader, Prefixes,
         },
         config::Source,
         metrics::{self, OutputFormat},
+        tests::util::assert_json_eq,
     };
     use rotonda_store::prelude::Prefix;
     use routecore::{asn::Asn, bmp::message::PeerType};
-    use rumqttd::{Broker, Notification};
+    use rumqttd::{local::LinkRx, Broker, Notification};
+    use serde_json::Number;
     use tokio::{io::AsyncWriteExt, net::TcpStream, time::sleep};
 
     use super::*;
@@ -217,8 +219,6 @@ mod tests {
     //     received at the MQTT broker.
     #[test]
     fn integration_test() {
-        use rotonda::tests::util::assert_json_eq;
-
         //    ___ ___ _____ _   _ ___
         //   / __| __|_   _| | | | _ \
         //   \__ \ _|  | | | |_| |  _/
@@ -410,8 +410,8 @@ mod tests {
             eprintln!("Subscribed to MQTT broker, sending BMP messages...");
             let mut bmp_conn = wait_for_bmp_connect().await;
             let sys_name = bmp_initiate(&mut bmp_conn).await;
-            bmp_peer_up(&mut bmp_conn).await;
-            bmp_route_announce(&mut bmp_conn, test_prefix).await;
+            bmp_peer_up(&mut bmp_conn, 1).await;
+            bmp_route_announce(&mut bmp_conn, 1, test_prefix).await;
 
             //     ___ _  _ ___ ___ _  __  ___ _____ _ _____ ___ 
             //    / __| || | __/ __| |/ / / __|_   _/_\_   _| __|
@@ -427,7 +427,7 @@ mod tests {
                 manager.metrics(),
                 "num_updates_total",
                 &[("component", "bmp-tcp-in")],
-                1,
+                1, // 1 route
             )
             .await;
             // And likewise that same message should pass into and out of
@@ -464,7 +464,14 @@ mod tests {
             // Query the route via the RIB HTTP API to make sure that it was stored.
             eprintln!("Querying prefix store...");
             let res = query_prefix(test_prefix).await;
-            assert_eq!(res.get("data").unwrap().as_array().unwrap().len(), 1);
+            eprintln!("{}", serde_json::to_string_pretty(&res).unwrap());
+            let json_routes = res.get("data").unwrap().as_array().unwrap();
+            assert_eq!(json_routes.len(), 1);
+            assert_eq!(json_routes[0]["route"]["prefix"].as_str(), Some("127.0.0.1/32"));
+            assert_eq!(json_routes[0]["route"]["peer_ip"].as_str(), Some("10.0.0.1"));
+            assert_eq!(json_routes[0]["route"]["peer_asn"].as_number(), Some(&Number::from_str("12346").unwrap()));
+            assert_eq!(json_routes[0]["route"]["router_id"].as_str(), Some("my-sys-name"));
+            assert_eq!(json_routes[0]["status"].as_str(), Some("InConvergence"));
 
             // Expect no change in the number of updates output by the RIB gate.
             assert_metric_eq(
@@ -552,7 +559,7 @@ mod tests {
 
             // Push another route in and check the metrics
             eprintln!("Sending another BMP route announcement");
-            bmp_route_announce(&mut bmp_conn, test_prefix2).await;
+            bmp_route_announce(&mut bmp_conn, 1, test_prefix2).await;
 
             //     ___ _  _ ___ ___ _  __  ___ _____ _ _____ ___ 
             //    / __| || | __/ __| |/ / / __|_   _/_\_   _| __|
@@ -565,7 +572,7 @@ mod tests {
                 manager.metrics(),
                 "num_updates_total",
                 &[("component", "bmp-tcp-in")],
-                2,
+                2, // 1 route + 1 route
             )
             .await;
             assert_metric_eq(
@@ -589,45 +596,34 @@ mod tests {
             .await;
             assert_metric_eq(
                 manager.metrics(),
-                "num_updates_total",
-                &[("component", "global-rib")],
-                3,
-            )
-            .await;
-            assert_metric_eq(
-                manager.metrics(),
                 "mqtt_target_publish_count_total",
                 &[("component", "local-broker")],
-                3,
+                3, // +3: 1 for each invocation of the "my-module" filter in the pRIB and 2 vRIBs
             )
             .await;
 
             // Query the route to make sure it was stored
             eprintln!("Querying prefix store...");
             let res = query_prefix(test_prefix2).await;
-            assert_eq!(res.get("data").unwrap().as_array().unwrap().len(), 1);
+            eprintln!("{}", serde_json::to_string_pretty(&res).unwrap());
+            let json_routes = res.get("data").unwrap().as_array().unwrap();
+            assert_eq!(json_routes.len(), 1);
+            assert_eq!(json_routes[0]["route"]["prefix"].as_str(), Some("127.0.0.2/32"));
+            assert_eq!(json_routes[0]["route"]["peer_ip"].as_str(), Some("10.0.0.1"));
+            assert_eq!(json_routes[0]["route"]["peer_asn"].as_number(), Some(&Number::from_str("12346").unwrap()));
+            assert_eq!(json_routes[0]["route"]["router_id"].as_str(), Some("my-sys-name"));
+            assert_eq!(json_routes[0]["status"].as_str(), Some("InConvergence"));
 
             let res = query_vrib_prefix(test_prefix2).await;
             assert_eq!(res.get("data").unwrap().as_array().unwrap().len(), 1);
 
-            // Wait for the manager to update the link report so that it will be included in the trace log output
-            while manager
-                .link_report_updated_at()
-                .duration_since(link_report_update_time)
-                .as_secs()
-                < 1
-            {
-                eprintln!("Waiting for link report to be updated");
-                tokio::time::sleep(Duration::from_secs(1)).await;
-            }
-
-            //    ___ _____ ___  ___   ___  ___ _____ ___  _  _ ___   _   
-            //   / __|_   _/ _ \| _ \ | _ \/ _ \_   _/ _ \| \| |   \ /_\  
-            //   \__ \ | || (_) |  _/ |   / (_) || || (_) | .` | |) / _ \ 
-            //   |___/ |_| \___/|_|   |_|_\\___/ |_| \___/|_|\_|___/_/ \_\
-            //                                                            
-
-            manager.terminate();
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                &[("component", "global-rib")],
+                4, // 1 route + 1 vRIB query + 1 route + vRIB query
+            )
+            .await;
 
             //     ___  _   _ ___ _____   __  ___ ___  ___  _  _____ ___ 
             //    / _ \| | | | __| _ \ \ / / | _ ) _ \/ _ \| |/ / __| _ \
@@ -655,32 +651,344 @@ mod tests {
             //
             // Below we handle the three MQTT messages published in response
             // to the output messages generated by the RIB units.
-            for _ in 1..=3 {
-                eprintln!("Receiving MQTT message...");
-                let msg = link_rx.recv().unwrap();
-                assert!(matches!(msg, Some(Notification::Forward(_))));
+            query_broker(&mut link_rx, 3);
 
-                eprintln!("Checking MQTT message...");
-                if let Some(Notification::Forward(forward)) = msg {
-                    assert_eq!(forward.publish.topic, "rotonda/testing");
-                    let expected_json = serde_json::json!({
-                        "message": "🤭 I encountered 1818"
-                    });
-                    let actual_json: serde_json::Value =
-                        serde_json::from_slice(&forward.publish.payload)
-                            .unwrap();
-                    assert_json_eq(actual_json, expected_json);
-                } else {
-                    unreachable!();
+            //    ___ ___ ___ ___   _   _ ___     _       _   _  _ _  _  ___  _   _ _  _  ___ ___ 
+            //   | _ \ __| __| _ \ | | | | _ \  _| |_    /_\ | \| | \| |/ _ \| | | | \| |/ __| __|
+            //   |  _/ _|| _||   / | |_| |  _/ |_   _|  / _ \| .` | .` | (_) | |_| | .` | (__| _| 
+            //   |_| |___|___|_|_\  \___/|_|     |_|   /_/ \_\_|\_|_|\_|\___/ \___/|_|\_|\___|___|
+            //                                                                                    
+
+            bmp_peer_up(&mut bmp_conn, 2).await;
+            bmp_route_announce(&mut bmp_conn, 2, test_prefix).await;
+            bmp_route_announce(&mut bmp_conn, 2, test_prefix2).await;
+
+            //     ___ _  _ ___ ___ _  __  ___ _____ _ _____ ___ 
+            //    / __| || | __/ __| |/ / / __|_   _/_\_   _| __|
+            //   | (__| __ | _| (__| ' <  \__ \ | |/ _ \| | | _| 
+            //    \___|_||_|___\___|_|\_\ |___/ |_/_/ \_\_| |___|
+            //                                                   
+
+            eprintln!("Checking counter metrics...");
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                &[("component", "bmp-tcp-in")],
+                4, // 1 route + 1 route + 2 routes
+            )
+            .await;
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                &[("component", "global-rib")],
+                6, // 1 route + 1 vRIB query + 1 route + vRIB query + 2 routes
+            )
+            .await;
+
+            eprintln!("Checking state metrics...");
+            // Expect two more route monitoring messages and a peer up message
+            assert_bmp_messages_received(manager.metrics(), &[("component","bmp-tcp-in"), ("router", "unknown")], [0, 0, 0, 0, 1, 0, 0]).await;
+            assert_bmp_messages_received(manager.metrics(), &[("component","bmp-tcp-in"), ("router", "my-sys-name")], [4, 0, 0, 2, 0, 0, 0]).await;
+            assert_metric_eq(
+                manager.metrics(),
+                "rib_unit_num_routes_announced_total",
+                &[("component", "global-rib")],
+                4, // Two more than above
+            )
+            .await;
+            assert_metric_eq(
+                manager.metrics(),
+                "mqtt_target_publish_count_total",
+                &[("component", "local-broker")],
+                9, // +3: 1 for each invocation of the "my-module" filter in the pRIB and 2 vRIBs
+            )
+            .await;
+
+            // Query the routes to make sure they are stored
+            eprintln!("Querying prefix store...");
+            let res = query_prefix(test_prefix).await;
+            eprintln!("{}", serde_json::to_string_pretty(&res).unwrap());
+            let json_routes = res.get("data").unwrap().as_array().unwrap();
+            assert_eq!(json_routes.len(), 2);
+
+            let mut wanted_peers = vec![
+                ("10.0.0.1", Number::from_str("12346").unwrap()),
+                ("10.0.0.2", Number::from_str("12347").unwrap())
+            ];
+            for json_route in json_routes {
+                assert_eq!(json_route["route"]["prefix"].as_str(), Some("127.0.0.1/32"));
+                assert_eq!(json_route["route"]["router_id"].as_str(), Some("my-sys-name"));
+                assert_eq!(json_route["status"].as_str(), Some("InConvergence"));
+                let found_peer = (
+                    json_route["route"]["peer_ip"].as_str().unwrap(),
+                    json_route["route"]["peer_asn"].as_number().unwrap()
+                );
+                if let Some(idx) = wanted_peers.iter().position(|(ip, asn)| {
+                    ip == &found_peer.0 && asn == found_peer.1
+                }) {
+                    wanted_peers.remove(idx);
                 }
             }
+            assert!(wanted_peers.is_empty());
 
-            eprintln!("Check that no more MQTT messages are waiting...");
-            let msg = link_rx.recv().unwrap();
-            if let Some(notification) = msg {
-                dbg!(notification);
-                panic!("Unexpected MQTT message received");
+            let res = query_vrib_prefix(test_prefix).await;
+            assert_eq!(res.get("data").unwrap().as_array().unwrap().len(), 2);
+
+            eprintln!("Querying prefix store...");
+            let res = query_prefix(test_prefix2).await;
+            eprintln!("{}", serde_json::to_string_pretty(&res).unwrap());
+            let json_routes = res.get("data").unwrap().as_array().unwrap();
+            assert_eq!(json_routes.len(), 2);
+
+            let mut wanted_peers = vec![
+                ("10.0.0.1", Number::from_str("12346").unwrap()),
+                ("10.0.0.2", Number::from_str("12347").unwrap())
+            ];
+            for json_route in json_routes {
+                assert_eq!(json_route["route"]["prefix"].as_str(), Some("127.0.0.2/32"));
+                assert_eq!(json_route["route"]["router_id"].as_str(), Some("my-sys-name"));
+                assert_eq!(json_route["status"].as_str(), Some("InConvergence"));
+                let found_peer = (
+                    json_route["route"]["peer_ip"].as_str().unwrap(),
+                    json_route["route"]["peer_asn"].as_number().unwrap()
+                );
+                if let Some(idx) = wanted_peers.iter().position(|(ip, asn)| {
+                    ip == &found_peer.0 && asn == found_peer.1
+                }) {
+                    wanted_peers.remove(idx);
+                }
             }
+            assert!(wanted_peers.is_empty());
+
+            let res = query_vrib_prefix(test_prefix2).await;
+            assert_eq!(res.get("data").unwrap().as_array().unwrap().len(), 2);
+
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                &[("component", "global-rib")],
+                8, // 1 route + 1 vRIB query + 1 route + vRIB query + 2 routes + 2 vRIB queries
+            )
+            .await;
+
+            //     ___  _   _ ___ _____   __  ___ ___  ___  _  _____ ___ 
+            //    / _ \| | | | __| _ \ \ / / | _ ) _ \/ _ \| |/ / __| _ \
+            //   | (_) | |_| | _||   /\ V /  | _ \   / (_) | ' <| _||   /
+            //    \__\_\\___/|___|_|_\ |_|   |___/_|_\\___/|_|\_\___|_|_\
+            //                                                           
+
+            query_broker(&mut link_rx, 6);
+
+            // __      _____ _____ _  _ ___  ___    ___      __  ___  ___  _   _ _____ ___   _ 
+            // \ \    / /_ _|_   _| || |   \| _ \  /_\ \    / / | _ \/ _ \| | | |_   _| __| / |
+            //  \ \/\/ / | |  | | | __ | |) |   / / _ \ \/\/ /  |   / (_) | |_| | | | | _|  | |
+            //   \_/\_/ |___| |_| |_||_|___/|_|_\/_/ \_\_/\_/   |_|_\\___/ \___/  |_| |___| |_|
+            //                                                                                 
+
+            eprintln!("Sending a BMP withdrawal of the first route announcement");
+            bmp_route_withdraw(&mut bmp_conn, 1, test_prefix).await;
+
+            //     ___ _  _ ___ ___ _  __  ___ _____ _ _____ ___ 
+            //    / __| || | __/ __| |/ / / __|_   _/_\_   _| __|
+            //   | (__| __ | _| (__| ' <  \__ \ | |/ _ \| | | _| 
+            //    \___|_||_|___\___|_|\_\ |___/ |_/_/ \_\_| |___|
+            //                                                   
+
+            eprintln!("Checking counter metrics...");
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                &[("component", "bmp-tcp-in")],
+                5, // 1 route + 1 route + 2 routes + 1 withdrawal
+            )
+            .await;
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                &[("component", "global-rib")],
+                9, // 1 route + 1 vRIB query + 1 route + vRIB query + 2 routes + 2 vRIB queries + 1 withdrawal
+            )
+            .await;
+
+            eprintln!("Checking state metrics...");
+            // Expect one more route monitoring message
+            assert_bmp_messages_received(manager.metrics(), &[("component","bmp-tcp-in"), ("router", "unknown")], [0, 0, 0, 0, 1, 0, 0]).await;
+            assert_bmp_messages_received(manager.metrics(), &[("component","bmp-tcp-in"), ("router", "my-sys-name")], [5, 0, 0, 2, 0, 0, 0]).await;
+            assert_metric_eq(
+                manager.metrics(),
+                "rib_unit_num_routes_announced_total",
+                &[("component", "global-rib")],
+                3, // One less than above
+            )
+            .await;
+            assert_metric_eq(
+                manager.metrics(),
+                "mqtt_target_publish_count_total",
+                &[("component", "local-broker")],
+                12, // +3: 1 for each invocation of the "my-module" filter in the pRIB and 2 vRIBs
+            )
+            .await;
+
+            // Query the route to make sure it is still stored but is now withdrawn
+            eprintln!("Querying prefix store...");
+            let res = query_prefix(test_prefix).await;
+            eprintln!("{}", serde_json::to_string_pretty(&res).unwrap());
+            let json_routes = res.get("data").unwrap().as_array().unwrap();
+            assert_eq!(json_routes.len(), 2);
+
+            let mut wanted_peers = vec![
+                ("10.0.0.1", Number::from_str("12346").unwrap(), "Withdrawn"),
+                ("10.0.0.2", Number::from_str("12347").unwrap(), "InConvergence")
+            ];
+            for json_route in json_routes {
+                assert_eq!(json_route["route"]["prefix"].as_str(), Some("127.0.0.1/32"));
+                assert_eq!(json_route["route"]["router_id"].as_str(), Some("my-sys-name"));
+                let found_peer = (
+                    json_route["route"]["peer_ip"].as_str().unwrap(),
+                    json_route["route"]["peer_asn"].as_number().unwrap(),
+                    json_route["status"].as_str().unwrap(),
+                );
+                if let Some(idx) = wanted_peers.iter().position(|(ip, asn, status)| {
+                    ip == &found_peer.0 && asn == found_peer.1 && status == &found_peer.2
+                }) {
+                    wanted_peers.remove(idx);
+                }
+            }
+            assert!(wanted_peers.is_empty());
+
+            let res = query_vrib_prefix(test_prefix).await;
+            assert_eq!(res.get("data").unwrap().as_array().unwrap().len(), 2);
+
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                &[("component", "global-rib")],
+                10, // 1 route + 1 vRIB query + 1 route + vRIB query + 2 routes + 2 vRIB queries + 1 withdrawal + 1 vRIB query
+            )
+            .await;
+
+            //     ___  _   _ ___ _____   __  ___ ___  ___  _  _____ ___ 
+            //    / _ \| | | | __| _ \ \ / / | _ ) _ \/ _ \| |/ / __| _ \
+            //   | (_) | |_| | _||   /\ V /  | _ \   / (_) | ' <| _||   /
+            //    \__\_\\___/|___|_|_\ |_|   |___/_|_\\___/|_|\_\___|_|_\
+            //                                                           
+
+            query_broker(&mut link_rx, 3);
+
+            //    ___ ___ ___ ___   ___   _____      ___  _ 
+            //   | _ \ __| __| _ \ |   \ / _ \ \    / / \| |
+            //   |  _/ _|| _||   / | |) | (_) \ \/\/ /| .` |
+            //   |_| |___|___|_|_\ |___/ \___/ \_/\_/ |_|\_|
+            //                                              
+
+            eprintln!("Sending a BMP peer down which should cause the second route to also be withdrawn");
+            bmp_peer_down(&mut bmp_conn, 1).await;
+
+            //     ___ _  _ ___ ___ _  __  ___ _____ _ _____ ___ 
+            //    / __| || | __/ __| |/ / / __|_   _/_\_   _| __|
+            //   | (__| __ | _| (__| ' <  \__ \ | |/ _ \| | | _| 
+            //    \___|_||_|___\___|_|\_\ |___/ |_/_/ \_\_| |___|
+            //                                                   
+
+            eprintln!("Checking counter metrics...");
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                &[("component", "bmp-tcp-in")],
+                5, // 1 route + 1 route + 2 routes + 1 withdrawal
+            )
+            .await;
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                &[("component", "global-rib")],
+                11, // 1 route + 1 vRIB query + 1 route + vRIB query + 2 routes + 2 vRIB queries + 1 withdrawal + 1 vRIB query + 1 withdrawal
+            )
+            .await;
+
+            eprintln!("Checking state metrics...");
+            // Expect a peer down message
+            assert_bmp_messages_received(manager.metrics(), &[("component","bmp-tcp-in"), ("router", "unknown")], [0, 0, 0, 0, 1, 0, 0]).await;
+            assert_bmp_messages_received(manager.metrics(), &[("component","bmp-tcp-in"), ("router", "my-sys-name")], [5, 0, 1, 2, 0, 0, 0]).await;
+            assert_metric_eq(
+                manager.metrics(),
+                "rib_unit_num_routes_announced_total",
+                &[("component", "global-rib")],
+                2, // One less than above
+            )
+            .await;
+            assert_metric_eq(
+                manager.metrics(),
+                "mqtt_target_publish_count_total",
+                &[("component", "local-broker")],
+                15, // +3: 1 for each invocation of the "my-module" filter in the pRIB and 2 vRIBs
+            )
+            .await;
+
+            // Query the route to make sure it is still stored but is now withdrawn
+            eprintln!("Querying prefix store...");
+            let res = query_prefix(test_prefix2).await;
+            eprintln!("{}", serde_json::to_string_pretty(&res).unwrap());
+            let json_routes = res.get("data").unwrap().as_array().unwrap();
+            assert_eq!(json_routes.len(), 2);
+
+            let mut wanted_peers = vec![
+                ("10.0.0.1", Number::from_str("12346").unwrap(), "Withdrawn"),
+                ("10.0.0.2", Number::from_str("12347").unwrap(), "InConvergence")
+            ];
+            for json_route in json_routes {
+                assert_eq!(json_route["route"]["prefix"].as_str(), Some("127.0.0.2/32"));
+                assert_eq!(json_route["route"]["router_id"].as_str(), Some("my-sys-name"));
+                let found_peer = (
+                    json_route["route"]["peer_ip"].as_str().unwrap(),
+                    json_route["route"]["peer_asn"].as_number().unwrap(),
+                    json_route["status"].as_str().unwrap(),
+                );
+                if let Some(idx) = wanted_peers.iter().position(|(ip, asn, status)| {
+                    ip == &found_peer.0 && asn == found_peer.1 && status == &found_peer.2
+                }) {
+                    wanted_peers.remove(idx);
+                }
+            }
+            assert!(wanted_peers.is_empty());
+
+            let res = query_vrib_prefix(test_prefix2).await;
+            assert_eq!(res.get("data").unwrap().as_array().unwrap().len(), 2);
+
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                &[("component", "global-rib")],
+                12, // 1 route + 1 vRIB query + 1 route + vRIB query + 2 routes + 2 vRIB queries + 1 withdrawal + 1 vRIB query + 1 withdrawal + 1 vRIB query
+            )
+            .await;
+
+            //     ___  _   _ ___ _____   __  ___ ___  ___  _  _____ ___ 
+            //    / _ \| | | | __| _ \ \ / / | _ ) _ \/ _ \| |/ / __| _ \
+            //   | (_) | |_| | _||   /\ V /  | _ \   / (_) | ' <| _||   /
+            //    \__\_\\___/|___|_|_\ |_|   |___/_|_\\___/|_|\_\___|_|_\
+            //                                                           
+
+            query_broker(&mut link_rx, 3);
+
+            //    ___ _____ ___  ___   ___  ___ _____ ___  _  _ ___   _   
+            //   / __|_   _/ _ \| _ \ | _ \/ _ \_   _/ _ \| \| |   \ /_\  
+            //   \__ \ | || (_) |  _/ |   / (_) || || (_) | .` | |) / _ \ 
+            //   |___/ |_| \___/|_|   |_|_\\___/ |_| \___/|_|\_|___/_/ \_\
+            //                                                            
+
+            // Wait for the manager to update the link report so that it will be included in the trace log output
+            while manager
+                .link_report_updated_at()
+                .duration_since(link_report_update_time)
+                .as_secs()
+                < 1
+            {
+                eprintln!("Waiting for link report to be updated");
+                tokio::time::sleep(Duration::from_secs(1)).await;
+            }
+
+            manager.terminate();
 
             //    ___ _  _ ___    _ 
             //   | __| \| |   \  | |
@@ -903,7 +1211,7 @@ mod tests {
         sys_name
     }
 
-    async fn bmp_peer_up(stream: &mut TcpStream) {
+    async fn bmp_peer_up(stream: &mut TcpStream, peer_n: u8) {
         let local_address: IpAddr = IpAddr::from_str("127.0.0.1").unwrap();
         let local_port: u16 = 80;
         let remote_port: u16 = 81;
@@ -912,7 +1220,7 @@ mod tests {
         let sent_bgp_identifier: u32 = 0;
         let received_bgp_id: u32 = 0;
 
-        let per_peer_header = mk_per_peer_header(received_bgp_id);
+        let per_peer_header = mk_per_peer_header(received_bgp_id, peer_n);
 
         stream
             .write_all(&mk_peer_up_notification_msg(
@@ -931,15 +1239,64 @@ mod tests {
             .expect("Error while sending BMP 'peer up' message");
     }
 
-    async fn bmp_route_announce(stream: &mut TcpStream, prefix: Prefix) {
-        let per_peer_header = mk_per_peer_header(0);
+    async fn bmp_peer_down(stream: &mut TcpStream, peer_n: u8) {
+        let received_bgp_id: u32 = 0;
+        let per_peer_header = mk_per_peer_header(received_bgp_id, peer_n);
+
+        stream
+            .write_all(&mk_peer_down_notification_msg(&per_peer_header))
+            .await
+            .expect("Error while sending BMP 'peer down' message");
+    }
+
+    async fn bmp_route_announce(
+        stream: &mut TcpStream,
+        peer_n: u8,
+        prefix: Prefix,
+    ) {
+        let received_bgp_id: u32 = 0;
+        let per_peer_header = mk_per_peer_header(received_bgp_id, peer_n);
+
         let withdrawals = Prefixes::default();
         let announcements = Announcements::from_str(&format!(
             "e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 {}",
             prefix
         ))
         .unwrap();
+        bmp_route_monitoring(
+            stream,
+            per_peer_header,
+            withdrawals,
+            announcements,
+        )
+        .await;
+    }
 
+    async fn bmp_route_withdraw(
+        stream: &mut TcpStream,
+        peer_n: u8,
+        prefix: Prefix,
+    ) {
+        let received_bgp_id: u32 = 0;
+        let per_peer_header = mk_per_peer_header(received_bgp_id, peer_n);
+
+        let withdrawals = Prefixes::new(vec![prefix]);
+        let announcements = Announcements::None;
+        bmp_route_monitoring(
+            stream,
+            per_peer_header,
+            withdrawals,
+            announcements,
+        )
+        .await;
+    }
+
+    async fn bmp_route_monitoring(
+        stream: &mut TcpStream,
+        per_peer_header: PerPeerHeader,
+        withdrawals: Prefixes,
+        announcements: Announcements,
+    ) {
         let msg_buf = mk_route_monitoring_msg(
             &per_peer_header,
             &withdrawals,
@@ -952,11 +1309,12 @@ mod tests {
             .expect("Error while sending 'route monitoring' message");
     }
 
-    fn mk_per_peer_header(received_bgp_id: u32) -> PerPeerHeader {
+    fn mk_per_peer_header(received_bgp_id: u32, peer_n: u8) -> PerPeerHeader {
         let peer_type: MyPeerType = PeerType::GlobalInstance.into();
         let peer_flags: u8 = 0;
-        let peer_address: IpAddr = IpAddr::from_str("10.0.0.1").unwrap();
-        let peer_as: Asn = Asn::from_u32(12345);
+        let peer_address: IpAddr =
+            IpAddr::from_str(&format!("10.0.0.{peer_n}")).unwrap();
+        let peer_as: Asn = Asn::from_u32(12345 + (peer_n as u32));
         let peer_bgp_id = received_bgp_id.to_be_bytes();
         let peer_distinguisher: [u8; 8] = [0; 8];
 
@@ -967,6 +1325,34 @@ mod tests {
             peer_address,
             peer_as,
             peer_bgp_id,
+        }
+    }
+
+    fn query_broker(link_rx: &mut LinkRx, num_expected_messages: usize) {
+        for _ in 1..=num_expected_messages {
+            eprintln!("Receiving MQTT message...");
+            let msg = link_rx.recv().unwrap();
+            assert!(matches!(msg, Some(Notification::Forward(_))));
+
+            eprintln!("Checking MQTT message...");
+            if let Some(Notification::Forward(forward)) = msg {
+                assert_eq!(forward.publish.topic, "rotonda/testing");
+                let expected_json = serde_json::json!({
+                    "message": "🤭 I encountered 1818"
+                });
+                let actual_json: serde_json::Value =
+                    serde_json::from_slice(&forward.publish.payload).unwrap();
+                assert_json_eq(actual_json, expected_json);
+            } else {
+                unreachable!();
+            }
+        }
+
+        eprintln!("Check that no more MQTT messages are waiting...");
+        let msg = link_rx.recv().unwrap();
+        if let Some(notification) = msg {
+            dbg!(notification);
+            panic!("Unexpected MQTT message received");
         }
     }
 

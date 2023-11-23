@@ -425,9 +425,13 @@ impl ConnectionFactory for MqttRunner<mqtt::AsyncClient> {
             config.destination.port,
         );
         create_opts.set_request_channel_capacity(config.queue_size.into());
-        create_opts.set_clean_session(false);
+        create_opts.set_clean_session(true);
         create_opts.set_inflight(1000);
         create_opts.set_keep_alive(Duration::from_secs(20));
+
+        if let (Some(username), Some(password)) = (&config.username, &config.password) {
+            create_opts.set_credentials(username, password);
+        }
 
         Connection::new(
             create_opts,

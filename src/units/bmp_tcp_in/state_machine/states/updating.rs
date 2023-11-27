@@ -1,6 +1,7 @@
 use std::{collections::hash_map::Keys, ops::ControlFlow};
 
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 use roto::types::builtin::RouteStatus;
 use routecore::{
     addr::Prefix,
@@ -14,7 +15,9 @@ use smallvec::SmallVec;
 
 use crate::{
     payload::{Payload, Update},
-    units::bmp_tcp_in::state_machine::machine::{PeerState, PeerStates},
+    units::bmp_tcp_in::state_machine::machine::{
+        BmpStateIdx, PeerState, PeerStates,
+    },
 };
 
 use super::super::{
@@ -61,6 +64,7 @@ impl BmpStateDetails<Updating> {
     #[allow(dead_code)]
     pub fn process_msg(
         self,
+        received: DateTime<Utc>,
         bmp_msg: BmpMsg<Bytes>,
         trace_id: Option<u8>,
     ) -> ProcessingResult {
@@ -73,6 +77,7 @@ impl BmpStateDetails<Updating> {
             BmpMsg::PeerDownNotification(msg) => self.peer_down(msg),
 
             BmpMsg::RouteMonitoring(msg) => self.route_monitoring(
+                received,
                 msg,
                 RouteStatus::UpToDate,
                 trace_id,
@@ -126,7 +131,10 @@ impl BmpStateDetails<Updating> {
             .collect();
         let next_state = BmpState::Terminated(self.into());
         if routes.is_empty() {
-            Self::mk_state_transition_result(next_state)
+            Self::mk_state_transition_result(
+                BmpStateIdx::Updating,
+                next_state,
+            )
         } else {
             Self::mk_final_routing_update_result(
                 next_state,
@@ -226,7 +234,7 @@ impl PeerAware for Updating {
         pph: &PerPeerHeader<Bytes>,
         afi: AFI,
         safi: SAFI,
-    ) {
+    ) -> usize {
         self.peer_states.add_pending_eor(pph, afi, safi)
     }
 

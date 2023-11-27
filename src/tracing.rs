@@ -262,7 +262,7 @@ mod tests {
     #[test]
     fn new_gate_trace_msg_has_expected_properties() {
         let gate_id = Uuid::new_v4();
-        let msg = format!("Some msg");
+        let msg = "Some msg".to_string();
         let msg_relation = MsgRelation::GATE;
         let now = Utc::now();
 
@@ -280,7 +280,7 @@ mod tests {
     #[test]
     fn new_component_trace_msg_has_expected_properties() {
         let gate_id = Uuid::new_v4();
-        let msg = format!("Some msg");
+        let msg = "Some msg".to_string();
         let msg_relation = MsgRelation::COMPONENT;
         let now = Utc::now();
 
@@ -324,7 +324,7 @@ mod tests {
     fn trace_with_one_msg_has_expected_properties() {
         let mut trace = Trace::new();
         let gate_id = Uuid::new_v4();
-        let msg = format!("Some msg");
+        let msg = "Some msg".to_string();
         let msg_relation = MsgRelation::GATE;
 
         trace.append_msg(gate_id, msg.clone(), msg_relation);
@@ -348,10 +348,10 @@ mod tests {
         let gate_id1 = Uuid::new_v4();
         let gate_id2 = Uuid::new_v4();
         let gate_id3 = Uuid::new_v4();
-        let msg1 = format!("Some msg1");
-        let msg2 = format!("Some msg2");
-        let msg3 = format!("Some msg3");
-        let msg4 = format!("Some msg4");
+        let msg1 = "Some msg1".to_string();
+        let msg2 = "Some msg2".to_string();
+        let msg3 = "Some msg3".to_string();
+        let msg4 = "Some msg4".to_string();
 
         trace.append_msg(gate_id1, msg1.clone(), MsgRelation::GATE);
         trace.append_msg(gate_id2, msg2.clone(), MsgRelation::GATE);
@@ -413,7 +413,7 @@ mod tests {
         let tracer = Tracer::new();
         let trace_id: u8 = 0;
         let gate_id: Uuid = Uuid::new_v4();
-        let msg = format!("some msg");
+        let msg = "some msg".to_string();
         tracer.note_gate_event(trace_id, gate_id, msg.clone());
         assert!(!tracer.get_trace(trace_id).msgs().is_empty());
         assert_eq!(
@@ -427,7 +427,7 @@ mod tests {
         let tracer = Tracer::new();
         let trace_id: u8 = 0;
         let gate_id: Uuid = Uuid::new_v4();
-        let msg = format!("some msg");
+        let msg = "some msg".to_string();
         tracer.note_component_event(trace_id, gate_id, msg.clone());
         assert!(!tracer.get_trace(trace_id).msgs().is_empty());
         assert_eq!(
@@ -441,7 +441,7 @@ mod tests {
         let tracer = Tracer::new();
         let trace_id: u8 = 0;
         let gate_id: Uuid = Uuid::new_v4();
-        let msg = format!("some msg");
+        let msg = "some msg".to_string();
         tracer.note_gate_event(trace_id, gate_id, msg.clone());
         assert!(!tracer.get_trace(trace_id).msgs().is_empty());
         assert_eq!(
@@ -459,7 +459,7 @@ mod tests {
         let bound_tracer = tracer.bind(gate_id);
 
         let trace_id = 0;
-        let msg = format!("some msg");
+        let msg = "some msg".to_string();
         bound_tracer.note_event(trace_id, msg.clone());
 
         assert!(!tracer.get_trace(trace_id).msgs().is_empty());

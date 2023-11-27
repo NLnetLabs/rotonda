@@ -51,8 +51,18 @@ impl BmpTcpInStatusReporter {
         sr_log!(warn: self, "Error while listening for connections: {}", err);
     }
 
-    pub fn router_connection_lost(&self, router_id: Arc<RouterId>) {
+    pub fn router_connection_lost(&self, router_id: &Arc<RouterId>) {
         sr_log!(debug: self, "Router connection lost: {}", router_id);
+        self.metrics.connection_lost_count.fetch_add(1, SeqCst);
+        self.metrics.remove_router(router_id);
+    }
+
+    pub fn router_connection_aborted<T: Display>(
+        &self,
+        router_id: &Arc<RouterId>,
+        err: T,
+    ) {
+        sr_log!(warn: self, "Router connection aborted: {}. Reason: {}", router_id, err);
         self.metrics.connection_lost_count.fetch_add(1, SeqCst);
         self.metrics.remove_router(router_id);
     }
@@ -77,24 +87,28 @@ impl BmpTcpInStatusReporter {
             .fetch_add(1, SeqCst);
     }
 
-    pub fn bmp_message_received(&self, router_id: Arc<RouterId>) {
+    pub fn message_received(
+        &self,
+        router_id: Arc<RouterId>,
+        rfc_7854_msg_type_code: u8,
+    ) {
         sr_log!(trace: self, "BMP message received from router '{}'", router_id);
         self.metrics
             .router_metrics(router_id)
-            .num_bmp_messages_received
+            .num_bmp_messages_received[rfc_7854_msg_type_code as usize]
             .fetch_add(1, SeqCst);
     }
 
-    pub fn bmp_message_processed(&self, router_id: Arc<RouterId>) {
+    pub fn message_processed(&self, router_id: Arc<RouterId>) {
         sr_log!(trace: self, "BMP message processed from router '{}'", router_id);
         self.metrics
             .router_metrics(router_id)
-            .num_bmp_messages_received
+            .num_bmp_messages_processed
             .fetch_add(1, SeqCst);
     }
 
-    pub fn invalid_bmp_message_received(&self, router_id: Arc<RouterId>) {
-        sr_log!(trace: self, "Invalid BMP message received from router '{}'", router_id);
+    pub fn message_processing_failure(&self, router_id: Arc<RouterId>) {
+        sr_log!(trace: self, "BMP message processing failed for message from router '{}'", router_id);
         self.metrics
             .router_metrics(router_id)
             .num_invalid_bmp_messages

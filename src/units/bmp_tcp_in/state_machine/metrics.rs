@@ -18,8 +18,8 @@ use super::machine::{AtomicBmpStateIdx, BmpStateIdx};
 
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 
-use std::sync::RwLock;
 use hex_slice::AsHex;
+use std::sync::RwLock;
 const MAX_RECENT_PARSE_ERRORS: usize = 10;
 
 #[derive(Clone, Debug, Default)]
@@ -101,11 +101,11 @@ impl ParseErrorsRingBuffer {
 // avoid the need to find the right metric to update, which in a concurrent
 // access scenario requires some sort of concurrent safe map.
 #[derive(Debug, Default)]
-pub struct BmpMetrics {
+pub struct BmpStateMachineMetrics {
     routers: Arc<FrimMap<Arc<RouterId>, Arc<RouterBmpMetrics>>>,
 }
 
-impl BmpMetrics {
+impl BmpStateMachineMetrics {
     pub fn router_metrics(
         &self,
         router_id: Arc<RouterId>,
@@ -121,6 +121,10 @@ impl BmpMetrics {
             Arc::new(metrics)
         })
     }
+
+    pub fn remove_router_metrics(&self, router_id: &Arc<RouterId>) {
+        self.routers.remove(router_id);
+    }
 }
 
 #[derive(Debug, Default)]
@@ -128,17 +132,10 @@ pub struct RouterBmpMetrics {
     pub bmp_state_machine_state: Arc<AtomicBmpStateIdx>,
     pub num_received_prefixes: Arc<AtomicUsize>,
     pub num_stored_prefixes: Arc<AtomicUsize>,
-    pub num_bgp_updates_processed: Arc<AtomicUsize>,
-    pub num_bgp_updates_for_unknown_peer: Arc<AtomicUsize>,
-    pub num_bgp_updates_with_recoverable_parsing_failures_for_known_peers:
+    pub num_bmp_route_monitoring_msgs_with_unknown_peer: Arc<AtomicUsize>,
+    pub num_bgp_updates_reparsed_due_to_incorrect_header_flags:
         Arc<AtomicUsize>,
-    pub num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers:
-        Arc<AtomicUsize>,
-    pub num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers:
-        Arc<AtomicUsize>,
-    pub num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers:
-        Arc<AtomicUsize>,
-    pub num_bgp_updates_filtered: Arc<AtomicUsize>,
+    pub num_unprocessable_bmp_messages: Arc<AtomicUsize>,
     pub num_announcements: Arc<AtomicUsize>,
     pub num_withdrawals: Arc<AtomicUsize>,
     pub num_peers_up: Arc<AtomicUsize>,
@@ -147,122 +144,95 @@ pub struct RouterBmpMetrics {
     pub parse_errors: Arc<ParseErrorsRingBuffer>,
 }
 
-impl BmpMetrics {
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
+impl BmpStateMachineMetrics {
+    const NUM_CONNECTED_ROUTERS_METRIC: Metric = Metric::new(
+        "bmp_num_connected_routers",
+        "the number of BMP routers connected to this unit",
+        MetricType::Gauge,
+        MetricUnit::Total,
+    );
     const BMP_STATE_MACHINE_STATE_METRIC: Metric = Metric::new(
         "bmp_state_machine_state",
         "the current state machine state for this monitored router connection",
         MetricType::Text,
         MetricUnit::State,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_RECEIVED_PREFIXES_METRIC: Metric = Metric::new(
         "bmp_state_num_received_prefixes",
         "the number of prefixes received from this router",
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_STORED_PREFIXES_METRIC: Metric = Metric::new(
         "bmp_state_num_stored_prefixes",
         "the number of prefixes stored for this router",
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
-    const NUM_BGP_UPDATES_PROCESSED_METRIC: Metric = Metric::new(
-        "bmp_state_num_bgp_updates_processed",
-        "the number of processed BGP UPDATE messages",
+    const NUM_BMP_ROUTE_MONITORING_MSGS_WITH_UNKNOWN_PEER_METRIC: Metric = Metric::new(
+        "bmp_state_num_bmp_route_monitoring_msgs_with_unknown_peer",
+        "the number of BMP Route Monitoring messages for which no Peer Up notification was seen",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
-    const NUM_BGP_UPDATES_FOR_UNKNOWN_PEER_METRIC: Metric = Metric::new(
-        "bmp_state_num_bgp_updates_with_unknown_peer",
-        "the number of BGP UPDATE messages for which no Peer Up notification was seen",
+    const NUM_BGP_UPDATES_REPARSED_DUE_TO_INCORRECT_HEADER_FLAGS: Metric = Metric::new(
+        "bmp_state_num_bgp_updates_reparsed_due_to_incorrect_header_flags",
+        "the number of BGP UPDATE messages that could only be parsed by not obeying the BMP common header flags",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
-    const NUM_BGP_UPDATES_WITH_RECOVERABLE_PARSING_FAILURE_FOR_KNOWN_PEER: Metric = Metric::new(
-        "bmp_state_num_bgp_updates_with_recoverable_parsing_failure_for_known_peer",
-        "the number of BGP UPDATE messages from known peers that could not be parsed with the expected session config",
+    const NUM_UNPROCESSABLE_BMP_MESSAGES: Metric = Metric::new(
+        "bmp_state_num_unprocessable_bmp_messages",
+        "the number of BMP messages that could not be parsed, were invbmp_state_num_unprocessable_bmp_messagesalid or otherwise could not be processed",
         MetricType::Counter,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
-    const NUM_BGP_UPDATES_WITH_RECOVERABLE_PARSING_FAILURE_FOR_UNKNOWN_PEER: Metric = Metric::new(
-        "bmp_state_num_bgp_updates_with_recoverable_parsing_failure_for_unknown_peer",
-        "the number of BGP UPDATE messages from unknown peers that could not be parsed with the expected session config",
-        MetricType::Counter,
-        MetricUnit::Total,
-    );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
-    const NUM_BGP_UPDATES_WITH_UNRECOVERABLE_PARSING_FAILURE_FOR_KNOWN_PEER: Metric = Metric::new(
-        "bmp_state_num_bgp_updates_with_unrecoverable_parsing_failure_for_known_peer",
-        "the number of BGP UPDATE messages from known peers that could not be parsed with the expected or generated session config",
-        MetricType::Counter,
-        MetricUnit::Total,
-    );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
-    const NUM_BGP_UPDATES_WITH_UNRECOVERABLE_PARSING_FAILURE_FOR_UNKNOWN_PEER: Metric = Metric::new(
-        "bmp_state_num_bgp_updates_with_unrecoverable_parsing_failure_for_unknown_peer",
-        "the number of BGP UPDATE messages from unknown peers that could not be parsed with the expected or generated session config",
-        MetricType::Counter,
-        MetricUnit::Total,
-    );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
-    const NUM_BGP_UPDATES_FILTERED: Metric = Metric::new(
-        "bmp_state_num_bgp_updates_filtered",
-        "the number of BGP UPDATE messages filtered out by accept/reject rules",
-        MetricType::Counter,
-        MetricUnit::Total,
-    );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_ANNOUNCEMENTS_METRIC: Metric = Metric::new(
         "bmp_state_num_announcements",
-        "the number of route announcements contained in the last BMP message",
+        "the number of route announcements seen from this router",
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_WITHDRAWALS_METRIC: Metric = Metric::new(
         "bmp_state_num_withdrawals",
-        "the number of route withdrawals contained in the last BMP message",
+        "the number of route withdrawals seen from this router",
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_PEERS_UP_METRIC: Metric = Metric::new(
         "bmp_state_num_up_peers",
         "the number of peers connected and in the up state",
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
     const NUM_PEERS_UP_EOR_CAPABLE_METRIC: Metric = Metric::new(
         "bmp_state_num_up_peers_eor_capable",
         "the number of up peers that support the graceful restart capability and thus are expected to signal End-of-Rib",
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    // TEST STATUS: [ ] makes sense? [ ] passes tests?
-    const NUM_PEERS_UP_DUMPING_METRIC: Metric = Metric::new(
-        "bmp_state_num_up_peers_dumping",
-        "the number of up peers expected to but have not yet signalled End-of-RIB",
+    const NUM_PEERS_UP_WITH_PENDING_EORS_METRIC: Metric = Metric::new(
+        "bmp_state_num_up_peers_with_pending_eors",
+        "the number of up peers with at least one pending End-of-RIB signal",
         MetricType::Gauge,
         MetricUnit::Total,
     );
 }
 
-impl BmpMetrics {
+impl BmpStateMachineMetrics {
     pub fn new() -> Self {
         Self::default()
     }
 }
 
-impl metrics::Source for BmpMetrics {
+impl metrics::Source for BmpStateMachineMetrics {
     fn append(&self, unit_name: &str, target: &mut metrics::Target) {
+        target.append_simple(
+            &Self::NUM_CONNECTED_ROUTERS_METRIC,
+            Some(unit_name),
+            self.routers.len(),
+        );
+
         for (router_id, metrics) in self.routers.guard().iter() {
             let router_id = router_id.as_str();
             append_per_router_metric(
@@ -290,58 +260,26 @@ impl metrics::Source for BmpMetrics {
                 unit_name,
                 target,
                 router_id,
-                Self::NUM_BGP_UPDATES_PROCESSED_METRIC,
-                metrics.num_bgp_updates_processed.load(SeqCst),
-            );
-            append_per_router_metric(
-                unit_name,
-                target,
-                router_id,
-                Self::NUM_BGP_UPDATES_FOR_UNKNOWN_PEER_METRIC,
-                metrics.num_bgp_updates_for_unknown_peer.load(SeqCst),
-            );
-            append_per_router_metric(
-                unit_name,
-                target,
-                router_id,
-                Self::NUM_BGP_UPDATES_WITH_RECOVERABLE_PARSING_FAILURE_FOR_KNOWN_PEER,
+                Self::NUM_BMP_ROUTE_MONITORING_MSGS_WITH_UNKNOWN_PEER_METRIC,
                 metrics
-                    .num_bgp_updates_with_recoverable_parsing_failures_for_known_peers
+                    .num_bmp_route_monitoring_msgs_with_unknown_peer
                     .load(SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 router_id,
-                Self::NUM_BGP_UPDATES_WITH_RECOVERABLE_PARSING_FAILURE_FOR_UNKNOWN_PEER,
+                Self::NUM_BGP_UPDATES_REPARSED_DUE_TO_INCORRECT_HEADER_FLAGS,
                 metrics
-                    .num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers
+                    .num_bgp_updates_reparsed_due_to_incorrect_header_flags
                     .load(SeqCst),
             );
             append_per_router_metric(
                 unit_name,
                 target,
                 router_id,
-                Self::NUM_BGP_UPDATES_WITH_UNRECOVERABLE_PARSING_FAILURE_FOR_KNOWN_PEER,
-                metrics
-                    .num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers
-                    .load(SeqCst),
-            );
-            append_per_router_metric(
-                unit_name,
-                target,
-                router_id,
-                Self::NUM_BGP_UPDATES_WITH_UNRECOVERABLE_PARSING_FAILURE_FOR_UNKNOWN_PEER,
-                metrics
-                    .num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers
-                    .load(SeqCst),
-            );
-            append_per_router_metric(
-                unit_name,
-                target,
-                router_id,
-                Self::NUM_BGP_UPDATES_FILTERED,
-                metrics.num_bgp_updates_filtered.load(SeqCst),
+                Self::NUM_UNPROCESSABLE_BMP_MESSAGES,
+                metrics.num_unprocessable_bmp_messages.load(SeqCst),
             );
             append_per_router_metric(
                 unit_name,
@@ -375,7 +313,7 @@ impl metrics::Source for BmpMetrics {
                 unit_name,
                 target,
                 router_id,
-                Self::NUM_PEERS_UP_DUMPING_METRIC,
+                Self::NUM_PEERS_UP_WITH_PENDING_EORS_METRIC,
                 metrics.num_peers_up_dumping.load(SeqCst),
             );
         }

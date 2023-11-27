@@ -1,14 +1,17 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use routecore::bmp::message::{Message as BmpMsg, TerminationMessage};
+use routecore::bmp::message::Message as BmpMsg;
 
-use crate::payload::{RouterId, SourceId};
+use crate::{
+    payload::{RouterId, SourceId},
+    units::bmp_tcp_in::state_machine::machine::BmpStateIdx,
+};
 
 use super::super::{
     machine::{BmpState, BmpStateDetails, Initiable},
     processing::{MessageType, ProcessingResult},
-    status_reporter::BmpTcpInStatusReporter,
+    status_reporter::BmpStateMachineStatusReporter,
 };
 
 /// BmpState machine state 'Initiating'.
@@ -46,7 +49,7 @@ impl BmpStateDetails<Initiating> {
     pub fn new(
         source_id: SourceId,
         router_id: Arc<RouterId>,
-        status_reporter: Arc<BmpTcpInStatusReporter>,
+        status_reporter: Arc<BmpStateMachineStatusReporter>,
     ) -> Self {
         BmpStateDetails {
             source_id,
@@ -67,15 +70,17 @@ impl BmpStateDetails<Initiating> {
             BmpMsg::InitiationMessage(msg) => {
                 let res = self.initiate(msg);
 
-                match res.processing_result {
+                match res.message_type {
                     MessageType::InvalidMessage { .. } => res,
 
                     _ => {
                         // A newly connected router, once initiated, should then
                         // start its initial table dump.
                         if let BmpState::Initiating(state) = res.next_state {
-                            let next_state = BmpState::Dumping(state.into());
-                            Self::mk_state_transition_result(next_state)
+                            Self::mk_state_transition_result(
+                                BmpStateIdx::Initiating,
+                                BmpState::Dumping(state.into()),
+                            )
                         } else {
                             unreachable!(
                                 "We should still be in state Initiating"
@@ -99,14 +104,6 @@ impl BmpStateDetails<Initiating> {
                 )
             }
         }
-    }
-
-    pub fn terminate(
-        self,
-        _msg: Option<TerminationMessage<Bytes>>,
-    ) -> ProcessingResult {
-        let next_state = BmpState::Terminated(self.into());
-        Self::mk_state_transition_result(next_state)
     }
 }
 
@@ -186,10 +183,7 @@ mod tests {
         let res = processor.process_msg(bmp_msg, None);
 
         // Then
-        assert!(matches!(
-            res.processing_result,
-            MessageType::StateTransition
-        ));
+        assert!(matches!(res.message_type, MessageType::StateTransition));
         assert!(matches!(res.next_state, BmpState::Dumping(_)));
         if let BmpState::Dumping(next_state) = res.next_state {
             assert_eq!(next_state.router_id.deref(), TEST_ROUTER_ID);
@@ -219,12 +213,11 @@ mod tests {
 
         // Then
         assert!(matches!(
-            res.processing_result,
+            res.message_type,
             MessageType::InvalidMessage { .. }
         ));
         assert!(matches!(res.next_state, BmpState::Initiating(_)));
-        if let MessageType::InvalidMessage { err, .. } = res.processing_result
-        {
+        if let MessageType::InvalidMessage { err, .. } = res.message_type {
             assert_eq!(
                 err,
                 "Invalid BMP InitiationMessage: Missing or empty sysName Information TLV"
@@ -244,12 +237,11 @@ mod tests {
 
         // Then
         assert!(matches!(
-            res.processing_result,
+            res.message_type,
             MessageType::InvalidMessage { .. }
         ));
         assert!(matches!(res.next_state, BmpState::Initiating(_)));
-        if let MessageType::InvalidMessage { err, .. } = res.processing_result
-        {
+        if let MessageType::InvalidMessage { err, .. } = res.message_type {
             assert_eq!(err, "RFC 7854 4.3 violation: Expected BMP Initiation Message but received: PeerUpNotification");
         }
     }

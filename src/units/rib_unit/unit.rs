@@ -47,7 +47,10 @@ use uuid::Uuid;
 use super::{
     http::PrefixesApi,
     metrics::RibUnitMetrics,
-    rib::{HashedRib, PreHashedTypeValue, RibValue, RouteExtra},
+    rib::{
+        HashedRib, PreHashedTypeValue, RibValue, RouteExtra,
+        StoreEvictionPolicy, StoreInsertionEffect, StoreMergeUpdateSettings,
+    },
     status_reporter::RibUnitStatusReporter,
 };
 use super::{
@@ -268,7 +271,11 @@ impl RibUnitRunner {
     ) -> Self {
         let unit_name = component.name().clone();
         let gate = Arc::new(gate);
-        let rib = Self::mk_rib(rib_type, rib_keys);
+        let rib = Self::mk_rib(
+            rib_type,
+            rib_keys,
+            StoreEvictionPolicy::UpdateStatusOnWithdraw.into(),
+        );
         let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> =
             Default::default();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
@@ -339,6 +346,7 @@ impl RibUnitRunner {
     pub(crate) fn mock(
         roto_script: &str,
         rib_type: RibType,
+        settings: StoreMergeUpdateSettings,
     ) -> (Self, crate::comms::GateAgent) {
         use crate::common::roto::RotoScriptOrigin;
 
@@ -356,7 +364,7 @@ impl RibUnitRunner {
         let query_limits =
             Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
         let rib_keys = RibUnit::default_rib_keys();
-        let rib = Self::mk_rib(rib_type, &rib_keys);
+        let rib = Self::mk_rib(rib_type, &rib_keys, settings);
         let status_reporter = RibUnitStatusReporter::default().into();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
         let filter_name =
@@ -411,6 +419,7 @@ impl RibUnitRunner {
     fn mk_rib(
         rib_type: RibType,
         rib_keys: &[RouteToken],
+        settings: StoreMergeUpdateSettings,
     ) -> Arc<ArcSwap<HashedRib>> {
         //
         // --- TODO: Create the Rib based on the Roto script Rib 'contains' type
@@ -424,8 +433,13 @@ impl RibUnitRunner {
         // --- End: Create the Rib based on the Roto script Rib 'contains' type
         //
         let physical = matches!(rib_type, RibType::Physical);
-        let rib = HashedRib::new(rib_keys, physical);
+        let rib = HashedRib::new(rib_keys, physical, settings);
         Arc::new(ArcSwap::from_pointee(rib))
+    }
+
+    #[cfg(test)]
+    pub(super) fn status_reporter(&self) -> Arc<RibUnitStatusReporter> {
+        self.status_reporter.clone()
     }
 
     #[cfg(test)]
@@ -525,7 +539,7 @@ impl RibUnitRunner {
                                         arc_self
                                             .status_reporter
                                             .filter_name_changed(
-                                                &old_filter_name,
+                                                old_filter_name,
                                                 Some(&new_filter_name),
                                             );
                                         arc_self
@@ -540,7 +554,7 @@ impl RibUnitRunner {
                                         arc_self
                                             .status_reporter
                                             .filter_name_changed(
-                                                &old_filter_name,
+                                                old_filter_name,
                                                 None,
                                             );
                                         arc_self.filter_name.store(
@@ -708,11 +722,12 @@ impl RibUnitRunner {
         if let Some(filtered_update) = Self::VM
             .with(|vm| {
                 payload
-                    .filter(|value, trace_id| {
+                    .filter(|value, received, trace_id| {
                         self.roto_scripts.exec_with_tracer(
                             vm,
                             &self.filter_name.load(),
                             value,
+                            received,
                             bound_tracer.clone(),
                             trace_id,
                         )
@@ -798,39 +813,44 @@ impl RibUnitRunner {
             };
 
             if let Some(prefix) = prefix {
-                let is_withdraw = payload.value.is_withdrawn();
+                let is_announcement = !payload.value.is_withdrawn();
+                let router_id =
+                    payload.value.router_id().unwrap_or_else(|| {
+                        Arc::new(RouterId::from_str("unknown").unwrap())
+                    });
 
                 let pre_insert = Utc::now();
                 match insert_fn(&prefix, payload.value.clone(), &rib) {
                     Ok((upsert, num_retries)) => {
                         let post_insert = Utc::now();
-                        let insert_delay = (post_insert - pre_insert)
-                            .num_microseconds()
-                            .unwrap_or(i64::MAX);
-
-                        // TODO: Use RawBgpMessage LogicalTime?
-                        // let propagation_delay = (post_insert - rib_el.received).num_milliseconds();
-                        let propagation_delay = 0;
-
-                        let router_id = Arc::new(
-                            RouterId::from_str("not implemented yet")
-                                .unwrap(),
-                        );
+                        let store_op_delay =
+                            (post_insert - pre_insert).to_std().unwrap();
+                        let propagation_delay = (post_insert
+                            - payload.received)
+                            .to_std()
+                            .unwrap();
 
                         match upsert {
                             Upsert::Insert => {
+                                let change = if is_announcement {
+                                    StoreInsertionEffect::RouteAdded
+                                } else {
+                                    // WTF - a withdrawal should NOT result in 'Insert' as that means
+                                    // that the prefix didn't yet have any routes associated with it
+                                    // so what was there to withdraw?
+                                    StoreInsertionEffect::RoutesWithdrawn(0)
+                                };
                                 self.status_reporter.insert_ok(
                                     router_id,
-                                    insert_delay,
+                                    store_op_delay,
                                     propagation_delay,
                                     num_retries,
-                                    is_withdraw,
-                                    1,
+                                    change,
                                 );
                             }
                             Upsert::Update(StoreInsertionReport {
-                                item_count_delta,
-                                item_count_total,
+                                change,
+                                item_count,
                                 op_duration,
                             }) => {
                                 STATS_COUNTER.with(|counter| {
@@ -840,25 +860,19 @@ impl RibUnitRunner {
                                         self.rib_merge_update_stats.add(
                                             op_duration.num_microseconds().unwrap_or(i64::MAX)
                                                 as u64,
-                                            item_count_total,
-                                            is_withdraw,
+                                            item_count,
+                                            is_announcement,
                                         );
                                     }
                                 });
 
                                 self.status_reporter.update_ok(
                                     router_id,
-                                    insert_delay,
+                                    store_op_delay,
                                     propagation_delay,
                                     num_retries,
-                                    item_count_delta,
+                                    change,
                                 );
-
-                                // status_reporter.update_processed(
-                                //     new_announcements,
-                                //     modified_announcements,
-                                //     new_withdrawals,
-                                // );
                             }
                         }
                     }
@@ -950,11 +964,12 @@ impl RibUnitRunner {
             trace!("Re-processing route");
 
             if let Ok(filtered_payloads) = Self::VM.with(|vm| {
-                payload.filter(|value, trace_id| {
+                payload.filter(|value, received, trace_id| {
                     self.roto_scripts.exec_with_tracer(
                         vm,
                         &self.filter_name.load(),
                         value,
+                        received,
                         tracer.clone(),
                         trace_id,
                     )

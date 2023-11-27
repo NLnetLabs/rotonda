@@ -621,7 +621,7 @@ pub fn extract_params(request: &Request<Body>) -> Vec<QueryParam> {
                 .map(|(n, v)| QueryParam::new(n, v))
                 .collect()
         })
-        .unwrap_or_else(Vec::new)
+        .unwrap_or_default()
 }
 
 pub fn get_param<'a>(

@@ -26,6 +26,7 @@ impl RotoFilterMetrics {
         &self,
         socket_addr: SocketAddr,
     ) -> Arc<RouterMetrics> {
+        #[allow(clippy::unwrap_or_default)]
         self.routers
             .entry(Arc::new(socket_addr))
             .or_insert_with(Default::default)
@@ -47,7 +48,6 @@ impl RotoFilterMetrics {
 }
 
 impl RotoFilterMetrics {
-    // TEST STATUS: [/] makes sense? [/] passes tests?
     const NUM_FILTERED_MESSAGES_METRIC: Metric = Metric::new(
         "roto_filter_num_filtered_messages",
         "the number of messages filtered out by this unit",

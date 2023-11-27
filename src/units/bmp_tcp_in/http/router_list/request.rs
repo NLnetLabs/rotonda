@@ -16,10 +16,7 @@ use crate::{
     payload::SourceId,
     units::bmp_tcp_in::{
         metrics::BmpTcpInMetrics,
-        state_machine::{
-            machine::{BmpState, BmpStateDetails},
-            metrics::BmpMetrics,
-        },
+        state_machine::{BmpState, BmpStateDetails, BmpStateMachineMetrics},
         types::RouterInfo,
         util::{calc_u8_pc, format_source_id},
     },
@@ -30,7 +27,7 @@ pub struct RouterListApi {
     pub http_api_path: Arc<String>,
     pub router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
     pub router_metrics: Arc<BmpTcpInMetrics>,
-    pub bmp_metrics: Arc<BmpMetrics>,
+    pub bmp_metrics: Arc<BmpStateMachineMetrics>,
     pub router_id_template: Arc<ArcSwap<String>>,
     pub router_states:
         Arc<FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>,
@@ -80,7 +77,7 @@ impl RouterListApi {
         http_api_path: Arc<String>,
         router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
         router_metrics: Arc<BmpTcpInMetrics>,
-        bmp_metrics: Arc<BmpMetrics>,
+        bmp_metrics: Arc<BmpStateMachineMetrics>,
         router_id_template: Arc<ArcSwap<String>>,
         router_states: Arc<
             FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
@@ -228,13 +225,11 @@ impl RouterListApi {
                                 }
 
                                 Some("soft_parse_errors") => {
-                                    metrics.num_bgp_updates_with_recoverable_parsing_failures_for_known_peers.load(SeqCst) +
-                                    metrics.num_bgp_updates_with_recoverable_parsing_failures_for_unknown_peers.load(SeqCst)
+                                    metrics.num_bgp_updates_reparsed_due_to_incorrect_header_flags.load(SeqCst)
                                 }
 
                                 Some("hard_parse_errors") => {
-                                    metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_known_peers.load(SeqCst) +
-                                    metrics.num_bgp_updates_with_unrecoverable_parsing_failures_for_unknown_peers.load(SeqCst)
+                                    metrics.num_unprocessable_bmp_messages.load(SeqCst)
                                 }
 
                                 _ => unreachable!()

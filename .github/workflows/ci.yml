@@ -3,7 +3,8 @@ name: ci
 on:
   push:
     branches:
-      main
+      - main
+      - blocks-wip
 
   pull_request:
 

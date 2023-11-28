@@ -1,6 +1,6 @@
 filter rib-in-pre-filter {
     define {
-        rx msg: Route;
+        rx route: Route;
     }
 
     apply {

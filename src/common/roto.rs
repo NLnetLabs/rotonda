@@ -335,14 +335,19 @@ impl RotoScripts {
         origin: RotoScriptOrigin,
         roto_script: &str,
     ) -> Result<(), RotoError> {
+        // Indicate whether reloading is allowed for a Filter(Map).
+        let reload;
+
         if let Some(script) = self.scripts_by_origin.get(&origin) {
             if script.source_code == roto_script {
                 trace!("Roto script {origin} is already loaded");
                 return Ok(());
             } else {
+                reload = true;
                 info!("Re-loading modified Roto script {origin}");
             }
         } else {
+            reload = false;
             info!("Loading new Roto script {origin}");
         }
 
@@ -372,6 +377,40 @@ impl RotoScripts {
         // Extract all the packs that are Filter(Map)s. Filter(Map)s can't
         // live in the Global scope, so these all have filter names.
         let new_filter_maps = rotolo.clean_packs_to_owned();
+
+        // Check if any of the compiled filters have the same name as one that
+        // we've already seen. If so, abort, as each Filter(Map) name must be
+        // unique across all loaded roto scripts so that they can referenced
+        // unambiguously by their name. We are only checking this if we are
+        // not reloading. Also note that filter(map)s with duplicate names in
+        // one file are checked by the Roto compiler, so that should already
+        // have been catched earlier in this method.
+        if !reload {
+            let mut filters_seen: Vec<ShortString> = vec![];
+            for filter_map in &new_filter_maps {
+                let filter_name = filter_map.get_filter_map_name();
+
+                if let Some(found) =
+                    self.scripts_by_filter.get(&filter_name.clone().into())
+                {
+                    let err = CompileError::from(format!(
+                        "Filter(Map) with name '{filter_name}' in {origin} is already defined \
+                            in {}",
+                        found.parent_script.origin
+                    ));
+                    return Err(RotoError::CompileError { origin, err });
+                }
+
+                if filters_seen.iter().any(|f| *f == filter_name) {
+                    let err = CompileError::from(format!(
+                        "Filter(Map) with name '{filter_name}' is already defined in {origin}"
+                    ));
+                    return Err(RotoError::CompileError { origin, err });
+                }
+
+                filters_seen.push(filter_name);
+            }
+        }
 
         // Create the new RotoScript for these packs.
         let new_script = Arc::new(RotoScript {

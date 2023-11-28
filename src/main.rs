@@ -180,7 +180,7 @@ mod tests {
         net::IpAddr,
         str::FromStr,
         sync::{atomic::Ordering::SeqCst, Arc},
-        time::Duration,
+        time::{Duration, Instant},
     };
 
     use atomic_enum::atomic_enum;
@@ -676,8 +676,12 @@ mod tests {
             }
 
             eprintln!("Check that no more MQTT messages are waiting...");
-            let msg = link_rx.recv().unwrap();
-            if let Some(notification) = msg {
+            // On MacOS ARM systems `link_rx.recv()` blocks forever here while
+            // on Linux/x86_64 systems it returns quickly if there are now
+            // pending messages. So use `recv_deadline()` here as it meets our
+            // needs on both architectures.
+            let deadline = Instant::now().checked_add(Duration::from_secs(3)).unwrap();
+            if let Ok(Some(notification)) = link_rx.recv_deadline(deadline) {
                 dbg!(notification);
                 panic!("Unexpected MQTT message received");
             }

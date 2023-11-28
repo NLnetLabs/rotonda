@@ -415,6 +415,7 @@ mod tests {
     };
 
     #[tokio::test(flavor = "multi_thread")]
+    #[cfg(not(tarpaulin))]
     async fn listener_bound_count_metric_should_work() {
         let mock_listener_factory_cb = |_addr| {
             Ok(MockTcpListener::new(|| async {

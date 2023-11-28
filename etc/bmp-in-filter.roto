@@ -27,7 +27,7 @@ filter bmp-in-filter {
     // Accept all, do not forget to comment out if you want to do the ASN
     // filtering.
     define {
-        rx msg: BmpMessage;
+        rx bmp_msg: BmpMessage;
     }
 
     apply {

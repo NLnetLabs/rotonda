@@ -384,7 +384,7 @@ impl RotoScripts {
         // unambiguously by their name. We are only checking this if we are
         // not reloading. Also note that filter(map)s with duplicate names in
         // one file are checked by the Roto compiler, so that should already
-        // have been catched earlier in this method.
+        // have been caught earlier in this method.
         if !reload {
             let mut filters_seen: Vec<ShortString> = vec![];
             for filter_map in &new_filter_maps {
@@ -394,7 +394,7 @@ impl RotoScripts {
                     self.scripts_by_filter.get(&filter_name.clone().into())
                 {
                     let err = CompileError::from(format!(
-                        "Filter(Map) with name '{filter_name}' in {origin} is already defined \
+                        "Filter(Map) with name '{filter_name}' is already defined \
                             in {}",
                         found.parent_script.origin
                     ));

@@ -306,7 +306,7 @@ impl BmpTcpInRunner {
         let runner = Self {
             component: Default::default(),
             listen: Arc::new("127.0.0.1:12345".parse().unwrap()),
-            http_api_path: BmpTcpIn::default_http_api_path().into(),
+            http_api_path: BmpTcpIn::default_http_api_path(),
             gate,
             router_states: Default::default(),
             router_info: Default::default(),
@@ -719,7 +719,7 @@ mod tests {
         let (runner, agent, _) = setup_test("1.2.3.4:12345");
         let status_reporter = runner.status_reporter.clone();
         let wait_forever =
-            |_addr| Ok(MockTcpListener::new(|| std::future::pending()));
+            |_addr| Ok(MockTcpListener::new(std::future::pending));
         let mock_listener_factory =
             Arc::new(MockTcpListenerFactory::new(wait_forever));
         let task = runner.run::<_, _, _, NoOpConfigAcceptor>(
@@ -786,7 +786,7 @@ mod tests {
         let (runner, agent, _) = setup_test("127.0.0.1:11019");
         let status_reporter = runner.status_reporter.clone();
         let wait_forever =
-            |_addr| Ok(MockTcpListener::new(|| std::future::pending()));
+            |_addr| Ok(MockTcpListener::new(std::future::pending));
         let mock_listener_factory =
             Arc::new(MockTcpListenerFactory::new(wait_forever));
         let task = runner.run::<_, _, _, NoOpConfigAcceptor>(
@@ -850,8 +850,8 @@ mod tests {
         // listen for incoming connections on "localhost:8080":
         let fail_on_bad_addr = |addr: String| {
             // Not technically a bad address, just one we can match on for test purposes
-            if addr.to_string() != "1.2.3.4:12345" {
-                Ok(MockTcpListener::new(|| std::future::pending()))
+            if addr != "1.2.3.4:12345" {
+                Ok(MockTcpListener::new(std::future::pending))
             } else {
                 Err(std::io::ErrorKind::PermissionDenied.into())
             }

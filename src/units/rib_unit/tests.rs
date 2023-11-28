@@ -1,5 +1,7 @@
 use crate::common::status_reporter::AnyStatusReporter;
-use crate::tests::util::internal::get_testable_metrics_snapshot;
+use crate::tests::util::internal::{
+    get_testable_metrics_snapshot, MOCK_ROUTER_ID,
+};
 use crate::units::rib_unit::rib::{
     StoreEvictionPolicy, StoreMergeUpdateSettings,
 };
@@ -31,8 +33,6 @@ use std::{str::FromStr, sync::Arc};
 
 use super::status_reporter::RibUnitStatusReporter;
 
-const MOCK_ROUTER_ID: &str = "mock-router";
-
 #[tokio::test]
 async fn process_non_route_update() {
     let (runner, _) = RibUnitRunner::mock(
@@ -63,7 +63,7 @@ async fn process_update_single_route() {
     );
 
     // Given a BGP update containing a single route announcement
-    let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
+    let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
     let update = mk_route_update(&prefix, Some("[111,222,333]"));
 
     // When it is processed by this unit it should not be filtered
@@ -85,7 +85,7 @@ async fn process_update_withdraw_unannounced_route() {
     );
 
     // Given a BGP update containing a single route withdrawal
-    let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
+    let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
     let update = mk_route_update(&prefix, None);
 
     // When it is processed by this unit it should not be filtered
@@ -156,7 +156,7 @@ async fn process_update_equivalent_route_twice() {
     );
 
     // Given a BGP update containing a single route announcement
-    let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
+    let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
     let update = mk_route_update_with_communities(
         &prefix,
         Some("[111,222,333]"),
@@ -218,7 +218,7 @@ async fn process_update_equivalent_route_twice() {
     // When a route that is identical by key but different by value then the
     // new route should not be filtered, where the default key is peer IP,
     // peer ASN and AS path (see RibUnit::default_rib_keys()).
-    let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
+    let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
     let update = mk_route_update_with_communities(
         &prefix,
         Some("[111,222,333]"),
@@ -310,7 +310,7 @@ async fn process_update_two_routes_to_the_same_prefix() {
         let (runner, _) = RibUnitRunner::mock("", RibType::Physical, StoreEvictionPolicy::UpdateStatusOnWithdraw.into());
 
         // Given BGP updates for two different routes to the same prefix
-        let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
+        let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
         for as_path_str in ["[111,222,333]", "[111,444,333]"] {
             let update = mk_route_update(&prefix, Some(as_path_str));
             assert!(!is_filtered(&runner, update.clone()).await);
@@ -469,7 +469,7 @@ async fn time_store_op_durations() {
     let (runner, _) = RibUnitRunner::mock("", RibType::Physical, settings);
 
     // Given a BGP update containing a single route announcement
-    let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
+    let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
     let update = mk_route_update(&prefix, Some("[111,222,333]"));
     let started_at = Utc::now();
 
@@ -531,6 +531,7 @@ async fn time_store_op_durations() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+#[cfg(not(tarpaulin))]
 async fn count_insert_retries_during_forced_contention() {
     const DELAY: Duration = Duration::from_millis(10);
     let mut settings = StoreMergeUpdateSettings::new(
@@ -542,7 +543,7 @@ async fn count_insert_retries_during_forced_contention() {
     let runner = Arc::new(runner);
 
     // Given a BGP update containing a single route announcement
-    let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
+    let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
     let update = mk_route_update(&prefix, Some("[111,222,333]"));
 
     // Insert it.
@@ -605,7 +606,7 @@ async fn count_hard_insert_failures() {
     let (runner, _) = RibUnitRunner::mock("", RibType::Physical, settings);
 
     // Given a BGP update containing a single route announcement
-    let prefix = Prefix::from_str("127.0.0.1/32").unwrap().into();
+    let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
     let update = mk_route_update(&prefix, Some("[111,222,333]"));
 
     // Check that the counter is zero to begin with

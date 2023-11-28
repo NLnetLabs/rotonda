@@ -1,3 +1,4 @@
+#![cfg(not(tarpaulin_include))]
 use clap::{crate_authors, crate_version, error::ErrorKind, Command};
 use futures::{
     future::{select, Either},
@@ -179,7 +180,7 @@ mod tests {
         net::IpAddr,
         str::FromStr,
         sync::{atomic::Ordering::SeqCst, Arc},
-        time::Duration,
+        time::{Duration, Instant},
     };
 
     use atomic_enum::atomic_enum;
@@ -200,19 +201,46 @@ mod tests {
 
     use super::*;
 
-    const MAX_TIME_TO_WAIT_SECS: u64 = 1;
+    const MAX_TIME_TO_WAIT_SECS: u64 = 3;
     const METRIC_PREFIX: &str = "rotonda_";
 
-    // NOTE: this test is currently flakey, sometimes it fails at the end receiving more MQTT messages than expected.
+    // This test runs Rotonda as if it were run from the command line using a
+    // config file. It:
+    //   - Configures Rotonda to expect BMP input and to produce MQTT output.
+    //   - Simulates a monitored router by sending BMP messages over a TCP
+    //     connection to Rotonda.
+    //   - Runs a real MQTT broker (using the rumqttd Rust library) to which
+    //     Rotonda will publish messages, and from which the test can retrieve
+    //     published messages.
+    //   - Inspects the state of Rotonda using its Prometheus metrics
+    //     endpoint, its RIB HTTP API and by looking at the MQTT messages
+    //     received at the MQTT broker.
     #[test]
     fn integration_test() {
         use rotonda::tests::util::assert_json_eq;
 
-        // Uncomment this to investigate roto script parsing and execution issues.
+        //    ___ ___ _____ _   _ ___
+        //   / __| __|_   _| | | | _ \
+        //   \__ \ _|  | | | |_| |  _/
+        //   |___/___| |_|  \___/|_|
+        //
+
+        // Uncomment this to investigate roto script parsing and execution
+        // issues.
         // std::env::set_var("ROTONDA_ROTO_LOG", "1");
 
+        let test_prefix = Prefix::from_str("127.0.0.1/32").unwrap();
+        let test_prefix2 = Prefix::from_str("127.0.0.2/32").unwrap();
+
+        // ===================================================================
+        // Initialize the logging system.
+        // ===================================================================
         Config::init().unwrap();
 
+        // ===================================================================
+        // Define a base Rotonda config. It defines a BMP input and a RIB with
+        // two vRIBs.
+        // ===================================================================
         let base_config_toml = r#"
         roto_scripts_path = "test-data/"
 
@@ -235,12 +263,20 @@ mod tests {
         source = "bmp-tcp-in"
         "#;
 
+        // ===================================================================
+        // Define a config fragment for a null target.
+        // We'll use this first.
+        // ===================================================================
         let null_target_toml = r#"
         [targets.null]
         type = "null-out"
         sources = ["global-rib"]
         "#;
 
+        // ===================================================================
+        // Define a config fragment for an MQTT target.
+        // We'll reconfigure Rotonda to use this instead of the null target.
+        // ===================================================================
         let mqtt_target_toml = r#"
         [targets.local-broker]
         type = "mqtt-out"
@@ -252,10 +288,23 @@ mod tests {
         connect_retry_secs = 1
         "#;
 
-        let test_prefix = Prefix::from_str("127.0.0.1/32").unwrap();
-        let test_prefix2 = Prefix::from_str("127.0.0.2/32").unwrap();
+        //    ___ _____ _   ___ _____   ___  ___ _____ ___  _  _ ___   _
+        //   / __|_   _/_\ | _ \_   _| | _ \/ _ \_   _/ _ \| \| |   \ /_\
+        //   \__ \ | |/ _ \|   / | |   |   / (_) || || (_) | .` | |) / _ \
+        //   |___/ |_/_/ \_\_|_\ |_|   |_|_\\___/ |_| \___/|_|\_|___/_/ \_\
+        //
+
+        // ===================================================================
+        // Run Rotonda using the base + null target config. This will also
+        // start a Tokio runtime which we then also use below to run the
+        // actual integration test steps.
+        // ===================================================================
         let mut config_bytes = base_config_toml.as_bytes().to_vec();
         config_bytes.extend_from_slice(null_target_toml.as_bytes());
+        eprintln!(
+            "The following Rotonda config file will be used:\n{}",
+            String::from_utf8_lossy(&config_bytes)
+        );
         let config_file = ConfigFile::new(
             config_bytes,
             Source::default(),
@@ -269,8 +318,10 @@ mod tests {
         let runtime = run_with_config(&mut manager, config)
             .expect("The application failed to start");
 
-        // ---
-
+        // ===================================================================
+        // Define a config file for the RUMQTTD MQTT broker. It looks like a
+        // lot but basically just says listen on 127.0.0.1 on port 1883.
+        // ===================================================================
         let mqttd_config = r#"
         id = 0
 
@@ -312,6 +363,15 @@ mod tests {
         listen = "127.0.0.1:3030"
         "#;
 
+        //    ___ _____ _   ___ _____   ___ ___  ___  _  _____ ___
+        //   / __|_   _/_\ | _ \_   _| | _ ) _ \/ _ \| |/ / __| _ \
+        //   \__ \ | |/ _ \|   / | |   | _ \   / (_) | ' <| _||   /
+        //   |___/ |_/_/ \_\_|_\ |_|   |___/_|_\\___/|_|\_\___|_|_\
+        //
+
+        // ===================================================================
+        // Run the MQTT broker using the above config in its own thread.
+        // ===================================================================
         let config: rumqttd::Config =
             toml::de::from_str(mqttd_config).unwrap();
         let mut broker = Broker::new(config);
@@ -321,82 +381,127 @@ mod tests {
             broker.start().unwrap();
         });
 
+        //    ___ _   _ _  _   _____ ___ ___ _____ ___ _
+        //   | _ \ | | | \| | |_   _| __/ __|_   _/ __| |
+        //   |   / |_| | .` |   | | | _|\__ \ | | \__ \_|
+        //   |_|_\\___/|_|\_|   |_| |___|___/ |_| |___(_)
+        //
+
         runtime.block_on(async {
+            // Save the time the component graph report was last updated so
+            // that we can easily tell if it has changed.
             let link_report_update_time = manager.link_report_updated_at();
 
-            // We have to subscribe to the broker _before_ we publish to it
+            // Subscribe our test program to the MQTT broker _before_ Rotonda
+            // publishes any messages to it.
             link_tx.subscribe("rotonda/#").unwrap();
             assert!(matches!(
                 link_rx.recv(),
                 Ok(Some(Notification::DeviceAck(_)))
             ));
 
+            //      _   _  _ _  _  ___  _   _ _  _  ___ ___   ___  ___  _   _ _____ ___   _ 
+            //     /_\ | \| | \| |/ _ \| | | | \| |/ __| __| | _ \/ _ \| | | |_   _| __| / |
+            //    / _ \| .` | .` | (_) | |_| | .` | (__| _|  |   / (_) | |_| | | | | _|  | |
+            //   /_/ \_\_|\_|_|\_|\___/ \___/|_|\_|\___|___| |_|_\\___/ \___/  |_| |___| |_|
+            //                                                                              
+
+            // Emulate a BMP capable router connected to Rotonda
             eprintln!("Subscribed to MQTT broker, sending BMP messages...");
             let mut bmp_conn = wait_for_bmp_connect().await;
             let sys_name = bmp_initiate(&mut bmp_conn).await;
             bmp_peer_up(&mut bmp_conn).await;
             bmp_route_announce(&mut bmp_conn, test_prefix).await;
 
-            // check to see if the internal "gate" counters are correct
+            //     ___ _  _ ___ ___ _  __  ___ _____ _ _____ ___ 
+            //    / __| || | __/ __| |/ / / __|_   _/_\_   _| __|
+            //   | (__| __ | _| (__| ' <  \__ \ | |/ _ \| | | _| 
+            //    \___|_||_|___\___|_|\_\ |___/ |_/_/ \_\_| |___|
+            //                                                   
+
+            // Check to see if the internal "gate" Prometheus metrics are
+            // correct. We expect a single message to be pushed out of the
+            // bmp-tcp-in units gate, a route announcement message.
             eprintln!("Checking counter metrics...");
             assert_metric_eq(
                 manager.metrics(),
                 "num_updates_total",
-                Some(("component", "bmp-tcp-in")),
-                3,
+                &[("component", "bmp-tcp-in")],
+                1,
             )
             .await;
+            // And likewise that same message should pass into and out of
+            // the RIB unit.
             assert_metric_eq(
                 manager.metrics(),
                 "num_updates_total",
-                Some(("component", "global-rib")),
+                &[("component", "global-rib")],
                 1,
             )
             .await;
 
-            // check metrics to see if the number of routes etc is as expected
+            // Check metrics to see if the number of routes etc is as
+            // expected.
             eprintln!("Checking state metrics...");
             assert_metric_eq(
                 manager.metrics(),
                 "bmp_state_num_up_peers_total",
-                Some(("router", &sys_name)),
+                &[("router", &sys_name)],
                 1,
             )
             .await;
-            assert_metric_eq(
-                manager.metrics(),
-                "bmp_tcp_in_num_bmp_messages_received_total",
-                Some(("router", "my-sys-name")),
-                3,
-            )
-            .await;
+            assert_bmp_messages_received(manager.metrics(), &[("component","bmp-tcp-in"), ("router", "unknown")], [0, 0, 0, 0, 1, 0, 0]).await;
+            assert_bmp_messages_received(manager.metrics(), &[("component","bmp-tcp-in"), ("router", "my-sys-name")], [1, 0, 0, 1, 0, 0, 0]).await;
+
             assert_metric_eq(
                 manager.metrics(),
                 "rib_unit_num_routes_announced_total",
-                Some(("component", "global-rib")),
+                &[("component","global-rib")],
                 1,
             )
             .await;
 
-            // query the route to make sure it was stored
+            // Query the route via the RIB HTTP API to make sure that it was stored.
             eprintln!("Querying prefix store...");
             let res = query_prefix(test_prefix).await;
             assert_eq!(res.get("data").unwrap().as_array().unwrap().len(), 1);
 
+            // Expect no change in the number of updates output by the RIB gate.
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                &[("component", "global-rib")],
+                1,
+            )
+            .await;
+
+            // And that we can also query it via a VRIB too.
             let res = query_vrib_prefix(test_prefix).await;
             assert_eq!(res.get("data").unwrap().as_array().unwrap().len(), 1);
 
-            // verify that there is no MQTT connection yet
+            // Expect the number of updates output by the RIB gate to have
+            // INCREASED BY ONE. This is because the vRIB HTTP API query is
+            // handled by it querying the upstream pRIB and the result of that
+            // query flows out of the pRIB gate down to the vRIB.
+            assert_metric_eq(
+                manager.metrics(),
+                "num_updates_total",
+                &[("component", "global-rib")],
+                2, // 1 route + 1 vRIB query
+            )
+            .await;
+
+            // Verify that there is no MQTT connection yet.
             assert_metric_ne(
                 manager.metrics(),
-                "mqtt_target_connection_established_count_total",
-                Some(("component", "local-broker")),
+                "mqtt_target_connection_established_state",
+                &[("component", "local-broker")],
                 0,
             )
             .await;
 
-            // save the last link report update time
-            // wait for the manager to update the link report so that it will be included in the trace log output
+            // Save the last link report update time
+            // Wait for the manager to update the link report so that it will be included in the trace log output
             while manager
                 .link_report_updated_at()
                 .duration_since(link_report_update_time)
@@ -408,10 +513,19 @@ mod tests {
             }
             let link_report_update_time = manager.link_report_updated_at();
 
-            // reconfigure to use an MQTT target
-            eprintln!("Reconfiguring...");
+            //    ___ ___ ___ ___  _  _ ___ ___ ___ _   _ ___ ___ 
+            //   | _ \ __/ __/ _ \| \| | __|_ _/ __| | | | _ \ __|
+            //   |   / _| (_| (_) | .` | _| | | (_ | |_| |   / _| 
+            //   |_|_\___\___\___/|_|\_|_| |___\___|\___/|_|_\___|
+            //                                                    
+
+            // Reconfigure to use an MQTT target
             let mut config_bytes = base_config_toml.as_bytes().to_vec();
             config_bytes.extend_from_slice(mqtt_target_toml.as_bytes());
+            eprintln!(
+                "Sending Rotonda a SIGHUP signal to reconfigure itself using the following config:\n{}",
+                String::from_utf8_lossy(&config_bytes)
+            );
             let config_file = ConfigFile::new(
                 config_bytes,
                 Source::default(),
@@ -421,59 +535,74 @@ mod tests {
                 Config::from_config_file(config_file, &mut manager).unwrap();
             manager.spawn(&mut config);
 
-            // verify that there is now an MQTT connection
+            // Verify that there is now an MQTT connection
             assert_metric_eq(
                 manager.metrics(),
-                "mqtt_target_connection_established_count_total",
-                Some(("component", "local-broker")),
+                "mqtt_target_connection_established_state",
+                &[("component", "local-broker")],
                 1,
             )
             .await;
 
-            // push another route in and check the metrics
+            //      _   _  _ _  _  ___  _   _ _  _  ___ ___   ___  ___  _   _ _____ ___   ___ 
+            //     /_\ | \| | \| |/ _ \| | | | \| |/ __| __| | _ \/ _ \| | | |_   _| __| |_  )
+            //    / _ \| .` | .` | (_) | |_| | .` | (__| _|  |   / (_) | |_| | | | | _|   / / 
+            //   /_/ \_\_|\_|_|\_|\___/ \___/|_|\_|\___|___| |_|_\\___/ \___/  |_| |___| /___|
+            //                                                                                
+
+            // Push another route in and check the metrics
             eprintln!("Sending another BMP route announcement");
             bmp_route_announce(&mut bmp_conn, test_prefix2).await;
+
+            //     ___ _  _ ___ ___ _  __  ___ _____ _ _____ ___ 
+            //    / __| || | __/ __| |/ / / __|_   _/_\_   _| __|
+            //   | (__| __ | _| (__| ' <  \__ \ | |/ _ \| | | _| 
+            //    \___|_||_|___\___|_|\_\ |___/ |_/_/ \_\_| |___|
+            //                                                   
 
             eprintln!("Checking counter metrics...");
             assert_metric_eq(
                 manager.metrics(),
                 "num_updates_total",
-                Some(("component", "bmp-tcp-in")),
-                4,
+                &[("component", "bmp-tcp-in")],
+                2,
             )
             .await;
             assert_metric_eq(
                 manager.metrics(),
                 "num_updates_total",
-                Some(("component", "global-rib")),
-                2,
+                &[("component", "global-rib")],
+                3, // 1 route + 1 vRIB query + 1 route
             )
             .await;
 
             eprintln!("Checking state metrics...");
+            // Expect one more route monitoring message
+            assert_bmp_messages_received(manager.metrics(), &[("component","bmp-tcp-in"), ("router", "unknown")], [0, 0, 0, 0, 1, 0, 0]).await;
+            assert_bmp_messages_received(manager.metrics(), &[("component","bmp-tcp-in"), ("router", "my-sys-name")], [2, 0, 0, 1, 0, 0, 0]).await;
             assert_metric_eq(
                 manager.metrics(),
-                "bmp_tcp_in_num_bmp_messages_received_total",
-                Some(("router", "my-sys-name")),
-                4,
+                "rib_unit_num_routes_announced_total",
+                &[("component", "global-rib")],
+                2,
             )
             .await;
             assert_metric_eq(
                 manager.metrics(),
-                "rib_unit_num_routes_announced_total",
-                Some(("component", "global-rib")),
-                2,
+                "num_updates_total",
+                &[("component", "global-rib")],
+                3,
             )
             .await;
             assert_metric_eq(
                 manager.metrics(),
                 "mqtt_target_publish_count_total",
-                Some(("component", "local-broker")),
-                4,
+                &[("component", "local-broker")],
+                3,
             )
             .await;
 
-            // query the route to make sure it was stored
+            // Query the route to make sure it was stored
             eprintln!("Querying prefix store...");
             let res = query_prefix(test_prefix2).await;
             assert_eq!(res.get("data").unwrap().as_array().unwrap().len(), 1);
@@ -481,7 +610,7 @@ mod tests {
             let res = query_vrib_prefix(test_prefix2).await;
             assert_eq!(res.get("data").unwrap().as_array().unwrap().len(), 1);
 
-            // wait for the manager to update the link report so that it will be included in the trace log output
+            // Wait for the manager to update the link report so that it will be included in the trace log output
             while manager
                 .link_report_updated_at()
                 .duration_since(link_report_update_time)
@@ -492,85 +621,40 @@ mod tests {
                 tokio::time::sleep(Duration::from_secs(1)).await;
             }
 
-            // shut down rotonda, we're finished with it
+            //    ___ _____ ___  ___   ___  ___ _____ ___  _  _ ___   _   
+            //   / __|_   _/ _ \| _ \ | _ \/ _ \_   _/ _ \| \| |   \ /_\  
+            //   \__ \ | || (_) |  _/ |   / (_) || || (_) | .` | |) / _ \ 
+            //   |___/ |_| \___/|_|   |_|_\\___/ |_| \___/|_|\_|___/_/ \_\
+            //                                                            
+
             manager.terminate();
 
-            // // receive the BGP UPDATE message that was published to the MQTT broker topic
-            // eprintln!("Receiving MQTT message...");
-            // let msg = link_rx.recv().unwrap();
-            // assert!(matches!(msg, Some(Notification::Forward(_))));
+            //     ___  _   _ ___ _____   __  ___ ___  ___  _  _____ ___ 
+            //    / _ \| | | | __| _ \ \ / / | _ ) _ \/ _ \| |/ / __| _ \
+            //   | (_) | |_| | _||   /\ V /  | _ \   / (_) | ' <| _||   /
+            //    \__\_\\___/|___|_|_\ |_|   |___/_|_\\___/|_|\_\___|_|_\
+            //                                                           
 
-            // eprintln!("Checking MQTT message...");
-            // if let Some(Notification::Forward(forward)) = msg {
-            //     assert_eq!(forward.publish.topic, "rotonda/testing");
-            //     let expected_json = serde_json::json!({
-            //         "route": {
-            //             "prefix": "127.0.0.2/32",
-            //             "as_path": [
-            //                 "AS123",
-            //                 "AS456",
-            //                 "AS789"
-            //             ],
-            //             "origin_type": "Egp",
-            //             "next_hop": {
-            //                 "Ipv4": "10.0.0.1"
-            //             },
-            //             "atomic_aggregate": false,
-            //             "communities": [
-            //                 {
-            //                     "rawFields": [
-            //                         "0xFFFF029A"
-            //                     ],
-            //                     "type": "standard",
-            //                     "parsed": {
-            //                         "value": {
-            //                             "type": "well-known",
-            //                             "attribute": "BLACKHOLE"
-            //                         }
-            //                     }
-            //                 },
-            //                 {
-            //                     "rawFields": [
-            //                         "0x007B",
-            //                         "0x002C"
-            //                     ],
-            //                     "type": "standard",
-            //                     "parsed": {
-            //                         "value": {
-            //                             "type": "private",
-            //                             "asn": "AS123",
-            //                             "tag": 44
-            //                         }
-            //                     }
-            //                 }
-            //             ],
-            //             "peer_ip": "10.0.0.1",
-            //             "peer_asn": 12345,
-            //             "router_id": "my-sys-name"
-            //         },
-            //         "status": "InConvergence",
-            //         "route_id": [
-            //             0,
-            //             0
-            //         ]
-            //     });
-            //     let actual_json: serde_json::Value =
-            //         serde_json::from_slice(&forward.publish.payload).unwrap();
-            //     assert_json_eq(actual_json, expected_json);
-            // } else {
-            //     unreachable!();
-            // }
-
-            // Three additional MQTT messages are published, one for every time the etc/filter.roto script was
-            // executed due to this line in the the application config file defined above:
-            //     filter_names = ["etc/filter.roto", "etc/filter.roto", "etc/filter.roto"]
-            // This line created a physical RIB and two eastward virtual RIBs, each configured to use the same Roto
-            // script. The physical RIB receives the route from our test BMP client and on success passes the route
-            // down the pipeline to the first vRIB, which does the same and passes it to the next vRIB. At each stage
-            // the roto script also produces an output message which is injected into the pipeline, resulting in the
-            // original BGP UPDATE message and 3 additional output messages flowing out of the final vRIB to the MQTT
-            // target. The MQTT message generated in response to the BGP UPDATE message was handled above. Below we
-            // handle the three MQTT messages generated in response to the output messages generated by the RIB unit.
+            // Three MQTT messages are published, one for every time the
+            // "my-module" filter was executed due to this line in the Rotonda
+            // config file defined above:
+            //
+            //     filter_names = ["my-module", "my-module", "my-module"]
+            //
+            // This line created a physical RIB and two eastward virtual RIBs,
+            // each configured to use the same Roto script. The physical RIB
+            // receives the route from our test BMP client and on success
+            // passes the route down the pipeline to the first vRIB, which
+            // does the same and passes it to the next vRIB.
+            //
+            // At each stage the roto script also produces an output message
+            // which is injected into the pipeline, resulting in the original
+            // BGP UPDATE message and 3 additional output messages flowing out
+            // of the final vRIB to the MQTT target, the former being ignored
+            // but the latter three being published to the MQTT broker.
+            //
+            // Below we handle the three MQTT messages published in response
+            // to the output messages generated by the RIB units.
             for _ in 1..=3 {
                 eprintln!("Receiving MQTT message...");
                 let msg = link_rx.recv().unwrap();
@@ -592,11 +676,21 @@ mod tests {
             }
 
             eprintln!("Check that no more MQTT messages are waiting...");
-            let msg = link_rx.recv().unwrap();
-            if let Some(notification) = msg {
+            // On MacOS ARM systems `link_rx.recv()` blocks forever here while
+            // on Linux/x86_64 systems it returns quickly if there are now
+            // pending messages. So use `recv_deadline()` here as it meets our
+            // needs on both architectures.
+            let deadline = Instant::now().checked_add(Duration::from_secs(3)).unwrap();
+            if let Ok(Some(notification)) = link_rx.recv_deadline(deadline) {
                 dbg!(notification);
                 panic!("Unexpected MQTT message received");
             }
+
+            //    ___ _  _ ___    _ 
+            //   | __| \| |   \  | |
+            //   | _|| .` | |) | |_|
+            //   |___|_|\_|___/  (_)
+            //                      
         })
     }
 
@@ -624,10 +718,60 @@ mod tests {
         .unwrap()
     }
 
+    // The wanted metric values array is in the same order as RFC 7854
+    // defines the BMP message types:
+    //
+    //       *  Type = 0: Route Monitoring
+    //       *  Type = 1: Statistics Report
+    //       *  Type = 2: Peer Down Notification
+    //       *  Type = 3: Peer Up Notification
+    //       *  Type = 4: Initiation Message
+    //       *  Type = 5: Termination Message
+    //       *  Type = 6: Route Mirroring Message
+    async fn assert_bmp_messages_received(
+        metrics: metrics::Collection,
+        base_labels: &[(&str, &str)],
+        wanted_values: [i64; 7],
+    ) {
+        const METRIC_NAME: &str =
+            "bmp_tcp_in_num_bmp_messages_received_total";
+        const MSG_TYPES: [&str; 7] = [
+            "Route Monitoring",
+            "Statistics Report",
+            "Peer Down Notification",
+            "Peer Up Notification",
+            "Initiation Message",
+            "Termination Message",
+            "Route Mirroring Message",
+        ];
+        let expected_total: i64 = wanted_values.iter().sum();
+
+        // Check the counters for each BMP message type defined by RFC 7854
+        assert_metric_eq(
+            metrics.clone(),
+            METRIC_NAME,
+            base_labels,
+            expected_total,
+        )
+        .await;
+
+        for (msg_type, &wanted_value) in
+            MSG_TYPES.iter().zip(wanted_values.iter())
+        {
+            assert_metric_eq(
+                metrics.clone(),
+                METRIC_NAME,
+                &[base_labels, &[("msg_type", msg_type)]].concat(),
+                wanted_value,
+            )
+            .await;
+        }
+    }
+
     async fn assert_metric_eq(
         metrics: metrics::Collection,
         metric_name: &str,
-        label: Option<(&str, &str)>,
+        labels: &[(&str, &str)],
         wanted_v: i64,
     ) {
         let duration = Duration::from_secs(MAX_TIME_TO_WAIT_SECS);
@@ -639,7 +783,7 @@ mod tests {
             wait_for_metric(
                 &metrics,
                 metric_name,
-                label,
+                labels,
                 wanted_v,
                 result.clone(),
             ),
@@ -647,12 +791,12 @@ mod tests {
         .await
         .is_err()
         {
-            if result.load(SeqCst) != MetricLookupResult::Ok {
+            if result.load(SeqCst) != MetricLookupResult::MetricValueMatched {
                 eprintln!("Metric dump: {:#?}", get_metrics(&metrics));
                 panic!(
                     "Metric '{}' with label '{:?}' != {} after {} seconds (reason: {})",
                     metric_name,
-                    label,
+                    labels,
                     wanted_v,
                     duration.as_secs(),
                     result.load(SeqCst),
@@ -664,8 +808,8 @@ mod tests {
     async fn assert_metric_ne(
         metrics: metrics::Collection,
         metric_name: &str,
-        label: Option<(&str, &str)>,
-        wanted_v: i64,
+        labels: &[(&str, &str)],
+        unwanted_v: i64,
     ) {
         let duration = Duration::from_secs(MAX_TIME_TO_WAIT_SECS);
         let result = Arc::new(AtomicMetricLookupResult::default());
@@ -676,21 +820,21 @@ mod tests {
             wait_for_metric(
                 &metrics,
                 metric_name,
-                label,
-                wanted_v,
+                labels,
+                unwanted_v,
                 result.clone(),
             ),
         )
         .await
         .is_ok()
         {
-            if result.load(SeqCst) != MetricLookupResult::Ok {
+            if result.load(SeqCst) != MetricLookupResult::MetricValueMatched {
                 eprintln!("Metric dump: {:#?}", get_metrics(&metrics));
                 panic!(
-                    "Metric '{}' with label '{:?}' != {} after {} seconds (reason: {})",
+                    "Metric '{}' with label '{:?}' == {} after {} seconds (reason: {})",
                     metric_name,
-                    label,
-                    wanted_v,
+                    labels,
+                    unwanted_v,
                     duration.as_secs(),
                     result.load(SeqCst),
                 );
@@ -701,19 +845,20 @@ mod tests {
     async fn wait_for_metric(
         metrics: &metrics::Collection,
         metric_name: &str,
-        label: Option<(&str, &str)>,
+        labels: &[(&str, &str)],
         wanted_v: i64,
         result: Arc<AtomicMetricLookupResult>,
     ) {
         let full_metric_name = format!("{}{}", METRIC_PREFIX, metric_name);
         loop {
-            if get_metrics(metrics).get(
+            let found_v = get_metrics(metrics).get(
                 &full_metric_name,
-                label,
+                labels,
                 result.clone(),
-            ) == Some(wanted_v)
-            {
-                result.store(MetricLookupResult::Ok, SeqCst);
+            );
+
+            if found_v == Some(wanted_v) {
+                result.store(MetricLookupResult::MetricValueMatched, SeqCst);
                 break;
             }
 
@@ -829,15 +974,17 @@ mod tests {
         }
     }
 
+    // From least specific match to most specific match, top to bottom
     #[atomic_enum]
     #[derive(Default, PartialEq, Eq)]
     enum MetricLookupResult {
         #[default]
         NotQueried,
-        NameNotFound,
-        LabelNotFound,
-        ValueNotMatched,
-        Ok,
+        MetricNameNotFound,
+        LabelNameNotFound,
+        LabelValueNotMatched,
+        MetricValueNotMatched,
+        MetricValueMatched,
     }
 
     impl Default for AtomicMetricLookupResult {
@@ -850,14 +997,19 @@ mod tests {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             match self {
                 MetricLookupResult::NotQueried => write!(f, "NotQueried"),
-                MetricLookupResult::NameNotFound => write!(f, "NameNotFound"),
-                MetricLookupResult::LabelNotFound => {
+                MetricLookupResult::MetricNameNotFound => {
+                    write!(f, "NameNotFound")
+                }
+                MetricLookupResult::LabelNameNotFound => {
                     write!(f, "LabelNotFound")
                 }
-                MetricLookupResult::ValueNotMatched => {
+                MetricLookupResult::LabelValueNotMatched => {
                     write!(f, "ValueNotMatched")
                 }
-                MetricLookupResult::Ok => write!(f, "Ok"),
+                MetricLookupResult::MetricValueNotMatched => {
+                    write!(f, "Found")
+                }
+                MetricLookupResult::MetricValueMatched => write!(f, "Ok"),
             }
         }
     }
@@ -866,7 +1018,7 @@ mod tests {
         fn get(
             &self,
             metric_name: &str,
-            label: Option<(&str, &str)>,
+            labels: &[(&str, &str)],
             result: Arc<AtomicMetricLookupResult>,
         ) -> Option<i64>;
     }
@@ -875,39 +1027,119 @@ mod tests {
         fn get(
             &self,
             metric_name: &str,
-            label: Option<(&str, &str)>,
+            labels: &[(&str, &str)],
             result: Arc<AtomicMetricLookupResult>,
         ) -> Option<i64> {
             fn is_wanted(
                 sample: &prometheus_parse::Sample,
                 metric_name: &str,
-                label: &Option<(&str, &str)>,
+                labels: &[(&str, &str)],
                 result: Arc<AtomicMetricLookupResult>,
             ) -> bool {
                 if sample.metric == metric_name {
-                    if let Some((label_name, label_value)) = label {
+                    if labels.is_empty() {
+                        result.store(
+                            MetricLookupResult::MetricValueNotMatched,
+                            SeqCst,
+                        );
+                        return true;
+                    }
+
+                    let mut found_count = 0;
+                    for (label_name, label_value) in labels {
                         if let Some(v) = sample.labels.get(label_name) {
                             if v == *label_value {
-                                result.store(MetricLookupResult::Ok, SeqCst);
-                                return true;
+                                found_count += 1;
                             } else {
+                                let res = result.compare_exchange(
+                                    MetricLookupResult::NotQueried,
+                                    MetricLookupResult::LabelValueNotMatched,
+                                    SeqCst,
+                                    SeqCst,
+                                );
+                                if res.is_err()
+                                    && res != Err(MetricLookupResult::MetricValueNotMatched)
+                                {
+                                    result.store(
+                                        MetricLookupResult::LabelValueNotMatched,
+                                        SeqCst,
+                                    );
+                                }
+                                break;
+                            }
+                        } else {
+                            let res = result.compare_exchange(
+                                MetricLookupResult::NotQueried,
+                                MetricLookupResult::LabelNameNotFound,
+                                SeqCst,
+                                SeqCst,
+                            );
+                            if res.is_err()
+                                && res != Err(
+                                    MetricLookupResult::MetricValueNotMatched,
+                                )
+                                && res != Err(
+                                    MetricLookupResult::LabelValueNotMatched,
+                                )
+                            {
                                 result.store(
-                                    MetricLookupResult::ValueNotMatched,
+                                    MetricLookupResult::LabelNameNotFound,
                                     SeqCst,
                                 );
                             }
-                        } else {
+                            break;
+                        }
+                    }
+
+                    if found_count == labels.len() {
+                        result.store(
+                            MetricLookupResult::MetricValueNotMatched,
+                            SeqCst,
+                        );
+                        return true;
+                    } else {
+                        let res = result.compare_exchange(
+                            MetricLookupResult::NotQueried,
+                            MetricLookupResult::LabelNameNotFound,
+                            SeqCst,
+                            SeqCst,
+                        );
+                        if res.is_err()
+                            && res
+                                != Err(
+                                    MetricLookupResult::MetricValueNotMatched,
+                                )
+                            && res
+                                != Err(
+                                    MetricLookupResult::LabelValueNotMatched,
+                                )
+                        {
                             result.store(
-                                MetricLookupResult::LabelNotFound,
+                                MetricLookupResult::LabelNameNotFound,
                                 SeqCst,
                             );
                         }
-                    } else {
-                        result.store(MetricLookupResult::Ok, SeqCst);
-                        return true;
+                        return false;
                     }
                 } else {
-                    result.store(MetricLookupResult::NameNotFound, SeqCst);
+                    let res = result.compare_exchange(
+                        MetricLookupResult::NotQueried,
+                        MetricLookupResult::MetricNameNotFound,
+                        SeqCst,
+                        SeqCst,
+                    );
+                    if res.is_err()
+                        && res
+                            != Err(MetricLookupResult::MetricValueNotMatched)
+                        && res
+                            != Err(MetricLookupResult::LabelValueNotMatched)
+                        && res != Err(MetricLookupResult::LabelNameNotFound)
+                    {
+                        result.store(
+                            MetricLookupResult::MetricNameNotFound,
+                            SeqCst,
+                        );
+                    }
                 }
 
                 false
@@ -922,12 +1154,22 @@ mod tests {
                 }
             }
 
-            self.samples
+            let sum: i64 = self
+                .samples
                 .iter()
-                .find(|sample| {
-                    is_wanted(sample, metric_name, &label, result.clone())
+                .filter(|sample| {
+                    is_wanted(sample, metric_name, labels, result.clone())
                 })
                 .map(sample_as_i64)
+                .sum();
+
+            if result.load(SeqCst)
+                == MetricLookupResult::MetricValueNotMatched
+            {
+                Some(sum)
+            } else {
+                None
+            }
         }
     }
 }

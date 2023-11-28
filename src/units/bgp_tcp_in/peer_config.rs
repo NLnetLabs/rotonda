@@ -18,6 +18,7 @@ use std::net::IpAddr;
 use rotonda_fsm::bgp::session::BgpConfig;
 use routecore::addr::Prefix;
 use routecore::asn::Asn;
+use routecore::bgp::types::AfiSafi;
 use serde::Deserialize;
 
 /// Enum carrying either a exact IP address, or a `Prefix`.
@@ -110,6 +111,8 @@ pub struct PeerConfig {
     name: String,
     remote_asn: OneOrManyAsns,
     hold_time: Option<u16>,
+    #[serde(default)]
+    protocols: Vec<AfiSafi>,
 }
 
 impl PeerConfig {
@@ -119,6 +122,7 @@ impl PeerConfig {
             name: "MOCK".to_string(),
             remote_asn: OneOrManyAsns::Many(vec![]),
             hold_time: None,
+            protocols: vec![],
         }
     }
 
@@ -203,6 +207,10 @@ impl BgpConfig for CombinedConfig {
         self.remote_prefix_or_exact.is_exact()
             && self.peer_config.single_asn()
     }
+
+    fn protocols(&self) -> Vec<AfiSafi> {
+        self.peer_config.protocols.clone()
+    }
 }
 
 pub trait ConfigExt {
@@ -252,6 +260,10 @@ name = "Peer-exact"
 remote_asn = 100
 hold_time = 10
 
+[peers."2.3.4.7"]
+name = "Explicit-protocols"
+remote_asn = 100
+protocols = ["Ipv4Unicast", "L2VpnEvpn"]
 "#;
 
         let Unit::BgpTcpIn(cfg) = toml::from_str::<Unit>(toml).unwrap()
@@ -286,5 +298,19 @@ hold_time = 10
 
         let ip6 = IpAddr::from_str("2001:0db8::1").unwrap();
         assert!(cfg.peer_configs.get(ip6).is_none());
+
+
+        let cfg4 = cfg
+            .peer_configs
+            .get(IpAddr::from_str("2.3.4.7").unwrap())
+            .unwrap();
+        assert!(cfg4.1.name == "Explicit-protocols");
+        assert_eq!(
+            cfg4.1.protocols,
+            vec![AfiSafi::Ipv4Unicast, AfiSafi::L2VpnEvpn]
+        );
+
+
+
     }
 }

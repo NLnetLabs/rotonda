@@ -516,19 +516,17 @@ where
                 Some(Bytes::copy_from_slice(msg.as_ref())),
             );
         } else {
-            self.status_reporter.routing_update(
-                UpdateReportMessage {
-                    router_id: self.router_id.clone(),
-                    n_new_prefixes: 0, // no new prefixes
-                    n_valid_announcements: 0, // no new announcements
-                    n_valid_withdrawals: 0, // no new withdrawals
-                    n_stored_prefixes: 0, // zero because we just removed all stored prefixes for this peer
-                    n_invalid_announcements: 0,
-                    n_invalid_withdrawals: 0,
-                    last_invalid_announcement: None,
-                    last_invalid_withdrawal: None
-                }
-            );
+            self.status_reporter.routing_update(UpdateReportMessage {
+                router_id: self.router_id.clone(),
+                n_new_prefixes: 0,        // no new prefixes
+                n_valid_announcements: 0, // no new announcements
+                n_valid_withdrawals: 0,   // no new withdrawals
+                n_stored_prefixes: 0, // zero because we just removed all stored prefixes for this peer
+                n_invalid_announcements: 0,
+                n_invalid_withdrawals: 0,
+                last_invalid_announcement: None,
+                last_invalid_withdrawal: None,
+            });
 
             let eor_capable = self.details.is_peer_eor_capable(&pph);
 
@@ -640,60 +638,73 @@ where
                             ControlFlow::Continue(saved_self) => saved_self,
                         };
 
-                    if let Ok((payloads, mut update_report_msg)) = 
-                        saved_self.extract_route_monitoring_routes(
-                        received,
-                        pph.clone(),
-                        &update,
-                        route_status,
-                        trace_id,
-                    ) {
-                    // println!("update report msg {:#?}", update_report_msg);
-                    match update.announcements_vec() {
-                        Ok(announcements) => {
-                            if update_report_msg.n_valid_announcements > 0
-                            && saved_self.details.is_peer_eor_capable(&pph)
-                                    == Some(true)
-                            {
-                                let (afi,safi) = announcements.first().unwrap().afi_safi();
-        
-                                let num_pending_eors = saved_self
-                                    .details
-                                    .add_pending_eor(&pph, afi, safi);
-        
-                                saved_self.status_reporter.pending_eors_update(
-                                    saved_self.router_id.clone(),
-                                    num_pending_eors,
-                                );
-                            }
-                        },
-                        // For now we are completely erroring out when a part
-                        // of the announcement cannot be parsed by routecore.
-                        // In the future we should handover more control
-                        // around processing partial errors to the roto user.
-                        Err(err) => {
-                            return saved_self.mk_invalid_message_result(
-                                format!("Invalid BMP RouteMonitoring BGP \
+                    if let Ok((payloads, mut update_report_msg)) = saved_self
+                        .extract_route_monitoring_routes(
+                            received,
+                            pph.clone(),
+                            &update,
+                            route_status,
+                            trace_id,
+                        )
+                    {
+                        match update.announcements_vec() {
+                            // For now we are completely erroring out when a part
+                            // of the announcement cannot be parsed by routecore.
+                            // In the future we should handover more control
+                            // around processing partial errors to the roto user.
+                            Err(err) => {
+                                return saved_self.mk_invalid_message_result(
+                                    format!(
+                                        "Invalid BMP RouteMonitoring BGP \
                                 UPDATE message. One or more elements in the \
                                 NLRI(s) cannot be parsed: {:?}",
-                                err.to_string()),
-                                Some(true),
-                                Some(Bytes::copy_from_slice(msg.as_ref())),
-                            );
+                                        err.to_string()
+                                    ),
+                                    Some(true),
+                                    Some(Bytes::copy_from_slice(
+                                        msg.as_ref(),
+                                    )),
+                                );
+                            }
+                            Ok(announcements) => {
+                                if update_report_msg.n_valid_announcements > 0
+                                    && saved_self
+                                        .details
+                                        .is_peer_eor_capable(&pph)
+                                        == Some(true)
+                                {
+                                    let (afi, safi) = announcements
+                                        .first()
+                                        .unwrap()
+                                        .afi_safi();
+
+                                    let num_pending_eors = saved_self
+                                        .details
+                                        .add_pending_eor(&pph, afi, safi);
+
+                                    saved_self
+                                        .status_reporter
+                                        .pending_eors_update(
+                                            saved_self.router_id.clone(),
+                                            num_pending_eors,
+                                        );
+                                }
+                            }
                         }
-                    }
 
+                        update_report_msg.set_n_stored_prefixes(
+                            saved_self
+                                .details
+                                .get_announced_prefixes(&pph)
+                                .map(|ap| ap.len())
+                                .unwrap_or(0),
+                        );
+                        saved_self
+                            .status_reporter
+                            .routing_update(update_report_msg);
 
-                    update_report_msg.set_n_stored_prefixes(saved_self
-                        .details
-                        .get_announced_prefixes(&pph)
-                        .unwrap()
-                        .len());
-                    saved_self.status_reporter.routing_update(update_report_msg);
-
-                    saved_self
-                        .mk_routing_update_result(Update::Bulk(payloads))
-                    
+                        saved_self
+                            .mk_routing_update_result(Update::Bulk(payloads))
                     } else {
                         return saved_self.mk_invalid_message_result(
                             "Invalid BMP RouteMonitoring BGP UPDATE message. The PDU cannot be parsed.",
@@ -736,9 +747,11 @@ where
         update: &UpdateMessage<Bytes>,
         route_status: RouteStatus,
         trace_id: Option<u8>,
-    ) -> Result<(SmallVec<[Payload; 8]>, UpdateReportMessage), session::Error> {
+    ) -> Result<(SmallVec<[Payload; 8]>, UpdateReportMessage), session::Error>
+    {
         let mut payloads: SmallVec<[Payload; 8]> = SmallVec::new();
-        let mut update_report_msg = UpdateReportMessage::new(self.router_id.clone());
+        let mut update_report_msg =
+            UpdateReportMessage::new(self.router_id.clone());
 
         for a in update.announcements()? {
             match a {
@@ -746,10 +759,11 @@ where
                     match a {
                         Nlri::Unicast(nlri) | Nlri::Multicast(nlri) => {
                             let prefix = nlri.prefix;
-                            if self.details.add_announced_prefix(&pph, prefix) {
+                            if self.details.add_announced_prefix(&pph, prefix)
+                            {
                                 update_report_msg.inc_new_prefixes();
                             }
-            
+
                             // clone is cheap due to use of Bytes
                             let route = mk_route_for_prefix(
                                 self.router_id.clone(),
@@ -759,22 +773,22 @@ where
                                 prefix,
                                 route_status,
                             );
-            
+
                             payloads.push(Payload::with_received(
                                 self.source_id.clone(),
                                 route,
                                 trace_id,
-                                received
+                                received,
                             ));
                             update_report_msg.inc_valid_announcements();
-                        },
+                        }
                         _ => {
                             // We'll count 'em, but we don't do anything with 'em.
                             update_report_msg.inc_valid_announcements();
                         }
                     }
-                },
-                Err(err) => { 
+                }
+                Err(err) => {
                     update_report_msg.inc_invalid_announcements();
                     update_report_msg.set_invalid_announcement(err);
                 }
@@ -797,9 +811,12 @@ where
 
                         // RFC7606 though? What a can of worms this is.
 
-                        if update.unicast_announcements_vec().unwrap().iter().all(|nlri| {
-                            nlri.prefix != prefix
-                        }) {
+                        if update
+                            .unicast_announcements_vec()
+                            .unwrap()
+                            .iter()
+                            .all(|nlri| nlri.prefix != prefix)
+                        {
                             // clone is cheap due to use of Bytes
                             let route = mk_route_for_prefix(
                                 self.router_id.clone(),
@@ -814,14 +831,15 @@ where
                                 self.source_id.clone(),
                                 route,
                                 trace_id,
-                                received
+                                received,
                             ));
 
-                            self.details.remove_announced_prefix(&pph, &prefix);
+                            self.details
+                                .remove_announced_prefix(&pph, &prefix);
                             update_report_msg.inc_valid_withdrawals();
                         }
                     }
-                },
+                }
                 Err(err) => {
                     update_report_msg.inc_invalid_withdrawals();
                     update_report_msg.set_invalid_withdrawal(err);
@@ -829,10 +847,7 @@ where
             }
         }
 
-        Ok((
-            payloads,
-            update_report_msg
-        ))
+        Ok((payloads, update_report_msg))
     }
 }
 

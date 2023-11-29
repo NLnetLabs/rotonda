@@ -359,7 +359,9 @@ impl Processor {
                     source_id,
                 );
 
-                self.gate.update_data(Update::Bulk(payloads)).await;
+                if let Ok(payloads) = payloads {
+                    self.gate.update_data(Update::Bulk(payloads)).await;
+                }
             }
         }
 

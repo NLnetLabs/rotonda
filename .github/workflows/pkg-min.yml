@@ -1,6 +1,9 @@
 name: Minimal Packaging
 
 # Manually invoking required
+on:
+  workflow_dispatch:
+
 
 jobs:
   min:

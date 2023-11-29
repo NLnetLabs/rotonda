@@ -449,7 +449,6 @@ impl Processor {
                         RouteStatus::InConvergence,
                     )
                 })
-                .collect::<Vec<_>>()
         );
 
         payloads.extend(
@@ -465,7 +464,6 @@ impl Processor {
                         RouteStatus::Withdrawn,
                     )
                 })
-                .collect::<Vec<_>>()
         );
 
         Ok(payloads.into())

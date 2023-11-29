@@ -1,13 +1,9 @@
 name: Minimal Packaging
 
 # Manually invoking required
-on:
-
-  workflow_dispatch:
-
 
 jobs:
-  minimal:
+  min:
     uses: NLnetLabs/ploutos/.github/workflows/pkg-rust.yml@v7
 
     with:

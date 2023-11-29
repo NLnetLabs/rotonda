@@ -1,0 +1,19 @@
+name: Minimal Packaging
+
+# Manually invoking required
+
+jobs:
+  min:
+    uses: NLnetLabs/ploutos/.github/workflows/pkg-rust.yml@v7
+
+    with:
+      runs_on: self-hosted
+
+      #package_build_rules: pkg/rules/packages-to-build.yml
+      package_test_scripts_path: pkg/test-scripts/test-<package>.sh
+
+      package_build_rules: |
+        image:
+          - "ubuntu:jammy" # ubuntu/22.04
+          - "debian:bookworm"
+        target: x86_64

@@ -409,7 +409,7 @@ impl ConfigFile {
             // on the command line arguments supplied.
             match mvp_overrides.bmp_proxy_destination_addr {
                 Some(addr) => {
-                    // Recofigure the dummy proxy definition to use the destination.
+                    // Reconfigure the dummy proxy definition to use the destination.
                     let Value::Table(ref mut targets) =
                         root.get_mut(CFG_TARGETS).unwrap()
                     else {
@@ -463,7 +463,7 @@ impl ConfigFile {
             // command line arguments supplied.
             match mvp_overrides.mqtt_destination_addr {
                 Some(addr) => {
-                    // Recofigure the dummy mqtt target definition to use the destination.
+                    // Reconfigure the dummy mqtt target definition to use the destination.
                     let Value::Table(ref mut targets) =
                         root.get_mut(CFG_TARGETS).unwrap()
                     else {

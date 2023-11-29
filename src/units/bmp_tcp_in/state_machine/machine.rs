@@ -799,10 +799,11 @@ where
                                 RouteStatus::Withdrawn,
                             );
 
-                            payloads.push(Payload::new(
+                            payloads.push(Payload::with_received(
                                 self.source_id.clone(),
                                 route,
                                 trace_id,
+                                received
                             ));
 
                             self.details.remove_announced_prefix(&pph, &prefix);

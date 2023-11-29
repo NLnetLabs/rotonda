@@ -1728,7 +1728,7 @@ dependencies = [
 [[package]]
 name = "rotonda-fsm"
 version = "0.1.0-dev"
-source = "git+https://github.com/NLnetLabs/rotonda-fsm.git#367a5fda177aeee3888c47aa541481bf1631d180"
+source = "git+https://github.com/NLnetLabs/rotonda-fsm.git#8b9bb0b0431775da3bf9f5468cee06e78f564bb1"
 dependencies = [
  "bytes",
  "log",
@@ -1749,7 +1749,7 @@ dependencies = [
 [[package]]
 name = "rotonda-store"
 version = "0.3.0-pre.3"
-source = "git+https://github.com/NLnetLabs/rotonda-store.git?branch=compose-messages-ng#89cc22b4d284fe4680bfdfc33a5ea639a7e8ebea"
+source = "git+https://github.com/NLnetLabs/rotonda-store.git?branch=compose-messages-ng#6d849cc1a02d9c2d653bb907e2236bf2f8199051"
 dependencies = [
  "arc-swap",
  "crossbeam-epoch",
@@ -1763,7 +1763,7 @@ dependencies = [
 [[package]]
 name = "routecore"
 version = "0.4.0-dev"
-source = "git+https://github.com/NLnetLabs/routecore.git?branch=compose-messages-ng#65c2642d87f3b63f512b61221d4057192b89e569"
+source = "git+https://github.com/NLnetLabs/routecore.git?branch=compose-messages-ng#ff402c60d316a7aa122504df92f9018cc4756e4e"
 dependencies = [
  "bytes",
  "chrono",
@@ -2585,9 +2585,9 @@ checksum = "7ab9b36309365056cd639da3134bf87fa8f3d86008abf99e612384a6eecd459f"
 
 [[package]]
 name = "web-sys"
-version = "0.3.65"
+version = "0.3.66"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5db499c5f66323272151db0e666cd34f78617522fb0c1604d31a27c50c206a85"
+checksum = "50c24a44ec86bb68fbecd1b3efed7e85ea5621b39b35ef2766b66cd984f8010f"
 dependencies = [
  "js-sys",
  "wasm-bindgen",

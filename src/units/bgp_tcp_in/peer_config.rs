@@ -211,6 +211,12 @@ impl BgpConfig for CombinedConfig {
     fn protocols(&self) -> Vec<AfiSafi> {
         self.peer_config.protocols.clone()
     }
+
+    fn addpath(&self) -> Vec<AfiSafi> {
+        todo!()
+    }
+
+    
 }
 
 pub trait ConfigExt {

@@ -653,9 +653,8 @@ impl Gate {
     ///
     /// Returns true if the update was sent to a downstream unit, false
     /// otherwise.
-    pub async fn update_data(&self, update: Result<Update, session::Error>) {
+    pub async fn update_data(&self, update: Update) {
         // let mut sender_lost = false;
-        if let Ok(update) = update {
             let mut sent_at_least_once = false;
 
             if log_enabled!(Level::Trace) {
@@ -753,9 +752,6 @@ impl Gate {
                 self.updates.clone(),
                 sent_at_least_once,
             );
-        } else {
-            // TODO: log error here!
-        }
     }
 
     /// Returns the current gate status.
@@ -1962,7 +1958,7 @@ mod tests {
 
         // Build an update to send
         let update = Update::Single(mk_test_payload());
-        gate_clone.update_data(Ok(update)).await;
+        gate_clone.update_data(update).await;
 
         let metrics = get_testable_metrics_snapshot(&gate_clone.metrics());
         assert_eq!(metrics.with_name::<usize>("num_updates"), 1);
@@ -1984,7 +1980,7 @@ mod tests {
 
         // Send the update through the gate
         eprintln!("SENDING PAYLOAD");
-        gate_clone.update_data(Ok(update)).await;
+        gate_clone.update_data(update).await;
 
         eprintln!("WAITING FOR PAYLOAD TO BE RECEIVED BY THE TEST TARGET");
         let timeout = Box::pin(tokio::time::sleep(Duration::from_secs(3)));

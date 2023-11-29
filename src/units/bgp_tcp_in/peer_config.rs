@@ -113,6 +113,8 @@ pub struct PeerConfig {
     hold_time: Option<u16>,
     #[serde(default)]
     protocols: Vec<AfiSafi>,
+    #[serde(default)]
+    addpath: Vec<AfiSafi>,
 }
 
 impl PeerConfig {
@@ -123,6 +125,7 @@ impl PeerConfig {
             remote_asn: OneOrManyAsns::Many(vec![]),
             hold_time: None,
             protocols: vec![],
+            addpath: vec![],
         }
     }
 
@@ -213,10 +216,8 @@ impl BgpConfig for CombinedConfig {
     }
 
     fn addpath(&self) -> Vec<AfiSafi> {
-        todo!()
+        self.peer_config.addpath.clone()
     }
-
-    
 }
 
 pub trait ConfigExt {
@@ -270,6 +271,7 @@ hold_time = 10
 name = "Explicit-protocols"
 remote_asn = 100
 protocols = ["Ipv4Unicast", "L2VpnEvpn"]
+addpath = ["Ipv4Unicast", "Ipv6Unicast"]
 "#;
 
         let Unit::BgpTcpIn(cfg) = toml::from_str::<Unit>(toml).unwrap()
@@ -314,6 +316,10 @@ protocols = ["Ipv4Unicast", "L2VpnEvpn"]
         assert_eq!(
             cfg4.1.protocols,
             vec![AfiSafi::Ipv4Unicast, AfiSafi::L2VpnEvpn]
+        );
+        assert_eq!(
+            cfg4.1.addpath,
+            vec![AfiSafi::Ipv4Unicast, AfiSafi::Ipv6Unicast]
         );
 
 

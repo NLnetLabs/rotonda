@@ -1728,7 +1728,7 @@ dependencies = [
 [[package]]
 name = "rotonda-fsm"
 version = "0.1.0-dev"
-source = "git+https://github.com/NLnetLabs/rotonda-fsm.git#8b9bb0b0431775da3bf9f5468cee06e78f564bb1"
+source = "git+https://github.com/NLnetLabs/rotonda-fsm.git#f1058892053b9f567e39da59f9f0f144a870205d"
 dependencies = [
  "bytes",
  "log",
@@ -1763,7 +1763,7 @@ dependencies = [
 [[package]]
 name = "routecore"
 version = "0.4.0-dev"
-source = "git+https://github.com/NLnetLabs/routecore.git?branch=compose-messages-ng#ff402c60d316a7aa122504df92f9018cc4756e4e"
+source = "git+https://github.com/NLnetLabs/routecore.git?branch=compose-messages-ng#2cd373f347bdd65ffc1e013beb6fe2341da66498"
 dependencies = [
  "bytes",
  "chrono",

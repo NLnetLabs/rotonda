@@ -268,7 +268,7 @@ impl RouterHandler {
             source_id: router_addr.into(),
         };
         self.gate
-            .update_data(Ok(Update::UpstreamStatusChange(new_status)))
+            .update_data(Update::UpstreamStatusChange(new_status))
             .await;
     }
 
@@ -298,34 +298,33 @@ impl RouterHandler {
             msg.common_header().msg_type().into(),
         );
 
-        let next_state =
-            if let Ok(ControlFlow::Continue(FilterOutput { south, east })) =
-                Self::VM
-                    .with(|vm| {
-                        let value =
-                            TypeValue::Builtin(BuiltinTypeValue::BmpMessage(
-                                Arc::new(BytesRecord(msg)),
-                            ));
-                        self.roto_scripts.exec_with_tracer(
-                            vm,
-                            &self.filter_name.load(),
-                            value,
-                            bound_tracer,
-                            trace_id,
-                        )
-                    })
-                    .map_err(|err| {
-                        self.status_reporter.message_filtering_failure(&err);
-                        err
-                    })
-            {
-                if !south.is_empty() {
-                    let payload = Payload::from_output_stream_queue(
-                        &source_id, south, trace_id,
-                    )
-                    .into();
-                    self.gate.update_data(Ok(payload)).await;
-                }
+        let next_state = if let ControlFlow::Continue(FilterOutput {
+            south,
+            east,
+            received,
+        }) = Self::VM
+            .with(|vm| {
+                let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(
+                    Arc::new(BytesRecord(msg)),
+                ));
+                self.roto_scripts.exec_with_tracer(
+                    vm,
+                    &self.filter_name.load(),
+                    value,
+                    received,
+                    bound_tracer,
+                    trace_id,
+                )
+            })
+            .map_err(|err| {
+                self.status_reporter.message_filtering_failure(&err);
+                (bmp_state.router_id(), err.to_string())
+            })? {
+            if !south.is_empty() {
+                let payload =
+                    Payload::from_output_stream_queue(south, trace_id).into();
+                self.gate.update_data(payload).await;
+            }
 
             if let TypeValue::Builtin(BuiltinTypeValue::BmpMessage(msg)) =
                 east
@@ -358,11 +357,11 @@ impl RouterHandler {
                         );
                     }
 
-                        MessageType::RoutingUpdate { update } => {
-                            // Pass the routing update on to downstream units and/or targets.
-                            // This is where we send an update down the pipeline.
-                            self.gate.update_data(Ok(update)).await;
-                        }
+                    MessageType::RoutingUpdate { update } => {
+                        // Pass the routing update on to downstream units and/or targets.
+                        // This is where we send an update down the pipeline.
+                        self.gate.update_data(update).await;
+                    }
 
                     MessageType::Other => {
                         // A BMP initiation message received after the initiation

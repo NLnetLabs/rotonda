@@ -2,10 +2,9 @@
 use std::{iter::Peekable, net::IpAddr, sync::Arc};
 
 use bytes::Bytes;
-use log::error;
-use roto::{types::builtin::{
+use roto::types::builtin::{
     BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus,
-}, compiler::CompileError};
+};
 use routecore::{
     addr::Prefix,
     asn::Asn,

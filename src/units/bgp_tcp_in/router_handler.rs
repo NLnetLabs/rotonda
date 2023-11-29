@@ -254,8 +254,7 @@ impl Processor {
                                     self.roto_scripts.exec(vm, &self.unit_cfg.filter_name, value, Utc::now())
                                 }) {
                                     if !south.is_empty() {
-                                        let source_id = SourceId::from("TODO");
-                                        let update = Ok(Payload::from_output_stream_queue(&source_id, south, None).into());
+                                        let update = Payload::from_output_stream_queue(south, None).into();
                                         self.gate.update_data(update).await;
                                     }
                                     if let TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(pdu)) = east {
@@ -267,7 +266,10 @@ impl Processor {
                                             //negotiated.remote_addr(),
                                             //negotiated.remote_asn()
                                         ).await;
-                                        self.gate.update_data(update).await;
+                                        match update {
+                                            Ok(update) => { self.gate.update_data(update).await; },
+                                            Err(e) => { error!("unexpected state: {e}"); },
+                                        };
                                     }
                                 }
                             } else {
@@ -357,7 +359,7 @@ impl Processor {
                     source_id,
                 );
 
-                self.gate.update_data(Ok(Update::Bulk(payloads))).await;
+                self.gate.update_data(Update::Bulk(payloads)).await;
             }
         }
 

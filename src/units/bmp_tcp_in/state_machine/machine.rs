@@ -565,13 +565,17 @@ where
         // Loop over announced prefixes constructing BGP UPDATE PDUs with as many prefixes as can fit in one PDU at a
         // time until withdrawals have been generated for all announced prefixes.
         if let Some(prefixes) = self.details.get_announced_prefixes(pph) {
-            mk_withdrawals_for_peers_announced_prefixes(
+            if let Ok(wds) = mk_withdrawals_for_peers_announced_prefixes(
                 prefixes,
                 self.router_id.clone(),
                 pph.address(),
                 pph.asn(),
                 self.source_id.clone(),
-            )
+            ) {
+                wds
+            } else {
+                SmallVec::new()
+            }
         } else {
             SmallVec::new()
         }

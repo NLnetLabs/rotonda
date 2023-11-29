@@ -3,9 +3,9 @@ use std::{iter::Peekable, net::IpAddr, sync::Arc};
 
 use bytes::Bytes;
 use log::error;
-use roto::types::builtin::{
+use roto::{types::builtin::{
     BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus,
-};
+}, compiler::CompileError};
 use routecore::{
     addr::Prefix,
     asn::Asn,
@@ -45,7 +45,7 @@ pub fn mk_withdrawals_for_peers_announced_prefixes<'a, I>(
     peer_address: IpAddr,
     peer_asn: Asn,
     source_id: SourceId,
-) -> SmallVec<[Payload; 8]>
+) -> Result<SmallVec<[Payload; 8]>, ComposeError>
 where
     I: Iterator<Item = &'a Prefix>,
 {
@@ -76,13 +76,13 @@ where
 
     // create a new UpdateBuilder and insert all the withdrawals
     let mut builder = UpdateBuilder::new_bytes();
-    builder.append_withdrawals(&mut withdrawals).unwrap();
+    builder.append_withdrawals(&mut withdrawals)?;
 
     // turn all the withdrawals into possibly several Update Messages (if the
     // amount of withdrawals will exceed the max PDU size). We only care about
     // these messages since we want to reference them in our routes.
     for bgp_msg in builder.into_iter().flatten() {
-        for basic_nlri in bgp_msg.unicast_withdrawals_vec().unwrap() {
+        for basic_nlri in bgp_msg.unicast_withdrawals_vec()? {
             let route = mk_route_for_prefix(
                 router_id.clone(),
                 bgp_msg.clone(),
@@ -98,7 +98,7 @@ where
         }
     }
 
-    payloads
+    Ok(payloads)
 }
 
 fn mk_bgp_update<I>(

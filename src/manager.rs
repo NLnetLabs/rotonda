@@ -799,8 +799,9 @@ impl Manager {
     ) -> Result<(), Terminate> {
         let mut res = Ok(());
 
-        // Load any .roto script files that exist (and unload any that no longer exist)
-        self.load_roto_scripts(config).or_else(|err| {
+        // Load any .roto script files that exist (and unload any that no
+        // longer exist)
+        self.load_roto_scripts(&config.roto_scripts_path).or_else(|err| {
             let msg = format!("Unable to load Roto scripts: {err}.");
             if matches!(err, RotoError::LoadError { .. })
                 && config.mvp_overrides.ignore_missing_filters
@@ -813,7 +814,8 @@ impl Manager {
             }
         })?;
 
-        // Drain the singleton static ROTO_FILTER_NAMES contents to a local variable.
+        // Drain the singleton static ROTO_FILTER_NAMES contents to a local
+        // variable.
         let config_filter_names = ROTO_FILTER_NAMES
             .with(|filter_names| {
                 filter_names.replace(Some(Default::default()))
@@ -861,7 +863,7 @@ impl Manager {
 
         // A Gate was created for each Link (e.g. for 'sources = ["a"]' and
         // 'upstream = "b"') but does the config file define units with
-        // correspding names ("a" and "b")? If not that means that the config
+        // corresponding names ("a" and "b")? If not that means that the config
         // file includes unresolvable links between components. For resolvable
         // links the corresponding Gate will be moved to the pending
         // collection to be handled later by spawn(). For unresolvable links
@@ -899,18 +901,17 @@ impl Manager {
     // TODO: Use Marked for returned error so that the location in the config file in question can be reported to the
     // user.
     // TODO: Don't load .roto script files that are not referenced by any units or targets?
-    fn load_roto_scripts(
+    pub fn load_roto_scripts(
         &mut self,
-        config: &Config,
+        roto_scripts_path: &Option<std::path::PathBuf>,
     ) -> Result<(), RotoError> {
         let mut new_origins = HashSet::<RotoScriptOrigin>::new();
 
-        if let Some(roto_scripts_path) = &config.roto_scripts_path {
+        if let Some(roto_scripts_path) = roto_scripts_path {
             let entries =
                 self.file_io.read_dir(roto_scripts_path).map_err(|err| {
                     LoadErrorKind::read_dir_err(roto_scripts_path, err)
                 })?;
-
             for entry in entries {
                 let entry = entry.map_err(|err| {
                     LoadErrorKind::read_dir_entry_err(roto_scripts_path, err)
@@ -1819,7 +1820,7 @@ thread_local!(
 ///
 /// # Panics
 ///
-/// This funtion panics if it is called outside of a run of
+/// This function panics if it is called outside of a run of
 /// [`Manager::load`].
 pub fn load_link(link_id: Marked<String>) -> Link {
     GATES.with(|gates| {

@@ -1,7 +1,7 @@
 filter bmp-in-filter {
     // // Uncomment to use ASN filtering
     // define {
-    //     rx msg: BmpMessage;
+    //     rx bmp_msg: BmpMessage;
     //     filtered_asn = 65000;
     // }
 
@@ -9,7 +9,7 @@ filter bmp-in-filter {
     // // Compare the ASN for BMP message types that have a Per Peer Header.
     // // Other message types not mentioned here lack the Per Peer Header and so
     // // do not have a matching ASN and are treated as such. 
-    //    match msg with {
+    //    match bmp_msg with {
     //        PeerDownNotification(pd_msg) -> pd_msg.per_peer_header.asn == filtered_asn,
     //        PeerUpNotification(pu_msg) -> pu_msg.per_peer_header.asn == filtered_asn,
     //        RouteMonitoring(rm_msg) -> rm_msg.per_peer_header.asn == filtered_asn,
@@ -27,7 +27,7 @@ filter bmp-in-filter {
     // Accept all, do not forget to comment out if you want to do the ASN
     // filtering.
     define {
-        rx msg: BmpMessage;
+        rx bmp_msg: BmpMessage;
     }
 
     apply {

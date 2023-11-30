@@ -50,7 +50,7 @@ trait BgpSession<C: BgpConfig + ConfigExt> {
 
     fn connected_addr(&self) -> Option<SocketAddr>;
 
-    fn negotiated(&self) -> Option<NegotiatedConfig>;
+    fn negotiated(&self) -> Option<&NegotiatedConfig>;
 
     async fn tick(&mut self) -> Result<(), session::Error>;
 }
@@ -65,7 +65,7 @@ impl BgpSession<CombinedConfig> for Session<CombinedConfig> {
         self.connected_addr()
     }
 
-    fn negotiated(&self) -> Option<NegotiatedConfig> {
+    fn negotiated(&self) -> Option<&NegotiatedConfig> {
         self.negotiated()
     }
 
@@ -255,7 +255,7 @@ impl Processor {
                                     self.roto_scripts.exec(vm, &self.unit_cfg.filter_name, value, Utc::now())
                                 }) {
                                     if !south.is_empty() {
-                                        let update = Ok(Payload::from_output_stream_queue(south, None).into());
+                                        let update = Payload::from_output_stream_queue(south, None).into();
                                         self.gate.update_data(update).await;
                                     }
                                     if let TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(pdu)) = east {
@@ -267,7 +267,10 @@ impl Processor {
                                             //negotiated.remote_addr(),
                                             //negotiated.remote_asn()
                                         ).await;
-                                        self.gate.update_data(update).await;
+                                        match update {
+                                            Ok(update) => { self.gate.update_data(update).await; },
+                                            Err(e) => { error!("unexpected state: {e}"); },
+                                        };
                                     }
                                 }
                             } else {
@@ -357,7 +360,9 @@ impl Processor {
                     source_id,
                 );
 
-                self.gate.update_data(Ok(Update::Bulk(payloads))).await;
+                if let Ok(payloads) = payloads {
+                    self.gate.update_data(Update::Bulk(payloads)).await;
+                }
             }
         }
 
@@ -450,7 +455,6 @@ impl Processor {
                         RouteStatus::InConvergence,
                     )
                 })
-                .collect::<Vec<_>>()
         );
 
         payloads.extend(
@@ -467,7 +471,6 @@ impl Processor {
                         RouteStatus::Withdrawn,
                     )
                 })
-                .collect::<Vec<_>>()
         );
 
         Ok(payloads.into())
@@ -649,7 +652,7 @@ mod tests {
             peer_config,
             remote_net,
         );
-        let session = MockBgpSession(config);
+        let session = MockBgpSession(config, NegotiatedConfig::dummy());
         let (mut p, gate_agent) = Processor::mock(unit_settings);
         let (sess_tx, sess_rx) = mpsc::channel::<Message>(100);
         let live_sessions = Arc::new(Mutex::new(HashMap::new()));
@@ -663,7 +666,7 @@ mod tests {
         (join_handle, status_reporter, gate_agent, sess_tx)
     }
 
-    struct MockBgpSession(CombinedConfig);
+    struct MockBgpSession(CombinedConfig, NegotiatedConfig);
 
     #[async_trait::async_trait]
     impl BgpSession<CombinedConfig> for MockBgpSession {
@@ -675,16 +678,18 @@ mod tests {
             Some("1.2.3.4:12345".parse().unwrap())
         }
 
-        fn negotiated(&self) -> Option<NegotiatedConfig> {
-            // Scary! We have no way of constructing the NegoatiatedConfig
+        fn negotiated(&self) -> Option<&NegotiatedConfig> {
+            // Scary! We have no way of constructing the NegotiatedConfig
             // type as the fields are private and there is no constructor fn.
             // We don't care what values it has for the purpose of these tests
             // so use transmute to create a dummy negotiated config.
-            unsafe {
-                let zeroed = [0u8; 28];
-                let created: NegotiatedConfig = std::mem::transmute(zeroed);
-                Some(created)
-            }
+            //unsafe {
+            //    let zeroed = [0u8; 28];
+            //    let created: NegotiatedConfig = std::mem::transmute(zeroed);
+            //    Some(created)
+            //}
+
+            Some(&self.1)
         }
 
         async fn tick(&mut self) -> Result<(), session::Error> {

@@ -237,9 +237,7 @@ async fn process_update_equivalent_route_twice() {
                 .0
                 .communities()
                 .unwrap()
-                .unwrap(
-                    
-                )
+                .unwrap()
                 .next()
                 .unwrap(),
             Wellknown::NoExport.into()
@@ -682,7 +680,8 @@ fn mk_route_update_with_communities(
     let bgp_update_bytes = mk_bgp_update(&wit, &ann, &[]);
 
     let roto_update_msg =
-        UpdateMessage::new(bgp_update_bytes, SessionConfig::modern()).unwrap();
+        UpdateMessage::new(bgp_update_bytes, SessionConfig::modern())
+            .unwrap();
     let bgp_update_msg =
         Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
     let route = RawRouteWithDeltas::new_with_message_ref(

@@ -621,7 +621,7 @@ impl RibUnitRunner {
                             trace!("Sending query {uuid} results downstream");
                             arc_self
                                 .gate
-                                .update_data(Ok(Update::QueryResult(uuid, res)))
+                                .update_data(Update::QueryResult(uuid, res))
                                 .await;
                         }
 
@@ -660,7 +660,7 @@ impl RibUnitRunner {
                 ..
             }) => {
                 // Nothing to do, pass it on
-                self.gate.update_data(Ok(update)).await;
+                self.gate.update_data(update).await;
             }
 
             Update::Bulk(payloads) => {
@@ -690,7 +690,7 @@ impl RibUnitRunner {
                     // No, pass it on to the next virtual RIB
                     trace!("Sending re-processed triggered query {uuid} results downstream");
                     self.gate
-                        .update_data(Ok(Update::QueryResult(uuid, processed_res)))
+                        .update_data(Update::QueryResult(uuid, processed_res))
                         .await;
                 }
             }
@@ -742,7 +742,7 @@ impl RibUnitRunner {
                 err
             })?
         {
-            self.gate.update_data(Ok(filtered_update)).await;
+            self.gate.update_data(filtered_update).await;
         }
 
         if let Ok(rib) = self.rib.load().store() {

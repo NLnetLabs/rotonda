@@ -4,7 +4,7 @@ use futures::{
     future::{select, Either},
     pin_mut,
 };
-use log::{error, info, warn};
+use log::{error, info, warn, debug};
 use rotonda::log::ExitError;
 use rotonda::manager::Manager;
 use rotonda::{
@@ -53,13 +53,18 @@ fn run_with_cmdline_args() -> Result<(), Terminate> {
     let mut manager = Manager::new();
     let (config_source, config) =
         Config::from_arg_matches(&matches, &cur_dir, &mut manager)?;
+    debug!("application working directory {:?}", cur_dir);
+    debug!("configuration source file {:?}", config_source);
+    debug!("configuration directory {:?}", &config.roto_scripts_path);
+    let roto_scripts_path = config.roto_scripts_path.clone();
     let runtime = run_with_config(&mut manager, config)?;
-    runtime.block_on(handle_signals(config_source, manager))?;
+    runtime.block_on(handle_signals(config_source, roto_scripts_path, manager))?;
     Ok(())
 }
 
 async fn handle_signals(
     config_source: Source,
+    roto_scripts_path: Option<std::path::PathBuf>,
     mut manager: Manager,
 ) -> Result<(), ExitError> {
     let mut hup_signals = signal(SignalKind::hangup()).map_err(|err| {
@@ -84,47 +89,61 @@ async fn handle_signals(
             }
             Either::Left((Some(_), _)) => {
                 // HUP signal received
-                if let Some(config_path) = config_source.path() {
-                    info!(
+                match config_source.path() {
+                    Some(config_path) => {
+                        info!(
                         "SIGHUP signal received, re-reading configuration file '{}'",
                         config_path.display()
-                    );
-                    match ConfigFile::load(&config_path) {
-                        Ok(config_file) => {
-                            match Config::from_config_file(
-                                config_file,
-                                &mut manager,
-                            ) {
-                                Err(_) => {
-                                    error!(
-                                        "Failed to re-read config file '{}'",
-                                        config_path.display()
-                                    );
-                                }
-                                Ok((_source, mut config)) => {
-                                    manager.spawn(&mut config);
-                                    info!("Configuration changes applied");
+                        );
+                        match ConfigFile::load(&config_path) {
+                            Ok(config_file) => {
+                                match Config::from_config_file(
+                                    config_file,
+                                    &mut manager,
+                                ) {
+                                    Err(_) => {
+                                        error!(
+                                            "Failed to re-read config file '{}'",
+                                            config_path.display()
+                                        );
+                                    }
+                                    Ok((_source, mut config)) => {
+                                        manager.spawn(&mut config);
+                                        info!("Configuration changes applied");
+                                    }
                                 }
                             }
-                        }
-                        Err(err) => {
-                            error!(
-                                "Failed to re-read config file '{}': {}",
-                                config_path.display(),
-                                err
-                            );
+                            Err(err) => {
+                                error!(
+                                    "Failed to re-read config file '{}': {}",
+                                    config_path.display(),
+                                    err
+                                );
+                            }
                         }
                     }
-                } else {
-                    info!(
-                        "SIGHUP signal received, nothing to do. No \
-                    configuration file specified to re-read (default used)."
-                    );
+                    None => {
+                        if let Some(ref rsp) = roto_scripts_path {
+                            info!("SIGHUP signal received. Reload roto scripts \
+                            from location {:?}", rsp);
+                        } else {
+                            error!("SIGHUP signal received. No location for roto \
+                            scripts. Not reloading");
+                            continue;
+                        }
+                        match manager.load_roto_scripts(&roto_scripts_path) {
+                            Ok(_) => { info!("Done reloading roto scripts"); }
+                            Err(e) => {
+                                error!("Cannot reload roto scripts: {e}. Not reloading");
+                            }
+                        };
+                    }
                 }
             }
             Either::Right((Err(err), _)) => {
                 error!(
-                    "Fatal: listening for CTRL-C (SIGINT) signals failed ({}). Aborting.",
+                    "Fatal: listening for CTRL-C (SIGINT) signals failed \
+                    ({}). Aborting.",
                     err
                 );
                 manager.terminate();

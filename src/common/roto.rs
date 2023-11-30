@@ -340,7 +340,7 @@ impl RotoScripts {
 
         if let Some(script) = self.scripts_by_origin.get(&origin) {
             if script.source_code == roto_script {
-                trace!("Roto script {origin} is already loaded");
+                info!("Roto script {origin} is already loaded and unchanged. Skipping reload");
                 return Ok(());
             } else {
                 reload = true;

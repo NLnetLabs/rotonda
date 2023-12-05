@@ -124,11 +124,10 @@ async fn handle_signals(
                     }
                     None => {
                         if let Some(ref rsp) = roto_scripts_path {
-                            info!("SIGHUP signal received. Reload roto scripts \
+                            info!("SIGHUP signal received, re-loading roto scripts \
                             from location {:?}", rsp);
                         } else {
-                            error!("SIGHUP signal received. No location for roto \
-                            scripts. Not reloading");
+                            error!("No location for roto scripts. Not reloading");
                             continue;
                         }
                         match manager.load_roto_scripts(&roto_scripts_path) {

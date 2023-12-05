@@ -935,7 +935,8 @@ fn route_monitoring_invalid_message() {
 
     // Then
     assert!(matches!(res.next_state, BmpState::Dumping(_)));
-    assert_invalid_msg_starts_with(&res, "Invalid BMP RouteMonitoring BGP UPDATE message: unimplemented AFI/SAFI");
+    assert_invalid_msg_starts_with(&res, "Invalid BMP RouteMonitoring BGP \
+    UPDATE message. One or more elements in the NLRI(s) cannot be parsed");
 
     // Check the metrics
     let processor = res.next_state;

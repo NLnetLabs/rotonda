@@ -705,8 +705,8 @@ where
                             .mk_routing_update_result(Update::Bulk(payloads))
                     } else {
                         return saved_self.mk_invalid_message_result(
-                            "Invalid BMP RouteMonitoring BGP UPDATE message. The PDU cannot be parsed.",
-                            Some(known_peer),
+                            "Invalid BMP RouteMonitoring BGP UPDATE message. The message cannot be parsed.",
+                            Some(true),
                             Some(Bytes::copy_from_slice(msg.as_ref())),
                         );
                     }

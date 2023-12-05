@@ -676,16 +676,6 @@ mod tests {
         }
 
         fn negotiated(&self) -> Option<&NegotiatedConfig> {
-            // Scary! We have no way of constructing the NegotiatedConfig
-            // type as the fields are private and there is no constructor fn.
-            // We don't care what values it has for the purpose of these tests
-            // so use transmute to create a dummy negotiated config.
-            //unsafe {
-            //    let zeroed = [0u8; 28];
-            //    let created: NegotiatedConfig = std::mem::transmute(zeroed);
-            //    Some(created)
-            //}
-
             Some(&self.1)
         }
 

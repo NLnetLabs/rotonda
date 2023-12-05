@@ -562,24 +562,19 @@ where
         // So, we must act as if we had received route withdrawals for
         // all of the routes previously received for this peer.
 
-        // Loop over announced prefixes constructing BGP UPDATE PDUs with as
-        // many prefixes as can fit in one PDU at a time until withdrawals
-        // have been generated for all announced prefixes.
-        if let Some(prefixes) = self.details.get_announced_prefixes(pph) {
-            if let Ok(wds) = mk_withdrawals_for_peers_announced_prefixes(
-                prefixes,
-                self.router_id.clone(),
-                pph.address(),
-                pph.asn(),
-                self.source_id.clone(),
-            ) {
-                wds
-            } else {
-                SmallVec::new()
-            }
-        } else {
-            SmallVec::new()
-        }
+        // Loop over announced prefixes constructing BGP UPDATE messages with
+        // as many prefixes as can fit in one message at a time until
+        // withdrawals have been generated for all announced prefixes.
+        self.details
+            .get_announced_prefixes(pph)
+            .and_then(|prefixes| mk_withdrawals_for_peers_announced_prefixes(
+                        prefixes,
+                        self.router_id.clone(),
+                        pph.address(),
+                        pph.asn(),
+                        self.source_id.clone()
+                    ).ok())
+            .unwrap_or_default()
     }
 
     /// `filter` should return `None` if the BGP message should be ignored,

@@ -34,7 +34,6 @@ use roto::types::{
 use routecore::{
     bgp::message::{
         open::CapabilityType,
-        update::FourOctetAsn,
         SessionConfig,
     },
     bmp::message::{InformationTlvType, Message as BmpMsg},

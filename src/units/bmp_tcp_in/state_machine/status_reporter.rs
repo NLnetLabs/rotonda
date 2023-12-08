@@ -193,8 +193,7 @@ impl UpdateReportMessage {
         self.n_stored_prefixes = n_stored;
     }
 
-
-    pub fn get_n_stored_prefixes(&self) ->  usize {
+    pub fn _get_n_stored_prefixes(&self) ->  usize {
         self.n_stored_prefixes
     }
 

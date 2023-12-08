@@ -100,7 +100,8 @@ where
     Ok(payloads)
 }
 
-fn mk_bgp_update<I>(
+// TODO: This probably lives in routes, get it from there.
+fn _mk_bgp_update<I>(
     withdrawals: &mut Peekable<I>,
 ) -> Result<UpdateMessage<Bytes>, ComposeError>
 where

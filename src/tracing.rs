@@ -35,7 +35,10 @@ use std::sync::{
     Arc, Mutex,
 };
 
-use chrono::{DateTime, SubsecRound, Utc};
+#[allow(unused_imports)]
+use chrono::SubsecRound;
+
+use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
 //----------- MsgRelation ----------------------------------------------------
@@ -155,7 +158,7 @@ impl Trace {
 ///
 /// The [`Tracer`] servers two audiences:
 ///   1. Callers wishing to log trace messages by trace ID.
-///   2. The [`Manager`] when it queries the [`Tracer`] for informaiton about
+///   2. The [`Manager`] when it queries the [`Tracer`] for information about
 ///      traces in order to serve a visual representation of them to the end
 ///      user.
 pub struct Tracer {

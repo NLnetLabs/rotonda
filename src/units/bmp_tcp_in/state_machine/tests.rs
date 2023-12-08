@@ -646,10 +646,8 @@ fn peer_down_spreads_withdrawals_across_multiple_bgp_updates_if_needed() {
             let mut num_withdrawals_seen = 0;
 
             for Payload {
-                source_id,
                 value,
-                trace_id,
-                received,
+                ..
             } in bulk.drain(..)
             {
                 if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) =
@@ -982,10 +980,8 @@ fn route_monitoring_announce_route() {
         if let Update::Bulk(updates) = &update {
             assert_eq!(updates.len(), 1);
             if let Payload {
-                source_id,
                 value: TypeValue::Builtin(BuiltinTypeValue::Route(route)),
-                trace_id,
-                received,
+                ..
             } = &updates[0]
             {
                 assert_eq!(
@@ -1199,7 +1195,7 @@ fn mk_route_monitoring_withdrawal_msg(
     .unwrap()
 }
 
-fn mk_ipv6_route_monitoring_withdrawal_msg(
+fn _mk_ipv6_route_monitoring_withdrawal_msg(
     pph: &crate::bgp::encode::PerPeerHeader,
 ) -> Bytes {
     let prefixes = Prefixes::from_str("2001:2000:3080:e9c::2/128").unwrap();

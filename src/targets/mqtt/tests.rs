@@ -434,10 +434,10 @@ impl Client for MockClient {
 
     async fn publish<S, V>(
         &self,
-        topic: S,
-        qos: QoS,
-        retain: bool,
-        payload: V,
+        _topic: S,
+        _qos: QoS,
+        _retain: bool,
+        _payload: V,
     ) -> Result<(), ClientError>
     where
         S: Into<String> + Send,

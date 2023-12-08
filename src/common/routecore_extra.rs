@@ -10,30 +10,28 @@ use routecore::{
     asn::Asn,
     bgp::message::{
         nlri::{BasicNlri, Nlri},
-        update::{AddPath, FourOctetAsn},
+        update::FourOctetAsn,
         update_builder::{ComposeError, UpdateBuilder},
         SessionConfig, UpdateMessage,
-    },
+    }
 };
 use smallvec::SmallVec;
 
 use crate::payload::{Payload, SourceId};
 
-// Based on code in bgmp::main.rs:
+// Originally based on code in bgmp::main.rs.
+// XXX Probably needs a more sophisticated way of trying Addpath
+// (combinations).
 pub fn generate_alternate_config(
     peer_config: &SessionConfig,
 ) -> Option<SessionConfig> {
     let mut alt_peer_config = *peer_config;
     if peer_config.four_octet_asn == FourOctetAsn::Disabled {
         alt_peer_config.enable_four_octet_asn();
-    } else if peer_config.add_path == AddPath::Disabled {
-        alt_peer_config.enable_addpath();
-    } else if peer_config.add_path == AddPath::Enabled {
-        alt_peer_config.disable_addpath();
     } else if peer_config.four_octet_asn == FourOctetAsn::Enabled {
         alt_peer_config.disable_four_octet_asn();
     } else {
-        return None;
+        alt_peer_config.inverse_addpaths();
     }
     Some(alt_peer_config)
 }

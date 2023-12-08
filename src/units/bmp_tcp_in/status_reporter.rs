@@ -29,7 +29,7 @@ impl BmpTcpInStatusReporter {
         }
     }
 
-    pub fn typed_metrics(&self) -> Arc<BmpTcpInMetrics> {
+    pub fn _typed_metrics(&self) -> Arc<BmpTcpInMetrics> {
         self.metrics.clone()
     }
 

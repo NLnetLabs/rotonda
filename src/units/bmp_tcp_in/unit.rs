@@ -250,7 +250,7 @@ struct BmpTcpInRunner {
     router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
     bmp_metrics: Arc<BmpStateMachineMetrics>,
     bmp_in_metrics: Arc<BmpTcpInMetrics>,
-    state_machine_metrics: Arc<TokioTaskMetrics>,
+    _state_machine_metrics: Arc<TokioTaskMetrics>,
     status_reporter: Arc<BmpTcpInStatusReporter>,
     roto_scripts: RotoScripts,
     router_id_template: Arc<ArcSwap<String>>,
@@ -272,7 +272,7 @@ impl BmpTcpInRunner {
         router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
         bmp_metrics: Arc<BmpStateMachineMetrics>,
         bmp_in_metrics: Arc<BmpTcpInMetrics>,
-        state_machine_metrics: Arc<TokioTaskMetrics>,
+        _state_machine_metrics: Arc<TokioTaskMetrics>,
         status_reporter: Arc<BmpTcpInStatusReporter>,
         roto_scripts: RotoScripts,
         router_id_template: Arc<ArcSwap<String>>,
@@ -289,7 +289,7 @@ impl BmpTcpInRunner {
             router_info,
             bmp_metrics,
             bmp_in_metrics,
-            state_machine_metrics,
+            _state_machine_metrics,
             status_reporter,
             roto_scripts,
             router_id_template,
@@ -300,7 +300,7 @@ impl BmpTcpInRunner {
     }
 
     #[cfg(test)]
-    pub(crate) fn mock() -> (Self, crate::comms::GateAgent) {
+    pub(crate) fn _mock() -> (Self, crate::comms::GateAgent) {
         let (gate, gate_agent) = Gate::new(0);
 
         let runner = Self {
@@ -312,7 +312,7 @@ impl BmpTcpInRunner {
             router_info: Default::default(),
             bmp_metrics: Default::default(),
             bmp_in_metrics: Default::default(),
-            state_machine_metrics: Default::default(),
+            _state_machine_metrics: Default::default(),
             status_reporter: Default::default(),
             roto_scripts: Default::default(),
             router_id_template: Arc::new(ArcSwap::from_pointee(
@@ -1027,7 +1027,7 @@ mod tests {
             router_info: Default::default(),
             bmp_metrics: Default::default(),
             bmp_in_metrics: metrics,
-            state_machine_metrics: Default::default(),
+            _state_machine_metrics: Default::default(),
             status_reporter: status_reporter.clone(),
             roto_scripts: Default::default(),
             router_id_template: Default::default(),

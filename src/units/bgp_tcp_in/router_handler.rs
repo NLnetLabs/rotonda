@@ -18,8 +18,7 @@ use roto::types::builtin::{
 use roto::types::typevalue::TypeValue;
 use routecore::addr::Prefix;
 use routecore::asn::Asn;
-use routecore::bgp::message::nlri::BasicNlri;
-use routecore::bgp::message::{nlri::Nlri, UpdateMessage as UpdatePdu};
+use routecore::bgp::message::UpdateMessage as UpdatePdu;
 use smallvec::SmallVec;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;

@@ -156,7 +156,7 @@ pub enum BmpState {
     Dumping(BmpStateDetails<Dumping>),
     Updating(BmpStateDetails<Updating>),
     Terminated(BmpStateDetails<Terminated>),
-    Aborted(SourceId, Arc<RouterId>),
+    _Aborted(SourceId, Arc<RouterId>),
 }
 
 // Rust enums with fields cannot have custom discriminant values assigned to them so we have to use separate
@@ -204,13 +204,13 @@ where
 }
 
 impl BmpState {
-    pub fn source_id(&self) -> SourceId {
+    pub fn _source_id(&self) -> SourceId {
         match self {
             BmpState::Initiating(v) => v.source_id.clone(),
             BmpState::Dumping(v) => v.source_id.clone(),
             BmpState::Updating(v) => v.source_id.clone(),
             BmpState::Terminated(v) => v.source_id.clone(),
-            BmpState::Aborted(source_id, _) => source_id.clone(),
+            BmpState::_Aborted(source_id, _) => source_id.clone(),
         }
     }
 
@@ -220,7 +220,7 @@ impl BmpState {
             BmpState::Dumping(v) => v.router_id.clone(),
             BmpState::Updating(v) => v.router_id.clone(),
             BmpState::Terminated(v) => v.router_id.clone(),
-            BmpState::Aborted(_, router_id) => router_id.clone(),
+            BmpState::_Aborted(_, router_id) => router_id.clone(),
         }
     }
 
@@ -230,7 +230,7 @@ impl BmpState {
             BmpState::Dumping(_) => BmpStateIdx::Dumping,
             BmpState::Updating(_) => BmpStateIdx::Updating,
             BmpState::Terminated(_) => BmpStateIdx::Terminated,
-            BmpState::Aborted(_, _) => BmpStateIdx::Aborted,
+            BmpState::_Aborted(_, _) => BmpStateIdx::Aborted,
         }
     }
 
@@ -242,7 +242,7 @@ impl BmpState {
             BmpState::Dumping(v) => Some(v.status_reporter.clone()),
             BmpState::Updating(v) => Some(v.status_reporter.clone()),
             BmpState::Terminated(v) => Some(v.status_reporter.clone()),
-            BmpState::Aborted(_, _) => None,
+            BmpState::_Aborted(_, _) => None,
         }
     }
 }
@@ -892,9 +892,9 @@ impl BmpState {
             BmpState::Terminated(inner) => {
                 inner.process_msg(bmp_msg, trace_id)
             }
-            BmpState::Aborted(source_id, router_id) => ProcessingResult::new(
+            BmpState::_Aborted(source_id, router_id) => ProcessingResult::new(
                 MessageType::Aborted,
-                BmpState::Aborted(source_id, router_id),
+                BmpState::_Aborted(source_id, router_id),
             ),
         };
 

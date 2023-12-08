@@ -7,17 +7,13 @@
 //! indicate that error information has been logged and a consumer can just
 //! return quietly.
 use crate::config::ConfigPath;
-use chrono::{DateTime, Utc};
 use clap::{Arg, ArgAction, ArgMatches, Command};
 use log::{error, LevelFilter, Log};
 use serde::Deserialize;
 use std::convert::TryFrom;
 use std::path::Path;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicU8, Ordering};
-use std::sync::{Arc, Mutex};
 use std::{fmt, io};
-use uuid::Uuid;
 
 //------------ LogConfig -----------------------------------------------------
 

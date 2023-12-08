@@ -21,7 +21,6 @@ use rotonda_store::{
 };
 use routecore::{addr::Prefix, asn::Asn};
 use serde::Serialize;
-use smallvec::SmallVec;
 
 use crate::payload::RouterId;
 

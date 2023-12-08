@@ -400,29 +400,33 @@ fn extract_msg_indices(trace: &Trace, gate_id: Uuid) -> String {
                     }
                     (None, Some(_l)) => unreachable!(),
                     (Some(f), None) => {
-                        if *idx == f + 1 {
-                            last = Some(*idx);
-                        } else if *idx > f + 1 {
-                            if !out.is_empty() {
-                                out.push_str(", ");
-                            }
-                            out.push_str(&format!("{}", f));
-                            first = Some(*idx);
-                        } else {
-                            unreachable!();
-                        }
+                        match *idx {
+                            idx if idx == f + 1 => { last = Some(idx); },
+                            idx if idx > f + 1 => {
+                                if !out.is_empty() {
+                                    out.push_str(", ");
+                                }
+                                out.push_str(&format!("{}", f));
+                                first = Some(idx);
+                            },
+                            _ => unreachable!()
+                        };
                     }
                     (Some(f), Some(l)) => {
-                        if *idx == l + 1 {
-                            last = Some(*idx);
-                        } else if *idx > l + 1 {
-                            if !out.is_empty() {
-                                out.push_str(", ");
-                            }
-                            out.push_str(&format!("{}-{}", f, l));
-                            first = Some(*idx);
-                            last = None;
-                        }
+                        match *idx {
+                            idx if idx == l + 1 => {
+                                last = Some(idx);
+                            },
+                            idx if idx > l + 1 => {
+                                if !out.is_empty() {
+                                    out.push_str(", ");
+                                }
+                                out.push_str(&format!("{}-{}", f, l));
+                                first = Some(idx);
+                                last = None;
+                            },
+                            _ => {}
+                        };
                     }
                 }
                 (out, first, last)
@@ -452,7 +456,8 @@ fn extract_msg_indices(trace: &Trace, gate_id: Uuid) -> String {
 #[derive(Clone, Default)]
 pub struct UpstreamLinkReport {
     links: Arc<Mutex<Option<Vec<LinkInfo>>>>,
-    graph_status: Arc<Mutex<Option<Weak<dyn GraphStatus>>>>, // this is actually about downstream sending, not about upstream links ...
+    // this is actually about downstream sending, not about upstream links ...
+    graph_status: Arc<Mutex<Option<Weak<dyn GraphStatus>>>>,
 }
 
 impl std::fmt::Debug for UpstreamLinkReport {
@@ -481,8 +486,10 @@ impl UpstreamLinkReport {
 
     pub fn set_sources<T>(&self, links: &NonEmpty<T>)
     where
-        // this strange for<'a> &'a construct is a Higher-Rank Trait Bound and is needed here in order to express that
-        // a reference to T can be made into a LinkInfo, i.e. to match impl From<&Link> for LinkInfo { .. }.
+        // this strange for<'a> &'a construct is a Higher-Rank Trait Bound and
+        // is needed here in order to express that a reference to T can be
+        // made into a LinkInfo, i.e. to match impl From<&Link> for LinkInfo {
+        // .. }.
         for<'a> &'a T: Into<LinkInfo>,
     {
         let mut lock = self.links.lock().unwrap();
@@ -492,15 +499,18 @@ impl UpstreamLinkReport {
 
     pub fn set_source<T>(&self, link: &T)
     where
-        // this strange for<'a> &'a construct is a Higher-Rank Trait Bound and is needed here in order to express that
-        // a reference to T can be made into a LinkInfo, i.e. to match impl From<&Link> for LinkInfo { .. }.
+        // this strange for<'a> &'a construct is a Higher-Rank Trait Bound and
+        // is needed here in order to express that a reference to T can be
+        // made into a LinkInfo, i.e. to match impl From<&Link> for LinkInfo {
+        // .. }.
         for<'a> &'a T: Into<LinkInfo>,
     {
         let mut lock = self.links.lock().unwrap();
         lock.replace(vec![link.into()]);
     }
 
-    /// Units that are themselves the source do not have upstream sources and so should
+    /// Units that are themselves the source do not have upstream sources and
+    /// so should
     /// notify via declare_source() that they have no sources.
     pub fn declare_source(&self) {
         let mut lock = self.links.lock().unwrap();
@@ -546,7 +556,8 @@ impl Display for TargetCommand {
 
 /// A manager for components and auxiliary services.
 ///
-/// Requires a running Tokio reactor that has been "entered" (see Tokio `Handle::enter()`).
+/// Requires a running Tokio reactor that has been "entered" (see Tokio
+/// `Handle::enter()`).
 pub struct Manager {
     /// The currently active units represented by agents to their gates.
     running_units: HashMap<String, (Discriminant<Unit>, GateAgent)>,
@@ -675,7 +686,7 @@ impl Manager {
         //     upstream = "b"
         //
         // Results in something like this:
-        //
+    
         //   unit             unit             target
         //   ┌───┐            ┌───┐            ┌───┐
         //   │ a │gate◀───link│ b │gate◀───link│ c │
@@ -704,7 +715,7 @@ impl Manager {
         //                   │
         //                  config
         //                  file
-        //
+    
         // Where for Unit (and not shown here but similar for Target):
         //
         //     #[derive(Debug, Deserialize)]
@@ -727,37 +738,32 @@ impl Manager {
         //                                      "c" --> Target::SomeTarget{..}
         //     }
         //
-        // Where references to Link like:
-        //     pub struct SomeUnit { sources: Vec<Link> }
-        // or:
-        //     pub struct SomeTarget { upstream: Link }
+        // Where references to Link like: pub struct SomeUnit { sources:
+        //     Vec<Link> } or: pub struct SomeTarget { upstream: Link }
         //
         // Are resolved via Serde like so:
         //
         //     From<String> for Link via manager::load_link(name)
         //
-        // Where manager::load_link():
-        //     - Creates a name -> LoadUnit entry in the static GATES map.
-        //     - Each LoadUnit consists of a new Gate and GateAgent.
-        //     - An MPSC channel is created, with:
-        //       - The Gate getting the Receiver (RxGate) to receive commands.
-        //       - The GateAgent getting the Sender (TxGate) for cloning to
-        //         enable other parties to send commands to the Gate.
-        //     - The GateAgent is used to create a Link, with:
-        //       - The Link getting a clone of the Sender to send commands
-        //         to the Gate.
+        // Where manager::load_link(): - Creates a name -> LoadUnit entry in
+        //     the static GATES map. - Each LoadUnit consists of a new Gate
+        //     and GateAgent. - An MPSC channel is created, with: - The Gate
+        //     getting the Receiver (RxGate) to receive commands. - The
+        //       GateAgent getting the Sender (TxGate) for cloning to enable
+        //       other parties to send commands to the Gate. - The GateAgent
+        //         is used to create a Link, with: - The Link getting a clone
+        //     of the Sender to send commands to the Gate.
         //
-        // At this point **DISCONNECTED** Gates and Links have been created:
-        //     - The Gates have not been given to Units yet so no data updates
-        //       will be pushed (from Units) via the Gates.
-        //     - The Gates have empty update Sender collections
-        //       (Vec<TxUpdate>) so have no corresponding LinkConnection
-        //       Receiver instances to send data updates to.
-        //     - The Links have been given to Targets but not yet connected
-        //       to Gates, i.e. have no LinkConnection Sender yet.
+        // At this point **DISCONNECTED** Gates and Links have been created: -
+        //     The Gates have not been given to Units yet so no data updates
+        //       will be pushed (from Units) via the Gates. - The Gates have
+        //     empty update Sender collections (Vec<TxUpdate>) so have no
+        //       corresponding LinkConnection Receiver instances to send data
+        //       updates to. - The Links have been given to Targets but not
+        //     yet connected to Gates, i.e. have no LinkConnection Sender yet.
         //
-        // To "wire up" these disconnected components:
-        //     - Manager::spawn() will assign Gates to Units.
+        // To "wire up" these disconnected components: - Manager::spawn() will
+        //     assign Gates to Units.
         //
         //     - On first use Link::query() will invoke Link::connect() which
         //       will:
@@ -790,8 +796,8 @@ impl Manager {
     /// Config.
     ///
     /// Primarily intended for testing purposes, allowing the prepare phase of
-    /// the load -> prepare -> spawn pipeline to be tested independently of the
-    /// other phases.
+    /// the load -> prepare -> spawn pipeline to be tested independently of
+    /// the other phases.
     pub fn prepare(
         &mut self,
         config: &Config,
@@ -833,9 +839,11 @@ impl Manager {
             let loaded_roto_scripts = self.roto_scripts.get_script_origins();
             let reason: String = if loaded_roto_scripts.is_empty() {
                 if let Some(path) = &config.roto_scripts_path {
-                    format!("no .roto scripts could be loaded from the configured `roto_scripts_path` directory '{}'.", path.display())
+                    format!("no .roto scripts could be loaded from the \
+                    configured `roto_scripts_path` directory '{}'.", path.display())
                 } else {
-                    "the `roto_scripts_path` setting is not specified so no filters were loaded."
+                    "the `roto_scripts_path` setting is not specified so no \
+                    filters were loaded."
                         .to_string()
                 }
             } else {
@@ -846,7 +854,8 @@ impl Manager {
                     .join(", ");
                 format!("none of the loaded .roto scripts ({scripts}) contains them")
             };
-            let msg = format!("Roto filters {unknown_filter_names} are referenced by your configuration but do not exist because {reason}");
+            let msg = format!("Roto filters {unknown_filter_names} are \
+            referenced by your configuration but do not exist because {reason}");
 
             if config.mvp_overrides.ignore_missing_filters {
                 warn!("{msg} These filters will be ignored.");
@@ -898,9 +907,9 @@ impl Manager {
         res
     }
 
-    // TODO: Use Marked for returned error so that the location in the config file in question can be reported to the
-    // user.
-    // TODO: Don't load .roto script files that are not referenced by any units or targets?
+    // TODO: Use Marked for returned error so that the location in the config
+    // file in question can be reported to the user. TODO: Don't load .roto
+    // script files that are not referenced by any units or targets?
     pub fn load_roto_scripts(
         &mut self,
         roto_scripts_path: &Option<std::path::PathBuf>,
@@ -1209,8 +1218,8 @@ impl Manager {
             new_gate.set_name(&name);
 
             // For the Unit that was created for configuration file section
-            // [units.<name>], see if we already have a GateAgent for a Unit by
-            // that name, i.e. a Unit by that name is already running.
+            // [units.<name>], see if we already have a GateAgent for a Unit
+            // by that name, i.e. a Unit by that name is already running.
             if let Some(running_unit) = self.running_units.remove(&name) {
                 // Yes, a Unit by that name is already running. Is it the same
                 // type? If so, command it to reconfigure itself to match the
@@ -1319,9 +1328,10 @@ impl Manager {
 
         let graph_svg_data = self.graph_svg_data.clone();
         crate::tokio::spawn("coordinator", async move {
-            // Wait for all running units and targets to become ready and to finish supplying
-            // responses to report-link commands, then log a link report at debug level, and
-            // generate an SVG representation of the link report for display at /status/graph.
+            // Wait for all running units and targets to become ready and to
+            // finish supplying responses to report-link commands, then log a
+            // link report at debug level, and generate an SVG representation
+            // of the link report for display at /status/graph.
             debug!("Waiting for coodinator");
 
             coordinator
@@ -1334,8 +1344,9 @@ impl Manager {
                 })
                 .await;
 
-            // Now it's safe to send the report link commands. Before this point they might have been ignored because
-            // one or more units were not ready to process them yet.
+            // Now it's safe to send the report link commands. Before this
+            // point they might have been ignored because one or more units
+            // were not ready to process them yet.
             for future in agent_cmd_futures {
                 future.await;
             }
@@ -1615,9 +1626,10 @@ impl WaitPoint {
     }
 
     pub async fn running(mut self) {
-        // Targets don't need to signal ready & running separately so they just invoke this fn,
-        // but we still need to make sure that the barrier is reached twice otherwise the client
-        // of the Coordinator will be left waiting forever.
+        // Targets don't need to signal ready & running separately so they
+        // just invoke this fn, but we still need to make sure that the
+        // barrier is reached twice otherwise the client of the Coordinator
+        // will be left waiting forever.
         if !self.ready {
             self.ready().await;
         }
@@ -1659,9 +1671,11 @@ impl Coordinator {
     }
 
     // Note: should be invoked twice:
-    //   - The first time the the units and targets reach the barrier when all are ready.
-    //     The barrier is then automatically reset and ready for use again.
-    //   - The second time the units and targets reach the barrier when all are running.
+    //   - The first time the the units and targets reach the barrier when all
+    //     are ready. The barrier is then automatically reset and ready for
+    //     use again.
+    //   - The second time the units and targets reach the barrier when all
+    //     are running.
     pub async fn ready(self: Arc<Self>, name: &str) {
         if self
             .pending
@@ -1680,8 +1694,9 @@ impl Coordinator {
     where
         T: FnMut(Vec<String>, &str),
     {
-        // Units and targets need to reach the barrier twice: once to signal that they are ready to run but are not
-        // yet actually running, and once when they are running.
+        // Units and targets need to reach the barrier twice: once to signal
+        // that they are ready to run but are not yet actually running, and
+        // once when they are running.
         self.clone().wait_internal(&mut alarm, "ready").await;
         self.wait_internal(&mut alarm, "running").await;
     }
@@ -1850,7 +1865,8 @@ fn get_queue_size_for_link(link_id: String) -> (String, usize) {
     {
         let queue_len = options.parse::<usize>().unwrap_or_else(|err| {
             warn!(
-                "Invalid queue length '{}' for '{}', falling back to the default ({}): {}",
+                "Invalid queue length '{}' for '{}', falling back to the \
+                default ({}): {}",
                 options, name, DEF_UPDATE_QUEUE_LEN, err
             );
             DEF_UPDATE_QUEUE_LEN
@@ -1934,7 +1950,8 @@ mod tests {
 
     //     #[test]
     //     fn config_with_unresolvable_links_should_fail() {
-    //         // given a config with only a single target with a link to a missing unit
+    //         // given a config with only a single target with a link to a 
+    //         // missing unit
     //         let toml = r#"
     //         http_listen = []
 
@@ -1954,7 +1971,8 @@ mod tests {
 
     //     #[test]
     //     fn config_with_unresolvable_filter_names_should_fail() {
-    //         // given a config with only unit that takes a filter_name referring to a roto filter that has not been loaded
+    //         // given a config with only unit that takes a filter_name 
+    //         // referring to a roto filter that has not been loaded
     //         let toml = r#"
     //         http_listen = []
 

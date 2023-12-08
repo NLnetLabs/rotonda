@@ -213,7 +213,7 @@ impl PrefixesApi {
     fn mk_result(
         _query_prefix: &Prefix,
         route: &Arc<PreHashedTypeValue>,
-        details_cfg: &Details,
+        _details_cfg: &Details,
     ) -> Value {
         // TODO: Honor details_cfg
         serde_json::to_value(route).unwrap()

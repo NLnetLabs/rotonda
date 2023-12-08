@@ -400,29 +400,33 @@ fn extract_msg_indices(trace: &Trace, gate_id: Uuid) -> String {
                     }
                     (None, Some(_l)) => unreachable!(),
                     (Some(f), None) => {
-                        if *idx == f + 1 {
-                            last = Some(*idx);
-                        } else if *idx > f + 1 {
-                            if !out.is_empty() {
-                                out.push_str(", ");
-                            }
-                            out.push_str(&format!("{}", f));
-                            first = Some(*idx);
-                        } else {
-                            unreachable!();
-                        }
+                        match *idx {
+                            idx if idx == f + 1 => { last = Some(idx); },
+                            idx if idx > f + 1 => {
+                                if !out.is_empty() {
+                                    out.push_str(", ");
+                                }
+                                out.push_str(&format!("{}", f));
+                                first = Some(idx);
+                            },
+                            _ => unreachable!()
+                        };
                     }
                     (Some(f), Some(l)) => {
-                        if *idx == l + 1 {
-                            last = Some(*idx);
-                        } else if *idx > l + 1 {
-                            if !out.is_empty() {
-                                out.push_str(", ");
-                            }
-                            out.push_str(&format!("{}-{}", f, l));
-                            first = Some(*idx);
-                            last = None;
-                        }
+                        match *idx {
+                            idx if idx == l + 1 => {
+                                last = Some(idx);
+                            },
+                            idx if idx > l + 1 => {
+                                if !out.is_empty() {
+                                    out.push_str(", ");
+                                }
+                                out.push_str(&format!("{}-{}", f, l));
+                                first = Some(idx);
+                                last = None;
+                            },
+                            _ => {}
+                        };
                     }
                 }
                 (out, first, last)

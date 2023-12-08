@@ -1,9 +1,9 @@
 [package]
 name = "rotonda"
 version = "0.0.1-dev"
-rust-version = "1.65"
-authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]
 edition = "2021"
+rust-version = "1.71"
+authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]
 description = "A modular analytical BGP Engine"
 repository = "https://github.com/NLnetLabs/rotonda/"
 keywords = ["routing", "bgp"]

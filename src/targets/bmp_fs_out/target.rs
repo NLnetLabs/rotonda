@@ -34,7 +34,7 @@ use roto::types::{
 use routecore::{
     bgp::message::{
         open::CapabilityType,
-        update::{AddPath, FourOctetAsn},
+        update::FourOctetAsn,
         SessionConfig,
     },
     bmp::message::{InformationTlvType, Message as BmpMsg},
@@ -302,13 +302,8 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                                 (chosen_peer_config, has_gr_cap),
                             ) = peer_configs.get(&pph_hash).map_or_else(
                                 || {
-                                    // TODO: use SessionConfig::modern() when it is const
                                     static FALLBACK_CONFIG: SessionConfig =
-                                        SessionConfig {
-                                            four_octet_asn:
-                                                FourOctetAsn::Enabled,
-                                            add_path: AddPath::Disabled,
-                                        };
+                                        SessionConfig::modern();
                                     (false, (&FALLBACK_CONFIG, false))
                                 },
                                 |(config, has_gr_cap)| {

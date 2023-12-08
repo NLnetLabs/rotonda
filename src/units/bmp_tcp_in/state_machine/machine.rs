@@ -656,7 +656,8 @@ where
                                     format!(
                                         "Invalid BMP RouteMonitoring BGP \
                                 UPDATE message. One or more elements in the \
-                                NLRI(s) cannot be parsed: {:?}",
+                                NLRI(s) cannot be parsed: ({:?}) {:?}",
+                                        &peer_config,
                                         err.to_string()
                                     ),
                                     Some(true),
@@ -728,7 +729,10 @@ where
                     }
 
                     self.mk_invalid_message_result(
-                        format!("Invalid BMP RouteMonitoring BGP UPDATE message: {}", err),
+                        format!(
+                            "Invalid BMP RouteMonitoring BGP UPDATE message: ({:?}) {}",
+                            &peer_config, err
+                        ),
                         Some(true),
                         Some(Bytes::copy_from_slice(msg.as_ref())),
                     )

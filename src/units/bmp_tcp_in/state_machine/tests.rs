@@ -364,19 +364,13 @@ fn peer_up_route_monitoring_peer_down() {
 
             let pfx = Prefix::from_str("2001:2000:3080:e9c::2/128").unwrap();
             let mut expected_roto_prefixes: Vec<TypeValue> = vec![pfx.into()];
-            for Payload {
-                source_id,
-                value,
-                trace_id,
-                received,
-            } in bulk.drain(..)
-            {
+            for Payload {value,..} in bulk.drain(..) {
                 if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) =
                     value
                 {
                     let materialized_route = MaterializedRoute::from(route);
-                    let found_pfx =
-                        materialized_route.route.prefix.as_ref().unwrap();
+                    let route = materialized_route.route.unwrap();
+                    let found_pfx = route.prefix.as_ref().unwrap();
                     let position = expected_roto_prefixes
                         .iter()
                         .position(|pfx| pfx == found_pfx)
@@ -678,7 +672,7 @@ fn peer_down_spreads_withdrawals_across_multiple_bgp_updates_if_needed() {
                             .raw_message()
                             .0
                             .withdrawals()
-                            .iter()
+                            .unwrap()
                             .count();
 
                         // This route may reference the same underlying BGP UPDATE
@@ -689,8 +683,8 @@ fn peer_down_spreads_withdrawals_across_multiple_bgp_updates_if_needed() {
                     }
 
                     let materialized_route = MaterializedRoute::from(route);
-                    let found_pfx =
-                        materialized_route.route.prefix.as_ref().unwrap();
+                    let route = materialized_route.route.unwrap();
+                    let found_pfx = route.prefix.as_ref().unwrap();
                     let position = expected_roto_prefixes
                         .iter()
                         .position(|pfx| pfx == found_pfx)
@@ -895,7 +889,7 @@ fn route_monitoring_invalid_message() {
     let (pph, peer_up_msg_buf, _) =
         mk_peer_up_notification_msg_without_rfc4724_support(
             "127.0.0.1",
-            12345,
+            65530,
         );
 
     let announcements = Announcements::from_str(
@@ -912,7 +906,8 @@ fn route_monitoring_invalid_message() {
     //   - https://datatracker.ietf.org/doc/html/rfc2858#section-2
     //   - https://www.iana.org/assignments/address-family-numbers/address-family-numbers.xhtml#address-family-numbers-2
     let invalid_mp_reach_nlri_attr = hex::decode(
-        "900e0024FFFF4604C0A800010001190001C0A8000100070003030303030303030100000000000000",
+        "900e0024FFFF4604C0A800010001190001C0A8000100070003030303030303030100\
+        000000000000",
     )
     .unwrap();
 
@@ -932,6 +927,8 @@ fn route_monitoring_invalid_message() {
         .process_msg(Utc::now(), peer_up_msg_buf, None)
         .next_state;
     let res = processor.process_msg(Utc::now(), route_mon_msg_buf, None);
+
+    println!("res {:#?}", res);
 
     // Then
     assert!(matches!(res.next_state, BmpState::Dumping(_)));

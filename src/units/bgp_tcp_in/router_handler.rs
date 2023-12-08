@@ -5,7 +5,8 @@ use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
-use log::{debug, error, info};
+use chrono::{DateTime, Utc};
+use log::{debug, error};
 use roto::types::builtin::{
     BgpUpdateMessage, /*IpAddress,*/
     RotondaId, RouteStatus, UpdateMessage,
@@ -447,6 +448,7 @@ impl Processor {
                 })
                 .map(|nlri| {
                     mk_payload(
+                        received,
                         nlri.prefix,
                         &msg,
                         &source_id,
@@ -462,6 +464,7 @@ impl Processor {
                 })
                 .map(|nlri| {
                     mk_payload(
+                        received,
                         nlri.prefix,
                         &msg,
                         &source_id,

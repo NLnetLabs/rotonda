@@ -119,28 +119,31 @@ impl BmpStateMachineStatusReporter {
         // n_withdrawals: usize,
         // n_total_prefixes: usize,
     ) {
-        let n_valid_announcements = update_report_msg.get_n_valid_announcements();
-        let n_valid_withdrawals = update_report_msg.get_n_valid_withdrawals();
-        let n_new_prefixes = update_report_msg.get_n_new_prefixes();
+        // let n_valid_announcements = update_report_msg.get_n_valid_announcements();
+        // let n_valid_withdrawals = update_report_msg.get_n_valid_withdrawals();
+        // let n_new_prefixes = update_report_msg.get_n_new_prefixes();
+        // let n_stored_prefixes = update_report_msg.get_n_stored_prefixes();
         let metrics = self.metrics.router_metrics(update_report_msg.router_id);
         metrics
             .num_received_prefixes
             .fetch_add(update_report_msg.n_new_prefixes, SeqCst);
-        metrics.num_stored_prefixes.store(n_new_prefixes, SeqCst);
-        metrics.num_announcements.fetch_add(n_valid_announcements, SeqCst);
-        metrics.num_withdrawals.fetch_add(n_valid_withdrawals, SeqCst);
+        metrics.num_stored_prefixes.store(update_report_msg.n_stored_prefixes, SeqCst);
+        metrics.num_announcements.fetch_add(update_report_msg.n_valid_announcements, SeqCst);
+        metrics.num_withdrawals.fetch_add(update_report_msg.n_valid_withdrawals, SeqCst);
     }
 }
 
+#[derive(Debug)]
 pub struct UpdateReportMessage {
-    router_id: Arc<RouterId>,
-    n_new_prefixes: usize,
-    n_valid_announcements: usize,
-    n_valid_withdrawals: usize,
-    n_invalid_announcements: usize,
-    n_invalid_withdrawals: usize,
-    last_invalid_announcement: Option<ParseError>,
-    last_invalid_withdrawal: Option<ParseError>
+    pub router_id: Arc<RouterId>,
+    pub n_new_prefixes: usize,
+    pub n_valid_announcements: usize,
+    pub n_valid_withdrawals: usize,
+    pub n_invalid_announcements: usize,
+    pub n_stored_prefixes: usize,
+    pub n_invalid_withdrawals: usize,
+    pub last_invalid_announcement: Option<ParseError>,
+    pub last_invalid_withdrawal: Option<ParseError>
 }
 
 impl UpdateReportMessage {
@@ -152,6 +155,7 @@ impl UpdateReportMessage {
             n_valid_withdrawals: 0,
             n_invalid_announcements: 0,
             n_invalid_withdrawals: 0,
+            n_stored_prefixes: 0,
             last_invalid_announcement: None,
             last_invalid_withdrawal: None
         }
@@ -185,33 +189,15 @@ impl UpdateReportMessage {
         self.last_invalid_announcement = Some(err);
     }
 
-    pub fn get_n_new_prefixes(&self) -> usize {
-        self.n_new_prefixes
+    pub fn set_n_stored_prefixes(&mut self, n_stored: usize) {
+        self.n_stored_prefixes = n_stored;
     }
 
-    pub fn get_n_valid_announcements(&self) -> usize {
-        self.n_valid_announcements
+
+    pub fn get_n_stored_prefixes(&self) ->  usize {
+        self.n_stored_prefixes
     }
 
-    pub fn get_n_invalid_announcements(&self) -> usize {
-        self.n_invalid_announcements
-    }
-
-    pub fn get_n_valid_withdrawals(&self) -> usize {
-        self.n_valid_withdrawals
-    }
-
-    pub fn get_n_invalid_withdrawals(&self) -> usize {
-        self.n_invalid_withdrawals
-    }
-
-    pub fn get_last_invalid_announcement(&self) -> Option<ParseError> {
-        self.last_invalid_announcement
-    }
-
-    pub fn get_last_invalid_withdrawal(&self) -> Option<ParseError> {
-        self.last_invalid_withdrawal
-    }
 }
 
 impl UnitStatusReporter for BmpStateMachineStatusReporter {}

@@ -1,6 +1,6 @@
 use atomic_enum::atomic_enum;
 use bytes::Bytes;
-use log::warn;
+use chrono::{DateTime, Utc};
 use roto::types::builtin::RouteStatus;
 
 use rotonda_fsm::bgp::session;
@@ -66,7 +66,7 @@ use super::{
         dumping::Dumping, initiating::Initiating, terminated::Terminated,
         updating::Updating,
     },
-    status_reporter::{BmpTcpInStatusReporter, UpdateReportMessage},
+    status_reporter::{BmpStateMachineStatusReporter, UpdateReportMessage},
 };
 
 //use octseq::Octets;
@@ -577,8 +577,9 @@ where
             .unwrap_or_default()
     }
 
-    /// `filter` should return `None` if the BGP message should be ignored, i.e. be filtered out, otherwise `Some(msg)`
-    /// where `msg` is either the original unmodified `msg` or a modified or completely new message.
+    /// `filter` should return `None` if the BGP message should be ignored,
+    /// i.e. be filtered out, otherwise `Some(msg)` where `msg` is either the
+    /// original unmodified `msg` or a modified or completely new message.
     pub fn route_monitoring<CB>(
         mut self,
         received: DateTime<Utc>,
@@ -782,7 +783,6 @@ where
                         }
                         _ => {
                             // We'll count 'em, but we don't do anything with 'em.
-                            // Also, LOG HERE!
                             update_report_msg.inc_valid_announcements();
                         }
                     }
@@ -875,8 +875,7 @@ impl BmpState {
         bmp_msg: BmpMsg<Bytes>,
         trace_id: Option<u8>,
     ) -> ProcessingResult {
-
-        match self {
+        let res = match self {
             BmpState::Initiating(inner) => {
                 inner.process_msg(bmp_msg, trace_id)
             }
@@ -893,6 +892,36 @@ impl BmpState {
                 MessageType::Aborted,
                 BmpState::Aborted(source_id, router_id),
             ),
+        };
+
+        if let ProcessingResult {
+            message_type:
+                MessageType::InvalidMessage {
+                    known_peer: _known_peer,
+                    msg_bytes,
+                    err,
+                },
+            next_state,
+        } = res
+        {
+            if let Some(reporter) = next_state.status_reporter() {
+                reporter.bgp_update_parse_hard_fail(
+                    next_state.router_id(),
+                    err.clone(),
+                    msg_bytes,
+                );
+            }
+
+            ProcessingResult::new(
+                MessageType::InvalidMessage {
+                    known_peer: None,
+                    msg_bytes: None,
+                    err,
+                },
+                next_state,
+            )
+        } else {
+            res
         }
     }
 }

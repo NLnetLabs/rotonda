@@ -1,10 +1,25 @@
 # Rotonda
 
+<img align="right" src="doc/manual/source/resources/rotonda-illustrative-icon.png" height="150">
+
 Roll your own BGP application with Rotonda. 
 
-This repository contains the units and the configurations to create a high-performance BGP application.
+BGP services that you will be able to build with Rotonda include, but are not
+limited to, a route monitor, a route collector, a route server, or a route reflector.
 
-Other parts of `Rotonda` are the lock-free, concurrent read/write prefix store [`rotonda-store`](https://github.com/NLnetLabs/rotonda-store) and the filter & query language [`roto`](https://github.com/NLnetLabs/roto). `Rotonda` draws heavily upon the BGP/BMP packet parsing functionality of the library called [`routecore`](https://github.com/NLnetLabs/routecore).
+Rotonda is and always
+will be free, open-source software.
+
+>### ROTONDA IS CURRENTLY IN ALPHA, DO NOT USE IN PRODUCTION
+>
+> Rotonda is being actively worked on and this repository and all the packages
+> we supply are still in ALPHA stage. Use it to experiment freely (we value your
+> feedback!), but do not use it with data and data-streams you cannot afford
+> to lose.
+>
+> You should also be aware that all the APIs, configuration and the `roto`
+> syntax and grammar are still (highly) unstable.
+>
 
 ### ROADMAP
 

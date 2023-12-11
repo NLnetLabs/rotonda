@@ -1207,7 +1207,7 @@ impl Manager {
                             terminate_unit(&name, running_unit_agent.into());
                         } else {
                             error!(
-                                "Unit {} is unused and will not be started.",
+                                "Unit '{}' is unused and will not be started.",
                                 name
                             );
                         }

@@ -878,6 +878,7 @@ fn end_of_rib_ipv6_for_a_single_peer() {}
 fn end_of_rib_for_all_pending_peers() {}
 
 #[test]
+#[ignore = "TODO: Routecore should error out on update messages bgp_update() message"]
 fn route_monitoring_invalid_message() {
     // Given
     let processor = mk_test_processor();

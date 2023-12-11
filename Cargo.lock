@@ -1657,6 +1657,7 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0"
+source = "git+https://github.com/NLnetLabs/roto.git?branch=main#2d0e68d48a3c4e4d2697a5e492e99d3cba91bf66"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -1727,6 +1728,7 @@ dependencies = [
 [[package]]
 name = "rotonda-fsm"
 version = "0.1.0-dev"
+source = "git+https://github.com/NLnetLabs/rotonda-fsm.git#32e5711f0024329ca34b8e70755b18781b88df0a"
 dependencies = [
  "bytes",
  "log",
@@ -1747,6 +1749,7 @@ dependencies = [
 [[package]]
 name = "rotonda-store"
 version = "0.3.0-pre.3"
+source = "git+https://github.com/NLnetLabs/rotonda-store.git?branch=compose-messages-ng#6d849cc1a02d9c2d653bb907e2236bf2f8199051"
 dependencies = [
  "arc-swap",
  "crossbeam-epoch",
@@ -1760,6 +1763,7 @@ dependencies = [
 [[package]]
 name = "routecore"
 version = "0.4.0-dev"
+source = "git+https://github.com/NLnetLabs/routecore.git?branch=compose-messages-ng#f35a3283bd68449d32035451dcb09dc801add52f"
 dependencies = [
  "bytes",
  "chrono",

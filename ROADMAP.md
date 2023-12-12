@@ -110,6 +110,7 @@ MVP
 - ✅ MQTT OutputConnector
 - ✅ BMP proxy
 - ✅ integrate BGP passive listener (BGP EventSource)
+- ✅ virtual RIB experimental implementation
 - 🦀 ~integrate BGP limited speaker (BGP EventEmitter)~
 - 🦀 installation and usage documentation 
 - 🦀 limited packaging
@@ -118,7 +119,6 @@ NEXT RELEASES
 
 - 🦀 file OutputConnector
 - 🦀 user-configurable RIBs experimental implementation
-- 🦀 virtual RIB experimental implementation
 - 🦀 unit structure
 - 🦀 implement tracing
 - 💤 namespaces / modules support

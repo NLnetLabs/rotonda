@@ -1656,8 +1656,8 @@ dependencies = [
 
 [[package]]
 name = "roto"
-version = "0.1.0"
-source = "git+https://github.com/NLnetLabs/roto.git?branch=main#2d0e68d48a3c4e4d2697a5e492e99d3cba91bf66"
+version = "0.1.0-dev"
+source = "git+https://github.com/NLnetLabs/roto.git#ccbe65d6aa6bb677c15f75655414f83f2fc9ea53"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -1728,7 +1728,7 @@ dependencies = [
 [[package]]
 name = "rotonda-fsm"
 version = "0.1.0-dev"
-source = "git+https://github.com/NLnetLabs/rotonda-fsm.git#32e5711f0024329ca34b8e70755b18781b88df0a"
+source = "git+https://github.com/NLnetLabs/rotonda-fsm.git#711329c9e7d3186b1c218e7b978cd0d6b8e9e6e6"
 dependencies = [
  "bytes",
  "log",
@@ -1739,8 +1739,8 @@ dependencies = [
 
 [[package]]
 name = "rotonda-macros"
-version = "0.3.0-pre.3"
-source = "git+https://github.com/NLnetLabs/rotonda-macros.git#6352b71155c044329452139ab72186985600d249"
+version = "0.3.0"
+source = "git+https://github.com/NLnetLabs/rotonda-macros.git#9fe4773768d7fa24467eaa810efab69a1326d643"
 dependencies = [
  "quote",
  "syn 2.0.40",
@@ -1749,7 +1749,7 @@ dependencies = [
 [[package]]
 name = "rotonda-store"
 version = "0.3.0-pre.3"
-source = "git+https://github.com/NLnetLabs/rotonda-store.git?branch=compose-messages-ng#6d849cc1a02d9c2d653bb907e2236bf2f8199051"
+source = "git+https://github.com/NLnetLabs/rotonda-store.git#6c2c1609ea210720b75fbe9f268e225857c7340b"
 dependencies = [
  "arc-swap",
  "crossbeam-epoch",
@@ -1763,7 +1763,7 @@ dependencies = [
 [[package]]
 name = "routecore"
 version = "0.4.0-dev"
-source = "git+https://github.com/NLnetLabs/routecore.git?branch=compose-messages-ng#f35a3283bd68449d32035451dcb09dc801add52f"
+source = "git+https://github.com/NLnetLabs/routecore.git#0e2e29460ba4a5cc28fff711fd6c882ef70239ef"
 dependencies = [
  "bytes",
  "chrono",
@@ -2767,9 +2767,9 @@ checksum = "dff9641d1cd4be8d1a070daf9e3773c5f67e78b4d9d42263020c057706765c04"
 
 [[package]]
 name = "winnow"
-version = "0.5.26"
+version = "0.5.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b67b5f0a4e7a27a64c651977932b9dc5667ca7fc31ac44b03ed37a0cf42fdfff"
+checksum = "6c830786f7720c2fd27a1a0e27a709dbd3c4d009b56d098fc742d4f4eab91fe2"
 dependencies = [
  "memchr",
 ]

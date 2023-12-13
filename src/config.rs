@@ -161,7 +161,7 @@ impl Config {
         config_file: ConfigFile,
         manager: &mut Manager,
     ) -> Result<(Source, Self), Terminate> {
-        self.log.switch_logging(true)?;
+        self.log.switch_logging(false)?;
 
         if self.mvp_overrides.print_config_and_exit {
             info!("The --print-config-and-exit command line argument was used. After processing the config file looks like this:");

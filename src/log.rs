@@ -396,7 +396,6 @@ impl LogConfig {
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 pub enum LogTarget {
     /// Use the system default.
-    #[default]
     #[serde(rename = "default")]
     Default,
 
@@ -406,6 +405,7 @@ pub enum LogTarget {
     Syslog,
 
     /// Stderr.
+    #[default]
     #[serde(rename = "stderr")]
     Stderr,
 

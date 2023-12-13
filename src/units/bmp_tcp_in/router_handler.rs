@@ -305,7 +305,7 @@ impl RouterHandler {
         }) = Self::VM
             .with(|vm| {
                 let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(
-                    Arc::new(BytesRecord(msg)),
+                    BytesRecord(msg),
                 ));
                 self.roto_scripts.exec_with_tracer(
                     vm,
@@ -329,7 +329,7 @@ impl RouterHandler {
             if let TypeValue::Builtin(BuiltinTypeValue::BmpMessage(msg)) =
                 east
             {
-                let msg = Arc::into_inner(msg).unwrap(); // This should succeed
+                // let msg = Arc::into_inner(msg).unwrap(); // This should succeed
                 let msg = msg.0;
 
                 self.status_reporter

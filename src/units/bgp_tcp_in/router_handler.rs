@@ -249,7 +249,7 @@ impl Processor {
                                     let delta_id = (RotondaId(0), 0); // TODO
                                     let roto_update_msg = roto::types::builtin::UpdateMessage(pdu);
                                     let msg = BgpUpdateMessage::new(delta_id, roto_update_msg);
-                                    let msg = Arc::new(msg);
+                                    // let msg = Arc::new(msg);
                                     let value: TypeValue = TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(msg));
                                     self.roto_scripts.exec(vm, &self.unit_cfg.filter_name, value, Utc::now())
                                 }) {
@@ -258,7 +258,7 @@ impl Processor {
                                         self.gate.update_data(update).await;
                                     }
                                     if let TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(pdu)) = east {
-                                        let pdu = Arc::into_inner(pdu).unwrap(); // This should succeed
+                                        // let pdu = Arc::into_inner(pdu).unwrap(); // This should succeed
                                         let pdu = pdu.raw_message().0.clone(); // Bytes is cheap to clone
                                         let update = self.process_update(
                                             received,

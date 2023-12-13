@@ -540,7 +540,7 @@ mod tests {
         let source_id =
             SourceId::SocketAddr("127.0.0.1:8080".parse().unwrap());
         let bmp_msg =
-            Arc::new(BytesRecord(BmpMessage::from_octets(msg_buf).unwrap()));
+            BytesRecord(BmpMessage::from_octets(msg_buf).unwrap());
         let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
         Update::Single(Payload::new(source_id, value, None))
     }

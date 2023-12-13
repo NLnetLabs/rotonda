@@ -3008,7 +3008,7 @@ mod tests {
             toml.as_bytes().to_vec(),
             Source::default(),
             Default::default(),
-        )
+        ).unwrap()
     }
 
     type UnitOrTargetName = String;

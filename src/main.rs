@@ -331,7 +331,7 @@ mod tests {
 
         let mut manager = Manager::new();
         let (_conf_source, config) =
-            Config::from_config_file(config_file, &mut manager)
+            Config::from_config_file(config_file.unwrap(), &mut manager)
                 .expect("The supplied config is invalid");
         let runtime = run_with_config(&mut manager, config)
             .expect("The application failed to start");
@@ -557,7 +557,7 @@ mod tests {
                 Default::default(),
             );
             let (_source, mut config) =
-                Config::from_config_file(config_file, &mut manager).unwrap();
+                Config::from_config_file(config_file.unwrap(), &mut manager).unwrap();
             manager.spawn(&mut config);
 
             // Verify that there is now an MQTT connection

@@ -1,6 +1,6 @@
 [package]
 name = "rotonda"
-version = "0.0.1-dev"
+version = "0.1.0-dev"
 edition = "2021"
 rust-version = "1.71"
 authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]

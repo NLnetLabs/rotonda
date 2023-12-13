@@ -139,7 +139,7 @@ impl Config {
                 mvp_overrides.update_with_arg_matches(args)?;
 
                 // Parse the given config bytes using MVP overrides to adjust the config as desired.
-                ConfigFile::new(bytes, Source::default(), Some(mvp_overrides))
+                ConfigFile::new(bytes, Source::default(), Some(mvp_overrides)).map_err(|_| Terminate::error())?
             }
         };
 
@@ -362,14 +362,17 @@ pub struct ConfigFile {
 impl ConfigFile {
     /// Load a config file from disk.
     pub fn load(path: &impl AsRef<Path>) -> Result<Self, io::Error> {
-        fs::read(path).map(|bytes| Self::new(bytes, path.into(), None))
+        match fs::read(path) {
+            Ok(bytes) => Self::new(bytes, path.into(), None),
+            Err(e) => Err(e)
+        }
     }
 
     pub fn new(
         bytes: Vec<u8>,
         source: Source,
         mvp_overrides: Option<MvpConfig>,
-    ) -> Self {
+    ) -> Result<Self, io::Error> {
         // Handle the special case of a rib unit that is actually a physical rib unit and one or more virtual rib
         // units. Rather than have the user manually configure these separate rib units by hand in the config file,
         // we expand any units with unit `type = "rib"` and `filter_name = [a, b, c, ...]` into multiple chained units
@@ -387,7 +390,14 @@ impl ConfigFile {
         // this expansion capability to give at least some verification that it is not obviously broken, but it's not
         // enough.
         let config_str = String::from_utf8_lossy(&bytes);
-        let mut toml: Value = toml::de::from_str(&config_str).unwrap();
+        let mut toml: Value = if let Ok(toml) = 
+            toml::de::from_str(&config_str) {
+                toml
+            } else {
+                return Err(io::Error::new(std::io::ErrorKind::InvalidInput,
+                    "Cannot parse config file")
+                );
+            };
         let mut source_remappings = None;
 
         if let Some(Value::Table(units)) = toml.get_mut(CFG_UNITS) {
@@ -548,7 +558,7 @@ impl ConfigFile {
 
         let config_str = toml::to_string(&toml).unwrap();
 
-        ConfigFile {
+        Ok(ConfigFile {
             source,
             line_starts: config_str.as_bytes().split(|ch| *ch == b'\n').fold(
                 vec![0],
@@ -558,7 +568,7 @@ impl ConfigFile {
                 },
             ),
             bytes: config_str.as_bytes().to_vec(),
-        }
+        })
     }
 
     pub fn path(&self) -> Option<&Path> {

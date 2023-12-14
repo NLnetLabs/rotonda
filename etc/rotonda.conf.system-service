@@ -217,6 +217,33 @@
 #                            with "reject" the UPDATE PDU will be discarded
 #                            as if it had never been received.
 #
+#     protocols              The list of address families (AFI/SAFI)
+#                            that is accepted from this peer. These are
+#                            announced in the BGP OPEN as MultiProtocol
+#                            Capabilities (RFC4760).  In order to receive 'as
+#                            much as possible', list all options.
+#                            If this setting is omitted or set to the empty
+#                            list, the session will only carry conventional IPv4
+#                            Unicast information.
+#
+#                            Currently supported are:
+#                               Ipv4Unicast, Ipv6Unicast,
+#                               Ipv4Multicast, Ipv6Multicast,
+#                               Ipv4MplsUnicast, Ipv6MplsUnicast,
+#                               Ipv4MplsVpnUnicast, Ipv6MplsVpnUnicast,
+#                               Ipv4RouteTarget,
+#                               Ipv4FlowSpec, Ipv6FlowSpec,
+#                               L2VpnVpls, L2VpnEvpn
+#
+#     addpath                The list of address families (AFI/SAFI) for which
+#                            ADDPATH Capabilities (RFC7911) will be announced in
+#                            the BGP OPEN sent to this peer.  If this setting is
+#                            omitted or set to the empty list, no capabilities
+#                            is announced. Supported address families are the
+#                            same as listed for the 'protocols' setting above,
+#                            though they do not make sense in all cases.
+#
+#
 # The following MANDATORY settings MUST be specified in a peers."address"
 # table:
 #
@@ -659,6 +686,10 @@
 #                            receive all events by subscribing to 'rotonda/#'
 #                            for example.
 #
+#     username               A "string" username for login to the MQTT broker.
+#
+#     password               A "string" password for login to the MQTT broker.
+#
 # --- Pipeline interaction ---------------------------------------------------
 #
 #                          +----------+
@@ -816,8 +847,8 @@ http_listen = ["127.0.0.1:8080"]
 [units.bgp-in]
 type = "bgp-tcp-in"
 listen = "0.0.0.0:179"         
-my_asn = SOME_ASN              # Tip: edit me, or comment this unit out
-my_bgp_id = []                 # Tip: edit me, or comment this unit out
+my_asn = 64512                 # Tip: edit me, or comment this unit out
+my_bgp_id = [0, 0, 0, 0]       # Tip: edit me, or comment this unit out
 filter_name = "bgp-in-filter"
 
 [units.bmp-in]

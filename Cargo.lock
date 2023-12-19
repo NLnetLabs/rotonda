@@ -1656,7 +1656,7 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0-dev"
-source = "git+https://github.com/NLnetLabs/roto.git#1d6a07947c0622d03e5462a54bc403e620dd7b8f"
+source = "git+https://github.com/NLnetLabs/roto.git#f3e173927861ea16a7ade9df503716b19eab234b"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -1762,7 +1762,7 @@ dependencies = [
 [[package]]
 name = "routecore"
 version = "0.4.0-dev"
-source = "git+https://github.com/NLnetLabs/routecore.git#7adc31cd9ae2154db97d3f681b2edb28050070c4"
+source = "git+https://github.com/NLnetLabs/routecore.git#cb6dde93ba7f3794fcb009c7c6f3fec24f4f114e"
 dependencies = [
  "bytes",
  "chrono",
@@ -2197,9 +2197,9 @@ checksum = "1f3ccbac311fea05f86f61904b462b55fb3df8837a366dfc601a0161d0532f20"
 
 [[package]]
 name = "tokio"
-version = "1.35.0"
+version = "1.35.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "841d45b238a16291a4e1584e61820b8ae57d696cc5015c459c229ccc6990cc1c"
+checksum = "c89b4efa943be685f629b149f53829423f8f5531ea21249408e8e2f8671ec104"
 dependencies = [
  "backtrace",
  "bytes",

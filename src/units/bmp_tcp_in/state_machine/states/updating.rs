@@ -7,7 +7,7 @@ use routecore::{
     addr::Prefix,
     bgp::{
         message::{SessionConfig, UpdateMessage},
-        types::{AFI, SAFI},
+        types::AfiSafi,
     },
     bmp::message::{Message as BmpMsg, PerPeerHeader, TerminationMessage},
 };
@@ -103,7 +103,7 @@ impl BmpStateDetails<Updating> {
         update: &UpdateMessage<Bytes>,
     ) -> ControlFlow<ProcessingResult, Self> {
         if let Ok(Some((afi, safi))) = update.is_eor() {
-            if self.details.remove_pending_eor(pph, afi, safi) {
+            if self.details.remove_pending_eor(pph, (afi, safi).try_into().unwrap()) {
                 let num_pending_eors = self.details.num_pending_eors();
                 self.status_reporter.pending_eors_update(
                     self.router_id.clone(),
@@ -232,19 +232,17 @@ impl PeerAware for Updating {
     fn add_pending_eor(
         &mut self,
         pph: &PerPeerHeader<Bytes>,
-        afi: AFI,
-        safi: SAFI,
+        afi_safi: AfiSafi
     ) -> usize {
-        self.peer_states.add_pending_eor(pph, afi, safi)
+        self.peer_states.add_pending_eor(pph, afi_safi)
     }
 
     fn remove_pending_eor(
         &mut self,
         pph: &PerPeerHeader<Bytes>,
-        afi: AFI,
-        safi: SAFI,
+        afi_safi: AfiSafi,
     ) -> bool {
-        self.peer_states.remove_pending_eor(pph, afi, safi)
+        self.peer_states.remove_pending_eor(pph, afi_safi)
     }
 
     fn num_pending_eors(&self) -> usize {

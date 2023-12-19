@@ -333,7 +333,7 @@ mod test {
     use roto::types::builtin::{
         BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus,
     };
-    use routecore::bgp::message::SessionConfig;
+    use routecore::bgp::{message::SessionConfig, types::AfiSafi};
 
     use crate::bgp::encode::{mk_bgp_update, Announcements, Prefixes};
 
@@ -361,6 +361,8 @@ mod test {
             delta_id,
             prefix.into(),
             &bgp_update_msg,
+            AfiSafi::Ipv4Unicast,
+            None,
             RouteStatus::InConvergence,
         );
 

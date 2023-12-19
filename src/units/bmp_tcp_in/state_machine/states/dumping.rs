@@ -7,7 +7,7 @@ use routecore::{
     addr::Prefix,
     bgp::{
         message::{SessionConfig, UpdateMessage},
-        types::{AFI, SAFI},
+        types::AfiSafi,
     },
     bmp::message::{Message as BmpMsg, PerPeerHeader, TerminationMessage},
 };
@@ -228,7 +228,7 @@ impl BmpStateDetails<Dumping> {
         update: &UpdateMessage<Bytes>,
     ) -> ControlFlow<ProcessingResult, Self> {
         if let Ok(Some((afi, safi))) = update.is_eor() {
-            if self.details.remove_pending_eor(pph, afi, safi) {
+            if self.details.remove_pending_eor(pph, (afi, safi).try_into().unwrap()) {
                 // The last pending EOR has been removed and so this signifies the end of the initial table dump, if
                 // we're in the Dumping state, otherwise in the Updating state it signifies only that a late Peer Up
                 // (that happened during the Updating state) has finished dumping. Unfortunately EoR is not a clearly
@@ -377,19 +377,17 @@ impl PeerAware for Dumping {
     fn add_pending_eor(
         &mut self,
         pph: &PerPeerHeader<Bytes>,
-        afi: AFI,
-        safi: SAFI,
+        afi_safi: AfiSafi,
     ) -> usize {
-        self.peer_states.add_pending_eor(pph, afi, safi)
+        self.peer_states.add_pending_eor(pph, afi_safi)
     }
 
     fn remove_pending_eor(
         &mut self,
         pph: &PerPeerHeader<Bytes>,
-        afi: AFI,
-        safi: SAFI,
+        afi_safi: AfiSafi,
     ) -> bool {
-        self.peer_states.remove_pending_eor(pph, afi, safi)
+        self.peer_states.remove_pending_eor(pph, afi_safi)
     }
 
     fn num_pending_eors(&self) -> usize {

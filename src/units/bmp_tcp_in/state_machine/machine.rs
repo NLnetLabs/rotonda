@@ -32,7 +32,7 @@ use routecore::{
         message::{
             nlri::Nlri, open::CapabilityType, SessionConfig, UpdateMessage,
         },
-        types::{AFI, SAFI},
+        types::AfiSafi,
     },
     bmp::message::{
         InformationTlvType, InitiationMessage, Message as BmpMsg,
@@ -74,8 +74,7 @@ use routecore::Octets;
 
 #[derive(Clone, Debug, Hash, Eq, PartialEq)]
 pub struct EoRProperties {
-    pub afi: AFI,
-    pub safi: SAFI,
+    pub afi_safi: AfiSafi,
     pub post_policy: bool, // post-policy if 1, or pre-policy if 0
     pub adj_rib_out: bool, // rfc8671: adj-rib-out if 1, adj-rib-in if 0
 }
@@ -83,12 +82,10 @@ pub struct EoRProperties {
 impl EoRProperties {
     pub fn new<T: AsRef<[u8]>>(
         pph: &PerPeerHeader<T>,
-        afi: AFI,
-        safi: SAFI,
+        afi_safi: AfiSafi,
     ) -> Self {
         EoRProperties {
-            afi,
-            safi,
+            afi_safi,
             post_policy: pph.is_post_policy(),
             adj_rib_out: pph.adj_rib_type() == RibType::AdjRibOut,
         }
@@ -412,8 +409,7 @@ pub trait PeerAware {
     fn add_pending_eor(
         &mut self,
         pph: &PerPeerHeader<Bytes>,
-        afi: AFI,
-        safi: SAFI,
+        afi_safi: AfiSafi,
     ) -> usize;
 
     /// Remove previously recorded pending End-of-RIB note for a peer.
@@ -423,8 +419,7 @@ pub trait PeerAware {
     fn remove_pending_eor(
         &mut self,
         pph: &PerPeerHeader<Bytes>,
-        afi: AFI,
-        safi: SAFI,
+        afi_safi: AfiSafi,
     ) -> bool;
 
     fn num_pending_eors(&self) -> usize;
@@ -673,14 +668,14 @@ where
                                         .is_peer_eor_capable(&pph)
                                         == Some(true)
                                 {
-                                    let (afi, safi) = announcements
+                                    let afi_safi: AfiSafi = announcements
                                         .first()
                                         .unwrap()
                                         .afi_safi();
 
                                     let num_pending_eors = saved_self
                                         .details
-                                        .add_pending_eor(&pph, afi, safi);
+                                        .add_pending_eor(&pph, afi_safi);
 
                                     saved_self
                                         .status_reporter
@@ -759,6 +754,7 @@ where
         for a in update.announcements()? {
             match a {
                 Ok(a) => {
+                    let afi_safi = a.afi_safi();
                     match a {
                         Nlri::Unicast(nlri) | Nlri::Multicast(nlri) => {
                             let prefix = nlri.prefix;
@@ -774,6 +770,8 @@ where
                                 pph.address(),
                                 pph.asn(),
                                 prefix,
+                                afi_safi,
+                                nlri.path_id(),
                                 route_status,
                             );
 
@@ -827,6 +825,8 @@ where
                                 pph.address(),
                                 pph.asn(),
                                 prefix,
+                                nlri.afi_safi(),
+                                None,
                                 RouteStatus::Withdrawn,
                             );
 
@@ -1026,13 +1026,12 @@ impl PeerAware for PeerStates {
     fn add_pending_eor(
         &mut self,
         pph: &PerPeerHeader<Bytes>,
-        afi: AFI,
-        safi: SAFI,
+        afi_safi: AfiSafi,
     ) -> usize {
         if let Some(peer_state) = self.0.get_mut(pph) {
             peer_state
                 .pending_eors
-                .insert(EoRProperties::new(pph, afi, safi));
+                .insert(EoRProperties::new(pph, afi_safi));
 
             peer_state.pending_eors.len()
         } else {
@@ -1043,13 +1042,12 @@ impl PeerAware for PeerStates {
     fn remove_pending_eor(
         &mut self,
         pph: &PerPeerHeader<Bytes>,
-        afi: AFI,
-        safi: SAFI,
+        afi_safi: AfiSafi,
     ) -> bool {
         if let Some(peer_state) = self.0.get_mut(pph) {
             peer_state
                 .pending_eors
-                .remove(&EoRProperties::new(pph, afi, safi));
+                .remove(&EoRProperties::new(pph, afi_safi));
         }
 
         // indicate if all pending EORs have been removed, i.e. this is

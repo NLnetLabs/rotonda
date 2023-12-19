@@ -576,7 +576,7 @@ mod tests {
         typevalue::TypeValue,
     };
     use rotonda_store::prelude::MergeUpdate;
-    use routecore::{addr::Prefix, asn::Asn, bgp::message::SessionConfig};
+    use routecore::{addr::Prefix, asn::Asn, bgp::{message::SessionConfig, types::AfiSafi}};
 
     use crate::{
         bgp::encode::{mk_bgp_update, Announcements, Prefixes},
@@ -937,12 +937,15 @@ mod tests {
         let roto_update_msg =
             UpdateMessage::new(bgp_update_bytes, SessionConfig::modern())
             .unwrap();
+        let afi_safi = if prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
         let bgp_update_msg =
             Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
         let mut route = RawRouteWithDeltas::new_with_message_ref(
             delta_id,
             prefix.into(),
             &bgp_update_msg,
+            afi_safi,
+            None,
             RouteStatus::InConvergence,
         );
 
@@ -973,12 +976,15 @@ mod tests {
         // When it is processed by this unit
         let roto_update_msg =
             UpdateMessage::new(bgp_update_bytes, SessionConfig::modern()).unwrap();
+        let afi_safi = if prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
         let bgp_update_msg =
             Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
         let mut route = RawRouteWithDeltas::new_with_message_ref(
             delta_id,
             prefix.into(),
             &bgp_update_msg,
+            afi_safi,
+            None,
             RouteStatus::Withdrawn,
         );
 

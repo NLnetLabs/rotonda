@@ -8,12 +8,12 @@ use roto::types::builtin::{
 use routecore::{
     addr::Prefix,
     asn::Asn,
-    bgp::message::{
-        nlri::{BasicNlri, Nlri},
+    bgp::{message::{
+        nlri::{BasicNlri, Nlri, PathId},
         update::FourOctetAsn,
         update_builder::{ComposeError, UpdateBuilder},
         SessionConfig, UpdateMessage,
-    }
+    }, types::AfiSafi}
 };
 use smallvec::SmallVec;
 
@@ -80,12 +80,16 @@ where
     // these messages since we want to reference them in our routes.
     for bgp_msg in builder.into_iter().flatten() {
         for basic_nlri in bgp_msg.unicast_withdrawals_vec()? {
+            let afi_safi = if basic_nlri.prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
+
             let route = mk_route_for_prefix(
                 router_id.clone(),
                 bgp_msg.clone(),
                 peer_address,
                 peer_asn,
                 basic_nlri.prefix,
+                afi_safi,
+                basic_nlri.path_id(),
                 RouteStatus::Withdrawn,
             );
 
@@ -118,6 +122,8 @@ pub fn mk_route_for_prefix(
     peer_address: IpAddr,
     peer_asn: Asn,
     prefix: Prefix,
+    afi_safi: AfiSafi,
+    path_id: Option<PathId>,
     route_status: RouteStatus,
 ) -> RawRouteWithDeltas {
     let delta_id = (RotondaId(0), 0); // TODO
@@ -127,6 +133,8 @@ pub fn mk_route_for_prefix(
         delta_id,
         prefix.into(),
         &raw_msg,
+        afi_safi,
+        path_id,
         route_status,
     )
     .with_peer_ip(peer_address)

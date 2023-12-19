@@ -1098,9 +1098,9 @@ dependencies = [
 
 [[package]]
 name = "mach2"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d0d1830bcd151a6fc4aea1369af235b36c1528fe976b8ff678683c9995eade8"
+checksum = "19b955cdeb2a02b9117f121ce63aa52d08ade45de53e48fe6a38b39c10f6f709"
 dependencies = [
  "libc",
 ]
@@ -1656,7 +1656,7 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0-dev"
-source = "git+https://github.com/NLnetLabs/roto.git#ec557e78381b465157638dc8888836fa8d867cc5"
+source = "git+https://github.com/NLnetLabs/roto.git#1d6a07947c0622d03e5462a54bc403e620dd7b8f"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -1762,7 +1762,7 @@ dependencies = [
 [[package]]
 name = "routecore"
 version = "0.4.0-dev"
-source = "git+https://github.com/NLnetLabs/routecore.git#153d4c1170c66c1e93f5f0929893e504f56108a7"
+source = "git+https://github.com/NLnetLabs/routecore.git#7adc31cd9ae2154db97d3f681b2edb28050070c4"
 dependencies = [
  "bytes",
  "chrono",
@@ -2151,9 +2151,9 @@ dependencies = [
 
 [[package]]
 name = "time"
-version = "0.3.30"
+version = "0.3.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c4a34ab300f2dee6e562c10a046fc05e358b29f9bf92277f30c3c8d82275f6f5"
+checksum = "f657ba42c3f86e7680e53c8cd3af8abbe56b5491790b46e22e19c0d57463583e"
 dependencies = [
  "deranged",
  "itoa",
@@ -2173,9 +2173,9 @@ checksum = "ef927ca75afb808a4d64dd374f00a2adf8d0fcff8e7b184af886c3c87ec4a3f3"
 
 [[package]]
 name = "time-macros"
-version = "0.2.15"
+version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4ad70d68dba9e1f8aceda7aa6711965dfec1cac869f311a51bd08b3a2ccbce20"
+checksum = "26197e33420244aeb70c3e8c78376ca46571bc4e701e4791c2cd9f57dcb3a43f"
 dependencies = [
  "time-core",
 ]

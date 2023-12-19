@@ -19,6 +19,8 @@ use roto::types::typevalue::TypeValue;
 use routecore::addr::Prefix;
 use routecore::asn::Asn;
 use routecore::bgp::message::UpdateMessage as UpdatePdu;
+use routecore::bgp::message::nlri::PathId;
+use routecore::bgp::types::AfiSafi;
 use smallvec::SmallVec;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -391,12 +393,16 @@ impl Processor {
             prefix: Prefix,
             msg: &Arc<BgpUpdateMessage>,
             source_id: &SourceId,
+            afi_safi: AfiSafi,
+            path_id: Option<PathId>,
             route_status: RouteStatus,
         ) -> Payload {
             let rrwd = RawRouteWithDeltas::new_with_message_ref(
                 msg.message_id(),
                 RotoPrefix::new(prefix),
                 msg,
+                afi_safi,
+                path_id,
                 route_status,
             );
             let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
@@ -446,11 +452,15 @@ impl Processor {
                     self.observed_prefixes.insert(nlri.prefix);
                 })
                 .map(|nlri| {
+                    let afi_safi = if nlri.prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
+
                     mk_payload(
                         received,
                         nlri.prefix,
                         &msg,
                         &source_id,
+                        afi_safi,
+                        nlri.path_id(),
                         RouteStatus::InConvergence,
                     )
                 })
@@ -462,11 +472,15 @@ impl Processor {
                     self.observed_prefixes.remove(&nlri.prefix);
                 })
                 .map(|nlri| {
+                    let afi_safi = if nlri.prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
+
                     mk_payload(
                         received,
                         nlri.prefix,
                         &msg,
                         &source_id,
+                        afi_safi,
+                        nlri.path_id(),
                         RouteStatus::Withdrawn,
                     )
                 })

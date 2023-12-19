@@ -322,8 +322,8 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                                         {
                                             true => format!(
                                                 "[{:?}, {:?}]",
-                                                update.withdrawals().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi().0).ok()).collect::<Vec<routecore::bgp::types::AFI>>()),
-                                                update.withdrawals().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi().1).ok()).collect::<Vec<routecore::bgp::types::SAFI>>()),
+                                                update.withdrawals().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi().afi()).ok()).collect::<Vec<routecore::bgp::types::AFI>>()),
+                                                update.withdrawals().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi().safi()).ok()).collect::<Vec<routecore::bgp::types::SAFI>>()),
                                             ),
                                             false => String::new(),
                                         };
@@ -334,8 +334,8 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                                             match num_announcements > 0 {
                                                 true => format!(
                                                     "[{:?}, {:?}]",
-                                                    update.announcements().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi().0).ok()).collect::<Vec<routecore::bgp::types::AFI>>()),
-                                                    update.announcements().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi().1).ok()).collect::<Vec<routecore::bgp::types::SAFI>>()),
+                                                    update.announcements().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi().afi()).ok()).collect::<Vec<routecore::bgp::types::AFI>>()),
+                                                    update.announcements().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi().safi()).ok()).collect::<Vec<routecore::bgp::types::SAFI>>()),
                                                 ),
                                                 false => String::new(),
                                             };

@@ -131,7 +131,7 @@ pub mod bgp {
         use routecore::bgp::aspath::HopPath;
         use routecore::bgp::communities::Community;
         use routecore::bgp::types::{
-            NextHop, OriginType, PathAttributeType, AFI, SAFI,
+            NextHop, OriginType, PathAttributeType, Afi, Safi,
         };
         use routecore::bmp::message::{
             InformationTlvType, MessageType, PeerType, TerminationInformation,
@@ -671,10 +671,10 @@ pub mod bgp {
                     IpAddr::V6(addr) => {
                         // https://datatracker.ietf.org/doc/html/rfc4760#section-4
                         if mp_unreach_nlri.is_empty() {
-                            mp_unreach_nlri.put_u16(AFI::Ipv6.into());
+                            mp_unreach_nlri.put_u16(Afi::Ipv6.into());
                             mp_unreach_nlri.put_u8(
-                                u8::from(SAFI::Unicast)
-                                    | u8::from(SAFI::Multicast),
+                                u8::from(Safi::Unicast)
+                                    | u8::from(Safi::Multicast),
                             );
                         }
                         mp_unreach_nlri.extend_from_slice(&[len]);
@@ -982,9 +982,9 @@ pub mod bgp {
                             IpAddr::V6(addr) => {
                                 // https://datatracker.ietf.org/doc/html/rfc4760#section-3
                                 if mp_reach_nlri.is_empty() {
-                                    mp_reach_nlri.put_u16(AFI::Ipv6.into());
+                                    mp_reach_nlri.put_u16(Afi::Ipv6.into());
                                     mp_reach_nlri
-                                        .put_u8(u8::from(SAFI::Unicast));
+                                        .put_u8(u8::from(Safi::Unicast));
                                     if let NextHop::Unicast(IpAddr::V6(addr)) | NextHop::Ipv6LL(addr, _) | NextHop::Multicast(IpAddr::V6(addr)) = next_hop.0 {
                                         mp_reach_nlri.put_u8(addr.octets().len() as u8);
                                         mp_reach_nlri.extend_from_slice(

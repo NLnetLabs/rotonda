@@ -205,11 +205,11 @@ async fn prefix_normalization_ipv6() {
         "/prefixes/2001:DB8:2222::/48?include=moreSpecifics",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix("2001:db8:2222::/48", AfiSafi::Ipv4Unicast, 1)], // note: DB8 was queried but db8 was reported
+            "data": [mk_response_announced_prefix("2001:db8:2222::/48", AfiSafi::Ipv6Unicast, 1)], // note: DB8 was queried but db8 was reported
             "included": {
                 "moreSpecifics": [
-                    mk_response_announced_prefix("2001:db8:2222::/64", AfiSafi::Ipv4Unicast, 2),   // note: 2222:0000:: compressed to 2222::
-                    mk_response_announced_prefix("2001:db8:2222:1::/64", AfiSafi::Ipv4Unicast, 3)  // note: 2222:0001:: compressed to 2222:1::
+                    mk_response_announced_prefix("2001:db8:2222::/64", AfiSafi::Ipv6Unicast, 2),   // note: 2222:0000:: compressed to 2222::
+                    mk_response_announced_prefix("2001:db8:2222:1::/64", AfiSafi::Ipv6Unicast, 3)  // note: 2222:0001:: compressed to 2222:1::
                 ]
             }
         })),

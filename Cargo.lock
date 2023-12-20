@@ -1656,7 +1656,7 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.1.0-dev"
-source = "git+https://github.com/NLnetLabs/roto.git#f3e173927861ea16a7ade9df503716b19eab234b"
+source = "git+https://github.com/NLnetLabs/roto.git#57c331c823310ed905e450cc0fc6c4938f03b7ca"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -1762,7 +1762,7 @@ dependencies = [
 [[package]]
 name = "routecore"
 version = "0.4.0-dev"
-source = "git+https://github.com/NLnetLabs/routecore.git#cb6dde93ba7f3794fcb009c7c6f3fec24f4f114e"
+source = "git+https://github.com/NLnetLabs/routecore.git#4397eed0633ded762e951cab00f65bff1751b5a5"
 dependencies = [
  "bytes",
  "chrono",
@@ -1922,9 +1922,9 @@ dependencies = [
 
 [[package]]
 name = "serde_spanned"
-version = "0.6.4"
+version = "0.6.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "12022b835073e5b11e90a14f86838ceb1c8fb0325b72416845c487ac0fa95e80"
+checksum = "eb3622f419d1296904700073ea6cc23ad690adbd66f13ea683df73298736f0c1"
 dependencies = [
  "serde",
 ]

@@ -20,8 +20,6 @@ use smallvec::SmallVec;
 use crate::payload::{Payload, SourceId};
 
 // Originally based on code in bgmp::main.rs.
-// XXX Probably needs a more sophisticated way of trying Addpath
-// (combinations).
 pub fn generate_alternate_config(
     peer_config: &SessionConfig,
 ) -> Option<SessionConfig> {
@@ -30,9 +28,15 @@ pub fn generate_alternate_config(
         alt_peer_config.enable_four_octet_asn();
     } else if peer_config.four_octet_asn == FourOctetAsn::Enabled {
         alt_peer_config.disable_four_octet_asn();
-    } else {
-        alt_peer_config.inverse_addpaths();
     }
+    // We could try to be smart and toggle addpath settings for all or some
+    // address families like below, but there is a chance we start storing
+    // incorrect data. The proper solution is to fix the exporting side.
+    //
+    //    alt_peer_config.inverse_addpaths();
+    //    or
+    //    alt_peer_config.inverse_addpath(AfiSafi::Ipv4Unicast);
+
     Some(alt_peer_config)
 }
 

@@ -13,7 +13,7 @@ use roto::types::builtin::{
 };
 use roto::types::builtin::{
     /*Asn as RotoAsn,*/
-    BuiltinTypeValue, Prefix as RotoPrefix, RawRouteWithDeltas,
+    BuiltinTypeValue, RawRouteWithDeltas,
 };
 use roto::types::typevalue::TypeValue;
 use routecore::addr::Prefix;
@@ -399,7 +399,7 @@ impl Processor {
         ) -> Payload {
             let rrwd = RawRouteWithDeltas::new_with_message_ref(
                 msg.message_id(),
-                RotoPrefix::new(prefix),
+                prefix,
                 msg,
                 afi_safi,
                 path_id,

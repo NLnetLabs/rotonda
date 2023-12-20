@@ -1821,7 +1821,6 @@ struct SubscribeResponse {
 #[cfg(test)]
 mod tests {
     use chrono::SubsecRound;
-    use roto::types::builtin::U8;
     use smallvec::smallvec;
     use tokio::sync::Notify;
 
@@ -1902,7 +1901,7 @@ mod tests {
         //     │                    Err(UnitStatus::Gone) │      None │
         //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│◀╌╌╌╌╌╌╌╌╌╌┘
         fn mk_test_payload() -> Payload {
-            Payload::new("test", U8::new(18), None)
+            Payload::new("test", 18_u8, None)
         }
 
         eprintln!("STARTING");

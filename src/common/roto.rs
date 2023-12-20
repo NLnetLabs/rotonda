@@ -765,7 +765,7 @@ impl FilterOutput {
 #[cfg(test)]
 mod tests {
     use roto::types::{
-        builtin::U8, collections::Record, outputs::OutputStreamMessage,
+        collections::Record, outputs::OutputStreamMessage,
         typedef::TypeDef,
     };
     use smallvec::smallvec;
@@ -776,7 +776,7 @@ mod tests {
 
     #[test]
     fn single_update_yields_single_result() {
-        let test_value: TypeValue = U8::new(0).into();
+        let test_value: TypeValue = 0_u8.into();
         let in_payload = Payload::new("test", test_value.clone(), None);
         let out_payloads = in_payload
             .filter(
@@ -796,7 +796,7 @@ mod tests {
 
     #[test]
     fn single_update_plus_output_stream_yields_both_as_bulk_update() {
-        let test_value: TypeValue = U8::new(0).into();
+        let test_value: TypeValue = 0_u8.into();
         let in_payload = Payload::new("test", test_value.clone(), None);
         let test_output_stream_message =
             mk_roto_output_stream_payload(test_value.clone(), TypeDef::U8);
@@ -828,8 +828,8 @@ mod tests {
 
     #[test]
     fn bulk_update_yields_bulk_update() {
-        let test_value1: TypeValue = U8::new(1).into();
-        let test_value2: TypeValue = U8::new(2).into();
+        let test_value1: TypeValue = 1_u8.into();
+        let test_value2: TypeValue = 2_u8.into();
         let payload1 = Payload::new("test1", test_value1.clone(), None);
         let payload2 = Payload::new("test2", test_value2.clone(), None);
         let in_payload = smallvec![payload1, payload2];
@@ -855,8 +855,8 @@ mod tests {
 
     #[test]
     fn bulk_update_plus_output_stream_yields_bulk_update() {
-        let test_value1: TypeValue = U8::new(1).into();
-        let test_value2: TypeValue = U8::new(2).into();
+        let test_value1: TypeValue = 1_u8.into();
+        let test_value2: TypeValue = 2_u8.into();
         let payload1 = Payload::new("test1", test_value1.clone(), None);
         let payload2 = Payload::new("test2", test_value2.clone(), None);
         let in_payload = smallvec![payload1, payload2];

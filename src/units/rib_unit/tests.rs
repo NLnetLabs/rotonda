@@ -206,7 +206,7 @@ async fn process_update_equivalent_route_twice() {
                 .raw_message
                 .raw_message()
                 .0
-                .communities::<Community>()
+                .communities()
                 .unwrap()
                 .unwrap()
                 .next()
@@ -236,7 +236,7 @@ async fn process_update_equivalent_route_twice() {
                 .raw_message
                 .raw_message()
                 .0
-                .communities::<Community>()
+                .communities()
                 .unwrap()
                 .unwrap()
                 .next()
@@ -272,7 +272,7 @@ async fn process_update_equivalent_route_twice() {
                 .raw_message
                 .raw_message()
                 .0
-                .communities::<Community>()
+                .communities()
                 .unwrap()
                 .unwrap()
                 .next()

@@ -135,7 +135,7 @@ pub fn mk_route_for_prefix(
     let raw_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
     RawRouteWithDeltas::new_with_message_ref(
         delta_id,
-        prefix.into(),
+        prefix,
         &raw_msg,
         afi_safi,
         path_id,

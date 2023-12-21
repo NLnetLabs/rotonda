@@ -11,7 +11,7 @@ use rotonda_store::prelude::Prefix;
 
 use routecore::{
     asn::Asn,
-    bgp::{aspath::Hop, communities::Community},
+    bgp::{aspath::Hop, communities::HumanReadableCommunity as Community},
 };
 use serde_json::{json, Value};
 
@@ -359,7 +359,7 @@ mod test {
             Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
         let raw_route = RawRouteWithDeltas::new_with_message_ref(
             delta_id,
-            prefix.into(),
+            prefix,
             &bgp_update_msg,
             AfiSafi::Ipv4Unicast,
             None,

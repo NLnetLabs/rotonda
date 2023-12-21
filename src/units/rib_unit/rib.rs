@@ -942,7 +942,7 @@ mod tests {
             Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
         let mut route = RawRouteWithDeltas::new_with_message_ref(
             delta_id,
-            prefix.into(),
+            prefix,
             &bgp_update_msg,
             afi_safi,
             None,
@@ -981,7 +981,7 @@ mod tests {
             Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
         let mut route = RawRouteWithDeltas::new_with_message_ref(
             delta_id,
-            prefix.into(),
+            prefix,
             &bgp_update_msg,
             afi_safi,
             None,

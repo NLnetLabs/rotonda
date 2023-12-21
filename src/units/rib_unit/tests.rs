@@ -23,7 +23,7 @@ use roto::types::{
 use rotonda_store::prelude::multi::PrefixStoreError;
 use rotonda_store::{epoch, MatchOptions, MatchType};
 use routecore::asn::Asn;
-use routecore::bgp::communities::Wellknown;
+use routecore::bgp::communities::{Wellknown, HumanReadableCommunity as Community};
 use routecore::bgp::types::AfiSafi;
 use routecore::{addr::Prefix, bgp::message::SessionConfig};
 
@@ -206,7 +206,7 @@ async fn process_update_equivalent_route_twice() {
                 .raw_message
                 .raw_message()
                 .0
-                .communities()
+                .communities::<Community>()
                 .unwrap()
                 .unwrap()
                 .next()
@@ -236,7 +236,7 @@ async fn process_update_equivalent_route_twice() {
                 .raw_message
                 .raw_message()
                 .0
-                .communities()
+                .communities::<Community>()
                 .unwrap()
                 .unwrap()
                 .next()
@@ -272,7 +272,7 @@ async fn process_update_equivalent_route_twice() {
                 .raw_message
                 .raw_message()
                 .0
-                .communities()
+                .communities::<Community>()
                 .unwrap()
                 .unwrap()
                 .next()
@@ -688,7 +688,7 @@ fn mk_route_update_with_communities(
         Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
     let route = RawRouteWithDeltas::new_with_message_ref(
         delta_id,
-        (*prefix).into(),
+        *prefix,
         &bgp_update_msg,
         afi_safi,
         None,

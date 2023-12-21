@@ -797,7 +797,7 @@ impl RibUnitRunner {
         if rib.is_physical() {
             let prefix: Option<Prefix> = match &payload.value {
                 TypeValue::Builtin(BuiltinTypeValue::Route(route)) => {
-                    Some(route.prefix.into())
+                    Some(route.prefix)
                 }
 
                 TypeValue::Record(record) => match record
@@ -805,7 +805,7 @@ impl RibUnitRunner {
                 {
                     Some(ElementTypeValue::Primitive(
                         TypeValue::Builtin(BuiltinTypeValue::Prefix(prefix)),
-                    )) => Some((*prefix).into()),
+                    )) => Some(*prefix),
                     _ => None,
                 },
 

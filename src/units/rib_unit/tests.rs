@@ -23,7 +23,7 @@ use roto::types::{
 use rotonda_store::prelude::multi::PrefixStoreError;
 use rotonda_store::{epoch, MatchOptions, MatchType};
 use routecore::asn::Asn;
-use routecore::bgp::communities::{Wellknown, HumanReadableCommunity as Community};
+use routecore::bgp::communities::Wellknown;
 use routecore::bgp::types::AfiSafi;
 use routecore::{addr::Prefix, bgp::message::SessionConfig};
 

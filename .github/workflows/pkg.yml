@@ -23,11 +23,6 @@ jobs:
     #  DOCKER_HUB_TOKEN: ${{ secrets.DOCKER_HUB_TOKEN }}
 
     with:
-      # TODO: When ready to make this repository public, remove this `runs_on` when this repository is made public.
-      # Until then run on self-hosted runners at the office to avoid consuming the GitHub Actions credits that we
-      # also use for other things because private repositories use a limited budget of per-organization credits.
-      runs_on: self-hosted
-
       docker_org: nlnetlabs
       docker_repo: rotonda
       docker_build_rules: pkg/rules/docker-images-to-build.yml

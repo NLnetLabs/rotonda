@@ -48,7 +48,7 @@ and then finally you can build Rotonda directly from github:
 cargo install rotonda --git https://github.com/NLnetLabs/rotonda
 ```
 
-If you restart you shell, you can start Rotonda by simply typing:
+If you restart your shell, you can start Rotonda by simply typing:
 
 ```bash
 rotonda

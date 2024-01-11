@@ -2,25 +2,22 @@
 .SH NAME
 rotonda - A modular analytical BGP Engine
 .SH SYNOPSIS
-rotonda -c, --config <FILE>
 
-rotonda -h, --help
+.B rotonda
+[options]
 
-rotonda -V, --version
+
 .SH DESCRIPTION
-Roll your own BGP applications with programmable RIBs and Filters.
-BGP applications that you can build with Rotonda include, but are
-not limited to, a route monitor|collector|server|reflector, all
-this without modifying a single line in the source code of Rotonda.
+Roll your own BGP/BMP applications with programmable RIBs and Filters.
 
 For more information please consult the online documentation at:
-    https://rotonda.docs.nlnetlabs.nl/en/stable/
+    https://rotonda.docs.nlnetlabs.nl/en/latest/
 
 .SH OPTIONS
 The available options are:
 
 .TP
-.BI -c,\ --config\ <FILE>
+.BI \-c\  path \fR,\ \fB\-\-config= path
 Specify the path to the config file to load. If no file is specified, default
 values will be used for all settings.
 
@@ -31,3 +28,55 @@ Prints help information.
 .TP
 .BI -V,\ --version
 Prints version information.
+
+.SH OPTIONS RELATED TO LOGGING
+
+.TP
+.BI -q,\ --quiet
+Log less information, twice for no information
+
+.TP
+.BI -v,\ --verbose
+Log more information, twice or thrice for even more
+
+.TP
+.BI --logfile= path
+Log to this file
+
+.TP
+.BI --syslog
+Log to syslog
+
+.TP
+.BI --syslog-facility= facility
+Facility to use for syslog logging [default: daemon]
+
+.SH OPTIONS FOR USE WITH THE EMBEDDED CONFIG FILE
+
+.TP
+.BI --print-config-and-exit
+Prints the configuration that will be used and then exits
+
+.TP
+.BI --http-listen= addr:port
+Listen for HTTP connections on this address
+
+.TP
+.BI --bgp-listen= addr:port
+Listen for BGP connections on this address
+
+.TP
+.BI --bmp-tracing-mode= Off | IfRequested | On
+Whether and how to enable tracing of BMP messages
+
+.TP
+.BI --bmp-listen= addr:port
+Listen for BMP connections on this address
+
+.TP
+.BI --bmp-proxy-destination= addr:port
+Proxy BMP connections to this address
+
+.TP
+.BI --mqtt-destination= addr | addr:port
+Publish MQTT messages to this address [default port: 1883]

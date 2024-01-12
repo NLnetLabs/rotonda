@@ -61,6 +61,11 @@ include:
     image: 'debian:buster'
     target: 'aarch64-unknown-linux-musl'
 
+  # package for virtual machines on Apple Silicon
+  - pkg: 'rotonda'
+    image: 'debian:bookworm'
+    target: 'aarch64-unknown-linux-musl'
+
   # the include entries below will not cause additional packages to be built because they specify combinations
   # of matrix keys and values as already exist elsewhere in the matrix, but they will cause an additional tests
   # to be run in the package testing phase, which will install the package in an LXC container running the 

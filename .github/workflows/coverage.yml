@@ -6,6 +6,13 @@ on:
     types:
       - completed
 
+  pull_request:
+    types: [review_requested, ready_for_review]
+  
+  push:
+    branches:
+      - main
+
   workflow_dispatch:
 
 jobs:

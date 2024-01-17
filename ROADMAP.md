@@ -33,7 +33,7 @@ rotoro -
 
 NEXT RELEASE
 
-↑ rotonda 0.1.1
+↑ rotonda 0.1.x
   rotonda-fsm 0.1
 ↑ roto 0.2.x
   routecore 0.4
@@ -139,7 +139,7 @@ RELEASE 0.1
 - ✅ limited packaging
 - ✅ limited `systemd` integration
 
-UNRELEASED 0.2
+UNRELEASED 0.1.x
 
 - 🦀 passive external data sources: RIBs
 - 🦀 implement FilterMap (user-defined rx/tx and RIB storage type)

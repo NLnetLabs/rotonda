@@ -26,7 +26,7 @@ rotoro -
 - ✅ client-specific runtime application with BMP ingress and RIBs
 - ✅ `roto` filtering language
 - ✅ BGP passive speaker
-- ✅ daemonize
+- ✅ limited systemd functionality
 - 🦀 ~~BGP limited active speaker~~ POSTPONED
 - ✅ Documentation
 - ✅ Packaging
@@ -48,12 +48,12 @@ NEXT RELEASES
 - 💤 support more AFI/SAFIs, e.g. FlowSpec, L2VPN, MPLS
 - 💤 emit BGP packets as events on OutputStream
 - 💤 egress modified/created BGP packets (on peering sessions)
-- 💤 RIB split over in-memory and on-disk.
+- 💤 RIB split over in-memory and on-disk
 - 💤 refactor configuration: dynamic units reconfiguration with RESTCONF/yang+json
 - 💤 implement active external data sources: RTR
 - 💤 more ingress connectors (e.g. Kafka, MQTT, mrt)
 - 💤 more egress connectors (e.g. Kafka, Parquet, mrt)
-- 💤 create plugin system.
+- 💤 create plugin system
 - 💤 query engine over (split) RIBs.
 - 💤 Rotonda shell
 - 💤 Distributed `rotonda`-`rotonda` setup with `rotoro` (experimental)
@@ -148,6 +148,7 @@ NEXT RELEASES
 
 - 💤 emit BGP packets as events on OutputStream
 - 💤 egress modified/created BGP packets (on peering sessions)
+- 💤 improved daemon functionality: drop privileges
 - 🦀 refactor configuration: dynamic units reconfiguration with RESTCONF/yang+json
 - 🦀 implement tracing
 - 💤 RIB split over in-memory and on-disk
@@ -158,7 +159,6 @@ NEXT RELEASES
 - 💤 create experimental global registry
 - 💤 snapshot/restore functionality
 - 💤 RIB diff functionality
-- 🦀 `systemd` integration
 - 💤 create experimental distributed units
 
 

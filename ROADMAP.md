@@ -5,6 +5,7 @@ Roadmap
 - ✅ work item complete
 - 🦀 work item in progress
 - 💤 work item not started yet
+- ↑ updated version
 
 General Features
 ================
@@ -32,12 +33,12 @@ rotoro -
 
 NEXT RELEASE
 
-rotonda 0.2
-rotonda-fsm 0.2
-roto 0.3
-routecore 0.4
-rotonda-store 0.3
-rotoro -
+↑ rotonda 0.1.1
+  rotonda-fsm 0.1
+↑ roto 0.2.x
+  routecore 0.4
+  rotonda-store 0.3
+  rotoro -
 
 - 🦀 implement FilterMap (user-defined rx/tx and RIB storage type)
 - 🦀 implement passive external data source: RIBs
@@ -78,7 +79,7 @@ RELEASED 0.2
 - 🦀 create manual-like docs
 - ✅ create high-level overview documentation
 
-UNRELEASED 0.3
+UNRELEASED 0.2.x
 
 - 🦀 complete passive external data sources for RIBS
 
@@ -116,10 +117,11 @@ RELEASE 0.4
 
 UNRELEASED 0.5
 
-NEXT RELEASES
-
 - 🦀 create BGP packet builder
 - 💤 partial FlowSpec parser
+
+NEXT RELEASES
+
 - 💤 BGPsec parser
 
 

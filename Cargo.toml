@@ -111,7 +111,8 @@ conf-files = [
     "/etc/rotonda/filters/bgp-in-filter.roto",
     "/etc/rotonda/filters/bmp-in-filter.roto",
     "/etc/rotonda/filters/rib-in-post-filter.roto",
-    "/etc/rotonda/filters/rib-in-pre-filter.roto"
+    "/etc/rotonda/filters/rib-in-pre-filter.roto",
+    "/etc/rotonda/filters/rotonda.example.conf"
 ]
 systemd-units = { unit-name = "rotonda", unit-scripts = "pkg/common", enable = false }
 

@@ -72,9 +72,9 @@ dependencies = [
 
 [[package]]
 name = "anstream"
-version = "0.6.9"
+version = "0.6.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3fde6067df7359f2d6335ec1a50c1f8f825801687d10da0cc4c6b08e3f6afd15"
+checksum = "6e2e1ebcb11de5c03c67de28a7df593d32191b44939c482e97702baaaa6ab6a5"
 dependencies = [
  "anstyle",
  "anstyle-parse",
@@ -1632,9 +1632,9 @@ dependencies = [
 
 [[package]]
 name = "roto"
-version = "0.2.0-rc0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc0c1fc5208c034ca0a47f1b604e446ff5ef7ad725eb468f183ab64c61b5ed07"
+checksum = "dc5e48d3c4cf45811b4e93ec359548434149eab05f32b67fe35b7a31628009e0"
 dependencies = [
  "arc-swap",
  "bytes",
@@ -1704,9 +1704,9 @@ dependencies = [
 
 [[package]]
 name = "rotonda-fsm"
-version = "0.1.0-rc0"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd072c7a361c58ec598b3238ae8848ac38e0573af239a9284c72f74c083cf27b"
+checksum = "eac66721bf3780f38b671cf2ce75c810db54e8549dbc7444a2f89311e969862d"
 dependencies = [
  "bytes",
  "log",
@@ -1727,9 +1727,9 @@ dependencies = [
 
 [[package]]
 name = "rotonda-store"
-version = "0.3.0-rc0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ac90f7f855dd4a382add56a6b719c82c4efc96b1691d03de6f868fd1f449083"
+checksum = "40b305bbb60bc1ff074a9ca68ed462625d7d6dd792211586f64515b1e55f652c"
 dependencies = [
  "arc-swap",
  "crossbeam-epoch",
@@ -1741,9 +1741,9 @@ dependencies = [
 
 [[package]]
 name = "routecore"
-version = "0.4.0-rc0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e74e425676b9279297c62620b325bf9341e2594ad2d3a6edd82b0c19cf9c09c4"
+checksum = "7c899795a3dcdfb5681b559bf38378851e837519a9302d4ff80ea90c3a88c82d"
 dependencies = [
  "bytes",
  "chrono",
@@ -1982,9 +1982,9 @@ dependencies = [
 
 [[package]]
 name = "smallvec"
-version = "1.12.0"
+version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2593d31f82ead8df961d8bd23a64c2ccf2eb5dd34b0a34bfb4dd54011c72009e"
+checksum = "3b187f0231d56fe41bfb12034819dd2bf336422a5866de41bc3fec4b2e3883e8"
 dependencies = [
  "serde",
 ]

@@ -240,20 +240,20 @@ mod tests {
         // when the expected roto scripts exist in the mock filesystem
         let readable_paths: [(PathBuf, String); 4] = [
             (
-                "etc/bgp-in-filter.roto".into(),
-                include_str!("../etc/bgp-in-filter.roto").into(),
+                "etc/rotonda/filters/bgp-in-filter.roto".into(),
+                include_str!("../etc/rotonda/filters/bgp-in-filter.roto").into(),
             ),
             (
-                "etc/bmp-in-filter.roto".into(),
-                include_str!("../etc/bmp-in-filter.roto").into(),
+                "etc/rotonda/filters/bmp-in-filter.roto".into(),
+                include_str!("../etc/rotonda/filters/bmp-in-filter.roto").into(),
             ),
             (
-                "etc/rib-in-pre.roto".into(),
-                include_str!("../etc/rib-in-pre-filter.roto").into(),
+                "etc/rotonda/filters/rib-in-pre.roto".into(),
+                include_str!("../etc/rotonda/filters/rib-in-pre-filter.roto").into(),
             ),
             (
-                "etc/rib-in-post.roto".into(),
-                include_str!("../etc/rib-in-post-filter.roto").into(),
+                "etc/rotonda/filters/rib-in-post.roto".into(),
+                include_str!("../etc/rotonda/filters/rib-in-post-filter.roto").into(),
             ),
         ];
         let mock_io = TheFileIo::new(readable_paths);
@@ -268,7 +268,7 @@ mod tests {
         assert!(!config_source.is_path());
 
         // and the configuration should be correct
-        assert_eq!(conf.roto_scripts_path, Some("etc/".into()));
+        assert_eq!(conf.roto_scripts_path, Some("etc/rotonda/filters".into()));
         assert_eq!(conf.log.log_target, LogTarget::Stderr);
         assert_eq!(
             conf.log.log_level,

@@ -308,7 +308,7 @@ mod tests {
         assert!(!config_source.is_path());
 
         // and the configuration should be correct
-        assert_eq!(conf.roto_scripts_path, Some("etc/".into()));
+        assert_eq!(conf.roto_scripts_path, Some("etc/rotonda/filters".into()));
         assert_eq!(conf.log.log_target, LogTarget::Stderr);
         assert_eq!(
             conf.log.log_level,

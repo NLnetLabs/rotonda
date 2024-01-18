@@ -2,8 +2,9 @@
 
 ## 0.1.0
 
-Unreleased
+Released 2024-01-18
 
+First release.
 
 Breaking changes
 

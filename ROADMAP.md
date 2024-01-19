@@ -5,13 +5,19 @@ Roadmap
 - ✅ work item complete
 - 🦀 work item in progress
 - 💤 work item not started yet
+- ↑ updated version
 
 General Features
 ================
 
-In order of priority:
+RELEASED
 
-MVP
+rotonda 0.1
+rotonda-fsm 0.1
+roto 0.2
+routecore 0.4
+rotonda-store 0.3
+rotoro -
 
 - ✅ BMP listener
 - ✅ BMP proxy
@@ -20,33 +26,45 @@ MVP
 - ✅ client-specific runtime application with BMP ingress and RIBs
 - ✅ `roto` filtering language
 - ✅ BGP passive speaker
-- 🦀 daemonize
+- ✅ limited systemd functionality
 - 🦀 ~~BGP limited active speaker~~ POSTPONED
-- 🦀 Documentation
-- 🦀 Packaging
+- ✅ Documentation
+- ✅ Packaging
+
+NEXT RELEASE
+
+↑ rotonda 0.1.x
+  rotonda-fsm 0.1
+↑ roto 0.2.x
+  routecore 0.4
+  rotonda-store 0.3
+  rotoro -
+
+- 🦀 implement FilterMap (user-defined rx/tx and RIB storage type)
+- 🦀 implement passive external data source: RIBs
 
 NEXT RELEASES
 
-Each item may constitute a new release
-
-- 🦀 ingress connectors (e.g. Kafka, MQTT)
-- 🦀 egress connectors (e.g. Kafka, MQTT)
-- 💤 create plugin system.
-- 💤 `mrt` file connector from RIBs.
-- 💤 egress connector to parquet.
-- 🦀 query engine REST API
-- 💤 query engine CLI
-- 🦀 historical records storage + snapshotting ("3 weeks of data")
-- 🦀 Distributed `rotonda`-`rotonda` setup with `rotoro` (experimental)
+- 💤 support more AFI/SAFIs, e.g. FlowSpec, L2VPN, MPLS
+- 💤 emit BGP packets as events on OutputStream
+- 💤 egress modified/created BGP packets (on peering sessions)
+- 💤 RIB split over in-memory and on-disk
+- 💤 refactor configuration: dynamic units reconfiguration with RESTCONF/yang+json
+- 💤 implement active external data sources: RTR
+- 💤 more ingress connectors (e.g. Kafka, MQTT, mrt)
+- 💤 more egress connectors (e.g. Kafka, Parquet, mrt)
+- 💤 create plugin system
+- 💤 query engine over (split) RIBs.
+- 💤 Rotonda shell
+- 💤 Distributed `rotonda`-`rotonda` setup with `rotoro` (experimental)
 
 
 Development per Component
 =========================
 
-
 ## `Roto language`
 
-MVP
+RELEASED 0.2
 
 - ✅ language lay-out
 - ✅ EBNF scheme
@@ -54,88 +72,99 @@ MVP
 - ✅ create experimental compiler
 - ✅ create experimental virtual machine
 - ✅ implement all methods on `roto` types
-- ✅ Integrate into `rotonda`
-- 💤 create user-friendly error messaging
-- 🦀 extensive stress testing
-- 🦀 create high-level overview documentation
+- ✅ integrate into `rotonda`
+- ✅ implement FilterMap (user-defined rx/tx)
+- 💤 ~create user-friendly error messaging~
+- 🦀 ~extensive stress testing
+- 🦀 create manual-like docs
+- ✅ create high-level overview documentation
+
+UNRELEASED 0.2.x
+
+- 🦀 complete passive external data sources for RIBS
 
 NEXT RELEASES
 
-- 🦀 Simple passive data sources use cases
+- 💤 implement more passive external data sources
+- 💤 implement active external data sources: RTR
+- 🦀 create reference-level documentation 
 - 💤 create namespaces / modules system
 - 💤 create user-configurable graph DSL for units
 - 💤 create user-configurable query DSL
 - 💤 create dev documentation
-- 💤 create manual-like docs
-- 💤 create reference-level documentation 
 
 
 ## `Rotonda-fsm`
 
-MVP
+RELEASE 0.1
 
 - ✅ BMP state machine
 - ✅ BGP state machine
 - ✅ BGP passive speaker (session management)
-- 🦀 ~BGP minimal active speaker~
 
-NEXT RELEASES
+UNRELEASED 0.2
 
-- 💤 more BGP active speaker features
+- 🦀 BGP active speaker
 
 
 ## `Routecore`
 
-MVP
+RELEASE 0.4
 
 - ✅ prefix types
 - ✅ route record example types
 - ✅ BGP/BMP types for parsing
-- 🦀 ~~create minimal BGP packet builder: Withdrawal for one prefix~~
-- 🦀 ~~create minimal BGP packet modifier: Add Community~~
+
+UNRELEASED 0.5
+
+- 🦀 create BGP packet builder
+- 💤 partial FlowSpec parser
 
 NEXT RELEASES
 
-- 💤 create BGP packet builder
 - 💤 BGPsec parser
 
 
 ## `Rotonda`
 
-MVP
+RELEASE 0.1
 
 - ✅ setup `tokio` skeleton with logging etc.
 - ✅ setup BMP listener
 - ✅ REST API setup
 - ✅ MQTT OutputConnector
-- ✅ BMP proxy
 - ✅ integrate BGP passive listener (BGP EventSource)
 - ✅ virtual RIB experimental implementation
-- 🦀 ~integrate BGP limited speaker (BGP EventEmitter)~
-- 🦀 installation and usage documentation 
-- 🦀 limited packaging
+- ✅ installation and usage documentation 
+- ✅ limited packaging
+- ✅ limited `systemd` integration
+
+UNRELEASED 0.1.x
+
+- 🦀 passive external data sources: RIBs
+- 🦀 implement FilterMap (user-defined rx/tx and RIB storage type)
 
 NEXT RELEASES
 
-- 🦀 file OutputConnector
-- 🦀 user-configurable RIBs experimental implementation
-- 🦀 unit structure
+- 💤 emit BGP packets as events on OutputStream
+- 💤 egress modified/created BGP packets (on peering sessions)
+- 💤 improved daemon functionality: drop privileges
+- 🦀 refactor configuration: dynamic units reconfiguration with RESTCONF/yang+json
 - 🦀 implement tracing
+- 💤 RIB split over in-memory and on-disk
 - 💤 namespaces / modules support
+- 💤 more ingress connectors (e.g. Kafka, mrt)
+- 💤 more egress connectors (e.g. Kafka, Parquet, mrt, (timescale) RDBMS)
+- 🦀 BMP proxy
 - 💤 create experimental global registry
-- 💤 Kafka connector
-- 💤 split-off EventSource, OutputConnector units
-- 💤 split-off EventEmitter, OutputConnector units
-- 💤 time-series DB OutputConnector
-- 💤 keep history window (serials)
 - 💤 snapshot/restore functionality
-- 💤 `systemd` integration
+- 💤 RIB diff functionality
 - 💤 create experimental distributed units
 
 
 ## `Rotoro`
 
-NEXT RELEASES
+MVP
 
 - 🦀 design wire protocol and select a layout (AVRO?)
 - 💤 create experimental de/serialization
@@ -144,7 +173,7 @@ NEXT RELEASES
 
 ## `Rotonda-store`
 
-MVP
+0.3
 
 - ✅ stabilize single-threaded store
 - ✅ stabilize multi-threaded store

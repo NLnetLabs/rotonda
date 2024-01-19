@@ -132,7 +132,7 @@ impl Config {
 
             None => {
                 // No --config command line argument specified, use the embedded MVP config
-                let bytes = include_bytes!("../etc/rotonda.conf").to_vec();
+                let bytes = include_bytes!("../etc/rotonda/rotonda.builtin.conf").to_vec();
 
                 // Detect command line arguments designed to override and alter the embedded MVP config file.
                 let mut mvp_overrides = MvpConfig::default();

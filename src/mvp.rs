@@ -240,19 +240,19 @@ mod tests {
         // when the expected roto scripts exist in the mock filesystem
         let readable_paths: [(PathBuf, String); 4] = [
             (
-                "etc/rotonda/filters/bgp-in-filter.roto".into(),
+                "/etc/rotonda/filters/bgp-in-filter.roto".into(),
                 include_str!("../etc/rotonda/filters/bgp-in-filter.roto").into(),
             ),
             (
-                "etc/rotonda/filters/bmp-in-filter.roto".into(),
+                "/etc/rotonda/filters/bmp-in-filter.roto".into(),
                 include_str!("../etc/rotonda/filters/bmp-in-filter.roto").into(),
             ),
             (
-                "etc/rotonda/filters/rib-in-pre.roto".into(),
+                "/etc/rotonda/filters/rib-in-pre.roto".into(),
                 include_str!("../etc/rotonda/filters/rib-in-pre-filter.roto").into(),
             ),
             (
-                "etc/rotonda/filters/rib-in-post.roto".into(),
+                "/etc/rotonda/filters/rib-in-post.roto".into(),
                 include_str!("../etc/rotonda/filters/rib-in-post-filter.roto").into(),
             ),
         ];
@@ -268,7 +268,7 @@ mod tests {
         assert!(!config_source.is_path());
 
         // and the configuration should be correct
-        assert_eq!(conf.roto_scripts_path, Some("etc/rotonda/filters".into()));
+        assert_eq!(conf.roto_scripts_path, Some("/etc/rotonda/filters".into()));
         assert_eq!(conf.log.log_target, LogTarget::Stderr);
         assert_eq!(
             conf.log.log_level,
@@ -308,7 +308,7 @@ mod tests {
         assert!(!config_source.is_path());
 
         // and the configuration should be correct
-        assert_eq!(conf.roto_scripts_path, Some("etc/rotonda/filters".into()));
+        assert_eq!(conf.roto_scripts_path, Some("/etc/rotonda/filters".into()));
         assert_eq!(conf.log.log_target, LogTarget::Stderr);
         assert_eq!(
             conf.log.log_level,
@@ -347,6 +347,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "BMP proxy currently disabled"]
     fn mvp_config_with_proxy_destination_cmd_line_arg_should_have_proxy_target(
     ) {
         let app = Command::new("test");
@@ -399,6 +400,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "BMP proxy currently disabled"]
     fn mvp_config_with_proxy_and_mqtt_destination_cmd_line_args_should_have_both_targets(
     ) {
         enable_logging("trace");

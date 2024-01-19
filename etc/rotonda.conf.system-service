@@ -45,9 +45,7 @@ http_api_path = "/rib-in-post/"
 type = "null-out"
 sources = ["rib-in-post"]
 
-# EDIT THIS OR COMMENT OUT SECTION
-destination = "SOME_IP_ADDRESS:SOME_PORT"
-
+# Commenting out this whole section will disable the mqtt interface
 [targets.mqtt]
 type = "mqtt-out"
 sources = ["bmp-in", "bgp-in", "rib-in-pre", "rib-in-post"]

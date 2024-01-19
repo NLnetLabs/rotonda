@@ -1649,7 +1649,7 @@ dependencies = [
 
 [[package]]
 name = "rotonda"
-version = "0.1.0"
+version = "0.1.1-dev"
 dependencies = [
  "allocator-api2",
  "anyhow",

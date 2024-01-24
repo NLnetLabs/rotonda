@@ -1632,12 +1632,11 @@ dependencies = [
 
 [[package]]
 name = "roto"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc5e48d3c4cf45811b4e93ec359548434149eab05f32b67fe35b7a31628009e0"
+version = "0.2.1-dev"
 dependencies = [
  "arc-swap",
  "bytes",
+ "chrono",
  "log",
  "nom",
  "paste",

@@ -331,7 +331,7 @@ mod test {
     use std::str::FromStr;
 
     use roto::types::builtin::{
-        BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus,
+        RawRouteWithDeltas, RotondaId, RouteStatus,
     };
     use routecore::bgp::{message::SessionConfig, types::AfiSafi};
 
@@ -354,13 +354,11 @@ mod test {
         let roto_update_msg = roto::types::builtin::UpdateMessage::new(
             bgp_update_bytes,
             SessionConfig::modern(),
-        ).unwrap();
-        let bgp_update_msg =
-            Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        ).unwrap();;
         let raw_route = RawRouteWithDeltas::new_with_message_ref(
             delta_id,
             prefix,
-            &bgp_update_msg,
+            roto_update_msg,
             AfiSafi::Ipv4Unicast,
             None,
             RouteStatus::InConvergence,

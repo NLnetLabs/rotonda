@@ -11,13 +11,15 @@ use roto::types::{
     lazyrecord_types::BmpMessage, typevalue::TypeValue,
 };
 use routecore::bmp::message::Message;
+use roto::types::builtin::SourceId;
+
 use tokio::sync::Mutex;
 use tokio::{io::AsyncRead, net::TcpStream};
 
 use crate::common::roto::{
     FilterName, FilterOutput, RotoScripts, ThreadLocalVM,
 };
-use crate::payload::{RouterId, SourceId};
+use crate::payload::RouterId;
 use crate::tracing::Tracer;
 use crate::{
     comms::{Gate, GateStatus},
@@ -305,7 +307,7 @@ impl RouterHandler {
         }) = Self::VM
             .with(|vm| {
                 let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(
-                    BytesRecord(msg),
+                    msg.into(),
                 ));
                 self.roto_scripts.exec_with_tracer(
                     vm,
@@ -329,13 +331,10 @@ impl RouterHandler {
             if let TypeValue::Builtin(BuiltinTypeValue::BmpMessage(msg)) =
                 east
             {
-                // let msg = Arc::into_inner(msg).unwrap(); // This should succeed
-                let msg = msg.0;
-
                 self.status_reporter
                     .message_processed(bmp_state.router_id());
 
-                let mut res = bmp_state.process_msg(received, msg, trace_id);
+                let mut res = bmp_state.process_msg(received, msg.into_inner(), trace_id);
 
                 match res.message_type {
                     MessageType::InvalidMessage { .. } => {

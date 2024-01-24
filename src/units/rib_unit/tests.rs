@@ -204,7 +204,6 @@ async fn process_update_equivalent_route_twice() {
         assert_eq!(
             route
                 .raw_message
-                .raw_message()
                 .0
                 .communities()
                 .unwrap()
@@ -234,7 +233,6 @@ async fn process_update_equivalent_route_twice() {
         assert_eq!(
             route
                 .raw_message
-                .raw_message()
                 .0
                 .communities()
                 .unwrap()
@@ -270,7 +268,6 @@ async fn process_update_equivalent_route_twice() {
         assert_eq!(
             route
                 .raw_message
-                .raw_message()
                 .0
                 .communities()
                 .unwrap()
@@ -684,12 +681,10 @@ fn mk_route_update_with_communities(
         UpdateMessage::new(bgp_update_bytes, SessionConfig::modern())
             .unwrap();
     let afi_safi = if prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
-    let bgp_update_msg =
-        Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
     let route = RawRouteWithDeltas::new_with_message_ref(
         delta_id,
         *prefix,
-        &bgp_update_msg,
+        roto_update_msg,
         afi_safi,
         None,
         route_status,

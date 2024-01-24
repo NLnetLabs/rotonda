@@ -938,12 +938,12 @@ mod tests {
             UpdateMessage::new(bgp_update_bytes, SessionConfig::modern())
             .unwrap();
         let afi_safi = if prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
-        let bgp_update_msg =
-            Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+        // let bgp_update_msg =
+        //     Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
         let mut route = RawRouteWithDeltas::new_with_message_ref(
             delta_id,
             prefix,
-            &bgp_update_msg,
+            roto_update_msg,
             afi_safi,
             None,
             RouteStatus::InConvergence,
@@ -977,12 +977,11 @@ mod tests {
         let roto_update_msg =
             UpdateMessage::new(bgp_update_bytes, SessionConfig::modern()).unwrap();
         let afi_safi = if prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
-        let bgp_update_msg =
-            Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+
         let mut route = RawRouteWithDeltas::new_with_message_ref(
             delta_id,
             prefix,
-            &bgp_update_msg,
+            roto_update_msg,
             afi_safi,
             None,
             RouteStatus::Withdrawn,

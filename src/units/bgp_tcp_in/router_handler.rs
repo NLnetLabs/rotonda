@@ -40,7 +40,7 @@ use roto::types::builtin::SourceId;
 use crate::common::roto::{FilterOutput, RotoScripts, ThreadLocalVM};
 use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
 use crate::comms::{Gate, GateStatus, Terminated};
-use crate::payload::{Payload, SourceId, Update};
+use crate::payload::{Payload, Update};
 use crate::units::bgp_tcp_in::status_reporter::BgpTcpInStatusReporter;
 use crate::units::Unit;
 
@@ -393,14 +393,14 @@ impl Processor {
         fn mk_payload(
             received: DateTime<Utc>,
             prefix: Prefix,
-            msg: &Arc<BgpUpdateMessage>,
+            msg: UpdateMessage,
             source_id: &SourceId,
             afi_safi: AfiSafi,
             path_id: Option<PathId>,
             route_status: RouteStatus,
         ) -> Payload {
             let rrwd = RawRouteWithDeltas::new_with_message_ref(
-                msg.message_id(),
+                (RotondaId(0), 0),
                 prefix,
                 msg,
                 afi_safi,
@@ -443,11 +443,7 @@ impl Processor {
         let source_id: SourceId = "unknown".into(); // TODO
         let rot_id = RotondaId(0_usize);
         let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
-        let msg = Arc::new(BgpUpdateMessage::new(
-            (rot_id, ltime),
-            UpdateMessage(pdu.clone()),
-        ));
-
+    
         payloads.extend(
             pdu.unicast_announcements_vec()?.iter()
                 .inspect(|nlri| {
@@ -459,7 +455,7 @@ impl Processor {
                     mk_payload(
                         received,
                         nlri.prefix,
-                        &msg,
+                        UpdateMessage(pdu.clone()),
                         &source_id,
                         afi_safi,
                         nlri.path_id(),
@@ -479,7 +475,7 @@ impl Processor {
                     mk_payload(
                         received,
                         nlri.prefix,
-                        &msg,
+                        UpdateMessage(pdu.clone()),
                         &source_id,
                         afi_safi,
                         nlri.path_id(),

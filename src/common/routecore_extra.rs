@@ -2,8 +2,9 @@
 use std::{iter::Peekable, net::IpAddr, sync::Arc};
 
 use bytes::Bytes;
+use chrono::Utc;
 use roto::types::builtin::{
-    BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus,
+    PeerId, PeerRibType, Provenance, RawRouteWithDeltas, RouteContext, RouteProperties, RouteStatus
 };
 use routecore::{
     addr::Prefix,
@@ -13,11 +14,13 @@ use routecore::{
         update::FourOctetAsn,
         update_builder::{ComposeError, UpdateBuilder},
         SessionConfig, UpdateMessage,
-    }, types::AfiSafi}
+    }, path_attributes::BgpIdentifier, types::AfiSafi}
 };
 use smallvec::SmallVec;
 
-use crate::payload::{Payload, SourceId};
+use roto::types::builtin::SourceId;
+
+use crate::payload::Payload;
 
 // Originally based on code in bgmp::main.rs.
 pub fn generate_alternate_config(
@@ -45,6 +48,8 @@ pub fn mk_withdrawals_for_peers_announced_prefixes<'a, I>(
     router_id: Arc<String>,
     peer_address: IpAddr,
     peer_asn: Asn,
+    // peer_bgp_id: BgpIdentifier,
+    // peer_distuingisher: [u8; 8],
     source_id: SourceId,
 ) -> Result<SmallVec<[Payload; 8]>, ComposeError>
 where
@@ -86,16 +91,24 @@ where
         for basic_nlri in bgp_msg.unicast_withdrawals_vec()? {
             let afi_safi = if basic_nlri.prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
 
-            let route = mk_route_for_prefix(
-                router_id.clone(),
-                bgp_msg.clone(),
-                peer_address,
-                peer_asn,
-                basic_nlri.prefix,
-                afi_safi,
-                basic_nlri.path_id(),
-                RouteStatus::Withdrawn,
-            );
+            let route: RawRouteWithDeltas = RouteContext {
+                    msg: bgp_msg.clone(),
+                    provenance: Provenance {
+                        timestamp: Utc::now(),
+                        router_id: router_id.clone(),
+                        source_id: source_id.clone(),
+                        peer_id: PeerId::new(peer_address, peer_asn),
+                        peer_bgp_id: BgpIdentifier::from([0,0,0,0]),
+                        peer_distuingisher: [0,0,0,0,0,0,0,0],
+                        peer_rib_type: PeerRibType::default(),
+                    },
+                    route_properties: RouteProperties {
+                        prefix: basic_nlri.prefix,
+                        path_id: basic_nlri.path_id(),
+                        afi_safi,
+                        status: RouteStatus::Withdrawn,
+                    },
+                }.into();
 
             let payload =
                 Payload::new(source_id.clone(), route, None);
@@ -118,30 +131,4 @@ where
         Ok(_) | Err(ComposeError::PduTooLarge(_)) => builder.into_message(),
         Err(err) => Err(err),
     }
-}
-
-pub fn mk_route_for_prefix(
-    router_id: Arc<String>,
-    update: UpdateMessage<Bytes>,
-    peer_address: IpAddr,
-    peer_asn: Asn,
-    prefix: Prefix,
-    afi_safi: AfiSafi,
-    path_id: Option<PathId>,
-    route_status: RouteStatus,
-) -> RawRouteWithDeltas {
-    let delta_id = (RotondaId(0), 0); // TODO
-    let roto_update_msg = roto::types::builtin::UpdateMessage(update);
-    let raw_msg = Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
-    RawRouteWithDeltas::new_with_message_ref(
-        delta_id,
-        prefix,
-        &raw_msg,
-        afi_safi,
-        path_id,
-        route_status,
-    )
-    .with_peer_ip(peer_address)
-    .with_peer_asn(peer_asn)
-    .with_router_id(router_id)
 }

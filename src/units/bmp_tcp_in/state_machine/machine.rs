@@ -1,7 +1,8 @@
 use atomic_enum::atomic_enum;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use roto::types::builtin::RouteStatus;
+use roto::types::builtin::{PeerId, PeerRibType, Provenance, 
+    RawRouteWithDeltas, RouteContext, RouteProperties, RouteStatus};
 
 use rotonda_fsm::bgp::session;
 /// RFC 7854 BMP processing.
@@ -31,8 +32,7 @@ use routecore::{
     bgp::{
         message::{
             nlri::Nlri, open::CapabilityType, SessionConfig, UpdateMessage,
-        },
-        types::AfiSafi,
+        }, types::AfiSafi
     },
     bmp::message::{
         InformationTlvType, InitiationMessage, Message as BmpMsg,
@@ -40,23 +40,22 @@ use routecore::{
         RouteMonitoring,
     },
 };
+use roto::types::builtin::SourceId;
+
 use smallvec::SmallVec;
 
 use std::{
-    collections::{hash_map::Keys, HashMap, HashSet},
-    ops::ControlFlow,
-    sync::Arc,
+    collections::{hash_map::Keys, HashMap, HashSet}, io::Read, ops::ControlFlow, sync::Arc
 };
 
 use crate::{
     common::{
         routecore_extra::{
-            generate_alternate_config, mk_route_for_prefix,
-            mk_withdrawals_for_peers_announced_prefixes,
+            generate_alternate_config, mk_withdrawals_for_peers_announced_prefixes
         },
         status_reporter::AnyStatusReporter,
     },
-    payload::{Payload, RouterId, SourceId, Update},
+    payload::{Payload, RouterId, Update},
 };
 
 use super::{
@@ -738,6 +737,8 @@ where
         }
     }
 
+    // This is the method that explodes the RoutingMonitoringMessage into
+    // multiple routes.
     pub fn extract_route_monitoring_routes(
         &mut self,
         received: DateTime<Utc>,
@@ -754,7 +755,6 @@ where
         for a in update.announcements()? {
             match a {
                 Ok(a) => {
-                    let afi_safi = a.afi_safi();
                     match a {
                         Nlri::Unicast(nlri) | Nlri::Multicast(nlri) => {
                             let prefix = nlri.prefix;
@@ -764,16 +764,24 @@ where
                             }
 
                             // clone is cheap due to use of Bytes
-                            let route = mk_route_for_prefix(
-                                self.router_id.clone(),
-                                update.clone(),
-                                pph.address(),
-                                pph.asn(),
-                                prefix,
-                                afi_safi,
-                                nlri.path_id(),
-                                route_status,
-                            );
+                            let route: RawRouteWithDeltas = RouteContext {
+                                msg: update.clone(),
+                                provenance: Provenance {
+                                    timestamp: pph.timestamp(),
+                                    router_id: self.router_id.clone(),
+                                    source_id: self.source_id.clone(),
+                                    peer_id: PeerId::new(pph.address(), pph.asn()),
+                                    peer_bgp_id: pph.bgp_id().into(),
+                                    peer_distuingisher: <[u8; 8]>::try_from(pph.distinguisher()).unwrap(),
+                                    peer_rib_type: PeerRibType::from((pph.is_post_policy(), pph.adj_rib_type())),
+                                },
+                                route_properties: RouteProperties {
+                                    prefix,
+                                    path_id: None,
+                                    afi_safi: a.afi_safi(),
+                                    status: route_status,
+                                },
+                            }.into();
 
                             payloads.push(Payload::with_received(
                                 self.source_id.clone(),
@@ -818,17 +826,26 @@ where
                             .iter()
                             .all(|nlri| nlri.prefix != prefix)
                         {
-                            // clone is cheap due to use of Bytes
-                            let route = mk_route_for_prefix(
-                                self.router_id.clone(),
-                                update.clone(),
-                                pph.address(),
-                                pph.asn(),
-                                prefix,
-                                nlri.afi_safi(),
-                                None,
-                                RouteStatus::Withdrawn,
-                            );
+
+                            let route: RawRouteWithDeltas = 
+                                RouteContext {
+                                    msg: update.clone(),
+                                    provenance: Provenance {
+                                        timestamp: pph.timestamp(),
+                                        router_id: self.router_id.clone(),
+                                        source_id: self.source_id.clone(),
+                                        peer_id: PeerId::new(pph.address(), pph.asn()),
+                                        peer_bgp_id: pph.bgp_id().into(),
+                                        peer_distuingisher: <[u8; 8]>::try_from(pph.distinguisher()).unwrap(),
+                                        peer_rib_type: PeerRibType::default(),
+                                    },
+                                    route_properties: RouteProperties {
+                                        prefix,
+                                        path_id: wd.path_id(),
+                                        afi_safi: nlri.afi_safi(),
+                                        status: RouteStatus::Withdrawn,
+                                    },
+                                }.into();
 
                             payloads.push(Payload::with_received(
                                 self.source_id.clone(),
@@ -890,7 +907,7 @@ impl BmpState {
                 inner.process_msg(received, bmp_msg, trace_id)
             }
             BmpState::Terminated(inner) => {
-                inner.process_msg(bmp_msg, trace_id)
+                inner.process_msg(bmp_msg.into(), trace_id)
             }
             BmpState::_Aborted(source_id, router_id) => ProcessingResult::new(
                 MessageType::Aborted,

@@ -799,13 +799,11 @@ fn insert_routes(
                 bgp_update_bytes.clone(),
                 SessionConfig::modern(),
             ).unwrap();
-            let bgp_update_msg =
-                Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
             let afi_safi = if prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
             let raw_route = RawRouteWithDeltas::new_with_message_ref(
                 delta_id,
                 *prefix,
-                &bgp_update_msg,
+                roto_update_msg,
                 afi_safi,
                 None,
                 RouteStatus::InConvergence,

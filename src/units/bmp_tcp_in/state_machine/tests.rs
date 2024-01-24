@@ -11,11 +11,12 @@ use routecore::{
     asn::Asn,
     bmp::message::{Message as BmpMsg, PerPeerHeader},
 };
+use roto::types::builtin::SourceId;
 
 use crate::{
     bgp::encode::{mk_per_peer_header, Announcements, Prefixes},
     common::status_reporter::AnyStatusReporter,
-    payload::{Payload, SourceId, Update},
+    payload::{Payload, Update},
     tests::util::internal::get_testable_metrics_snapshot,
     units::bmp_tcp_in::{
         metrics::BmpTcpInMetrics,
@@ -662,12 +663,11 @@ fn peer_down_spreads_withdrawals_across_multiple_bgp_updates_if_needed() {
                     // per generated BGP UPDATE withdrawal message, instead
                     // compare the actual underlying BGP UPDATE.
                     let bgp_update_bytes =
-                        route.raw_message.raw_message().0.clone();
+                        route.raw_message.clone();
                     if !distinct_bgp_updates_seen.contains(&bgp_update_bytes)
                     {
                         num_withdrawals_seen += route
                             .raw_message
-                            .raw_message()
                             .0
                             .withdrawals()
                             .unwrap()

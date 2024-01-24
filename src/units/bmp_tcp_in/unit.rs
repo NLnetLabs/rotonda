@@ -17,6 +17,7 @@ use tokio::{
     sync::{Mutex, RwLock},
     time::sleep,
 };
+use roto::types::builtin::SourceId;
 
 use crate::{
     common::{
@@ -31,7 +32,6 @@ use crate::{
     },
     comms::{Gate, GateStatus, Terminated},
     manager::{Component, WaitPoint},
-    payload::SourceId,
     tokio::TokioTaskMetrics,
     tracing::Tracer,
     units::Unit,
@@ -662,6 +662,7 @@ mod tests {
     };
 
     use tokio::{sync::Mutex, time::timeout};
+    use roto::types::builtin::SourceId;
 
     use crate::{
         common::{
@@ -669,7 +670,6 @@ mod tests {
             status_reporter::AnyStatusReporter,
         },
         comms::{Gate, GateAgent, Terminated},
-        payload::SourceId,
         tests::util::{
             internal::{enable_logging, get_testable_metrics_snapshot},
             net::{

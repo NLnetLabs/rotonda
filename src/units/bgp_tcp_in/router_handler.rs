@@ -35,6 +35,8 @@ use rotonda_fsm::bgp::session::{
     Session,
 };
 
+use roto::types::builtin::SourceId;
+
 use crate::common::roto::{FilterOutput, RotoScripts, ThreadLocalVM};
 use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
 use crate::comms::{Gate, GateStatus, Terminated};

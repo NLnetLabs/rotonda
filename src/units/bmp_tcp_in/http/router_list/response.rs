@@ -2,9 +2,9 @@ use std::sync::{atomic::Ordering::SeqCst, Arc};
 
 use hyper::{Body, Response};
 use indoc::formatdoc;
+use roto::types::builtin::SourceId;
 
 use crate::{
-    payload::SourceId,
     units::bmp_tcp_in::{
         state_machine::{BmpState, BmpStateDetails},
         util::{calc_u8_pc, format_source_id},

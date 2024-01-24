@@ -8,6 +8,8 @@ use super::{
     status_reporter::BmpProxyStatusReporter,
 };
 
+use roto::types::builtin::SourceId;
+
 use crate::{
     common::{
         frim::FrimMap,
@@ -17,7 +19,7 @@ use crate::{
     },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
     manager::{Component, TargetCommand, WaitPoint},
-    payload::{Payload, SourceId, Update, UpstreamStatus},
+    payload::{Payload, Update, UpstreamStatus},
 };
 
 use async_trait::async_trait;

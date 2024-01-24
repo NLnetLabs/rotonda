@@ -295,10 +295,11 @@ mod tests {
         lazyrecord_types::BmpMessage, typevalue::TypeValue,
     };
     use routecore::{asn::Asn, bmp::message::PeerType};
+    use roto::types::builtin::SourceId;
 
     use crate::{
         bgp::encode::{Announcements, Prefixes},
-        payload::{Payload, SourceId},
+        payload::Payload,
         tests::util::internal::{
             enable_logging, get_testable_metrics_snapshot,
         },
@@ -540,7 +541,7 @@ mod tests {
         let source_id =
             SourceId::SocketAddr("127.0.0.1:8080".parse().unwrap());
         let bmp_msg =
-            BytesRecord(BmpMessage::from_octets(msg_buf).unwrap());
+            BytesRecord::from(BmpMessage::from_octets(msg_buf).unwrap());
         let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
         Update::Single(Payload::new(source_id, value, None))
     }

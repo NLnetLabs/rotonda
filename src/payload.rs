@@ -1,13 +1,12 @@
 use chrono::{DateTime, Utc};
 use roto::{types::typevalue::TypeValue, vm::OutputStreamQueue};
+use roto::types::builtin::SourceId;
 use rotonda_store::QueryResult;
 
 use smallvec::{smallvec, SmallVec};
 use std::{
     fmt::Display,
-    net::{IpAddr, SocketAddr},
     ops::ControlFlow,
-    sync::Arc,
 };
 use uuid::Uuid;
 
@@ -19,80 +18,6 @@ use crate::{
 // TODO: make this a reference
 pub type RouterId = String;
 
-//------------ SourceId ------------------------------------------------------
-
-/// The source of received updates.
-///
-/// Not all incoming data has to come from a TCP/IP connection. This enum
-/// exists to represent both the TCP/IP type of incoming connection that we
-/// receive data from today as well as other connection types in future, and
-/// can also be used to represent alternate sources of incoming data such as
-/// replay from file or test data created on the fly.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum SourceId {
-    SocketAddr(SocketAddr),
-    Named(Arc<String>),
-}
-
-impl Default for SourceId {
-    fn default() -> Self {
-        "unknown".into()
-    }
-}
-
-impl SourceId {
-    pub fn generated() -> Self {
-        Self::from("generated")
-    }
-
-    pub fn socket_addr(&self) -> Option<&SocketAddr> {
-        match self {
-            SourceId::SocketAddr(addr) => Some(addr),
-            SourceId::Named(_) => None,
-        }
-    }
-
-    pub fn ip(&self) -> Option<IpAddr> {
-        match self {
-            SourceId::SocketAddr(addr) => Some(addr.ip()),
-            SourceId::Named(_) => None,
-        }
-    }
-
-    pub fn name(&self) -> Option<&str> {
-        match self {
-            SourceId::SocketAddr(_) => None,
-            SourceId::Named(name) => Some(name),
-        }
-    }
-}
-
-impl Display for SourceId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SourceId::SocketAddr(addr) => addr.fmt(f),
-            SourceId::Named(name) => name.fmt(f),
-        }
-    }
-}
-
-impl From<SocketAddr> for SourceId {
-    fn from(addr: SocketAddr) -> Self {
-        SourceId::SocketAddr(addr)
-    }
-}
-
-impl From<String> for SourceId {
-    fn from(name: String) -> Self {
-        SourceId::Named(name.into())
-    }
-}
-
-impl From<&str> for SourceId {
-    fn from(name: &str) -> Self {
-        SourceId::Named(name.to_string().into())
-    }
-}
 
 //------------ UpstreamStatus ------------------------------------------------
 

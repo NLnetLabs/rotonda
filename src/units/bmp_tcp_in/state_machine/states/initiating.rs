@@ -4,9 +4,11 @@ use bytes::Bytes;
 use routecore::bmp::message::Message as BmpMsg;
 
 use crate::{
-    payload::{RouterId, SourceId},
+    payload::RouterId,
     units::bmp_tcp_in::state_machine::machine::BmpStateIdx,
 };
+
+use roto::types::builtin::SourceId;
 
 use super::super::{
     machine::{BmpState, BmpStateDetails, Initiable},

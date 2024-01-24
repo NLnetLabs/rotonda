@@ -2,11 +2,10 @@ use std::{fmt::Display, sync::Arc};
 
 use log::error;
 
-use crate::{
-    common::status_reporter::{
+use roto::types::builtin::SourceId;
+
+use crate::common::status_reporter::{
         sr_log, AnyStatusReporter, Chainable, Named, TargetStatusReporter,
-    },
-    payload::SourceId,
 };
 
 use super::metrics::BmpFsOutMetrics;

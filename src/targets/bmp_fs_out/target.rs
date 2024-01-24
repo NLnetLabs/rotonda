@@ -9,6 +9,8 @@ use std::{
     sync::Arc,
 };
 
+use roto::types::builtin::SourceId;
+
 use super::{
     metrics::BmpFsOutMetrics, status_reporter::BmpFsOutStatusReporter,
 };
@@ -22,7 +24,7 @@ use crate::{
     },
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
     manager::{Component, TargetCommand, WaitPoint},
-    payload::{Payload, SourceId, Update, UpstreamStatus},
+    payload::{Payload, Update, UpstreamStatus},
 };
 
 use async_trait::async_trait;

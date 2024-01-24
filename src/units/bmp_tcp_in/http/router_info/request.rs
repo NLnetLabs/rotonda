@@ -7,10 +7,10 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use hyper::{Body, Method, Request, Response};
 use tokio::sync::Mutex;
+use roto::types::builtin::SourceId;
 
 use crate::{
     http::{self, PercentDecodedPath, ProcessRequest},
-    payload::SourceId,
     units::bmp_tcp_in::{
         metrics::BmpTcpInMetrics,
         state_machine::{BmpState, BmpStateDetails, BmpStateMachineMetrics},

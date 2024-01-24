@@ -5,11 +5,13 @@ use std::{
 
 use log::error;
 
+use roto::types::builtin::SourceId;
+
 use crate::{
     common::status_reporter::{
         sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter,
     },
-    payload::{FilterError, SourceId},
+    payload::FilterError,
 };
 
 use super::metrics::RotoFilterMetrics;

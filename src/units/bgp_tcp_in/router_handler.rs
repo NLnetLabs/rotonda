@@ -1,5 +1,7 @@
 use std::cell::RefCell;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeSet;
+use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
 use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
@@ -7,20 +9,26 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use log::{debug, error};
-use roto::types::builtin::{
-    BgpUpdateMessage, /*IpAddress,*/
-    RotondaId, RouteStatus, UpdateMessage,
-};
+// use roto::types::builtin::{
+//     BgpUpdateMessage, /*IpAddress,*/
+//     RotondaId, RouteStatus, UpdateMessage,
+// };
 use roto::types::builtin::{
     /*Asn as RotoAsn,*/
-    BuiltinTypeValue, RawRouteWithDeltas,
+    BuiltinTypeValue, NlriStatus, PeerId, PeerRibType, Provenance, RouteContext
 };
+use roto::types::collections::BytesRecord;
+use roto::types::lazyrecord_types::BgpUpdateMessage;
+// use roto::types::lazyrecord_types::BgpUpdateMessage;
 use roto::types::typevalue::TypeValue;
-use routecore::addr::Prefix;
-use routecore::asn::Asn;
-use routecore::bgp::message::UpdateMessage as UpdatePdu;
-use routecore::bgp::message::nlri::PathId;
-use routecore::bgp::types::AfiSafi;
+use inetnum::addr::Prefix;
+use inetnum::asn::Asn;
+// use routecore::bgp::message::UpdateMessage as UpdatePdu;
+use routecore::bgp::workshop::route::BasicNlri;
+use routecore::bgp::message::SessionConfig;
+use routecore::bgp::path_attributes::{self, AttributesMap, PaMap};
+use routecore::bgp::types::{AfiSafi, PathAttributeType};
+use routecore::bgp::workshop::route::RouteWorkshop;
 use smallvec::SmallVec;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -35,7 +43,7 @@ use rotonda_fsm::bgp::session::{
     Session,
 };
 
-use roto::types::builtin::SourceId;
+use roto::types::builtin::basic_route::SourceId;
 
 use crate::common::roto::{FilterOutput, RotoScripts, ThreadLocalVM};
 use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
@@ -141,6 +149,52 @@ impl Processor {
         let peer_addr_cfg = session.config().remote_prefix_or_exact();
 
         let mut rejected = false;
+        let mut connection_id = DefaultHasher::new();
+        session.connected_addr().hash(&mut connection_id);
+
+        let mut provenance = Provenance {
+            timestamp: Utc::now(),
+            // connection_id: connection_id.finish() as u32,
+            // Provisional PeerId!
+            connection_id: session.connected_addr().unwrap(),
+            peer_id: PeerId { addr: "0.0.0.0".parse().unwrap(), asn: 0.into() }, 
+            peer_bgp_id: session.config().bgp_id().into(),
+            peer_distuingisher: [0,0,0,0,0,0,0,0],
+            peer_rib_type: PeerRibType::OutPost,
+        };
+
+        if let Some(negotiated) = session.negotiated() {
+            let mut connection_id = DefaultHasher::new();
+            session.connected_addr().hash(&mut connection_id);
+
+            provenance = Provenance {
+                timestamp: Utc::now(),
+                // router_id: 0,
+                connection_id: session.connected_addr().unwrap(),
+                peer_id: PeerId { addr: negotiated.remote_addr(), asn: negotiated.remote_asn() },
+                peer_bgp_id: session.config().bgp_id().into(),
+                peer_distuingisher: [0,0,0,0,0,0,0,0],
+                peer_rib_type: PeerRibType::OutPost,
+            };
+        }
+
+            //capabilities: Vec<Capability<Vec<u8>>,
+    // hold_time: u16, // smaller of the two OPENs, 0 or >= 3
+    // remote_bgp_id: [u8; 4],
+    // remote_asn: Asn,
+    // remote_addr: IpAddr,
+    // addpath: Vec<AddpathFamDir>,
+
+        // fn local_asn(&self) -> Asn;
+        // fn bgp_id(&self) -> [u8; 4];
+        // fn remote_addr_allowed(&self, remote_addr: IpAddr) -> bool;
+        // fn remote_asn_allowed(&self, remote_asn: Asn) -> bool;
+        // fn hold_time(&self) -> Option<u16>;
+        // fn is_exact(&self) -> bool;
+    
+        // fn protocols(&self) -> Vec<AfiSafi>;
+        // fn addpath(&self) -> Vec<AfiSafi>;
+        // let mut ticker = session.tick();
 
         // XXX is this all OK cancel-safety-wise?
         loop {
@@ -244,18 +298,20 @@ impl Processor {
                 res = rx_sess.recv() => {
                     match res {
                         None => { break; }
-                        Some(Message::UpdateMessage(pdu)) => {
+                        Some(Message::UpdateMessage(bgp_msg)) => {
                             // We can only receive UPDATE messages over an
                             // established session, so not having a
                             // NegotiatedConfig should never happen.
                             if let Some(_negotiated) = session.negotiated() {
                                 if let Ok(ControlFlow::Continue(FilterOutput { south, east, received })) = Self::VM.with(|vm| {
-                                    let delta_id = (RotondaId(0), 0); // TODO
-                                    let roto_update_msg = roto::types::builtin::UpdateMessage(pdu);
-                                    let msg = BgpUpdateMessage::new(delta_id, roto_update_msg);
+                                    // let delta_id = (RotondaId(0), 0); // TODO
+                                    // let msg: BytesRecord<BgpUpdateMessage> = bgp_msg.into();
+                                    // let msg = BgpUpdateMessage::new(delta_id, roto_update_msg);
                                     // let msg = Arc::new(msg);
-                                    let value: TypeValue = TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(msg));
-                                    self.roto_scripts.exec(vm, &self.unit_cfg.filter_name, value, Utc::now())
+                                    let msg = BytesRecord::<BgpUpdateMessage>::from(bgp_msg);
+                                    let context = RouteContext::new(Some(msg.clone()), NlriStatus::InConvergence, provenance);
+                                    vm.borrow_mut().as_mut().map(|vm| vm.update_context(Arc::new(context)));
+                                    self.roto_scripts.exec(vm, &self.unit_cfg.filter_name, msg.into(), Utc::now())
                                 }) {
                                     if !south.is_empty() {
                                         let update = Payload::from_output_stream_queue(south, None).into();
@@ -263,10 +319,16 @@ impl Processor {
                                     }
                                     if let TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(pdu)) = east {
                                         // let pdu = Arc::into_inner(pdu).unwrap(); // This should succeed
-                                        let pdu = pdu.raw_message().0.clone(); // Bytes is cheap to clone
+                                        let pdu = pdu.bytes_parser().clone(); // Bytes is cheap to clone
+                                        let context = RouteContext::new(
+                                            Some(pdu.into()),
+                                            NlriStatus::InConvergence,
+                                            provenance,
+                                        );
                                         let update = self.process_update(
                                             received,
-                                            pdu,
+                                            // pdu,
+                                            context,
                                             //negotiated.remote_addr(),
                                             //negotiated.remote_asn()
                                         ).await;
@@ -386,29 +448,53 @@ impl Processor {
     async fn process_update(
         &mut self,
         received: DateTime<Utc>,
-        pdu: UpdatePdu<Bytes>,
+        // bgp_msg: BgpUpdateMessage,
+        context: RouteContext,
         //peer_ip: IpAddr,
         //peer_asn: Asn
     ) -> Result<Update, session::Error> {
         fn mk_payload(
+            nlri: &BasicNlri,
+            attrs: PaMap,
             received: DateTime<Utc>,
-            prefix: Prefix,
-            msg: UpdateMessage,
-            source_id: &SourceId,
-            afi_safi: AfiSafi,
-            path_id: Option<PathId>,
-            route_status: RouteStatus,
+            // prefix: Prefix,
+            // source_id: &SourceId,
+            // afi_safi: AfiSafi,
+            // path_id: Option<PathId>,
+            // route_status: NlriStatus,
+            // path_attributes: AttributesMap,
+            provenance: Option<Provenance>,
+            // bgp_msg: Option<BgpUpdateMessage>,
         ) -> Payload {
-            let rrwd = RawRouteWithDeltas::new_with_message_ref(
-                (RotondaId(0), 0),
-                prefix,
-                msg,
-                afi_safi,
-                path_id,
-                route_status,
+            let route = RouteWorkshop::<BasicNlri>::from_pa_map(
+                *nlri,
+                attrs
+                // afi_safi,
+                // path_attributes.clone(),
+                // route_status,
             );
-            let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
-            Payload::with_received(source_id.clone(), typval, None, received)
+
+
+            // let tv;
+            // if let Ok(route) = route.try_into() {
+            //     tv = TypeValue::Builtin(
+            //         BuiltinTypeValue::Route(route)
+            //     );
+            // } else {
+            //     return Err(session::Error::for_str("Cannot parse route"));
+            // }
+            
+            Payload::with_received(
+                // source_id.clone(),
+                TypeValue::from(route),
+                provenance,
+                None,
+                // provenance,
+                // bgp_msg,
+                // None,
+                received
+            )
+            
         }
 
         // When sending both v4 and v6 nlri using exabgp, exa sends a v4
@@ -441,11 +527,19 @@ impl Processor {
         let mut payloads = SmallVec::new();
 
         let source_id: SourceId = "unknown".into(); // TODO
-        let rot_id = RotondaId(0_usize);
+        // let rot_id = RotondaId(0_usize);
         let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
+        let target = bytes::BytesMut::new();
+
+        let bgp_msg = context.message().clone().unwrap().into_inner();
+        let path_attributes = routecore::bgp::message::update_builder::UpdateBuilder::from_update_message(
+            &bgp_msg,
+            &SessionConfig::modern(), 
+            target
+        ).map_err(|e| session::Error::for_str("Cannot parse BGP message"))?;
     
         payloads.extend(
-            pdu.unicast_announcements_vec()?.iter()
+            bgp_msg.unicast_announcements_vec()?.iter()
                 .inspect(|nlri| {
                     self.observed_prefixes.insert(nlri.prefix);
                 })
@@ -453,34 +547,41 @@ impl Processor {
                     let afi_safi = if nlri.prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
 
                     mk_payload(
-                        received,
-                        nlri.prefix,
-                        UpdateMessage(pdu.clone()),
-                        &source_id,
-                        afi_safi,
-                        nlri.path_id(),
-                        RouteStatus::InConvergence,
+                        // received,
+                        nlri,
+                        path_attributes.attributes().clone()
+                        // &source_id,
+                        // afi_safi,
+                        // nlri.path_id(),
+                        // NlriStatus::InConvergence,
+                        // path_attributes.attributes().clone(),
+                        // provenance,
+                        // Some(bgp_msg.clone()),
                     )
                 })
         );
 
         payloads.extend(
-            pdu.unicast_withdrawals_vec()?.iter()
+            bgp_msg.unicast_withdrawals_vec()?.iter()
                 .inspect(|nlri| {
                     self.observed_prefixes.remove(&nlri.prefix);
                 })
                 .map(|nlri| {
                     let afi_safi = if nlri.prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
 
-                    mk_payload(
-                        received,
-                        nlri.prefix,
-                        UpdateMessage(pdu.clone()),
-                        &source_id,
-                        afi_safi,
-                        nlri.path_id(),
-                        RouteStatus::Withdrawn,
-                    )
+                    mk_payload(nlri, path_attributes.attributes().clone())
+
+                    // mk_payload(
+                    //     received,
+                    //     nlri.prefix,
+                    //     &source_id,
+                    //     afi_safi,
+                    //     nlri.path_id(),
+                    //     NlriStatus::Withdrawn,
+                    //     path_attributes.attributes().clone(),
+                    //     provenance,
+                    //     Some(bgp_msg.clone()),
+                    // )
                 })
         );
 
@@ -558,7 +659,7 @@ mod tests {
     };
 
     use rotonda_fsm::bgp::session::{self, Message, NegotiatedConfig};
-    use routecore::asn::Asn;
+    use inetnum::asn::Asn;
     use tokio::{sync::mpsc, task::JoinHandle};
 
     use crate::{

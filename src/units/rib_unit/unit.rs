@@ -24,7 +24,7 @@ use hash_hasher::{HashBuildHasher, HashedSet};
 use log::{error, log_enabled, trace, warn};
 use non_empty_vec::NonEmpty;
 use roto::types::{
-    builtin::{BuiltinTypeValue, RouteToken},
+    builtin::{BuiltinTypeValue, BasicRouteToken},
     collections::ElementTypeValue,
     typevalue::TypeValue,
 };
@@ -162,7 +162,7 @@ pub struct RibUnit {
 
     /// Which fields are the key for RIB metadata items?
     #[serde(default = "RibUnit::default_rib_keys")]
-    pub rib_keys: NonEmpty<RouteToken>,
+    pub rib_keys: NonEmpty<BasicRouteToken>,
 
     /// Virtual RIB upstream physical RIB. Only used when rib_type is Virtual.
     #[serde(default)]
@@ -198,11 +198,11 @@ impl RibUnit {
         QueryLimits::default()
     }
 
-    fn default_rib_keys() -> NonEmpty<RouteToken> {
+    fn default_rib_keys() -> NonEmpty<BasicRouteToken> {
         NonEmpty::try_from(vec![
-            RouteToken::PeerIp,
-            RouteToken::PeerAsn,
-            RouteToken::AsPath,
+            BasicRouteToken::PeerId,
+            BasicRouteToken::PeerAsn,
+            BasicRouteToken::AsPath,
         ])
         .unwrap()
     }
@@ -266,7 +266,7 @@ impl RibUnitRunner {
         query_limits: QueryLimits,
         filter_name: FilterName,
         rib_type: RibType,
-        rib_keys: &[RouteToken],
+        rib_keys: &[BasicRouteToken],
         vrib_upstream: Option<Link>,
     ) -> Self {
         let unit_name = component.name().clone();
@@ -418,7 +418,7 @@ impl RibUnitRunner {
 
     fn mk_rib(
         rib_type: RibType,
-        rib_keys: &[RouteToken],
+        rib_keys: &[BasicRouteToken],
         settings: StoreMergeUpdateSettings,
     ) -> Arc<ArcSwap<HashedRib>> {
         //
@@ -795,9 +795,9 @@ impl RibUnitRunner {
     {
         let rib = self.rib.load();
         if rib.is_physical() {
-            let prefix: Option<Prefix> = match &payload.value {
+            let prefix: Option<Prefix> = match &payload.rx_value {
                 TypeValue::Builtin(BuiltinTypeValue::Route(route)) => {
-                    Some(route.prefix)
+                    Some(route.prefix())
                 }
 
                 TypeValue::Record(record) => match record
@@ -813,14 +813,14 @@ impl RibUnitRunner {
             };
 
             if let Some(prefix) = prefix {
-                let is_announcement = !payload.value.is_withdrawn();
+                let is_announcement = !payload.rx_value.is_withdrawn();
                 let router_id =
-                    payload.value.router_id().unwrap_or_else(|| {
+                    payload.rx_value.router_id().unwrap_or_else(|| {
                         Arc::new(RouterId::from_str("unknown").unwrap())
                     });
 
                 let pre_insert = Utc::now();
-                match insert_fn(&prefix, payload.value.clone(), &rib) {
+                match insert_fn(&prefix, payload.rx_value.clone(), &rib) {
                     Ok((upsert, num_retries)) => {
                         let post_insert = Utc::now();
                         let store_op_delay =
@@ -980,7 +980,7 @@ impl RibUnitRunner {
                         .into_iter()
                         .filter(|payload| {
                             !matches!(
-                                payload.value,
+                                payload.rx_value,
                                 TypeValue::OutputStreamMessage(_)
                             )
                         })
@@ -989,8 +989,8 @@ impl RibUnitRunner {
                             let hash = self
                                 .rib
                                 .load()
-                                .precompute_hash_code(&payload.value);
-                            PreHashedTypeValue::new(payload.value, hash)
+                                .precompute_hash_code(&payload.rx_value);
+                            PreHashedTypeValue::new(payload.rx_value, hash)
                                 .into()
                         }),
                 );
@@ -1085,7 +1085,7 @@ mod tests {
 
         assert_eq!(
             config.rib_keys.as_slice(),
-            &[RouteToken::PeerIp, RouteToken::PeerAsn, RouteToken::AsPath]
+            &[BasicRouteToken::PeerIp, BasicRouteToken::PeerAsn, BasicRouteToken::AsPath]
         );
     }
 
@@ -1100,7 +1100,7 @@ mod tests {
 
         assert_eq!(
             config.rib_keys.as_slice(),
-            &[RouteToken::PeerIp, RouteToken::NextHop]
+            &[BasicRouteToken::PeerIp, BasicRouteToken::NextHop]
         );
     }
 

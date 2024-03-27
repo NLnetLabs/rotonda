@@ -202,17 +202,18 @@ impl DirectUpdate for BmpTcpOutRunner {
             }
 
             Update::Single(Payload {
-                source_id,
-                value: TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bytes)),
+                // source_id,
+                rx_value: TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bytes)),
+                provenance,
                 ..
             }) => {
                 // Dispatch the message to the proxy for this router. Create the proxy if it doesn't exist yet.
-                if let Some(addr) = source_id.socket_addr() {
+                if let Some(prov) = provenance {
                     let bytes = BytesRecord::as_ref(&bytes);
 
                     let proxy =
-                        self.proxies.entry(source_id.clone()).or_insert_with(
-                            || Arc::new(RwLock::new(self.spawn_proxy(*addr))),
+                        self.proxies.entry(SourceId::SocketAddr(prov.connection_id)).or_insert_with(
+                            || Arc::new(RwLock::new(self.spawn_proxy(prov.connection_id))),
                         );
                     proxy.write().await.send(bytes).await;
                 }

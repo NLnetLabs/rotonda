@@ -1,8 +1,7 @@
 use atomic_enum::atomic_enum;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use roto::types::builtin::{PeerId, PeerRibType, Provenance, 
-    RawRouteWithDeltas, RouteContext, RouteProperties, RouteStatus};
+use roto::types::{builtin::{NlriStatus, PeerId, PeerRibType, Provenance}, lazyrecord_types::BgpUpdateMessage};
 
 use rotonda_fsm::bgp::session;
 /// RFC 7854 BMP processing.
@@ -29,10 +28,12 @@ use rotonda_fsm::bgp::session;
 /// factoring the common code out.
 use routecore::{
     addr::Prefix,
+    bgp::workshop::route::BasicNlri,
+    bgp::nlri::afisafi::Nlri,
     bgp::{
         message::{
-            nlri::Nlri, open::CapabilityType, SessionConfig, UpdateMessage,
-        }, types::AfiSafi
+            open::CapabilityType, SessionConfig, UpdateMessage,
+        }, types::AfiSafi, workshop::route::RouteWorkshop
     },
     bmp::message::{
         InformationTlvType, InitiationMessage, Message as BmpMsg,
@@ -45,7 +46,7 @@ use roto::types::builtin::SourceId;
 use smallvec::SmallVec;
 
 use std::{
-    collections::{hash_map::Keys, HashMap, HashSet}, io::Read, ops::ControlFlow, sync::Arc
+    collections::{hash_map::{DefaultHasher, Keys}, HashMap, HashSet}, hash::{Hash, Hasher}, io::Read, ops::ControlFlow, sync::Arc
 };
 
 use crate::{
@@ -91,6 +92,13 @@ impl EoRProperties {
     }
 }
 
+pub struct PeerDetails {
+    peer_bgp_id: [u8; 4],
+    peer_distinguisher: [u8; 8],
+    peer_rib_type: RibType,
+    peer_id: PeerId
+}
+
 pub struct PeerState {
     /// The settings needed to correctly parse BMP UPDATE messages sent
     /// for this peer.
@@ -124,6 +132,8 @@ pub struct PeerState {
     /// the prefix that is no longer routed to. We only need to keep the set of announced prefixes here as PeerStates
     /// stores the PerPeerHeader.
     pub announced_prefixes: HashSet<Prefix>,
+
+    pub peer_details: PeerDetails,
 }
 
 impl std::fmt::Debug for PeerState {
@@ -240,6 +250,13 @@ impl BmpState {
             BmpState::Terminated(v) => Some(v.status_reporter.clone()),
             BmpState::_Aborted(_, _) => None,
         }
+    }
+}
+
+impl<T> std::hash::Hash for BmpStateDetails<T> where
+    BmpState: From<BmpStateDetails<T>> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.source_id.hash(state);
     }
 }
 
@@ -578,7 +595,7 @@ where
         mut self,
         received: DateTime<Utc>,
         msg: RouteMonitoring<Bytes>,
-        route_status: RouteStatus,
+        route_status: NlriStatus,
         trace_id: Option<u8>,
         do_state_specific_pre_processing: CB,
     ) -> ProcessingResult
@@ -610,7 +627,7 @@ where
 
         let mut retry_due_to_err: Option<String> = None;
         loop {
-            let res = match msg.bgp_update(peer_config) {
+            let res = match msg.bgp_update(&peer_config) {
                 Ok(update) => {
                     if let Some(err_str) = retry_due_to_err {
                         self.status_reporter.bgp_update_parse_soft_fail(
@@ -743,8 +760,8 @@ where
         &mut self,
         received: DateTime<Utc>,
         pph: PerPeerHeader<Bytes>,
-        update: &UpdateMessage<Bytes>,
-        route_status: RouteStatus,
+        bgp_msg: &BgpUpdateMessage,
+        route_status: NlriStatus,
         trace_id: Option<u8>,
     ) -> Result<(SmallVec<[Payload; 8]>, UpdateReportMessage), session::Error>
     {
@@ -752,7 +769,33 @@ where
         let mut update_report_msg =
             UpdateReportMessage::new(self.router_id.clone());
 
-        for a in update.announcements()? {
+        let target = bytes::BytesMut::new();
+
+        let path_attributes = routecore::bgp::message::update_builder::UpdateBuilder::from_update_message(
+                bgp_msg, 
+                &SessionConfig::modern(), 
+                target
+            ).map_err(|_| session::Error::for_str("Cannot parse BGP message"))?;
+
+        let mut router_id = DefaultHasher::new();
+        self.router_id.hash(&mut router_id);
+        // router_id.finish();
+
+        let mut source_id = DefaultHasher::new();
+        self.hash(&mut source_id);
+        self.source_id.hash(&mut source_id);
+
+        let provenance = Provenance {
+            timestamp: pph.timestamp(),
+            // router_id: router_id.finish() as u32,
+            peer_id: PeerId::new(pph.address(), pph.asn()),
+            peer_bgp_id: pph.bgp_id().into(),
+            peer_distuingisher: <[u8; 8]>::try_from(pph.distinguisher()).unwrap(),
+            peer_rib_type: PeerRibType::from((pph.is_post_policy(), pph.adj_rib_type())),
+            connection_id: source_id,
+        };
+
+        for a in bgp_msg.announcements()? {
             match a {
                 Ok(a) => {
                     match a {
@@ -764,28 +807,19 @@ where
                             }
 
                             // clone is cheap due to use of Bytes
-                            let route: RawRouteWithDeltas = RouteContext {
-                                msg: update.clone(),
-                                provenance: Provenance {
-                                    timestamp: pph.timestamp(),
-                                    router_id: self.router_id.clone(),
-                                    source_id: self.source_id.clone(),
-                                    peer_id: PeerId::new(pph.address(), pph.asn()),
-                                    peer_bgp_id: pph.bgp_id().into(),
-                                    peer_distuingisher: <[u8; 8]>::try_from(pph.distinguisher()).unwrap(),
-                                    peer_rib_type: PeerRibType::from((pph.is_post_policy(), pph.adj_rib_type())),
-                                },
-                                route_properties: RouteProperties {
-                                    prefix,
-                                    path_id: None,
-                                    afi_safi: a.afi_safi(),
-                                    status: route_status,
-                                },
-                            }.into();
+                            let route = RouteWorkshop::<BasicNlri>::new(
+                                BasicNlri::new(prefix)
+                                // None,
+                                // a.afi_safi(),
+                                // path_attributes.attributes().clone(),
+                                // route_status,
+                            );
 
                             payloads.push(Payload::with_received(
-                                self.source_id.clone(),
+                                // self.source_id.clone(),
                                 route,
+                                Some(provenance),
+                                // Some(bgp_msg.clone()),
                                 trace_id,
                                 received,
                             ));
@@ -804,7 +838,7 @@ where
             }
         }
 
-        for nlri in update.withdrawals()? {
+        for nlri in bgp_msg.withdrawals()? {
             match nlri {
                 Ok(nlri) => {
                     if let Nlri::Unicast(wd) = nlri {
@@ -820,36 +854,26 @@ where
 
                         // RFC7606 though? What a can of worms this is.
 
-                        if update
+                        if bgp_msg
                             .unicast_announcements_vec()
                             .unwrap()
                             .iter()
                             .all(|nlri| nlri.prefix != prefix)
                         {
 
-                            let route: RawRouteWithDeltas = 
-                                RouteContext {
-                                    msg: update.clone(),
-                                    provenance: Provenance {
-                                        timestamp: pph.timestamp(),
-                                        router_id: self.router_id.clone(),
-                                        source_id: self.source_id.clone(),
-                                        peer_id: PeerId::new(pph.address(), pph.asn()),
-                                        peer_bgp_id: pph.bgp_id().into(),
-                                        peer_distuingisher: <[u8; 8]>::try_from(pph.distinguisher()).unwrap(),
-                                        peer_rib_type: PeerRibType::default(),
-                                    },
-                                    route_properties: RouteProperties {
-                                        prefix,
-                                        path_id: wd.path_id(),
-                                        afi_safi: nlri.afi_safi(),
-                                        status: RouteStatus::Withdrawn,
-                                    },
-                                }.into();
+                            let route = RouteWorkshop::<BasicNlri>::new(
+                                    BasicNlri { prefix,
+                                    path_id: wd.path_id(), }
+                                    // nlri.afi_safi(),
+                                    // path_attributes.attributes().clone(),
+                                    // NlriStatus::Withdrawn,
+                            );
 
                             payloads.push(Payload::with_received(
-                                self.source_id.clone(),
+                                // self.source_id.clone(),
                                 route,
+                                // Some(provenance),
+                                // Some(bgp_msg.clone()),
                                 trace_id,
                                 received,
                             ));
@@ -996,6 +1020,12 @@ impl PeerAware for PeerStates {
                 eor_capable,
                 pending_eors: HashSet::with_capacity(0),
                 announced_prefixes: HashSet::with_capacity(0),
+                peer_details: PeerDetails {
+                    peer_bgp_id: pph.bgp_id(),
+                    peer_distinguisher: pph.distinguisher().try_into().unwrap(),
+                    peer_rib_type: u8::from(pph.peer_type()).into(),
+                    peer_id: PeerId::new(pph.address(), pph.asn())
+                }
             }
         });
         added
@@ -1012,6 +1042,12 @@ impl PeerAware for PeerStates {
     ) -> bool {
         if let Some(peer_state) = self.0.get_mut(pph) {
             peer_state.session_config = new_config;
+            peer_state.peer_details = PeerDetails {
+                peer_bgp_id: pph.bgp_id(),
+                peer_distinguisher: pph.distinguisher().try_into().unwrap(),
+                peer_rib_type: u8::from(pph.peer_type()).into(),
+                peer_id: PeerId::new(pph.address(), pph.asn())
+            };
             true
         } else {
             false

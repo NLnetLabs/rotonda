@@ -3,9 +3,7 @@ use std::{str::FromStr, sync::Arc};
 use arc_swap::ArcSwap;
 use assert_json_diff::{assert_json_matches_no_panic, CompareMode, Config};
 use hyper::{body::Bytes, Body, Request, StatusCode};
-use roto::types::builtin::{
-    BgpUpdateMessage, RawRouteWithDeltas, RotondaId, RouteStatus,
-};
+use roto::types::{builtin::{BasicRoute, NlriStatus, Provenance, RotondaId, SingleNlri}, collections::BytesRecord, lazyrecord_types::BgpUpdateMessage};
 use routecore::{
     addr::Prefix,
     asn::Asn,
@@ -14,7 +12,7 @@ use routecore::{
             Community, ExtendedCommunity, LargeCommunity, ParseError,
             StandardCommunity, Wellknown,
         },
-        message::SessionConfig, types::AfiSafi,
+        message::{nlri::BasicNlri, SessionConfig}, types::AfiSafi,
     },
 };
 use serde_json::{json, Value};
@@ -795,19 +793,27 @@ fn insert_routes(
         let loaded_rib = rib.load();
 
         for prefix in prefixes.iter() {
-            let roto_update_msg = roto::types::builtin::UpdateMessage::new(
+            let roto_update_msg = BytesRecord::<BgpUpdateMessage>::new(
                 bgp_update_bytes.clone(),
                 SessionConfig::modern(),
             ).unwrap();
             let afi_safi = if prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
-            let raw_route = RawRouteWithDeltas::new_with_message_ref(
-                delta_id,
+            let raw_route = SingleNlri::<BasicNlri>::new(
                 *prefix,
                 roto_update_msg,
                 afi_safi,
                 None,
-                RouteStatus::InConvergence,
-            )
+                NlriStatus::InConvergence,
+                Provenance {
+                    timestamp: todo!(),
+                    router_id: todo!(),
+                    connection_id: todo!(),
+                    peer_id: todo!(),
+                    peer_bgp_id: todo!(),
+                    peer_distuingisher: todo!(),
+                    peer_rib_type: todo!(),
+                }
+            ).unwrap()
             .with_peer_ip(format!("192.168.0.{n}").parse().unwrap())
             .with_peer_asn(Asn::from_u32(1000 + (n as u32)))
             .with_router_id(Arc::new(format!("router{n}")));

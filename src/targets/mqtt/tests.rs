@@ -633,7 +633,7 @@ fn mk_roto_output_stream_payload() -> OutputStreamMessage {
         ("name", "MOCK".into()),
         ("topic", "my-topic".into()),
         ("some-str", "some-value".into()),
-        ("some-asn", routecore::asn::Asn::from_u32(1818).into()),
+        ("some-asn", inetnum::asn::Asn::from_u32(1818).into()),
     ];
     let record = Record::create_instance_with_sort(&typedef, fields).unwrap();
     OutputStreamMessage::from(record)

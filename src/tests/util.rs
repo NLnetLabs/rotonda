@@ -127,7 +127,7 @@ pub mod bgp {
         use bytes::{BufMut, Bytes, BytesMut};
         use chrono::Utc;
         use rotonda_store::addr::Prefix;
-        use routecore::asn::Asn;
+        use inetnum::asn::Asn;
         use routecore::bgp::aspath::HopPath;
         use routecore::bgp::communities::Community;
         use routecore::bgp::types::{

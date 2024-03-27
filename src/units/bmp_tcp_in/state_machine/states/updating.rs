@@ -2,7 +2,7 @@ use std::{collections::hash_map::Keys, ops::ControlFlow};
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use roto::types::builtin::RouteStatus;
+use roto::types::builtin::NlriStatus;
 use routecore::{
     addr::Prefix,
     bgp::{
@@ -79,7 +79,7 @@ impl BmpStateDetails<Updating> {
             BmpMsg::RouteMonitoring(msg) => self.route_monitoring(
                 received,
                 msg,
-                RouteStatus::UpToDate,
+                NlriStatus::UpToDate,
                 trace_id,
                 |s, pph, update| {
                     s.route_monitoring_preprocessing(pph, update)
@@ -102,8 +102,8 @@ impl BmpStateDetails<Updating> {
         pph: &PerPeerHeader<Bytes>,
         update: &UpdateMessage<Bytes>,
     ) -> ControlFlow<ProcessingResult, Self> {
-        if let Ok(Some((afi, safi))) = update.is_eor() {
-            if self.details.remove_pending_eor(pph, (afi, safi).try_into().unwrap()) {
+        if let Ok(Some(afi_safi)) = update.is_eor() {
+            if self.details.remove_pending_eor(pph, afi_safi.try_into().unwrap()) {
                 let num_pending_eors = self.details.num_pending_eors();
                 self.status_reporter.pending_eors_update(
                     self.router_id.clone(),

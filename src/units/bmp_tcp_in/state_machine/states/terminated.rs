@@ -7,7 +7,7 @@ use crate::units::bmp_tcp_in::state_machine::{
 use super::{dumping::Dumping, initiating::Initiating, updating::Updating};
 
 use bytes::Bytes;
-use roto::{types::builtin::BgpUpdateMessage, vm::OutputStreamQueue};
+use roto::{types::lazyrecord_types::BgpUpdateMessage, vm::OutputStreamQueue};
 use routecore::bmp::message::Message as BmpMsg;
 
 /// BmpState machine state 'Terminated'.

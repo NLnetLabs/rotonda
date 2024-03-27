@@ -9,7 +9,7 @@ use std::{
 use chrono::{Duration, Utc};
 use hash_hasher::{HashBuildHasher, HashedSet};
 use roto::{types::{
-    builtin::{BuiltinTypeValue, RotondaId, RouteStatus, RouteToken},
+    builtin::{BuiltinTypeValue, RotondaId, NlriStatus, BasicRouteToken},
     datasources::Rib,
     typedef::{RibTypeDef, TypeDef},
     typevalue::TypeValue,
@@ -59,7 +59,7 @@ impl Default for HashedRib {
         // learned of (either the "tcp ip address:tcp port" or the BMP Initiation message sysName TLV), or for BGP
         // a string representation of the connected peers "tcp ip address:tcp port".
         Self::new(
-            &[RouteToken::PeerIp, RouteToken::PeerAsn, RouteToken::AsPath],
+            &[BasicRouteToken::PeerIp, BasicRouteToken::PeerAsn, BasicRouteToken::AsPath],
             true,
             StoreEvictionPolicy::UpdateStatusOnWithdraw.into(),
         )
@@ -68,7 +68,7 @@ impl Default for HashedRib {
 
 impl HashedRib {
     pub fn new(
-        key_fields: &[RouteToken],
+        key_fields: &[BasicRouteToken],
         physical: bool,
         settings: StoreMergeUpdateSettings,
     ) -> Self {
@@ -132,14 +132,14 @@ impl HashedRib {
         store.insert(prefix, rib_value)
     }
 
-    pub fn key_fields(&self) -> Vec<RouteToken> {
+    pub fn key_fields(&self) -> Vec<BasicRouteToken> {
         let TypeDef::Rib((_td, Some(field_indices))) = &self.type_def_rib
         else {
             unreachable!();
         };
         field_indices
             .iter()
-            .map(|idx| RouteToken::try_from(idx.first().unwrap()).unwrap())
+            .map(|idx| BasicRouteToken::try_from(idx.first().unwrap()).unwrap())
             .collect()
     }
 }
@@ -439,6 +439,16 @@ impl From<HashedSet<Arc<PreHashedTypeValue>>> for RibValue {
     }
 }
 
+//------------ StoredValue ---------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct StoredValue {
+    value: bytes::Bytes,
+    hash: u64,
+    disk_id: u64,
+    i_time: u64
+}
+
 // -------- PreHashedTypeValue ----------------------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize)]
@@ -528,7 +538,7 @@ impl RouteExtra for TypeValue {
     fn withdraw(&mut self) {
         if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = self {
             let delta_id = (RotondaId(0), 0); // TODO
-            route.update_status(delta_id, RouteStatus::Withdrawn);
+            route.update_status(delta_id, NlriStatus::Withdrawn);
         }
     }
 
@@ -555,7 +565,7 @@ impl RouteExtra for TypeValue {
     }
 
     fn is_withdrawn(&self) -> bool {
-        matches!(&self, TypeValue::Builtin(BuiltinTypeValue::Route(route)) if route.status() == RouteStatus::Withdrawn)
+        matches!(&self, TypeValue::Builtin(BuiltinTypeValue::Route(route)) if route.status() == NlriStatus::Withdrawn)
     }
 }
 
@@ -569,9 +579,9 @@ mod tests {
 
     use hashbrown::hash_map::DefaultHashBuilder;
     use roto::types::{
+        lazyrecord_types::BgpUpdateMessage,
         builtin::{
-            BgpUpdateMessage, BuiltinTypeValue, RawRouteWithDeltas,
-            RotondaId, RouteStatus, UpdateMessage,
+            BasicRoute, BuiltinTypeValue, NlriStatus, RotondaId
         },
         typevalue::TypeValue,
     };
@@ -720,7 +730,7 @@ mod tests {
         if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = first_ty {
             assert_eq!(route.peer_ip(), Some(peer_one.ip.unwrap()));
             assert_eq!(route.peer_asn(), Some(peer_one.asn.unwrap()));
-            assert_eq!(route.status(), RouteStatus::Withdrawn);
+            assert_eq!(route.status(), NlriStatus::Withdrawn);
         }
 
         let next = iter.next();
@@ -733,7 +743,7 @@ mod tests {
         if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = next_ty {
             assert_eq!(route.peer_ip(), Some(peer_one.ip.unwrap()));
             assert_eq!(route.peer_asn(), Some(peer_one.asn.unwrap()));
-            assert_eq!(route.status(), RouteStatus::Withdrawn);
+            assert_eq!(route.status(), NlriStatus::Withdrawn);
         }
 
         // But the route from the second peer remains untouched
@@ -747,7 +757,7 @@ mod tests {
         if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = next_ty {
             assert_eq!(route.peer_ip(), Some(peer_two.ip.unwrap()));
             assert_eq!(route.peer_asn(), Some(peer_two.asn.unwrap()));
-            assert_eq!(route.status(), RouteStatus::InConvergence);
+            assert_eq!(route.status(), NlriStatus::InConvergence);
         }
 
         // And a withdrawal by one peer of the prefix which the RibValue represents, when using the removal eviction
@@ -923,7 +933,7 @@ mod tests {
         prefix: Prefix,
         as_path: &str,
         peer_id: T,
-    ) -> RawRouteWithDeltas {
+    ) -> BasicRoute {
         let delta_id = (RotondaId(0), 0);
         let announcements = Announcements::from_str(&format!(
             "e [{as_path}] 10.0.0.1 BLACKHOLE,123:44 {}",
@@ -935,18 +945,18 @@ mod tests {
 
         // When it is processed by this unit
         let roto_update_msg =
-            UpdateMessage::new(bgp_update_bytes, SessionConfig::modern())
+            BgpUpdateMessage::new(bgp_update_bytes, SessionConfig::modern())
             .unwrap();
         let afi_safi = if prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
         // let bgp_update_msg =
         //     Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
-        let mut route = RawRouteWithDeltas::new_with_message_ref(
+        let mut route = BasicRoute::new(
             delta_id,
             prefix,
             roto_update_msg,
             afi_safi,
             None,
-            RouteStatus::InConvergence,
+            NlriStatus::InConvergence,
         );
 
         let peer_id = peer_id.into();
@@ -965,7 +975,7 @@ mod tests {
     fn mk_route_withdrawal(
         prefix: Prefix,
         peer_id: PeerId,
-    ) -> RawRouteWithDeltas {
+    ) -> MutableBasicRoute {
         let delta_id = (RotondaId(0), 0);
         let bgp_update_bytes = mk_bgp_update(
             &Prefixes::new(vec![prefix]),
@@ -975,16 +985,16 @@ mod tests {
 
         // When it is processed by this unit
         let roto_update_msg =
-            UpdateMessage::new(bgp_update_bytes, SessionConfig::modern()).unwrap();
+            BgpUpdateMessage::new(bgp_update_bytes, SessionConfig::modern()).unwrap();
         let afi_safi = if prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
 
-        let mut route = RawRouteWithDeltas::new_with_message_ref(
+        let mut route = BasicRoute::new(
             delta_id,
             prefix,
             roto_update_msg,
             afi_safi,
             None,
-            RouteStatus::Withdrawn,
+            NlriStatus::Withdrawn,
         );
 
         if let Some(ip) = peer_id.ip {

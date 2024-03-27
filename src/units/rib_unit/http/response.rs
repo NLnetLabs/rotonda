@@ -1,4 +1,4 @@
-use std::{cmp::Ordering, sync::Arc};
+use std::{ascii::escape_default, cmp::Ordering, sync::Arc};
 
 use hyper::{Body, Response};
 
@@ -11,7 +11,7 @@ use rotonda_store::prelude::Prefix;
 
 use routecore::{
     asn::Asn,
-    bgp::{aspath::Hop, communities::HumanReadableCommunity as Community},
+    bgp::{aspath::{AsPath, Hop, HopPath}, communities::HumanReadableCommunity as Community},
 };
 use serde_json::{json, Value};
 
@@ -264,13 +264,18 @@ impl PrefixesApi {
         match ***item {
             TypeValue::Builtin(BuiltinTypeValue::Route(ref route)) => {
                 let mut route = route.clone();
-                let attrs = if let Ok(attrs) = route.get_latest_attrs() {
-                    attrs
+                // let attrs = if let Ok(attrs) = route.0.attributes().get_attrs() {
+                //     attrs
+                // } else {
+                //     debug!("Ignoring AS path matching for {:?} with {:?}", route, filter_as_path);
+                //     return false;
+                // };
+                let as_path = if let  Some(as_path) = route.0.get_attr::<HopPath>() {
+                    as_path
                 } else {
                     debug!("Ignoring AS path matching for {:?} with {:?}", route, filter_as_path);
                     return false;
                 };
-                let as_path = attrs.as_path.as_routecore_hops_vec();
                 let mut actual_it = as_path.iter();
                 let mut wanted_it = filter_as_path.iter();
 
@@ -300,7 +305,7 @@ impl PrefixesApi {
         match ***item {
             TypeValue::Builtin(BuiltinTypeValue::Route(ref route)) => {
                 let mut route = route.clone();
-                if let Ok(attrs) = route.get_latest_attrs() {
+                if let Ok(attrs) = route.get_attrs() {
                     attrs.communities.as_vec().iter().any(|item| {
                         matches!(
                             item,
@@ -330,9 +335,9 @@ impl PrefixesApi {
 mod test {
     use std::str::FromStr;
 
-    use roto::types::builtin::{
-        RawRouteWithDeltas, RotondaId, RouteStatus,
-    };
+    use roto::types::{builtin::{
+        BasicRoute, NlriStatus, Provenance, RotondaId
+    }, collections::BytesRecord, lazyrecord_types::BgpUpdateMessage};
     use routecore::bgp::{message::SessionConfig, types::AfiSafi};
 
     use crate::bgp::encode::{mk_bgp_update, Announcements, Prefixes};
@@ -351,17 +356,26 @@ mod test {
         let delta_id = (RotondaId(0), 0); // TODO
         let prefix =
             routecore::addr::Prefix::from_str("192.168.0.1/32").unwrap();
-        let roto_update_msg = roto::types::builtin::UpdateMessage::new(
+        let roto_update_msg = BytesRecord::<BgpUpdateMessage>::new(
             bgp_update_bytes,
             SessionConfig::modern(),
-        ).unwrap();;
-        let raw_route = RawRouteWithDeltas::new_with_message_ref(
-            delta_id,
+        ).unwrap();
+        let raw_route = BasicRoute::new(
+            // delta_id,
             prefix,
             roto_update_msg,
             AfiSafi::Ipv4Unicast,
             None,
-            RouteStatus::InConvergence,
+            NlriStatus::InConvergence,
+            Provenance {
+                timestamp: todo!(),
+                router_id: todo!(),
+                connection_id: todo!(),
+                peer_id: todo!(),
+                peer_bgp_id: todo!(),
+                peer_distuingisher: todo!(),
+                peer_rib_type: todo!(),
+            }
         );
 
         let details = Details::default();

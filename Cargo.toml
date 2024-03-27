@@ -20,14 +20,18 @@ clap               = { version = "4.4", features = ["cargo"] }
 crossbeam-utils    = "0.8"
 fern               = "0.6"
 futures            = "0.3"
+hash32             = "0.3.1"
 hyper              = { version = "0.14", features = ["server", "stream"] }
 log                = "0.4"
 log-reroute        = "0.1"
 pin-project-lite   = "0.2"
 rand               = "0.8"
 reqwest            = { version = "0.11", default-features = false }
-routecore          = { version = "0.4.0", features = ["bgp", "bmp", "serde"] }
-rotonda-fsm        = "0.1.0"
+inetnum            = { version = "0.1.0", features = ["arbitrary", "serde"] }
+# routecore          = { version = "0.4.0", features = ["bgp", "bmp", "serde"] }
+routecore          = { path = "../../routecore-pab", features = ["bgp", "bmp", "serde"] }
+# rotonda-fsm        = "0.1.0"
+rotonda-fsm        = { path = "../rotonda-fsm" }
 sanitise-file-name = "1.0"
 serde              = { version = "1.0", features = ["derive", "rc"] }
 serde_json         = { version = "1.0", features = ["preserve_order"] }
@@ -56,7 +60,8 @@ non-empty-vec      = { version = "0.2", features = ["serde"]}
 percent-encoding   = "2.3"
 # roto               = "0.2.0"
 roto               = { path = "../roto" }
-rotonda-store      = "0.3.0"
+rotonda-store      = { path = "../rotonda-store-main" }
+# rotonda-store      = "0.3.0"
 serde_with         = "3"
 smallvec           = { version = "1.11", features = ["const_generics", "const_new", "union"] }
 tokio-metrics      = { version = "0.3", default-features = false }

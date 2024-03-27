@@ -8,7 +8,7 @@ use futures::future::select;
 use futures::{pin_mut, Future};
 use log::debug;
 use rotonda_fsm::bgp::session::Command;
-use routecore::asn::Asn;
+use inetnum::asn::Asn;
 use serde::Deserialize;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -393,7 +393,7 @@ mod tests {
     };
 
     use futures::Future;
-    use routecore::asn::Asn;
+    use inetnum::asn::Asn;
 
     use crate::{
         common::{

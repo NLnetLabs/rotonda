@@ -15,17 +15,18 @@ use chrono::Utc;
 use futures::future::join_all;
 use roto::types::{
     builtin::{
-        BgpUpdateMessage, BuiltinTypeValue, RawRouteWithDeltas, RotondaId,
+        BgpUpdateMessage, BuiltinTypeValue, RotondaId,
         RouteStatus, UpdateMessage,
     },
     typevalue::TypeValue,
 };
 use rotonda_store::prelude::multi::PrefixStoreError;
 use rotonda_store::{epoch, MatchOptions, MatchType};
-use routecore::asn::Asn;
+use inetnum::{asn::Asn, addr::Prefix};
 use routecore::bgp::communities::Wellknown;
+use routecore::bgp::path_attributes::{PathAttribute, PathAttributeType, PathAttributesBuilder};
 use routecore::bgp::types::AfiSafi;
-use routecore::{addr::Prefix, bgp::message::SessionConfig};
+use routecore::bgp::message::SessionConfig;
 
 use std::net::IpAddr;
 use std::sync::atomic::Ordering::SeqCst;
@@ -201,20 +202,17 @@ async fn process_update_equivalent_route_twice() {
     if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) =
         &***prehashed_type_value
     {
-        assert_eq!(
-            route
-                .raw_message
-                .0
-                .communities()
-                .unwrap()
-                .unwrap()
-                .next()
-                .unwrap(),
-            Wellknown::Blackhole.into()
-        );
-    } else {
-        unreachable!()
-    };
+        if let Some(PathAttribute::Communities(comms)) = route.get_attrs().get(&PathAttributeType::Communities) {
+            assert_eq!(
+                comms.inner().communities()
+                    .first()
+                    .unwrap(),
+                Wellknown::Blackhole.into()
+            );
+        } else {
+            unreachable!()
+        };
+    }
 
     // When a route that is identical by key but different by value then the
     // new route should not be filtered, where the default key is peer IP,
@@ -226,7 +224,7 @@ async fn process_update_equivalent_route_twice() {
         Some("NO_EXPORT"),
     );
     if let Update::Single(Payload {
-        value: TypeValue::Builtin(BuiltinTypeValue::Route(route)),
+        rx_value: TypeValue::Builtin(BuiltinTypeValue::Route(route)),
         ..
     }) = &update
     {

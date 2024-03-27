@@ -1,20 +1,20 @@
 //! Things not implemented in the routecore crate that we use.
-use std::{iter::Peekable, net::IpAddr, sync::Arc};
+use std::{collections::{hash_map::DefaultHasher, BTreeMap}, hash::{Hash, Hasher}, iter::Peekable, net::IpAddr, sync::Arc};
 
 use bytes::Bytes;
 use chrono::Utc;
 use roto::types::builtin::{
-    PeerId, PeerRibType, Provenance, RawRouteWithDeltas, RouteContext, RouteProperties, RouteStatus
+    Nlri, NlriStatus, PeerId, PeerRibType, Provenance
 };
 use routecore::{
     addr::Prefix,
     asn::Asn,
+    bgp::workshop::route::BasicNlri,
     bgp::{message::{
-        nlri::{BasicNlri, Nlri, PathId},
         update::FourOctetAsn,
         update_builder::{ComposeError, UpdateBuilder},
         SessionConfig, UpdateMessage,
-    }, path_attributes::BgpIdentifier, types::AfiSafi}
+    }, path_attributes::{BgpIdentifier, PathAttribute, PathAttributeType}, types::AfiSafi, workshop::route::RouteWorkshop}
 };
 use smallvec::SmallVec;
 
@@ -84,34 +84,38 @@ where
     let mut builder = UpdateBuilder::new_bytes();
     builder.append_withdrawals(&mut withdrawals)?;
 
+    let mut router_hash = DefaultHasher::new();
+    router_id.hash(&mut router_hash);
+
+    // let provenance = Provenance {
+    //     timestamp: Utc::now(),
+    //     peer_id: PeerId::new(peer_address, peer_asn),
+    //     peer_bgp_id: BgpIdentifier::from([0,0,0,0]),
+    //     peer_distuingisher: [0,0,0,0,0,0,0,0],
+    //     peer_rib_type: PeerRibType::default(),
+    //     router_id: router_hash.finish() as u32,
+    //     connection_id: 0,
+    // };
     // turn all the withdrawals into possibly several Update Messages (if the
     // amount of withdrawals will exceed the max PDU size). We only care about
     // these messages since we want to reference them in our routes.
     for bgp_msg in builder.into_iter().flatten() {
         for basic_nlri in bgp_msg.unicast_withdrawals_vec()? {
             let afi_safi = if basic_nlri.prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
-
-            let route: RawRouteWithDeltas = RouteContext {
-                    msg: bgp_msg.clone(),
-                    provenance: Provenance {
-                        timestamp: Utc::now(),
-                        router_id: router_id.clone(),
-                        source_id: source_id.clone(),
-                        peer_id: PeerId::new(peer_address, peer_asn),
-                        peer_bgp_id: BgpIdentifier::from([0,0,0,0]),
-                        peer_distuingisher: [0,0,0,0,0,0,0,0],
-                        peer_rib_type: PeerRibType::default(),
-                    },
-                    route_properties: RouteProperties {
-                        prefix: basic_nlri.prefix,
-                        path_id: basic_nlri.path_id(),
-                        afi_safi,
-                        status: RouteStatus::Withdrawn,
-                    },
-                }.into();
+            // let router_id_hash: u32 = router_id.into();
+            let route = RouteWorkshop::<BasicNlri>::new(
+                basic_nlri
+            );
 
             let payload =
-                Payload::new(source_id.clone(), route, None);
+                Payload::new(
+                    // source_id.clone(),
+                    route,
+                    None
+                    // Some(provenance),
+                    // Some(bgp_msg),
+                    // None
+                );
             payloads.push(payload);
         }
     }

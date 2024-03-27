@@ -2,7 +2,7 @@ use std::{collections::hash_map::Keys, fmt::Debug, ops::ControlFlow};
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use roto::types::builtin::RouteStatus;
+use roto::types::builtin::NlriStatus;
 use routecore::{
     addr::Prefix,
     bgp::{
@@ -204,7 +204,7 @@ impl BmpStateDetails<Dumping> {
             BmpMsg::RouteMonitoring(msg) => self.route_monitoring(
                 received,
                 msg,
-                RouteStatus::InConvergence,
+                NlriStatus::InConvergence,
                 trace_id,
                 |s, pph, update| {
                     s.route_monitoring_preprocessing(pph, update)
@@ -227,8 +227,8 @@ impl BmpStateDetails<Dumping> {
         pph: &PerPeerHeader<Bytes>,
         update: &UpdateMessage<Bytes>,
     ) -> ControlFlow<ProcessingResult, Self> {
-        if let Ok(Some((afi, safi))) = update.is_eor() {
-            if self.details.remove_pending_eor(pph, (afi, safi).try_into().unwrap()) {
+        if let Ok(Some(afi_safi)) = update.is_eor() {
+            if self.details.remove_pending_eor(pph, (afi_safi).try_into().unwrap()) {
                 // The last pending EOR has been removed and so this signifies the end of the initial table dump, if
                 // we're in the Dumping state, otherwise in the Updating state it signifies only that a late Peer Up
                 // (that happened during the Updating state) has finished dumping. Unfortunately EoR is not a clearly

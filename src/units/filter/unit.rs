@@ -543,7 +543,7 @@ mod tests {
         let bmp_msg =
             BytesRecord::from(BmpMessage::from_octets(msg_buf).unwrap());
         let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
-        Update::Single(Payload::new(source_id, value, None))
+        Update::Single(Payload::new(source_id, value, None, None, None))
     }
 
     async fn is_filtered(filter: &RotoFilterRunner, update: Update) -> bool {

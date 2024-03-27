@@ -3,7 +3,7 @@ use std::{net::IpAddr, str::FromStr, sync::Arc};
 use bytes::Bytes;
 use chrono::Utc;
 use roto::types::{
-    builtin::{BuiltinTypeValue, MaterializedRoute, RouteStatus},
+    builtin::{BuiltinTypeValue, NlriStatus},
     typevalue::TypeValue,
 };
 use routecore::{
@@ -365,21 +365,21 @@ fn peer_up_route_monitoring_peer_down() {
 
             let pfx = Prefix::from_str("2001:2000:3080:e9c::2/128").unwrap();
             let mut expected_roto_prefixes: Vec<TypeValue> = vec![pfx.into()];
-            for Payload {value,..} in bulk.drain(..) {
+            for Payload {rx_value: value,..} in bulk.drain(..) {
                 if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) =
                     value
                 {
-                    let materialized_route = MaterializedRoute::from(route);
-                    let route = materialized_route.route.unwrap();
-                    let found_pfx = route.prefix.as_ref().unwrap();
+                    // let materialized_route = MaterializedRoute2::from(route);
+                    // let pa = route.0.attributes();
+                    let found_pfx = route.prefix().into();
                     let position = expected_roto_prefixes
                         .iter()
                         .position(|pfx| pfx == found_pfx)
                         .unwrap();
                     expected_roto_prefixes.remove(position);
                     assert_eq!(
-                        materialized_route.status,
-                        RouteStatus::Withdrawn
+                        route.0.status,
+                        NlriStatus::Withdrawn
                     );
                 } else {
                     panic!("Expected TypeValue::Builtin(BuiltinTypeValue::Route(_)");
@@ -647,7 +647,7 @@ fn peer_down_spreads_withdrawals_across_multiple_bgp_updates_if_needed() {
             let mut num_withdrawals_seen = 0;
 
             for Payload {
-                value,
+                rx_value: value,
                 ..
             } in bulk.drain(..)
             {
@@ -680,7 +680,7 @@ fn peer_down_spreads_withdrawals_across_multiple_bgp_updates_if_needed() {
                         distinct_bgp_updates_seen.insert(bgp_update_bytes);
                     }
 
-                    let materialized_route = MaterializedRoute::from(route);
+                    let materialized_route = MaterializedRoute2::from(route);
                     let route = materialized_route.route.unwrap();
                     let found_pfx = route.prefix.as_ref().unwrap();
                     let position = expected_roto_prefixes
@@ -981,7 +981,7 @@ fn route_monitoring_announce_route() {
         if let Update::Bulk(updates) = &update {
             assert_eq!(updates.len(), 1);
             if let Payload {
-                value: TypeValue::Builtin(BuiltinTypeValue::Route(route)),
+                rx_value: TypeValue::Builtin(BuiltinTypeValue::Route(route)),
                 ..
             } = &updates[0]
             {

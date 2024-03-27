@@ -9,7 +9,7 @@ use std::{
     sync::Arc,
 };
 
-use roto::types::builtin::SourceId;
+use roto::types::builtin::{RouteContext, SourceId};
 
 use super::{
     metrics::BmpFsOutMetrics, status_reporter::BmpFsOutStatusReporter,
@@ -236,6 +236,7 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
 
     async fn message_transformer(
         mut rx: Receiver,
+        context: RouteContext,
         format: Format,
         mut file_io: T,
         mut file: tokio::io::BufWriter<tokio::fs::File>,
@@ -245,8 +246,8 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
             HashMap::new();
 
         while let Some(Payload {
-            source_id,
-            value: TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bytes)),
+            // source_id,
+            rx_value: TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bytes)),
             ..
         }) = rx.recv().await
         {
@@ -281,8 +282,9 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                                 .collect::<Vec<_>>()
                                 .join("|");
 
+                            let source_id = context.provenance().connection_id;
                             let router_id =
-                                format!("{source_id} [{sys_name}]");
+                                format!("{} [{sys_name}]", source_id);
                             router_ids.insert(source_id.clone(), router_id);
 
                             (
@@ -315,7 +317,7 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                             let mut chosen_peer_config = *chosen_peer_config;
                             let mut retry_count = 0;
                             let extra = loop {
-                                match msg.bgp_update(chosen_peer_config) {
+                                match msg.bgp_update(&chosen_peer_config) {
                                     Ok(update) => {
                                         let num_withdrawals =
                                             update.withdrawn_routes_len();
@@ -519,7 +521,7 @@ impl<T: FileIo + Send + Sync + 'static> DirectUpdate for BmpFsOutRunner<T> {
 
             Update::Single(
                 payload @ Payload {
-                    value: TypeValue::Builtin(BuiltinTypeValue::BmpMessage(_)),
+                    rx_value: TypeValue::Builtin(BuiltinTypeValue::BmpMessage(_)),
                     ..
                 },
             ) => {

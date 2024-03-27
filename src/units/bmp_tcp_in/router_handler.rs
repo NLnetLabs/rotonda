@@ -1,17 +1,21 @@
 //! BMP message stream handler for a single connected BMP publishing client.
 use std::cell::RefCell;
+use std::hash::{self, DefaultHasher, Hash};
+use std::net::IpAddr;
 use std::sync::{Arc, RwLock};
 use std::{net::SocketAddr, ops::ControlFlow};
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use hash32::Hasher;
+use roto::types::lazyrecord_types::BgpUpdateMessage;
 use roto::types::{
     builtin::BuiltinTypeValue, collections::BytesRecord,
     lazyrecord_types::BmpMessage, typevalue::TypeValue,
 };
 use routecore::bmp::message::Message;
-use roto::types::builtin::SourceId;
+use roto::types::builtin::{NlriStatus, PeerId, PeerRibType, Provenance, RouteContext, SourceId};
 
 use tokio::sync::Mutex;
 use tokio::{io::AsyncRead, net::TcpStream};
@@ -134,6 +138,7 @@ impl RouterHandler {
         router_addr: SocketAddr,
         source_id: SourceId,
     ) {
+
         // Discard the write half of the TCP stream as we are a "monitoring
         // station" and per the BMP RFC 7584 specification _"No BMP message is
         // ever sent from the monitoring station to the monitored router"_.
@@ -151,6 +156,22 @@ impl RouterHandler {
         // Setup BMP streaming
         let mut stream =
             BmpStream::new(rx, self.gate.clone(), self.tracing_mode.clone());
+
+        let mut router_id = hash32::FnvHasher::default();
+        router_addr.hash(&mut router_id);
+
+        let mut connection_id =  hash32::FnvHasher::default();
+        source_id.hash(&mut connection_id);
+
+        // let provenance = Provenance {
+        //     timestamp: Utc::now(),
+        //     router_id: router_id.finish32(),
+        //     connection_id: connection_id.finish32(),
+        //     peer_bgp_id: [0,0,0,0].into(),
+        //     peer_distuingisher: [0,0,0,0,0,0,0,0],
+        //     peer_rib_type: PeerRibType::OutPost,
+        //     peer_id: PeerId { addr: "0.0.0.0".parse::<IpAddr>().unwrap().into(), asn: 0.into() }
+        // };
 
         // Ensure that on first use the metrics for the "unknown" router are
         // correctly initialised.
@@ -243,6 +264,7 @@ impl RouterHandler {
                                 router_addr,
                                 source_id.clone(),
                                 bmp_msg,
+                                None,
                                 trace_id,
                             )
                             .await
@@ -280,6 +302,7 @@ impl RouterHandler {
         addr: SocketAddr,
         source_id: SourceId,
         msg: Message<Bytes>,
+        provenance: Option<Provenance>,
         trace_id: Option<u8>,
     ) -> Result<(), (Arc<RouterId>, String)> {
         let mut bmp_state_lock = self.state_machine.lock().await;
@@ -309,6 +332,16 @@ impl RouterHandler {
                 let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(
                     msg.into(),
                 ));
+                
+                // We will only create a context if we have a provenance, i.e.
+                // we have already processed a BMP PeerUpNotification (the
+                // first BMP message with a per-peer-header that contains some
+                // of the Provenance content).
+                if let Some(prov) = provenance {
+                    let context = RouteContext::new(None, NlriStatus::InConvergence, prov);
+                    vm.borrow_mut().as_mut().map(|vm| vm.update_context(Arc::new(context)));
+                }
+
                 self.roto_scripts.exec_with_tracer(
                     vm,
                     &self.filter_name.load(),
@@ -594,8 +627,8 @@ mod tests {
             BmpMessage::from_octets(mk_peer_down_notification_msg(&pph))
                 .unwrap();
 
-        process_msg(&runner, bad_initiation_msg).await.unwrap();
-        process_msg(&runner, bad_peer_down_msg).await.unwrap();
+        process_msg(&runner, bad_initiation_msg, None).await.unwrap();
+        process_msg(&runner, bad_peer_down_msg, None).await.unwrap();
 
         let metrics = get_testable_metrics_snapshot(
             &runner.status_reporter.metrics().unwrap(),
@@ -627,15 +660,15 @@ mod tests {
         .unwrap();
 
         // router id is "unknown" at this point
-        process_msg(&runner, bad_peer_down_msg.clone()).await.unwrap(); // 1
-        process_msg(&runner, initiation_msg).await.unwrap(); // 2
+        process_msg(&runner, bad_peer_down_msg.clone(), None).await.unwrap(); // 1
+        process_msg(&runner, initiation_msg, None).await.unwrap(); // 2
 
         // messages after this point are counted under router id SYS_NAME
-        process_msg(&runner, bad_peer_down_msg.clone()).await.unwrap(); // 3
-        process_msg(&runner, reinitiation_msg).await.unwrap(); // 4
+        process_msg(&runner, bad_peer_down_msg.clone(), None).await.unwrap(); // 3
+        process_msg(&runner, reinitiation_msg, None).await.unwrap(); // 4
 
         // messages after this point are counted under router id OTHER_SYS_NAME
-        process_msg(&runner, bad_peer_down_msg).await.unwrap(); // 5
+        process_msg(&runner, bad_peer_down_msg, None).await.unwrap(); // 5
 
         let metrics = get_testable_metrics_snapshot(
             &runner.status_reporter.metrics().unwrap(),
@@ -665,6 +698,7 @@ mod tests {
     async fn process_msg(
         router_handler: &RouterHandler,
         msg: BmpMessage,
+        provenance: Option<Provenance>
     ) -> Result<(), (Arc<String>, String)> {
         router_handler
             .process_msg(
@@ -672,7 +706,8 @@ mod tests {
                 "1.2.3.4:12345".parse().unwrap(),
                 "unknown".into(),
                 msg,
-                None,
+                provenance,
+                None
             )
             .await
     }

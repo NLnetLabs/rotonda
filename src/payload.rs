@@ -1,6 +1,8 @@
 use chrono::{DateTime, Utc};
+use roto::types::collections::BytesRecord;
+use roto::types::lazyrecord_types::BgpUpdateMessage;
 use roto::{types::typevalue::TypeValue, vm::OutputStreamQueue};
-use roto::types::builtin::SourceId;
+use roto::types::builtin::{Provenance, SourceId};
 use rotonda_store::QueryResult;
 
 use smallvec::{smallvec, SmallVec};
@@ -76,8 +78,10 @@ impl Display for FilterError {
 
 #[derive(Clone, Debug, Eq)]
 pub struct Payload {
-    pub source_id: SourceId,
-    pub value: TypeValue,
+    // pub source_id: SourceId,
+    pub rx_value: TypeValue,
+    pub provenance: Option<Provenance>,
+    // pub bgp_msg: Option<BgpUpdateMessage>,
     pub trace_id: Option<u8>,
     pub received: DateTime<Utc>,
 }
@@ -85,47 +89,58 @@ pub struct Payload {
 impl PartialEq for Payload {
     fn eq(&self, other: &Self) -> bool {
         // Don't compare the received timestamp
-        self.source_id == other.source_id
-            && self.value == other.value
-            && self.trace_id == other.trace_id // && self.received == other.received
+        // self.source_id == other.source_id &&
+            self.rx_value == other.rx_value && 
+            self.trace_id == other.trace_id
     }
 }
 
 impl Payload {
-    pub fn new<S, T>(source_id: S, value: T, trace_id: Option<u8>) -> Self
+    pub fn new<T>(
+        // source_id: S,
+        value: T,
+        provenance: Option<Provenance>,
+        // bgp_msg: Option<BgpUpdateMessage>,
+        trace_id: Option<u8>) -> Self
     where
-        S: Into<SourceId>,
+        // S: Into<SourceId>,
         T: Into<TypeValue>,
     {
         Self {
-            source_id: source_id.into(),
-            value: value.into(),
+            // source_id: source_id.into(),
+            rx_value: value.into(),
+            provenance,
+            // bgp_msg,
             trace_id,
             received: Utc::now(),
         }
     }
 
-    pub fn with_received<S, T>(
-        source_id: S,
+    pub fn with_received<T>(
+        // source_id: S,
         value: T,
+        provenance: Option<Provenance>,
+        // bgp_msg: Option<BgpUpdateMessage>,
         trace_id: Option<u8>,
         received: DateTime<Utc>,
     ) -> Self
     where
-        S: Into<SourceId>,
+        // S: Into<SourceId>,
         T: Into<TypeValue>,
     {
         Self {
-            source_id: source_id.into(),
-            value: value.into(),
+            // source_id: source_id.into(),
+            rx_value: value.into(),
+            provenance,
+            // bgp_msg,
             trace_id,
             received,
         }
     }
 
-    pub fn source_id(&self) -> &SourceId {
-        &self.source_id
-    }
+    // pub fn source_id(&self) -> &SourceId {
+    //     &self.source_id
+    // }
 
     pub fn trace_id(&self) -> Option<u8> {
         self.trace_id
@@ -145,15 +160,16 @@ impl Filterable for Payload {
         FilterError: From<E>,
     {
         if let ControlFlow::Continue(filter_output) =
-            filter_fn(self.value, self.received, self.trace_id)?
+            // filter_fn(self.rx_value, self.received, self.trace_id)?
+            filter_fn(self.rx_value, self.received, self.trace_id)?
         {
             Ok(Payload::from_filter_output(
-                self.source_id.clone(),
+                // self.source_id.clone(),
                 filter_output,
                 self.trace_id,
             ))
         } else {
-            filtered_fn(self.source_id);
+            // filtered_fn(self.source_id);
             Ok(smallvec![])
         }
     }
@@ -185,7 +201,7 @@ impl Filterable for SmallVec<[Payload; 8]> {
 
 impl Payload {
     pub fn from_filter_output(
-        source_id: SourceId,
+        // source_id: SourceId,
         filter_output: FilterOutput,
         trace_id: Option<u8>,
     ) -> SmallVec<[Payload; 8]> {
@@ -193,8 +209,10 @@ impl Payload {
 
         // Make a payload out of it
         let new_payload = Payload::with_received(
-            source_id,
+            // source_id,
             filter_output.east,
+            filter_output.provenance,
+            // filter_output.bgp_msg,
             trace_id,
             filter_output.received,
         );
@@ -218,7 +236,7 @@ impl Payload {
         trace_id: Option<u8>,
     ) -> SmallVec<[Payload; 8]> {
         osq.into_iter()
-            .map(|osm| Payload::new(SourceId::generated(), osm, trace_id))
+            .map(|osm| Payload::new(osm, None, trace_id))
             .collect()
     }
 }
@@ -237,7 +255,7 @@ impl From<Payload> for SmallVec<[Update; 1]> {
 
 impl From<TypeValue> for Payload {
     fn from(tv: TypeValue) -> Self {
-        Self::new("generated", tv, None)
+        Self::new(tv, None)
     }
 }
 

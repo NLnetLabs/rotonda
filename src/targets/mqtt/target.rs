@@ -455,7 +455,7 @@ where
             }
 
             Update::Single(Payload {
-                value: TypeValue::OutputStreamMessage(osm),
+                rx_value: TypeValue::OutputStreamMessage(osm),
                 ..
             }) => {
                 if let Some(msg) = self.output_stream_message_to_msg(osm) {
@@ -470,7 +470,7 @@ where
             Update::Bulk(payloads) => {
                 for payload in payloads {
                     if let Payload {
-                        value: TypeValue::OutputStreamMessage(osm),
+                        rx_value: TypeValue::OutputStreamMessage(osm),
                         ..
                     } = payload
                     {

@@ -1901,7 +1901,7 @@ mod tests {
         //     │                    Err(UnitStatus::Gone) │      None │
         //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│◀╌╌╌╌╌╌╌╌╌╌┘
         fn mk_test_payload() -> Payload {
-            Payload::new("test", 18_u8, None)
+            Payload::new(18_u8, None)
         }
 
         eprintln!("STARTING");

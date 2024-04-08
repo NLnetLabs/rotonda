@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use roto::types::collections::BytesRecord;
 use roto::types::lazyrecord_types::BgpUpdateMessage;
 use roto::{types::typevalue::TypeValue, vm::OutputStreamQueue};
-use roto::types::builtin::{Provenance, SourceId};
+use roto::types::builtin::{Provenance, RouteContext, SourceId};
 use rotonda_store::QueryResult;
 
 use smallvec::{smallvec, SmallVec};
@@ -80,7 +80,8 @@ impl Display for FilterError {
 pub struct Payload {
     // pub source_id: SourceId,
     pub rx_value: TypeValue,
-    pub provenance: Option<Provenance>,
+    pub context: RouteContext,
+    // pub provenance: Option<Provenance>,
     // pub bgp_msg: Option<BgpUpdateMessage>,
     pub trace_id: Option<u8>,
     pub received: DateTime<Utc>,
@@ -99,7 +100,8 @@ impl Payload {
     pub fn new<T>(
         // source_id: S,
         value: T,
-        provenance: Option<Provenance>,
+        context: RouteContext,
+        // provenance: Option<Provenance>,
         // bgp_msg: Option<BgpUpdateMessage>,
         trace_id: Option<u8>) -> Self
     where
@@ -109,7 +111,7 @@ impl Payload {
         Self {
             // source_id: source_id.into(),
             rx_value: value.into(),
-            provenance,
+            context,
             // bgp_msg,
             trace_id,
             received: Utc::now(),
@@ -119,8 +121,7 @@ impl Payload {
     pub fn with_received<T>(
         // source_id: S,
         value: T,
-        provenance: Option<Provenance>,
-        // bgp_msg: Option<BgpUpdateMessage>,
+        context: RouteContext,
         trace_id: Option<u8>,
         received: DateTime<Utc>,
     ) -> Self
@@ -131,8 +132,7 @@ impl Payload {
         Self {
             // source_id: source_id.into(),
             rx_value: value.into(),
-            provenance,
-            // bgp_msg,
+            context,
             trace_id,
             received,
         }
@@ -167,6 +167,7 @@ impl Filterable for Payload {
                 // self.source_id.clone(),
                 filter_output,
                 self.trace_id,
+                self.context
             ))
         } else {
             // filtered_fn(self.source_id);
@@ -201,9 +202,9 @@ impl Filterable for SmallVec<[Payload; 8]> {
 
 impl Payload {
     pub fn from_filter_output(
-        // source_id: SourceId,
         filter_output: FilterOutput,
         trace_id: Option<u8>,
+        context: RouteContext,
     ) -> SmallVec<[Payload; 8]> {
         let mut out_payloads = smallvec![];
 
@@ -211,7 +212,7 @@ impl Payload {
         let new_payload = Payload::with_received(
             // source_id,
             filter_output.east,
-            filter_output.provenance,
+            context,
             // filter_output.bgp_msg,
             trace_id,
             filter_output.received,

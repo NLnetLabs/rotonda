@@ -264,7 +264,7 @@ impl PrefixesApi {
         filter_as_path: &[Asn],
     ) -> bool {
         match ***item {
-            TypeValue::Builtin(BuiltinTypeValue::Route(ref route)) => {
+            TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(ref route)) => {
                 let mut route = route.clone();
                 // let attrs = if let Ok(attrs) = route.0.attributes().get_attrs() {
                 //     attrs
@@ -272,7 +272,7 @@ impl PrefixesApi {
                 //     debug!("Ignoring AS path matching for {:?} with {:?}", route, filter_as_path);
                 //     return false;
                 // };
-                let as_path = if let  Some(as_path) = route.0.get_attr::<HopPath>() {
+                let as_path = if let  Some(as_path) = route.get_attr::<HopPath>() {
                     as_path
                 } else {
                     debug!("Ignoring AS path matching for {:?} with {:?}", route, filter_as_path);
@@ -305,7 +305,7 @@ impl PrefixesApi {
     ) -> bool {
         let wanted_c = BuiltinTypeValue::try_from(*community).unwrap();
         match ***item {
-            TypeValue::Builtin(BuiltinTypeValue::Route(ref route)) => {
+            TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(ref route)) => {
                 let mut route = route.clone();
                 if let Ok(attrs) = route.get_attrs() {
                     attrs.communities.as_vec().iter().any(|item| {
@@ -325,7 +325,7 @@ impl PrefixesApi {
 
     fn match_peer_as(item: &Arc<PreHashedTypeValue>, peer_as: &Asn) -> bool {
         match ***item {
-            TypeValue::Builtin(BuiltinTypeValue::Route(ref route)) => {
+            TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(ref route)) => {
                 route.peer_asn() == Some(*peer_as)
             }
             _ => false,

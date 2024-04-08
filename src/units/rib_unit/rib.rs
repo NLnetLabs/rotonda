@@ -19,7 +19,7 @@ use rotonda_store::{
     prelude::{multi::PrefixStoreError, MergeUpdate},
     MultiThreadedStore,
 };
-use routecore::{addr::Prefix, asn::Asn};
+use inetnum::{addr::Prefix, asn::Asn};
 use serde::Serialize;
 
 use crate::payload::RouterId;
@@ -581,12 +581,13 @@ mod tests {
     use roto::types::{
         lazyrecord_types::BgpUpdateMessage,
         builtin::{
-            BasicRoute, BuiltinTypeValue, NlriStatus, RotondaId
+            PrefixRoute, BuiltinTypeValue, NlriStatus, RotondaId
         },
         typevalue::TypeValue,
     };
     use rotonda_store::prelude::MergeUpdate;
-    use routecore::{addr::Prefix, asn::Asn, bgp::{message::SessionConfig, types::AfiSafi}};
+    use inetnum::{addr::Prefix, asn::Asn};
+    use routecore::bgp::{message::SessionConfig, types::AfiSafi};
 
     use crate::{
         bgp::encode::{mk_bgp_update, Announcements, Prefixes},
@@ -933,7 +934,7 @@ mod tests {
         prefix: Prefix,
         as_path: &str,
         peer_id: T,
-    ) -> BasicRoute {
+    ) -> PrefixRoute {
         let delta_id = (RotondaId(0), 0);
         let announcements = Announcements::from_str(&format!(
             "e [{as_path}] 10.0.0.1 BLACKHOLE,123:44 {}",
@@ -950,7 +951,7 @@ mod tests {
         let afi_safi = if prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
         // let bgp_update_msg =
         //     Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
-        let mut route = BasicRoute::new(
+        let mut route = PrefixRoute::new(
             delta_id,
             prefix,
             roto_update_msg,

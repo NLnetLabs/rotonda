@@ -253,11 +253,11 @@ impl From<Payload> for SmallVec<[Update; 1]> {
     }
 }
 
-impl From<TypeValue> for Payload {
-    fn from(tv: TypeValue) -> Self {
-        Self::new(tv, None)
-    }
-}
+// impl From<TypeValue> for Payload {
+//     fn from(tv: TypeValue) -> Self {
+//         Self::new(tv, None, None)
+//     }
+// }
 
 //------------ Update --------------------------------------------------------
 

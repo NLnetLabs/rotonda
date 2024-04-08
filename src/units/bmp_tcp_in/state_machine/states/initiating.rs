@@ -130,7 +130,8 @@ impl Initiable for Initiating {
 mod tests {
     use std::ops::Deref;
 
-    use routecore::{asn::Asn, bmp::message::PeerType};
+    use inetnum::asn::Asn;
+    use routecore::bmp::message::PeerType;
 
     use crate::{
         bgp::encode::{

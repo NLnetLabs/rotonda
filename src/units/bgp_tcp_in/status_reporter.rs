@@ -43,8 +43,12 @@ impl BgpTcpInStatusReporter {
         sr_log!(warn: self, "Error while listening for connections: {}", err);
     }
 
-    pub fn peer_connection_lost(&self, peer_addr: SocketAddr) {
-        sr_log!(debug: self, "Router connection lost: {}", peer_addr);
+    pub fn peer_connection_lost(&self, peer_addr: Option<SocketAddr>) {
+        if let Some(socket) = peer_addr {
+            sr_log!(debug: self, "Router connection lost: {}", socket);
+        } else {
+            sr_log!(debug: self, "Router without unknown socket address lost");
+        }
         self.metrics.connection_lost_count.fetch_add(1, SeqCst);
     }
 

@@ -77,7 +77,7 @@ use futures::future::{select, Either, Future};
 use futures::pin_mut;
 use log::{error, log_enabled, trace, Level};
 use rotonda_store::MatchOptions;
-use routecore::addr::Prefix;
+use inetnum::addr::Prefix;
 use serde::Deserialize;
 use tokio::sync::mpsc::Sender;
 
@@ -1901,7 +1901,7 @@ mod tests {
         //     │                    Err(UnitStatus::Gone) │      None │
         //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│◀╌╌╌╌╌╌╌╌╌╌┘
         fn mk_test_payload() -> Payload {
-            Payload::new(18_u8, None)
+            Payload::new(18_u8, None, None)
         }
 
         eprintln!("STARTING");

@@ -5,7 +5,8 @@ use async_trait::async_trait;
 use hyper::{Body, Method, Request, Response};
 use log::trace;
 use rotonda_store::{epoch, prelude::Prefix, MatchOptions};
-use routecore::{asn::Asn, bgp::communities::HumanReadableCommunity as Community};
+use inetnum::asn::Asn;
+use routecore::bgp::communities::HumanReadableCommunity as Community;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 

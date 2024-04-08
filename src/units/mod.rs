@@ -18,7 +18,7 @@
 //------------ Sub-modules ---------------------------------------------------
 //
 // These contain all the actual unit types grouped by shared functionality.
-mod bgp_tcp_in;
+pub(crate) mod bgp_tcp_in;
 mod bmp_tcp_in;
 mod filter;
 mod rib_unit;

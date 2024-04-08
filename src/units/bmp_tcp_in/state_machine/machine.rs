@@ -3,7 +3,7 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use roto::types::{builtin::{NlriStatus, PeerId, PeerRibType, Provenance}, lazyrecord_types::BgpUpdateMessage};
 
-use rotonda_fsm::bgp::session;
+use routecore::bgp::fsm::session;
 /// RFC 7854 BMP processing.
 ///
 /// This module includes a BMP state machine and handling of cases defined in
@@ -26,10 +26,10 @@ use rotonda_fsm::bgp::session;
 /// such as the implementation of `fn get_peer_config()`. Duplicate code could
 /// lead to fixes in one place and not in another which should be avoided be
 /// factoring the common code out.
+use inetnum::addr::Prefix;
 use routecore::{
-    addr::Prefix,
-    bgp::workshop::route::BasicNlri,
     bgp::nlri::afisafi::Nlri,
+    bgp::nlri::afisafi::IsPrefix,
     bgp::{
         message::{
             open::CapabilityType, SessionConfig, UpdateMessage,
@@ -131,7 +131,7 @@ pub struct PeerState {
     /// the only information needed to announce a withdrawal is the peer identity (represented by the PerPeerHeader and
     /// the prefix that is no longer routed to. We only need to keep the set of announced prefixes here as PeerStates
     /// stores the PerPeerHeader.
-    pub announced_prefixes: HashSet<Prefix>,
+    pub announced_nlri: HashSet<Nlri<bytes::Bytes>>,
 
     pub peer_details: PeerDetails,
 }
@@ -443,19 +443,19 @@ pub trait PeerAware {
     fn add_announced_prefix(
         &mut self,
         pph: &PerPeerHeader<Bytes>,
-        prefix: Prefix,
+        prefix: Nlri<bytes::Bytes>,
     ) -> bool;
 
     fn remove_announced_prefix(
         &mut self,
         pph: &PerPeerHeader<Bytes>,
-        prefix: &Prefix,
+        prefix: &Nlri<bytes::Bytes>,
     );
 
     fn get_announced_prefixes(
         &self,
         pph: &PerPeerHeader<Bytes>,
-    ) -> Option<std::collections::hash_set::Iter<Prefix>>;
+    ) -> Option<std::collections::hash_set::Iter<Nlri<bytes::Bytes>>>;
 }
 
 impl<T> BmpStateDetails<T>
@@ -576,16 +576,36 @@ where
         // Loop over announced prefixes constructing BGP UPDATE messages with
         // as many prefixes as can fit in one message at a time until
         // withdrawals have been generated for all announced prefixes.
+
         self.details
             .get_announced_prefixes(pph)
-            .and_then(|prefixes| mk_withdrawals_for_peers_announced_prefixes(
-                        prefixes,
-                        self.router_id.clone(),
-                        pph.address(),
-                        pph.asn(),
-                        self.source_id.clone()
-                    ).ok())
-            .unwrap_or_default()
+            .and_then(|nlri| {
+                    match nlri {
+                        Nlri::Ipv4Unicast(nlri) => {
+                            mk_withdrawals_for_peers_announced_prefixes(
+                                nlri,
+                                provenance,
+                                session_config
+                                // self.router_id.clone(),
+                                // pph.address(),
+                                // pph.asn(),
+                                // self.source_id.clone()
+                            ).ok()
+                        }
+                    }
+            }        
+            ).unwrap_or_default()
+                
+            //     mk_withdrawals_for_peers_announced_prefixes(
+            //             nlri,
+            //             provenance,
+            //             session_config
+            //             // self.router_id.clone(),
+            //             // pph.address(),
+            //             // pph.asn(),
+            //             // self.source_id.clone()
+            //         ).ok())
+            // .unwrap_or_default()
     }
 
     /// `filter` should return `None` if the BGP message should be ignored,
@@ -781,9 +801,9 @@ where
         self.router_id.hash(&mut router_id);
         // router_id.finish();
 
-        let mut source_id = DefaultHasher::new();
-        self.hash(&mut source_id);
-        self.source_id.hash(&mut source_id);
+        // let mut source_id = DefaultHasher::new();
+        // self.hash(&mut source_id);
+        // self.source_id.hash(&mut source_id);
 
         let provenance = Provenance {
             timestamp: pph.timestamp(),
@@ -792,10 +812,11 @@ where
             peer_bgp_id: pph.bgp_id().into(),
             peer_distuingisher: <[u8; 8]>::try_from(pph.distinguisher()).unwrap(),
             peer_rib_type: PeerRibType::from((pph.is_post_policy(), pph.adj_rib_type())),
-            connection_id: source_id,
+            connection_id: self.source_id.socket_addr(),
         };
 
-        for a in bgp_msg.announcements()? {
+        for a in bgp_msg.typed_announcements()?.unwrap() {
+            a.unwrap().is_prefix();
             match a {
                 Ok(a) => {
                     match a {
@@ -872,7 +893,7 @@ where
                             payloads.push(Payload::with_received(
                                 // self.source_id.clone(),
                                 route,
-                                // Some(provenance),
+                                Some(provenance),
                                 // Some(bgp_msg.clone()),
                                 trace_id,
                                 received,
@@ -1019,7 +1040,7 @@ impl PeerAware for PeerStates {
                 session_config,
                 eor_capable,
                 pending_eors: HashSet::with_capacity(0),
-                announced_prefixes: HashSet::with_capacity(0),
+                announced_nlri: HashSet::with_capacity(0),
                 peer_details: PeerDetails {
                     peer_bgp_id: pph.bgp_id(),
                     peer_distinguisher: pph.distinguisher().try_into().unwrap(),
@@ -1119,10 +1140,10 @@ impl PeerAware for PeerStates {
     fn add_announced_prefix(
         &mut self,
         pph: &PerPeerHeader<Bytes>,
-        prefix: Prefix,
+        prefix: Nlri<bytes::Bytes>,
     ) -> bool {
         if let Some(peer_state) = self.0.get_mut(pph) {
-            peer_state.announced_prefixes.insert(prefix)
+            peer_state.announced_nlri.insert(prefix)
         } else {
             false
         }
@@ -1131,19 +1152,19 @@ impl PeerAware for PeerStates {
     fn remove_announced_prefix(
         &mut self,
         pph: &PerPeerHeader<Bytes>,
-        prefix: &Prefix,
+        nlri: &Nlri<bytes::Bytes>,
     ) {
         if let Some(peer_state) = self.0.get_mut(pph) {
-            peer_state.announced_prefixes.remove(prefix);
+            peer_state.announced_nlri.remove(nlri);
         }
     }
 
     fn get_announced_prefixes(
         &self,
         pph: &PerPeerHeader<Bytes>,
-    ) -> Option<std::collections::hash_set::Iter<Prefix>> {
+    ) -> Option<std::collections::hash_set::Iter<Nlri<bytes::Bytes>>> {
         self.0
             .get(pph)
-            .map(|peer_state| peer_state.announced_prefixes.iter())
+            .map(|peer_state| peer_state.announced_nlri.iter())
     }
 }

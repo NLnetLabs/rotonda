@@ -6,11 +6,11 @@ use roto::types::{
     builtin::{BuiltinTypeValue, NlriStatus},
     typevalue::TypeValue,
 };
-use routecore::{
+use inetnum::{
     addr::Prefix,
-    asn::Asn,
-    bmp::message::{Message as BmpMsg, PerPeerHeader},
+    asn::Asn
 };
+use routecore::bmp::message::{Message as BmpMsg, PerPeerHeader};
 use roto::types::builtin::SourceId;
 
 use crate::{

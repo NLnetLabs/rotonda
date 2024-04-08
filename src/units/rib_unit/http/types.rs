@@ -1,4 +1,5 @@
-use routecore::{asn::Asn, bgp::communities::HumanReadableCommunity as Community};
+use inetnum::asn::Asn;
+use routecore::bgp::communities::HumanReadableCommunity as Community;
 
 #[derive(Debug, Default)]
 pub struct Includes {

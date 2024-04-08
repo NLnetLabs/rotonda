@@ -294,7 +294,8 @@ mod tests {
         builtin::BuiltinTypeValue, collections::BytesRecord,
         lazyrecord_types::BmpMessage, typevalue::TypeValue,
     };
-    use routecore::{asn::Asn, bmp::message::PeerType};
+    use inetnum::asn::Asn;
+    use routecore::bmp::message::PeerType;
     use roto::types::builtin::SourceId;
 
     use crate::{
@@ -543,7 +544,7 @@ mod tests {
         let bmp_msg =
             BytesRecord::from(BmpMessage::from_octets(msg_buf).unwrap());
         let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
-        Update::Single(Payload::new(source_id, value, None, None, None))
+        Update::Single(Payload::new(value, None, None))
     }
 
     async fn is_filtered(filter: &RotoFilterRunner, update: Update) -> bool {

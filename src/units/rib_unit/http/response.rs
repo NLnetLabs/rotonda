@@ -8,11 +8,13 @@ use roto::types::{
     typevalue::TypeValue,
 };
 use rotonda_store::prelude::Prefix;
+use inetnum::asn::Asn;
 
-use routecore::{
-    asn::Asn,
-    bgp::{aspath::{AsPath, Hop, HopPath}, communities::HumanReadableCommunity as Community},
+use routecore::bgp::{
+    aspath::{AsPath, Hop, HopPath}, 
+    communities::HumanReadableCommunity as Community
 };
+
 use serde_json::{json, Value};
 
 use crate::{
@@ -336,7 +338,7 @@ mod test {
     use std::str::FromStr;
 
     use roto::types::{builtin::{
-        BasicRoute, NlriStatus, Provenance, RotondaId
+        PrefixRoute, NlriStatus, Provenance, RotondaId
     }, collections::BytesRecord, lazyrecord_types::BgpUpdateMessage};
     use routecore::bgp::{message::SessionConfig, types::AfiSafi};
 
@@ -355,12 +357,12 @@ mod test {
 
         let delta_id = (RotondaId(0), 0); // TODO
         let prefix =
-            routecore::addr::Prefix::from_str("192.168.0.1/32").unwrap();
+            inetnum::addr::Prefix::from_str("192.168.0.1/32").unwrap();
         let roto_update_msg = BytesRecord::<BgpUpdateMessage>::new(
             bgp_update_bytes,
             SessionConfig::modern(),
         ).unwrap();
-        let raw_route = BasicRoute::new(
+        let raw_route = PrefixRoute::new(
             // delta_id,
             prefix,
             roto_update_msg,
@@ -369,7 +371,6 @@ mod test {
             NlriStatus::InConvergence,
             Provenance {
                 timestamp: todo!(),
-                router_id: todo!(),
                 connection_id: todo!(),
                 peer_id: todo!(),
                 peer_bgp_id: todo!(),

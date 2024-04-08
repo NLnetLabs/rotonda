@@ -35,7 +35,7 @@ use rotonda_store::{
     QueryResult, RecordSet,
 };
 
-use routecore::addr::Prefix;
+use inetnum::addr::Prefix;
 use serde::Deserialize;
 use smallvec::SmallVec;
 use std::{
@@ -796,7 +796,7 @@ impl RibUnitRunner {
         let rib = self.rib.load();
         if rib.is_physical() {
             let prefix: Option<Prefix> = match &payload.rx_value {
-                TypeValue::Builtin(BuiltinTypeValue::Route(route)) => {
+                TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(route)) => {
                     Some(route.prefix())
                 }
 

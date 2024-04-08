@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 
-use rotonda_fsm::bgp::session::BgpConfig;
+use routecore::bgp::fsm::session::BgpConfig;
 use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
 use routecore::bgp::types::AfiSafi;

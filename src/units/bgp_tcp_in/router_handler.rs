@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeSet;
+use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
 use std::ops::ControlFlow;
@@ -15,7 +16,7 @@ use log::{debug, error};
 // };
 use roto::types::builtin::{
     /*Asn as RotoAsn,*/
-    BuiltinTypeValue, NlriStatus, PeerId, PeerRibType, Provenance, RouteContext
+    explode_announcements, explode_withdrawals, BuiltinTypeValue, Nlri, NlriStatus, PeerId, PeerRibType, Provenance, RouteContext
 };
 use roto::types::collections::BytesRecord;
 use roto::types::lazyrecord_types::BgpUpdateMessage;
@@ -23,17 +24,18 @@ use roto::types::lazyrecord_types::BgpUpdateMessage;
 use roto::types::typevalue::TypeValue;
 use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
+use routecore::bgp::message::update_builder::ComposeError;
 // use routecore::bgp::message::UpdateMessage as UpdatePdu;
-use routecore::bgp::workshop::route::BasicNlri;
-use routecore::bgp::message::SessionConfig;
-use routecore::bgp::path_attributes::{self, AttributesMap, PaMap};
-use routecore::bgp::types::{AfiSafi, PathAttributeType};
+use routecore::bgp::message::{SessionConfig, UpdateMessage};
+use routecore::bgp::nlri::afisafi::{AfiSafiNlri, Ipv4UnicastNlri};
+use routecore::bgp::path_attributes::PaMap;
+use routecore::bgp::types::AfiSafi;
 use routecore::bgp::workshop::route::RouteWorkshop;
 use smallvec::SmallVec;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
-use rotonda_fsm::bgp::session::{
+use routecore::bgp::fsm::session::{
     self,
     BgpConfig, // trait
     Command,
@@ -45,6 +47,7 @@ use rotonda_fsm::bgp::session::{
 
 use roto::types::builtin::basic_route::SourceId;
 
+use crate::bgp::encode::Announcements;
 use crate::common::roto::{FilterOutput, RotoScripts, ThreadLocalVM};
 use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
 use crate::comms::{Gate, GateStatus, Terminated};
@@ -94,7 +97,7 @@ struct Processor {
     bgp_ltime: u64, // XXX or should this be on Unit level?
     tx: mpsc::Sender<Command>,
     status_reporter: Arc<BgpTcpInStatusReporter>,
-    observed_prefixes: BTreeSet<Prefix>,
+    observed_nlri: BTreeSet<Nlri>,
 }
 
 impl Processor {
@@ -117,7 +120,7 @@ impl Processor {
             bgp_ltime: 0,
             tx,
             status_reporter,
-            observed_prefixes: BTreeSet::new(),
+            observed_nlri: BTreeSet::new(),
         }
     }
 
@@ -134,7 +137,7 @@ impl Processor {
             bgp_ltime: 0,
             tx: cmds_tx,
             status_reporter: Default::default(),
-            observed_prefixes: BTreeSet::new(),
+            observed_nlri: BTreeSet::new(),
         };
 
         (processor, gate_agent)
@@ -352,13 +355,22 @@ impl Processor {
                             //TODO clean up RIB etc?
                             self.status_reporter
                                 .peer_connection_lost(socket);
-                            debug!(
-                                "Connection lost: {}@{}",
-                                session.negotiated()
-                                    .map(|n| n.remote_asn())
-                                    .unwrap_or(Asn::MIN),
-                                socket
-                                );
+                            if let Some(socket) = socket {
+                                debug!(
+                                    "Connection lost: {}@{}",
+                                    session.negotiated()
+                                        .map(|n| n.remote_asn())
+                                        .unwrap_or(Asn::MIN),
+                                    socket
+                                    );
+                                } else {
+                                    debug!(
+                                        "Connection lost: {}@UNKOWN",
+                                        session.negotiated()
+                                            .map(|n| n.remote_asn())
+                                            .unwrap_or(Asn::MIN),
+                                        );
+                                }
                             break;
                         }
                         Some(Message::SessionNegotiated(negotiated)) => {
@@ -390,7 +402,7 @@ impl Processor {
         }
 
         if rejected {
-            assert!(self.observed_prefixes.is_empty());
+            assert!(self.observed_nlri.is_empty());
         }
 
         // Done, for whatever reason. Remove ourselves form the live sessions.
@@ -411,18 +423,18 @@ impl Processor {
                     live_sessions.lock().unwrap().len()
                 );
 
-                let prefixes = self.observed_prefixes.iter();
-                let router_id = Arc::new("TODO".into());
+                let prefixes = self.observed_nlri.iter();
+                // let router_id = Arc::new("TODO".into());
                 let source_id: SourceId = "TODO".into();
                 let peer_address = negotiated.remote_addr();
                 let peer_asn = negotiated.remote_asn();
 
-                let payloads = mk_withdrawals_for_peers_announced_prefixes(
-                    prefixes,
-                    router_id,
-                    peer_address,
-                    peer_asn,
-                    source_id,
+                let ipv4_unicast_nlri = prefixes.filter_map(|n| if let Nlri::Ipv4Unicast(p) = n { Some(p) } else { None });
+
+                let payloads = mk_withdrawals_for_peers_announced_prefixes::<'_, Ipv4UnicastNlri, _>(
+                    ipv4_unicast_nlri,
+                    provenance,
+                    SessionConfig::modern()
                 );
 
                 if let Ok(payloads) = payloads {
@@ -454,26 +466,11 @@ impl Processor {
         //peer_asn: Asn
     ) -> Result<Update, session::Error> {
         fn mk_payload(
-            nlri: &BasicNlri,
-            attrs: PaMap,
+            tv: TypeValue,
             received: DateTime<Utc>,
-            // prefix: Prefix,
-            // source_id: &SourceId,
-            // afi_safi: AfiSafi,
-            // path_id: Option<PathId>,
-            // route_status: NlriStatus,
-            // path_attributes: AttributesMap,
             provenance: Option<Provenance>,
-            // bgp_msg: Option<BgpUpdateMessage>,
         ) -> Payload {
-            let route = RouteWorkshop::<BasicNlri>::from_pa_map(
-                *nlri,
-                attrs
-                // afi_safi,
-                // path_attributes.clone(),
-                // route_status,
-            );
-
+            
 
             // let tv;
             // if let Ok(route) = route.try_into() {
@@ -485,13 +482,9 @@ impl Processor {
             // }
             
             Payload::with_received(
-                // source_id.clone(),
-                TypeValue::from(route),
+                tv,
                 provenance,
                 None,
-                // provenance,
-                // bgp_msg,
-                // None,
                 received
             )
             
@@ -526,64 +519,21 @@ impl Processor {
         // needs to go out. Also, check whether 7606 comes into play here.
         let mut payloads = SmallVec::new();
 
-        let source_id: SourceId = "unknown".into(); // TODO
-        // let rot_id = RotondaId(0_usize);
-        let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
-        let target = bytes::BytesMut::new();
+        // let source_id: SourceId = "unknown".into(); // TODO
+        // // let rot_id = RotondaId(0_usize);
+        // let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
+        // let target = bytes::BytesMut::new();
 
         let bgp_msg = context.message().clone().unwrap().into_inner();
-        let path_attributes = routecore::bgp::message::update_builder::UpdateBuilder::from_update_message(
-            &bgp_msg,
-            &SessionConfig::modern(), 
-            target
-        ).map_err(|e| session::Error::for_str("Cannot parse BGP message"))?;
     
-        payloads.extend(
-            bgp_msg.unicast_announcements_vec()?.iter()
-                .inspect(|nlri| {
-                    self.observed_prefixes.insert(nlri.prefix);
-                })
-                .map(|nlri| {
-                    let afi_safi = if nlri.prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
+        let rws = explode_announcements(&bgp_msg, &mut self.observed_nlri)?;
 
-                    mk_payload(
-                        // received,
-                        nlri,
-                        path_attributes.attributes().clone()
-                        // &source_id,
-                        // afi_safi,
-                        // nlri.path_id(),
-                        // NlriStatus::InConvergence,
-                        // path_attributes.attributes().clone(),
-                        // provenance,
-                        // Some(bgp_msg.clone()),
-                    )
-                })
-        );
+        payloads.extend(rws.into_iter().map(|rws| mk_payload(rws, received, Some(*context.provenance()))));
+
+        let wds = explode_withdrawals(&bgp_msg, &mut self.observed_nlri)?;
 
         payloads.extend(
-            bgp_msg.unicast_withdrawals_vec()?.iter()
-                .inspect(|nlri| {
-                    self.observed_prefixes.remove(&nlri.prefix);
-                })
-                .map(|nlri| {
-                    let afi_safi = if nlri.prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
-
-                    mk_payload(nlri, path_attributes.attributes().clone())
-
-                    // mk_payload(
-                    //     received,
-                    //     nlri.prefix,
-                    //     &source_id,
-                    //     afi_safi,
-                    //     nlri.path_id(),
-                    //     NlriStatus::Withdrawn,
-                    //     path_attributes.attributes().clone(),
-                    //     provenance,
-                    //     Some(bgp_msg.clone()),
-                    // )
-                })
-        );
+            wds.into_iter().map(|wds| mk_payload(wds, received, Some(*context.provenance()))));
 
         Ok(payloads.into())
     }
@@ -658,7 +608,7 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
-    use rotonda_fsm::bgp::session::{self, Message, NegotiatedConfig};
+    use routecore::bgp::fsm::session::{self, Message, NegotiatedConfig};
     use inetnum::asn::Asn;
     use tokio::{sync::mpsc, task::JoinHandle};
 
@@ -708,7 +658,7 @@ mod tests {
 
         // Emulate the real session behaviour of sending a ConnectionLost
         // message.
-        let msg = Message::ConnectionLost("10.0.0.2:12345".parse().unwrap());
+        let msg = Message::ConnectionLost(Some("10.0.0.2:12345".parse().unwrap()));
         let _ = sess_tx.send(msg).await;
 
         // Now it's safe to wait for the processor to abort.
@@ -732,7 +682,7 @@ mod tests {
         let (join_handle, status_reporter, _gate_agent, sess_tx) =
             setup_test();
 
-        let msg = Message::ConnectionLost("10.0.0.2:12345".parse().unwrap());
+        let msg = Message::ConnectionLost("10.0.0.2:12345".parse().ok());
         let _ = sess_tx.send(msg).await;
 
         join_handle.await.unwrap();

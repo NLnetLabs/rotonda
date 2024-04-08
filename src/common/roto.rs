@@ -362,7 +362,7 @@ impl RotoScripts {
         // will store the resulting MIR, plus the required arguments (a
         // RotoPack) in the RotoScript struct. This we only have to compile
         // once.
-        let rotolo = Compiler::build(roto_script)
+        let rotolo = Compiler::build(roto_script, None)
             .map_err(|err| RotoError::compile_err(&origin, err))?;
 
         if !rotolo.get_mis_compilations().is_empty() {
@@ -806,7 +806,7 @@ mod tests {
     fn single_update_plus_output_stream_yields_both_as_bulk_update() {
         let test_value: TypeValue = 0_u8.into();
         // let in_payload = Payload::new("test", test_value.clone());
-        let in_payload = Payload::new(test_value.clone(), None);
+        let in_payload = Payload::new(test_value.clone(), None, None);
         let test_output_stream_message =
             mk_roto_output_stream_payload(test_value.clone(), TypeDef::U8);
         let mut output_stream_queue = OutputStreamQueue::new();
@@ -839,8 +839,8 @@ mod tests {
     fn bulk_update_yields_bulk_update() {
         let test_value1: TypeValue = 1_u8.into();
         let test_value2: TypeValue = 2_u8.into();
-        let payload1 = Payload::new("test1", test_value1.clone());
-        let payload2 = Payload::new("test2", test_value2.clone());
+        let payload1 = Payload::new("test1", None, test_value1.clone());
+        let payload2 = Payload::new("test2", None, test_value2.clone());
         let in_payload = smallvec![payload1, payload2];
         let out_payloads = in_payload
             .filter(
@@ -855,10 +855,10 @@ mod tests {
 
         assert_eq!(out_payloads.len(), 2);
         assert!(
-            matches!(&out_payloads[0], Payload { source_id, rx_value, .. } if source_id.name() == Some("test1") && *rx_value == test_value1)
+            matches!(&out_payloads[0], Payload { provenance, rx_value, .. } if provenance.source_id().name() == Some("test1") && *rx_value == test_value1)
         );
         assert!(
-            matches!(&out_payloads[1], Payload { source_id, rx_value, .. } if source_id.name() == Some("test2") && *rx_value == test_value2)
+            matches!(&out_payloads[1], Payload { provenance, rx_value, .. } if provenance.source_id().name() == Some("test2") && *rx_value == test_value2)
         );
     }
 
@@ -866,8 +866,8 @@ mod tests {
     fn bulk_update_plus_output_stream_yields_bulk_update() {
         let test_value1: TypeValue = 1_u8.into();
         let test_value2: TypeValue = 2_u8.into();
-        let payload1 = Payload::new("test1", test_value1.clone());
-        let payload2 = Payload::new("test2", test_value2.clone());
+        let payload1 = Payload::new("test1", None, test_value1.clone());
+        let payload2 = Payload::new("test2", None, test_value2.clone());
         let in_payload = smallvec![payload1, payload2];
         let test_output_stream_message =
             mk_roto_output_stream_payload(test_value1.clone(), TypeDef::U8);
@@ -890,16 +890,16 @@ mod tests {
 
         assert_eq!(out_payloads.len(), 4);
         assert!(
-            matches!(&out_payloads[0], Payload { source_id, rx_value, .. } if source_id.name() == Some("test1") && *rx_value == test_value1)
+            matches!(&out_payloads[0], Payload { provenance, rx_value, .. } if provenance.source_id.name() == Some("test1") && *rx_value == test_value1)
         );
         assert!(
-            matches!(&out_payloads[1], Payload { source_id, rx_value: TypeValue::OutputStreamMessage(osm), .. } if source_id.name() == Some("generated") && **osm == test_output_stream_message)
+            matches!(&out_payloads[1], Payload { provenance, rx_value: TypeValue::OutputStreamMessage(osm), .. } if provenance.source_id.name() == Some("generated") && **osm == test_output_stream_message)
         );
         assert!(
-            matches!(&out_payloads[2], Payload { source_id, rx_value, .. } if source_id.name() == Some("test2") && *rx_value == test_value2)
+            matches!(&out_payloads[2], Payload { provenance, rx_value, .. } if provenance.source_id.name() == Some("test2") && *rx_value == test_value2)
         );
         assert!(
-            matches!(&out_payloads[3], Payload { source_id, rx_value: TypeValue::OutputStreamMessage(osm), .. } if source_id.name() == Some("generated") && **osm == test_output_stream_message)
+            matches!(&out_payloads[3], Payload { provenance, rx_value: TypeValue::OutputStreamMessage(osm), .. } if provenance.source_id.name() == Some("generated") && **osm == test_output_stream_message)
         );
     }
 

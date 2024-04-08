@@ -247,6 +247,7 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
 
         while let Some(Payload {
             // source_id,
+            provenance,
             rx_value: TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bytes)),
             ..
         }) = rx.recv().await
@@ -325,9 +326,9 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                                             > 0
                                         {
                                             true => format!(
-                                                "[{:?}, {:?}]",
-                                                update.withdrawals().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi().afi()).ok()).collect::<Vec<routecore::bgp::types::Afi>>()),
-                                                update.withdrawals().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi().safi()).ok()).collect::<Vec<routecore::bgp::types::Safi>>()),
+                                                "[{:?}]",update.withdrawals().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi()).ok()).collect::<Vec<routecore::bgp::types::AfiSafi>>())
+                                                // update.withdrawals().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi().afi()).ok()).collect::<Vec<routecore::bgp::types::Afi>>()),
+                                                // update.withdrawals().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi().safi()).ok()).collect::<Vec<routecore::bgp::types::Safi>>()),
                                             ),
                                             false => String::new(),
                                         };
@@ -337,17 +338,15 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                                         let ann_s_afis =
                                             match num_announcements > 0 {
                                                 true => format!(
-                                                    "[{:?}, {:?}]",
-                                                    update.announcements().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi().afi()).ok()).collect::<Vec<routecore::bgp::types::Afi>>()),
-                                                    update.announcements().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi().safi()).ok()).collect::<Vec<routecore::bgp::types::Safi>>()),
+                                                    "[{:?}]",update.withdrawals().map(|n| n.filter_map(|w| w.map(|w| w.afi_safi()).ok()).collect::<Vec<routecore::bgp::types::AfiSafi>>())
                                                 ),
                                                 false => String::new(),
                                             };
 
-                                        if let Ok(Some((afi, safi))) =
+                                        if let Ok(Some(afi_safi)) =
                                             update.is_eor()
                                         {
-                                            break format!(" [peer: {}, peer up seen: {}] EOR<{}, {}>, caps[GR: {}]", msg.per_peer_header(), known_peer, afi, safi, has_gr_cap);
+                                            break format!(" [peer: {}, peer up seen: {}] EOR<{}>, caps[GR: {}]", msg.per_peer_header(), known_peer, afi_safi, has_gr_cap);
                                         } else {
                                             break format!(" [peer: {}, peer up seen: {}] # withdrawals: {}{}, # announcements: {}{}",
                                             msg.per_peer_header(), known_peer,
@@ -441,7 +440,7 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
                     };
 
                     let router_id = router_ids
-                        .entry(source_id.clone())
+                        .entry(provenance.unwrap().connection_id.clone())
                         .or_insert_with(|| format!("{source_id} \"-\""));
 
                     let received = Utc::now();
@@ -528,7 +527,7 @@ impl<T: FileIo + Send + Sync + 'static> DirectUpdate for BmpFsOutRunner<T> {
                 // Dispatch the message to the writer for this
                 // router. Create the writer if it doesn't
                 // exist yet.
-                let source_id = payload.source_id().clone();
+                let source_id = payload.provenance.unwrap().connection_id;
                 let tx =
                     self.senders.entry(source_id.clone()).or_insert_with(
                         || Arc::new(self.spawn_writer(source_id.clone())),

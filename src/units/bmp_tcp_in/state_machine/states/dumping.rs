@@ -3,14 +3,13 @@ use std::{collections::hash_map::Keys, fmt::Debug, ops::ControlFlow};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use roto::types::builtin::NlriStatus;
-use routecore::{
-    addr::Prefix,
-    bgp::{
+use routecore::bgp::nlri::afisafi::Nlri;
+use inetnum::addr::Prefix;
+use routecore::bgp::{
         message::{SessionConfig, UpdateMessage},
         types::AfiSafi,
-    },
-    bmp::message::{Message as BmpMsg, PerPeerHeader, TerminationMessage},
-};
+    };
+use routecore::bmp::message::{Message as BmpMsg, PerPeerHeader, TerminationMessage};
 use smallvec::SmallVec;
 
 use crate::{
@@ -397,23 +396,23 @@ impl PeerAware for Dumping {
     fn add_announced_prefix(
         &mut self,
         pph: &PerPeerHeader<Bytes>,
-        prefix: Prefix,
+        nlri: Nlri<bytes::Bytes>,
     ) -> bool {
-        self.peer_states.add_announced_prefix(pph, prefix)
+        self.peer_states.add_announced_prefix(pph, nlri)
     }
 
     fn remove_announced_prefix(
         &mut self,
         pph: &PerPeerHeader<Bytes>,
-        prefix: &Prefix,
+        nlri: &Nlri<bytes::Bytes>,
     ) {
-        self.peer_states.remove_announced_prefix(pph, prefix)
+        self.peer_states.remove_announced_prefix(pph, nlri)
     }
 
     fn get_announced_prefixes(
         &self,
         pph: &PerPeerHeader<Bytes>,
-    ) -> Option<std::collections::hash_set::Iter<Prefix>> {
+    ) -> Option<std::collections::hash_set::Iter<Nlri<bytes::Bytes>>> {
         self.peer_states.get_announced_prefixes(pph)
     }
 }

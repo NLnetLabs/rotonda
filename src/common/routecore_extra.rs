@@ -6,16 +6,14 @@ use chrono::Utc;
 use roto::types::builtin::{
     Nlri, NlriStatus, PeerId, PeerRibType, Provenance
 };
-use routecore::{
-    addr::Prefix,
-    asn::Asn,
-    bgp::workshop::route::BasicNlri,
-    bgp::{message::{
-        update::FourOctetAsn,
+use inetnum::{addr::Prefix, asn::Asn};
+use crate::units::bgp_tcp_in::peer_config::ConfigExt;
+
+use routecore::
+    bgp::{fsm::session::BgpConfig, message::{update::FourOctetAsn,
         update_builder::{ComposeError, UpdateBuilder},
         SessionConfig, UpdateMessage,
-    }, path_attributes::{BgpIdentifier, PathAttribute, PathAttributeType}, types::AfiSafi, workshop::route::RouteWorkshop}
-};
+    }, nlri::afisafi::{AfiSafiNlri, AfiSafiParse, NlriCompose}, path_attributes::{BgpIdentifier, PathAttribute, PathAttributeType}, types::AfiSafi, workshop::route::RouteWorkshop};
 use smallvec::SmallVec;
 
 use roto::types::builtin::SourceId;
@@ -43,17 +41,20 @@ pub fn generate_alternate_config(
     Some(alt_peer_config)
 }
 
-pub fn mk_withdrawals_for_peers_announced_prefixes<'a, I>(
-    prefixes: I,
-    router_id: Arc<String>,
-    peer_address: IpAddr,
-    peer_asn: Asn,
+pub fn mk_withdrawals_for_peers_announced_prefixes<'a, N, NI>(
+    nlri: NI,
+    // router_id: Arc<String>,
+    provenance: Provenance,
+    session_config: SessionConfig,
+    // peer_address: IpAddr,
+    // peer_asn: Asn,
     // peer_bgp_id: BgpIdentifier,
     // peer_distuingisher: [u8; 8],
-    source_id: SourceId,
+    // source_id: SourceId,
 ) -> Result<SmallVec<[Payload; 8]>, ComposeError>
 where
-    I: Iterator<Item = &'a Prefix>,
+    NI: Iterator<Item = &'a N>,
+    N: AfiSafiNlri + NlriCompose + Clone + 'a
 {
     // From https://datatracker.ietf.org/doc/html/rfc7854#section-4.9
     //
@@ -69,23 +70,23 @@ where
     // So, we must act as if we had received route withdrawals for
     // all of the routes previously received for this peer.
 
-    let possible_num_payloads = match prefixes.size_hint() {
+    let possible_num_payloads = match nlri.size_hint() {
         (_, Some(upper_bound)) => upper_bound,
         (lower_bound, None) => lower_bound,
     };
     let mut payloads = SmallVec::with_capacity(possible_num_payloads);
 
     // create all the withdrawals for the prefixes we need to withdraw
-    let mut withdrawals = prefixes
-        .map(|p| Nlri::Unicast::<Bytes>(BasicNlri::new(*p)))
-        .collect::<Vec<_>>();
+    let mut withdrawals = nlri
+        .map(|n| *n)
+        .collect::<Vec<N>>();
 
     // create a new UpdateBuilder and insert all the withdrawals
     let mut builder = UpdateBuilder::new_bytes();
-    builder.append_withdrawals(&mut withdrawals)?;
+    builder.append_withdrawals(withdrawals)?;
 
-    let mut router_hash = DefaultHasher::new();
-    router_id.hash(&mut router_hash);
+    // let mut router_hash = DefaultHasher::new();
+    // router_id.hash(&mut router_hash);
 
     // let provenance = Provenance {
     //     timestamp: Utc::now(),
@@ -99,22 +100,19 @@ where
     // turn all the withdrawals into possibly several Update Messages (if the
     // amount of withdrawals will exceed the max PDU size). We only care about
     // these messages since we want to reference them in our routes.
-    for bgp_msg in builder.into_iter().flatten() {
-        for basic_nlri in bgp_msg.unicast_withdrawals_vec()? {
-            let afi_safi = if basic_nlri.prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
+    for pdu in builder.into_pdu_iter(&session_config).flatten() {
+        for nlri in pdu.withdrawals_vec()? {
+            // let afi_safi = if basic_nlri.prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
             // let router_id_hash: u32 = router_id.into();
-            let route = RouteWorkshop::<BasicNlri>::new(
-                basic_nlri
-            );
+            // let route = RouteWorkshop::new(
+            //     nlri
+            // );
 
             let payload =
-                Payload::new(
-                    // source_id.clone(),
-                    route,
+                Payload::new::<Nlri>(
+                    nlri.into(),
+                    Some(provenance),
                     None
-                    // Some(provenance),
-                    // Some(bgp_msg),
-                    // None
                 );
             payloads.push(payload);
         }
@@ -124,15 +122,17 @@ where
 }
 
 // TODO: This probably lives in routes, get it from there.
-fn _mk_bgp_update<I>(
-    withdrawals: &mut Peekable<I>,
+fn _mk_bgp_update<'a, N, NI>(
+    withdrawals: &mut Peekable<NI>,
+    session_config: SessionConfig
 ) -> Result<UpdateMessage<Bytes>, ComposeError>
 where
-    I: Iterator<Item = Nlri<Vec<u8>>>,
+    NI: Iterator<Item = N>,
+    N: AfiSafiNlri + NlriCompose + Clone + 'a
 {
     let mut builder = UpdateBuilder::new_bytes();
     match builder.withdrawals_from_iter(withdrawals) {
-        Ok(_) | Err(ComposeError::PduTooLarge(_)) => builder.into_message(),
+        Ok(_) | Err(ComposeError::PduTooLarge(_)) => builder.into_message(&session_config),
         Err(err) => Err(err),
     }
 }

@@ -362,7 +362,7 @@ impl RotoScripts {
         // will store the resulting MIR, plus the required arguments (a
         // RotoPack) in the RotoScript struct. This we only have to compile
         // once.
-        let rotolo = Compiler::build(roto_script, None)
+        let rotolo = roto::pipeline::run_string(roto_script.to_string())
             .map_err(|err| RotoError::compile_err(&origin, err))?;
 
         if !rotolo.get_mis_compilations().is_empty() {

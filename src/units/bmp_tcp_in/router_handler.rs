@@ -337,9 +337,18 @@ impl RouterHandler {
                 // we have already processed a BMP PeerUpNotification (the
                 // first BMP message with a per-peer-header that contains some
                 // of the Provenance content).
+                //
+                // LH: but, we must have a RouteContext for the VM to build
+                // successfully...
+                // Currently, prior to the very first run of the VM,
+                // vm.borrow_mut().as_mut() will return None and thus the
+                // map() below has no effect.
+                let ctx;
                 if let Some(prov) = provenance {
-                    let context = RouteContext::new(None, NlriStatus::InConvergence, prov);
-                    vm.borrow_mut().as_mut().map(|vm| vm.update_context(Arc::new(context)));
+                    ctx = RouteContext::new(None, NlriStatus::InConvergence, prov);
+                    vm.borrow_mut().as_mut().map(|vm| vm.update_context(Arc::new(ctx.clone())));
+                } else {
+                    ctx = RouteContext::new(None, NlriStatus::InConvergence, Provenance::mock());
                 }
 
                 self.roto_scripts.exec_with_tracer(
@@ -349,6 +358,7 @@ impl RouterHandler {
                     received,
                     bound_tracer,
                     trace_id,
+                    ctx,
                 )
             })
             .map_err(|err| {

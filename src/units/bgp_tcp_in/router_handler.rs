@@ -319,8 +319,19 @@ impl Processor {
                                     // let msg = Arc::new(msg);
                                     let msg = BytesRecord::<BgpUpdateMessage>::from(bgp_msg);
                                     let context = RouteContext::new(Some(msg.clone()), NlriStatus::InConvergence, provenance);
-                                    vm.borrow_mut().as_mut().map(|vm| vm.update_context(Arc::new(context)));
-                                    self.roto_scripts.exec(vm, &self.unit_cfg.filter_name, msg.into(), Utc::now())
+                                    //if vm.borrow().is_none() {
+                                    //    self.roto_scripts.init_vm(vm, &self.unit_cfg.filter_name).unwrap();
+                                    //}
+                                    //if let Some(vm) = vm.borrow_mut().as_mut() {
+                                    //    vm.update_context(Arc::new(context));
+                                    //} else {
+                                    //    // LH: This shouldn't happen I suppose?
+                                    //    debug!("no vm, attempt to init");
+                                    //    //self.roto_scripts.init_vm(vm, &self.unit_cfg.filter_name);
+                                    //    //vm.update_context(Arc::new(context));
+                                    //}
+                                    //vm.borrow_mut().as_mut().map(|vm| vm.update_context(Arc::new(context)));
+                                    self.roto_scripts.exec(vm, &self.unit_cfg.filter_name, msg.into(), Utc::now(), context)
                                 }) {
                                     if !south.is_empty() {
                                         let context = RouteContext::new(

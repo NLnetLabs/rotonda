@@ -503,8 +503,9 @@ impl RotoScripts {
         filter_name: &FilterName,
         rx: TypeValue,
         received: DateTime<Utc>,
+        context: RouteContext,
     ) -> FilterResult<RotoError> {
-        self.do_exec(vm_ref, filter_name, rx, received, None)
+        self.do_exec(vm_ref, filter_name, rx, received, None, context)
     }
 
     pub fn exec_with_tracer(
@@ -515,6 +516,7 @@ impl RotoScripts {
         received: DateTime<Utc>,
         tracer: BoundTracer,
         trace_id: Option<u8>,
+        context: RouteContext
     ) -> FilterResult<RotoError> {
         if let Some(trace_id) = trace_id {
             self.do_exec(
@@ -523,9 +525,10 @@ impl RotoScripts {
                 rx,
                 received,
                 Some((tracer, trace_id)),
+                context
             )
         } else {
-            self.do_exec(vm_ref, filter_name, rx, received, None)
+            self.do_exec(vm_ref, filter_name, rx, received, None, context)
         }
     }
 
@@ -536,6 +539,7 @@ impl RotoScripts {
         rx: TypeValue,
         received: DateTime<Utc>,
         trace_details: Option<(BoundTracer, u8)>,
+        context: RouteContext,
     ) -> FilterResult<RotoError> {
         // Let the payload through if it is actually an output stream message as we don't filter those, we just forward them
         // down the pipeline to a target where they can be handled, or if no roto script exists.
@@ -561,7 +565,7 @@ impl RotoScripts {
         }
 
         // Initialize the VM if needed.
-        let was_initialized_res = self.init_vm(vm_ref, filter_name);
+        let was_initialized_res = self.init_vm(vm_ref, filter_name, context.clone());
 
         // Don't fail on missing filters. If they are missing this is because
         // the earlier check in RotoScripts allows them to be missing because
@@ -596,7 +600,7 @@ impl RotoScripts {
             if found_filter.parent_script.loaded_when > stateful_vm.built_when
             {
                 debug!("Updating roto VM");
-                stateful_vm.vm = self.build_vm(filter_name)?;
+                stateful_vm.vm = self.build_vm(filter_name, context)?;
                 stateful_vm.built_when =
                     found_filter.parent_script.loaded_when;
             } else {
@@ -684,6 +688,7 @@ impl RotoScripts {
         &self,
         vm_ref: &ThreadLocalVM,
         filter_name: &FilterName,
+        context: RouteContext,
     ) -> Result<bool, RotoError> {
         let mut was_replaced = true;
         let vm_ref = &mut vm_ref.borrow_mut();
@@ -691,7 +696,7 @@ impl RotoScripts {
         if vm_ref.is_none() {
             let filter_name = filter_name.clone();
             let built_when = Instant::now();
-            let vm = self.build_vm(&filter_name)?;
+            let vm = self.build_vm(&filter_name, context)?;
             let mem = LinearMemory::uninit();
             vm_ref.replace(StatefulVM {
                 filter_name,
@@ -723,7 +728,7 @@ impl RotoScripts {
         }
     }
 
-    fn build_vm(&self, filter_name: &FilterName) -> Result<VM, RotoError> {
+    fn build_vm(&self, filter_name: &FilterName, context: RouteContext) -> Result<VM, RotoError> {
         // Find the script that contains the named filter
         let scoped_script = self
             .scripts_by_filter
@@ -734,8 +739,12 @@ impl RotoScripts {
         VmBuilder::new()
             .with_mir_code(pack.mir)
             .with_data_sources(pack.data_sources)
+            .with_context(Arc::new(context))
             .build()
-            .map_err(|err| RotoError::build_err(filter_name, err))
+            .map_err(|err| {
+                dbg!("erroring from build_vm");
+                RotoError::build_err(filter_name, err)
+            })
     }
 }
 

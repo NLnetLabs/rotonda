@@ -722,7 +722,7 @@ impl RibUnitRunner {
         if let Some(filtered_update) = Self::VM
             .with(|vm| {
                 payload
-                    .filter(|value, received, trace_id| {
+                    .filter(|value, received, trace_id, context| {
                         self.roto_scripts.exec_with_tracer(
                             vm,
                             &self.filter_name.load(),
@@ -730,6 +730,7 @@ impl RibUnitRunner {
                             received,
                             bound_tracer.clone(),
                             trace_id,
+                            context
                         )
                     },
                     |_source_id| { /* TODO: self.status_reporter.message_filtered(source_id) */ })
@@ -957,14 +958,24 @@ impl RibUnitRunner {
 
         let tracer = BoundTracer::new(self.tracer.clone(), self.gate.id());
 
+        let ctx = roto::types::builtin::RouteContext::new(
+                    None,
+                    roto::types::builtin::NlriStatus::Empty,
+                    roto::types::builtin::Provenance::mock()
+                );
         for route in rib_value.iter() {
             let in_type_value: &TypeValue = route.deref();
-            let payload = Payload::from(in_type_value.clone()); // TODO: Do we really want to clone here? Or pass the Arc on?
+            //let payload = Payload::from(in_type_value.clone()); // TODO: Do we really want to clone here? Or pass the Arc on?
+            let payload = Payload::new(
+                in_type_value.clone(),
+                ctx.clone(),
+                None
+            );
 
             trace!("Re-processing route");
 
             if let Ok(filtered_payloads) = Self::VM.with(|vm| {
-                payload.filter(|value, received, trace_id| {
+                payload.filter(|value, received, trace_id, context| {
                     self.roto_scripts.exec_with_tracer(
                         vm,
                         &self.filter_name.load(),
@@ -972,6 +983,7 @@ impl RibUnitRunner {
                         received,
                         tracer.clone(),
                         trace_id,
+                        context
                     )
                 }, |_source_id| { /* TODO: self.status_reporter.message_filtered(source_id) */ })
             }) {

@@ -44,7 +44,7 @@ pub trait Filterable {
         filtered_fn: U,
     ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
-        T: Fn(TypeValue, DateTime<Utc>, Option<u8>) -> FilterResult<E>
+        T: Fn(TypeValue, DateTime<Utc>, Option<u8>, RouteContext) -> FilterResult<E>
             + Clone,
         U: Fn(SourceId) + Clone,
         FilterError: From<E>;
@@ -154,14 +154,14 @@ impl Filterable for Payload {
         filtered_fn: U,
     ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
-        T: Fn(TypeValue, DateTime<Utc>, Option<u8>) -> FilterResult<E>
+        T: Fn(TypeValue, DateTime<Utc>, Option<u8>, RouteContext) -> FilterResult<E>
             + Clone,
         U: Fn(SourceId) + Clone,
         FilterError: From<E>,
     {
         if let ControlFlow::Continue(filter_output) =
             // filter_fn(self.rx_value, self.received, self.trace_id)?
-            filter_fn(self.rx_value, self.received, self.trace_id)?
+            filter_fn(self.rx_value, self.received, self.trace_id, self.context.clone())?
         {
             Ok(Payload::from_filter_output(
                 // self.source_id.clone(),
@@ -183,7 +183,7 @@ impl Filterable for SmallVec<[Payload; 8]> {
         filtered_fn: U,
     ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
-        T: Fn(TypeValue, DateTime<Utc>, Option<u8>) -> FilterResult<E>
+        T: Fn(TypeValue, DateTime<Utc>, Option<u8>, RouteContext) -> FilterResult<E>
             + Clone,
         U: Fn(SourceId) + Clone,
         FilterError: From<E>,

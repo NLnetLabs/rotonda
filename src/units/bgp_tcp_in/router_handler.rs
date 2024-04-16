@@ -51,6 +51,7 @@ use roto::types::builtin::basic_route::SourceId;
 use crate::common::roto::{FilterOutput, RotoScripts, ThreadLocalVM};
 use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
 use crate::comms::{Gate, GateStatus, Terminated};
+use crate::ingress;
 use crate::payload::{Payload, Update};
 use crate::units::bgp_tcp_in::status_reporter::BgpTcpInStatusReporter;
 use crate::units::Unit;
@@ -99,6 +100,7 @@ struct Processor {
     pdu_out_tx: mpsc::Sender<BgpMsg<Bytes>>,
     status_reporter: Arc<BgpTcpInStatusReporter>,
     observed_nlri: BTreeSet<Nlri>,
+    ingresses: Arc<ingress::Register>,
 }
 
 impl Processor {
@@ -114,6 +116,7 @@ impl Processor {
         tx: mpsc::Sender<Command>,
         pdu_out_tx: mpsc::Sender<BgpMsg<Bytes>>,
         status_reporter: Arc<BgpTcpInStatusReporter>,
+        ingresses: Arc<ingress::Register>,
     ) -> Self {
         Processor {
             roto_scripts,
@@ -124,6 +127,7 @@ impl Processor {
             pdu_out_tx,
             status_reporter,
             observed_nlri: BTreeSet::new(),
+            ingresses
         }
     }
 
@@ -416,6 +420,23 @@ impl Processor {
                                 live_sessions.len()
                             );
                             }
+                            // register ingress
+                            let session_ingress_id = self.ingresses.register();
+                            debug!(
+                                "got assigned {} for this session",
+                                session_ingress_id 
+                            );
+                            debug!("get: {:?}", self.ingresses.get(session_ingress_id));
+                            self.ingresses.update_info(
+                                session_ingress_id,
+                                ingress::IngressInfo::new()
+                                    .with_name("some-bgp-session".to_string())
+                                    .with_remote_asn(negotiated.remote_asn())
+                                );
+                            debug!("get 2: {:?}", self.ingresses.get(session_ingress_id));
+                                
+
+
                         }
                         Some(Message::Attributes(_)) => unimplemented!(),
                     }
@@ -577,6 +598,7 @@ pub async fn handle_connection(
     cmds_rx: mpsc::Receiver<Command>,
     status_reporter: Arc<BgpTcpInStatusReporter>,
     live_sessions: Arc<Mutex<super::unit::LiveSessions>>,
+    ingresses: Arc<ingress::Register>,
 ) {
     // NB: when testing with an FRR instance configured with
     //  "neighbor 1.2.3.4 timers delayopen 15"
@@ -637,6 +659,7 @@ pub async fn handle_connection(
         cmds_tx,
         pdu_out_tx,
         status_reporter,
+        ingresses
     );
 
     tokio::spawn(async move {

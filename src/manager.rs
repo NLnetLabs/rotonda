@@ -12,7 +12,7 @@ use crate::log::Terminate;
 use crate::targets::Target;
 use crate::tracing::{MsgRelation, Trace, Tracer};
 use crate::units::Unit;
-use crate::{http, metrics};
+use crate::{http, metrics, ingress};
 use arc_swap::ArcSwap;
 use futures::future::{join_all, select, Either};
 use log::{debug, error, info, log_enabled, trace, warn};
@@ -62,6 +62,9 @@ pub struct Component {
 
     /// A reference to the Tracer
     tracer: Arc<Tracer>,
+
+    /// A reference to the ingress sources.
+    ingresses: Arc<ingress::Register>,
 }
 
 #[cfg(test)]
@@ -75,6 +78,7 @@ impl Default for Component {
             http_resources: Default::default(),
             roto_scripts: Default::default(),
             tracer: Default::default(),
+            ingresses: Default::default(),
         }
     }
 }
@@ -89,6 +93,7 @@ impl Component {
         http_resources: http::Resources,
         roto_scripts: RotoScripts,
         tracer: Arc<Tracer>,
+        ingresses: Arc<ingress::Register>,
     ) -> Self {
         Component {
             name: name.into(),
@@ -98,6 +103,7 @@ impl Component {
             http_resources,
             roto_scripts,
             tracer,
+            ingresses,
         }
     }
 
@@ -163,6 +169,15 @@ impl Component {
             rel_base_url,
             true,
         )
+    }
+
+
+    pub fn register_ingress(&self) -> ingress::IngressId {
+        self.ingresses.register()
+    }
+
+    pub fn ingresses(&self) -> Arc<ingress::Register> {
+        self.ingresses.clone()
     }
 }
 
@@ -590,6 +605,8 @@ pub struct Manager {
     tracer: Arc<Tracer>,
 
     tracer_processor: Arc<dyn ProcessRequest>,
+
+    ingresses: Arc<ingress::Register>,
 }
 
 impl Default for Manager {
@@ -606,6 +623,7 @@ impl Manager {
             LinkReport::new(),
         )));
         let tracer = Arc::new(Tracer::new());
+        let ingresses = Arc::new(ingress::Register::new());
 
         let (graph_svg_processor, graph_svg_rel_base_url) =
             Self::mk_svg_http_processor(
@@ -633,6 +651,7 @@ impl Manager {
             file_io: TheFileIo::default(),
             tracer,
             tracer_processor,
+            ingresses,
         };
 
         // Register the /status/graph endpoint.
@@ -1177,6 +1196,7 @@ impl Manager {
                 self.http_resources.clone(),
                 self.roto_scripts.clone(),
                 self.tracer.clone(),
+                self.ingresses.clone(),
             );
 
             let target_type = std::mem::discriminant(&new_target);
@@ -1254,6 +1274,7 @@ impl Manager {
                 self.http_resources.clone(),
                 self.roto_scripts.clone(),
                 self.tracer.clone(),
+                self.ingresses.clone(),
             );
 
             let unit_type = std::mem::discriminant(&new_unit);

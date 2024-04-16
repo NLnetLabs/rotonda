@@ -33,6 +33,7 @@ use crate::common::net::{
 };
 use crate::common::roto::{FilterName, RotoScripts};
 use crate::common::status_reporter::{Chainable, UnitStatusReporter};
+use crate::ingress;
 use crate::payload::Update;
 use crate::common::unit::UnitActivity;
 use crate::comms::{
@@ -101,6 +102,8 @@ impl BgpTcpIn {
         let metrics = Arc::new(BgpTcpInMetrics::new(&gate));
         component.register_metrics(metrics.clone());
 
+        let ingresses = component.ingresses();
+
         // Setup status reporting
         let status_reporter = Arc::new(BgpTcpInStatusReporter::new(
             &unit_name,
@@ -131,6 +134,7 @@ impl BgpTcpIn {
             metrics,
             status_reporter,
             roto_scripts,
+            ingresses,
         )
         .run::<_, _, StandardTcpStream, BgpTcpInRunner>(
             sources,
@@ -175,6 +179,8 @@ struct BgpTcpInRunner {
 
     // To send commands to a Session based on peer IP + ASN.
     live_sessions: Arc<Mutex<LiveSessions>>,
+
+    ingresses: Arc<ingress::Register>,
 }
 
 impl BgpTcpInRunner {
@@ -184,6 +190,7 @@ impl BgpTcpInRunner {
         metrics: Arc<BgpTcpInMetrics>,
         status_reporter: Arc<BgpTcpInStatusReporter>,
         roto_scripts: RotoScripts,
+        ingresses: Arc<ingress::Register>,
     ) -> Self {
         BgpTcpInRunner {
             bgp: Arc::new(ArcSwap::from_pointee(bgp)),
@@ -192,6 +199,7 @@ impl BgpTcpInRunner {
             status_reporter,
             roto_scripts,
             live_sessions: Arc::new(Mutex::new(HashMap::new())),
+            ingresses,
         }
     }
 
@@ -302,6 +310,7 @@ impl BgpTcpInRunner {
                                 remote_net,
                                 child_status_reporter,
                                 arc_self.live_sessions.clone(),
+                                arc_self.ingresses.clone(),
                             );
                         } else {
                             debug!("No config to accept {}", peer_addr.ip());
@@ -508,6 +517,7 @@ impl ConfigAcceptor for BgpTcpInRunner {
         remote_net: super::peer_config::PrefixOrExact,
         child_status_reporter: Arc<BgpTcpInStatusReporter>,
         live_sessions: Arc<Mutex<LiveSessions>>,
+        ingresses: Arc<ingress::Register>,
     ) {
         let (cmds_tx, cmds_rx) = mpsc::channel(10*10); //XXX this is limiting and
                                                     //causes loss
@@ -524,6 +534,7 @@ impl ConfigAcceptor for BgpTcpInRunner {
                 cmds_rx,
                 child_status_reporter,
                 live_sessions,
+                ingresses
             ),
         );
     }

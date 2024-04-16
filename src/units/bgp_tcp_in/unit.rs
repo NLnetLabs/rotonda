@@ -4,11 +4,25 @@ use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use arc_swap::ArcSwap;
+use async_trait::async_trait;
+use bytes::{Bytes, BytesMut};
 use futures::future::select;
 use futures::{pin_mut, Future};
-use log::debug;
-use routecore::bgp::fsm::session::Command;
+use log::{debug, warn};
+use non_empty_vec::NonEmpty;
+use roto::types::{builtin::BuiltinTypeValue, typevalue::TypeValue};
+use routecore::bgp::fsm::session::{Command, DisconnectReason};
 use inetnum::asn::Asn;
+use routecore::bgp::types::AfiSafi;
+use routecore::bgp::message::{
+    SessionConfig,
+    UpdateMessage,
+    update_builder::UpdateBuilder,
+    Message as BgpMsg,
+};
+use routecore::bgp::nlri::afisafi::Nlri;
+
 use serde::Deserialize;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -19,8 +33,11 @@ use crate::common::net::{
 };
 use crate::common::roto::{FilterName, RotoScripts};
 use crate::common::status_reporter::{Chainable, UnitStatusReporter};
+use crate::payload::Update;
 use crate::common::unit::UnitActivity;
-use crate::comms::{GateStatus, Terminated};
+use crate::comms::{
+    AnyDirectUpdate, DirectUpdate, DirectLink, GateStatus, Terminated
+};
 use crate::manager::{Component, WaitPoint};
 use crate::units::{Gate, Unit};
 
@@ -46,6 +63,9 @@ pub struct BgpTcpIn {
 
     #[serde(default)]
     pub filter_name: FilterName,
+
+    /// Outgoing BGP UPDATEs can come from these sources.
+    pub sources: NonEmpty<DirectLink>
 }
 
 impl PartialEq for BgpTcpIn {
@@ -65,6 +85,7 @@ impl BgpTcpIn {
             my_bgp_id: Default::default(),
             peer_configs: Default::default(),
             filter_name: Default::default(),
+            //TODO sources
         }
     }
 
@@ -100,6 +121,10 @@ impl BgpTcpIn {
         // them.
         waitpoint.running().await;
 
+        // XXX refactor BgpTcpInRunner so it does not take the mut BgpTcpIn
+        // so that we can pass self.sources into .run below
+        // That way this unit is a bit more consistent with the RibUnit.
+        let sources = self.sources.clone();
         BgpTcpInRunner::new(
             self,
             gate,
@@ -107,10 +132,10 @@ impl BgpTcpIn {
             status_reporter,
             roto_scripts,
         )
-        .run::<_, _, StandardTcpStream, BgpTcpInRunner>(Arc::new(
-            StandardTcpListenerFactory,
-        ))
-        .await
+        .run::<_, _, StandardTcpStream, BgpTcpInRunner>(
+            sources,
+            Arc::new(StandardTcpListenerFactory,)
+        ).await
     }
 }
 
@@ -126,14 +151,19 @@ trait ConfigAcceptor {
         remote_net: super::peer_config::PrefixOrExact,
         child_status_reporter: Arc<BgpTcpInStatusReporter>,
         live_sessions: Arc<Mutex<LiveSessions>>,
+        ingresses: Arc<ingress::Register>,
     );
 }
 
-pub type LiveSessions = HashMap<(IpAddr, Asn), mpsc::Sender<Command>>;
+pub type LiveSessions = HashMap<
+    (IpAddr, Asn),
+    (mpsc::Sender<Command>, mpsc::Sender<BgpMsg<Bytes>>)
+>;
 
+#[derive(Debug)]
 struct BgpTcpInRunner {
     // The configuration from the .conf.
-    bgp: BgpTcpIn,
+    bgp: Arc<ArcSwap<BgpTcpIn>>,
 
     gate: Gate,
 
@@ -156,7 +186,7 @@ impl BgpTcpInRunner {
         roto_scripts: RotoScripts,
     ) -> Self {
         BgpTcpInRunner {
-            bgp,
+            bgp: Arc::new(ArcSwap::from_pointee(bgp)),
             gate,
             metrics,
             status_reporter,
@@ -182,7 +212,8 @@ impl BgpTcpInRunner {
     }
 
     async fn run<T, U, V, F>(
-        mut self,
+        self,
+        mut sources: NonEmpty<DirectLink>,
         listener_factory: Arc<T>,
     ) -> Result<(), Terminated>
     where
@@ -195,8 +226,15 @@ impl BgpTcpInRunner {
         // spawning tasks to handle them.
         let status_reporter = self.status_reporter.clone();
 
+
+        let arc_self = Arc::new(self);
+        // Register as a direct update receiver with the linked gates.
+        for link in sources.iter_mut() {
+            link.connect(arc_self.clone(), false).await.unwrap();
+        }
+
         loop {
-            let listen_addr = self.bgp.listen.clone();
+            let listen_addr = arc_self.bgp.load().listen.clone();
 
             let bind_with_backoff = || async {
                 let mut wait = 1;
@@ -215,7 +253,7 @@ impl BgpTcpInRunner {
                 }
             };
 
-            let listener = match self.process_until(bind_with_backoff()).await
+            let listener = match arc_self.process_until(bind_with_backoff()).await
             {
                 ControlFlow::Continue(Ok(res)) => res,
                 ControlFlow::Continue(Err(_err)) => continue,
@@ -225,7 +263,7 @@ impl BgpTcpInRunner {
             status_reporter.listener_listening(&listen_addr);
 
             'inner: loop {
-                match self.process_until(listener.accept()).await {
+                match arc_self.process_until(listener.accept()).await {
                     ControlFlow::Continue(Ok((tcp_stream, peer_addr))) => {
                         status_reporter
                             .listener_connection_accepted(peer_addr);
@@ -239,7 +277,7 @@ impl BgpTcpInRunner {
                         // are exchanged and we know the remote ASN.
 
                         if let Some((remote_net, cfg)) =
-                            self.bgp.peer_configs.get(peer_addr.ip())
+                            arc_self.bgp.load().peer_configs.get(peer_addr.ip())
                         {
                             let child_name = format!(
                                 "bgp[{}:{}]",
@@ -256,14 +294,14 @@ impl BgpTcpInRunner {
                             );
                             F::accept_config(
                                 child_name,
-                                &self.roto_scripts,
-                                &self.gate,
-                                &self.bgp,
+                                &arc_self.roto_scripts,
+                                &arc_self.gate,
+                                &arc_self.bgp.load().clone(),
                                 tcp_stream,
                                 cfg,
                                 remote_net,
                                 child_status_reporter,
-                                self.live_sessions.clone(),
+                                arc_self.live_sessions.clone(),
                             );
                         } else {
                             debug!("No config to accept {}", peer_addr.ip());
@@ -277,7 +315,7 @@ impl BgpTcpInRunner {
     }
 
     async fn process_until<T, U>(
-        &mut self,
+        &self,
         until_fut: T,
     ) -> ControlFlow<Terminated, std::io::Result<U>>
     where
@@ -309,9 +347,9 @@ impl BgpTcpInRunner {
                             // router_handler() tasks will receive their
                             // own copy of this Reconfiguring status
                             // update and can react to it accordingly.
-                            let rebind = self.bgp.listen != new_unit.listen;
+                            let rebind = self.bgp.load().listen != new_unit.listen;
 
-                            self.bgp = new_unit;
+                            self.bgp.store(new_unit.into());
 
                             if rebind {
                                 // Trigger re-binding to the new listen port.
@@ -351,6 +389,114 @@ impl BgpTcpInRunner {
     }
 }
 
+#[async_trait]
+impl DirectUpdate for BgpTcpInRunner {
+    async fn direct_update(&self, update: Update) {
+        let process_update = |value: TypeValue| async {
+            if let TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(pfr)) = value {
+                //debug!("got {} for prefix {} from {:?}@{:?}",
+                //    rrwd.status(),
+                //    rrwd.prefix,
+                //    rrwd.peer_asn(),
+                //    rrwd.peer_ip(),
+                //);
+                use roto::types::builtin::PrefixRouteWs;
+                let pdus: Vec<_> = match pfr.0 {
+                    PrefixRouteWs::Ipv4Unicast(rws)=> {
+                        let b = UpdateBuilder::<BytesMut, _>::from_workshop(rws);
+                        b.into_pdu_iter(&SessionConfig::modern()).collect()
+                        }
+                    PrefixRouteWs::Ipv4UnicastAddpath(rws)=> {
+                        let b = UpdateBuilder::<BytesMut, _>::from_workshop(rws);
+                        b.into_pdu_iter(&SessionConfig::modern()).collect()
+                    }
+                    PrefixRouteWs::Ipv6Unicast(rws) => {
+                        let b = UpdateBuilder::<BytesMut, _>::from_workshop(rws);
+                        b.into_pdu_iter(&SessionConfig::modern()).collect()
+                    }
+                    PrefixRouteWs::Ipv6UnicastAddpath(_) => todo!(),
+                    PrefixRouteWs::Ipv4Multicast(_) => todo!(),
+                    PrefixRouteWs::Ipv4MulticastAddpath(_) => todo!(),
+                    PrefixRouteWs::Ipv6Multicast(_) => todo!(),
+                    PrefixRouteWs::Ipv6MulticastAddpath(_) => todo!(),
+                };
+
+                /*
+                let mut builder = match UpdateBuilder::from_update_message(
+                    &rrwd.raw_message.raw_message().0,
+                    &SessionConfig::modern(), // currenlty unused
+                    buffer
+                ) {
+                    Ok(builder) => builder,
+                    Err(_e) => {
+                        warn!("got invalid PDU from RIB");
+                        return;
+                    }
+                };
+                match rrwd.afi_safi {
+                    AfiSafi::Ipv4Unicast | AfiSafi::Ipv6Unicast => {
+                        if let Err(e) = builder.add_announcement(
+                            &Nlri::<&[u8]>::Unicast(BasicNlri::from(rrwd.prefix))
+                        ) {
+                            warn!("failed to add announcement for {}: {}",
+                                rrwd.prefix,
+                                e
+                            );
+                        }
+                    }
+                    _ => { warn!("got non unicast PDU from RIB"); return }
+                }
+                if let Ok(Some(nh)) = rrwd.raw_message.raw_message().0.mp_next_hop() {
+                    if let Err(e) = builder.set_mp_nexthop(nh) {
+                        warn!("invalid MP nexthop {:?} in PDU leaving RIB: {}", nh, e);
+                    }
+                }
+                let pdu_out = builder.into_message().unwrap();
+                */
+                let chans = {
+                    self.live_sessions.lock().unwrap().clone().into_values()
+                };
+                for (cmd_tx, pdu_out_tx) in chans {
+                    //debug!(
+                    //    "emitting Command::RawUpdate, chan cap {}",
+                    //    chan.capacity()
+                    //);
+                    for pdu_out in &pdus {
+                        let pdu_out = match pdu_out {
+                            Ok(p) => p,
+                            Err(e) => {
+                                warn!("Failed to construct PDU: {e}");
+                                continue;
+                            }
+                        };
+                        if let Err(e) = pdu_out_tx.send(
+                            //Command::RawUpdate(pdu_out.clone())
+                            BgpMsg::Update(pdu_out.clone())
+                        ).await {
+                            warn!("failed to send to pdu_out_tx: {e}");
+                            let _ = cmd_tx.send(Command::Disconnect(DisconnectReason::Other)).await;
+                        }
+                    }
+                }
+            }
+        };
+
+        match update {
+            Update::Single(update) => {
+                process_update(update.rx_value).await;
+            },
+            Update::Bulk(bulk) => {
+                for u in bulk {
+                    process_update(u.rx_value).await;
+                }
+            },
+            _ => todo!(),
+        }
+    }
+}
+
+impl AnyDirectUpdate for BgpTcpInRunner {}
+
 impl ConfigAcceptor for BgpTcpInRunner {
     fn accept_config(
         child_name: String,
@@ -363,7 +509,8 @@ impl ConfigAcceptor for BgpTcpInRunner {
         child_status_reporter: Arc<BgpTcpInStatusReporter>,
         live_sessions: Arc<Mutex<LiveSessions>>,
     ) {
-        let (cmds_tx, cmds_rx) = mpsc::channel(16);
+        let (cmds_tx, cmds_rx) = mpsc::channel(10*10); //XXX this is limiting and
+                                                    //causes loss
         let tcp_stream = tcp_stream.into_inner().unwrap(); // SAFETY: StandardTcpStream::into_inner() always returns Ok(...)
         crate::tokio::spawn(
             &child_name,

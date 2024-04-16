@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use log::{debug, error};
+use log::{debug, error, warn};
 // use roto::types::builtin::{
 //     BgpUpdateMessage, /*IpAddress,*/
 //     RotondaId, RouteStatus, UpdateMessage,
@@ -26,7 +26,7 @@ use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
 use routecore::bgp::message::update_builder::ComposeError;
 // use routecore::bgp::message::UpdateMessage as UpdatePdu;
-use routecore::bgp::message::{SessionConfig, UpdateMessage};
+use routecore::bgp::message::{SessionConfig, UpdateMessage, Message as BgpMsg};
 use routecore::bgp::nlri::afisafi::{AfiSafiNlri, Ipv4UnicastNlri};
 use routecore::bgp::path_attributes::PaMap;
 use routecore::bgp::types::AfiSafi;
@@ -47,7 +47,7 @@ use routecore::bgp::fsm::session::{
 
 use roto::types::builtin::basic_route::SourceId;
 
-use crate::bgp::encode::Announcements;
+//use crate::bgp::encode::Announcements;
 use crate::common::roto::{FilterOutput, RotoScripts, ThreadLocalVM};
 use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
 use crate::comms::{Gate, GateStatus, Terminated};
@@ -96,6 +96,7 @@ struct Processor {
     unit_cfg: BgpTcpIn,
     bgp_ltime: u64, // XXX or should this be on Unit level?
     tx: mpsc::Sender<Command>,
+    pdu_out_tx: mpsc::Sender<BgpMsg<Bytes>>,
     status_reporter: Arc<BgpTcpInStatusReporter>,
     observed_nlri: BTreeSet<Nlri>,
 }
@@ -111,6 +112,7 @@ impl Processor {
         unit_cfg: BgpTcpIn,
         //rx: mpsc::Receiver<Message>,
         tx: mpsc::Sender<Command>,
+        pdu_out_tx: mpsc::Sender<BgpMsg<Bytes>>,
         status_reporter: Arc<BgpTcpInStatusReporter>,
     ) -> Self {
         Processor {
@@ -119,6 +121,7 @@ impl Processor {
             unit_cfg,
             bgp_ltime: 0,
             tx,
+            pdu_out_tx,
             status_reporter,
             observed_nlri: BTreeSet::new(),
         }
@@ -129,6 +132,7 @@ impl Processor {
         let (gate, gate_agent) = Gate::new(0);
 
         let (cmds_tx, _) = mpsc::channel(16);
+        let (pdu_out_tx, _) = mpsc::channel(16);
 
         let processor = Self {
             roto_scripts: Default::default(),
@@ -136,6 +140,7 @@ impl Processor {
             unit_cfg,
             bgp_ltime: 0,
             tx: cmds_tx,
+            pdu_out_tx,
             status_reporter: Default::default(),
             observed_nlri: BTreeSet::new(),
         };
@@ -147,6 +152,7 @@ impl Processor {
         &mut self,
         mut session: T,
         mut rx_sess: mpsc::Receiver<Message>,
+        //mut pdu_out_rx: mpsc::Receiver<BgpMsg<Bytes>>,
         live_sessions: Arc<Mutex<super::unit::LiveSessions>>,
     ) -> (T, mpsc::Receiver<Message>) {
         let peer_addr_cfg = session.config().remote_prefix_or_exact();
@@ -317,7 +323,12 @@ impl Processor {
                                     self.roto_scripts.exec(vm, &self.unit_cfg.filter_name, msg.into(), Utc::now())
                                 }) {
                                     if !south.is_empty() {
-                                        let update = Payload::from_output_stream_queue(south, None).into();
+                                        let context = RouteContext::new(
+                                            None,
+                                            NlriStatus::Empty,
+                                            provenance,
+                                        );
+                                        let update = Payload::from_output_stream_queue(south, context, None).into();
                                         self.gate.update_data(update).await;
                                     }
                                     if let TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(pdu)) = east {
@@ -387,7 +398,7 @@ impl Processor {
                             let mut live_sessions = live_sessions.lock().unwrap();
                             live_sessions.insert(
                                 (negotiated.remote_addr(), negotiated.remote_asn()),
-                                self.tx.clone()
+                                (self.tx.clone(), self.pdu_out_tx.clone())
                             );
                             debug!(
                                 "inserted into live_sessions (current count: {})",
@@ -431,6 +442,7 @@ impl Processor {
 
                 let ipv4_unicast_nlri = prefixes.filter_map(|n| if let Nlri::Ipv4Unicast(p) = n { Some(p) } else { None });
 
+                // XXX mk_withdrawals_ is a todo!() now, so this will panic
                 let payloads = mk_withdrawals_for_peers_announced_prefixes::<'_, Ipv4UnicastNlri, _>(
                     ipv4_unicast_nlri,
                     provenance,
@@ -468,7 +480,8 @@ impl Processor {
         fn mk_payload(
             tv: TypeValue,
             received: DateTime<Utc>,
-            provenance: Option<Provenance>,
+            //provenance: Option<Provenance>,
+            context: RouteContext,
         ) -> Payload {
             
 
@@ -483,7 +496,7 @@ impl Processor {
             
             Payload::with_received(
                 tv,
-                provenance,
+                context,
                 None,
                 received
             )
@@ -528,12 +541,15 @@ impl Processor {
     
         let rws = explode_announcements(&bgp_msg, &mut self.observed_nlri)?;
 
-        payloads.extend(rws.into_iter().map(|rws| mk_payload(rws, received, Some(*context.provenance()))));
+        payloads.extend(
+            rws.into_iter().map(|rws| mk_payload(rws, received, context.clone()))
+        );
 
         let wds = explode_withdrawals(&bgp_msg, &mut self.observed_nlri)?;
 
-        payloads.extend(
-            wds.into_iter().map(|wds| mk_payload(wds, received, Some(*context.provenance()))));
+        payloads.extend(wds.into_iter().map(|wds|
+                mk_payload(wds, received, context.clone())
+        ));
 
         Ok(payloads.into())
     }
@@ -566,7 +582,10 @@ pub async fn handle_connection(
     // we do:
     let _ = tcp_stream.writable().await;
 
+    let (tcp_in, tcp_out) = tcp_stream.into_split();
     let (sess_tx, sess_rx) = mpsc::channel::<Message>(100);
+
+    let (pdu_out_tx, mut pdu_out_rx) = mpsc::channel(10);
 
     /*
     //  - depending on candidate_config, with or without DelayOpen
@@ -581,8 +600,18 @@ pub async fn handle_connection(
         delay_open
     );
 
+    let cmds_tx2 = cmds_tx.clone();
+    let sess_tx2 = sess_tx.clone();
+
+
     let mut session =
-        Session::new(candidate_config, tcp_stream, sess_tx, cmds_rx);
+        Session::new(
+            candidate_config,
+            tcp_in,
+            sess_tx,
+            cmds_rx,
+            pdu_out_tx.clone(),
+        );
 
     if delay_open {
         session.enable_delay_open();
@@ -595,8 +624,47 @@ pub async fn handle_connection(
         gate,
         unit_config,
         cmds_tx,
+        pdu_out_tx,
         status_reporter,
     );
+
+    tokio::spawn(async move {
+        while let Some(pdu) = pdu_out_rx.recv().await {
+            /*
+            if let Err(e) = tcp_out.writable().await.and({
+                tcp_out.try_write(pdu.as_ref())
+            }) {
+                warn!("error sending pdu ({:?}): {}", tcp_out.peer_addr(), e);
+            }
+            */
+            if let Err(e) = tcp_out.writable().await {
+                warn!("error while awaiting tcp_out.writable(): {}", e);
+            }
+            //if let Err(e) = tcp_out.try_write(pdu.as_ref()) {
+            //    warn!("error sending pdu ({:?}): {}", tcp_out.peer_addr(), e);
+            //}
+            match tcp_out.try_write(pdu.as_ref()) {
+                Ok(_) => { },
+                Err(ref e) if e.kind() == tokio::io::ErrorKind::WouldBlock => {
+                    debug!("WouldBlock after writable().await");
+                }
+                Err(e) => {
+                    warn!(
+                        "error sending pdu ({:?}): {}",
+                        tcp_out.peer_addr(), e
+                    );
+                    break;
+                }
+            }
+        }
+        // Make sure we get rid of the other half of the TcpStream:
+        let _ = cmds_tx2.send(Command::Disconnect(DisconnectReason::Other)).await;
+        let _ = sess_tx2.send(Message::ConnectionLost(None)).await;
+        debug!("pre tcp_out.forget()");
+        tcp_out.forget();
+        debug!("post tcp_out.forget()");
+    });
+
     p.process(session, sess_rx, live_sessions).await;
 }
 

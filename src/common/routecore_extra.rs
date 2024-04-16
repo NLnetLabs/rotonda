@@ -24,7 +24,7 @@ use crate::payload::Payload;
 pub fn generate_alternate_config(
     peer_config: &SessionConfig,
 ) -> Option<SessionConfig> {
-    let mut alt_peer_config = *peer_config;
+    let mut alt_peer_config = peer_config.clone();
     if peer_config.four_octet_asn == FourOctetAsn::Disabled {
         alt_peer_config.enable_four_octet_asn();
     } else if peer_config.four_octet_asn == FourOctetAsn::Enabled {
@@ -70,6 +70,8 @@ where
     // So, we must act as if we had received route withdrawals for
     // all of the routes previously received for this peer.
 
+    todo!()
+    /*
     let possible_num_payloads = match nlri.size_hint() {
         (_, Some(upper_bound)) => upper_bound,
         (lower_bound, None) => lower_bound,
@@ -119,6 +121,7 @@ where
     }
 
     Ok(payloads)
+    */
 }
 
 // TODO: This probably lives in routes, get it from there.

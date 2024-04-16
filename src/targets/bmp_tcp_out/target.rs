@@ -204,7 +204,7 @@ impl DirectUpdate for BmpTcpOutRunner {
             Update::Single(Payload {
                 // source_id,
                 rx_value: TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bytes)),
-                provenance,
+                //provenance,
                 ..
             }) => {
                 // Dispatch the message to the proxy for this router. Create the proxy if it doesn't exist yet.

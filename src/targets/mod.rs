@@ -15,8 +15,8 @@
 //------------ Sub-modules ---------------------------------------------------
 //
 // These contain all the actual unit types grouped by shared functionality.
-mod bmp_fs_out;
-mod bmp_tcp_out;
+//mod bmp_fs_out;
+//mod bmp_tcp_out;
 mod mqtt;
 mod null;
 
@@ -35,11 +35,11 @@ use serde::Deserialize;
 #[serde(tag = "type")]
 
 pub enum Target {
-    #[serde(rename = "bmp-fs-out")]
-    BmpFsOut(bmp_fs_out::target::BmpFsOut),
+    //#[serde(rename = "bmp-fs-out")]
+    //BmpFsOut(bmp_fs_out::target::BmpFsOut),
 
-    #[serde(rename = "bmp-tcp-out")]
-    BmpTcpOut(bmp_tcp_out::target::BmpTcpOut),
+    //#[serde(rename = "bmp-tcp-out")]
+    //BmpTcpOut(bmp_tcp_out::target::BmpTcpOut),
 
     #[serde(rename = "mqtt-out")]
     Mqtt(mqtt::target::Mqtt),
@@ -57,12 +57,12 @@ impl Target {
         waitpoint: WaitPoint,
     ) -> Result<(), Terminated> {
         match self {
-            Target::BmpFsOut(target) => {
-                target.run(component, cmd, waitpoint).await
-            }
-            Target::BmpTcpOut(target) => {
-                target.run(component, cmd, waitpoint).await
-            }
+            //Target::BmpFsOut(target) => {
+            //    target.run(component, cmd, waitpoint).await
+            //}
+            //Target::BmpTcpOut(target) => {
+            //    target.run(component, cmd, waitpoint).await
+            //}
             Target::Mqtt(target) => {
                 target.run(component, cmd, waitpoint).await
             }
@@ -74,8 +74,8 @@ impl Target {
 
     pub fn type_name(&self) -> &'static str {
         match self {
-            Target::BmpFsOut(_) => "bmp-fs-out",
-            Target::BmpTcpOut(_) => "bmp-tcp-out",
+            //Target::BmpFsOut(_) => "bmp-fs-out",
+            //Target::BmpTcpOut(_) => "bmp-tcp-out",
             Target::Mqtt(_) => "mqtt-out",
             Target::Null(_) => "null-out",
         }

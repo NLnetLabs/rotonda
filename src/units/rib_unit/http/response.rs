@@ -12,7 +12,10 @@ use inetnum::asn::Asn;
 
 use routecore::bgp::{
     aspath::{AsPath, Hop, HopPath}, 
-    communities::HumanReadableCommunity as Community
+    communities::{
+        HumanReadableCommunity as Community,
+        Community as CommunityEnum
+    }
 };
 
 use serde_json::{json, Value};
@@ -307,11 +310,13 @@ impl PrefixesApi {
         match ***item {
             TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(ref route)) => {
                 let mut route = route.clone();
-                if let Ok(attrs) = route.get_attrs() {
-                    attrs.communities.as_vec().iter().any(|item| {
+                //if let Ok(attrs) = route.get_attrs() {
+                if let Some(communities) = route.get_attr::<Vec<CommunityEnum>>() {
+                    communities.iter().any(|item| {
                         matches!(
                             item,
-                            ElementTypeValue::Primitive(TypeValue::Builtin(possible_c)) if *possible_c == wanted_c
+                            //ElementTypeValue::Primitive(TypeValue::Builtin(possible_c)) if *possible_c == wanted_c
+                            community
                         )
                     })
                 } else {
@@ -324,10 +329,15 @@ impl PrefixesApi {
     }
 
     fn match_peer_as(item: &Arc<PreHashedTypeValue>, peer_as: &Asn) -> bool {
+        // Should this come from Provenance now?
         match ***item {
-            TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(ref route)) => {
-                route.peer_asn() == Some(*peer_as)
+            //TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(ref route)) => {
+            //    route.peer_asn() == Some(*peer_as)
+            //}
+            TypeValue::Builtin(BuiltinTypeValue::RouteContext(ref ctx)) => {
+                ctx.provenance().peer_asn() == *peer_as
             }
+
             _ => false,
         }
     }

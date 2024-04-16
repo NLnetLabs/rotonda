@@ -188,6 +188,8 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
     }
 
     fn spawn_writer<G: Display>(&self, source_id: G) -> Sender {
+        todo!()
+        /*
         let file_io = T::default();
         let writer = self.build_file_writer(source_id);
         let format = self.config.format;
@@ -199,6 +201,7 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
         );
 
         tx
+        */
     }
 
     fn build_file_writer<G: Display>(
@@ -241,6 +244,8 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
         mut file_io: T,
         mut file: tokio::io::BufWriter<tokio::fs::File>,
     ) {
+        todo!()
+        /*
         let mut router_ids = HashMap::new();
         let mut peer_configs: HashMap<u64, (SessionConfig, bool)> =
             HashMap::new();
@@ -441,7 +446,8 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
 
                     let router_id = router_ids
                         .entry(provenance.unwrap().connection_id.clone())
-                        .or_insert_with(|| format!("{source_id} \"-\""));
+                        //.or_insert_with(|| format!("{source_id} \"-\""));
+                        .or_insert(provenance.unwrap().peer_ip().to_string());
 
                     let received = Utc::now();
                     let log_msg = format!(
@@ -500,6 +506,7 @@ impl<T: FileIo + Sync + Send + 'static> BmpFsOutRunner<T> {
 
             file_io.flush(&mut file).await.unwrap();
         }
+    */
     }
 }
 
@@ -527,6 +534,8 @@ impl<T: FileIo + Send + Sync + 'static> DirectUpdate for BmpFsOutRunner<T> {
                 // Dispatch the message to the writer for this
                 // router. Create the writer if it doesn't
                 // exist yet.
+                todo!()
+                /*
                 let source_id = payload.provenance.unwrap().connection_id;
                 let tx =
                     self.senders.entry(source_id.clone()).or_insert_with(
@@ -535,6 +544,7 @@ impl<T: FileIo + Send + Sync + 'static> DirectUpdate for BmpFsOutRunner<T> {
                 if let Err(err) = tx.send(payload) {
                     self.status_reporter.write_error(source_id, err);
                 }
+                */
             }
 
             _ => {

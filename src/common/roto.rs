@@ -362,27 +362,29 @@ impl RotoScripts {
         // will store the resulting MIR, plus the required arguments (a
         // RotoPack) in the RotoScript struct. This we only have to compile
         // once.
-        let rotolo = roto::pipeline::run_string(roto_script.to_string())
-            .map_err(|err| RotoError::compile_err(&origin, err))?;
+        let rotolos = roto::pipeline::run_string(roto_script.to_string())
+            .map_err(|err|
+                RotoError::compile_err(&origin, err.to_string().into())
+            )?;
 
-        if !rotolo.get_mis_compilations().is_empty() {
-            let report = rotolo.get_mis_compilations().iter().fold(
-                String::new(),
-                |mut acc, (scope, err)| {
-                    acc.push_str(&format!("Scope: {scope}, Error: {err}; "));
-                    acc
-                },
-            );
-            let report = report.trim_end_matches("; ");
-            return Err(RotoError::CompileError {
-                origin,
-                err: report.into(),
-            });
-        }
+        //if !rotolo.get_mis_compilations().is_empty() {
+        //    let report = rotolo.get_mis_compilations().iter().fold(
+        //        String::new(),
+        //        |mut acc, (scope, err)| {
+        //            acc.push_str(&format!("Scope: {scope}, Error: {err}; "));
+        //            acc
+        //        },
+        //    );
+        //    let report = report.trim_end_matches("; ");
+        //    return Err(RotoError::CompileError {
+        //        origin,
+        //        err: report.into(),
+        //    });
+        //}
 
         // Extract all the packs that are Filter(Map)s. Filter(Map)s can't
         // live in the Global scope, so these all have filter names.
-        let new_filter_maps = rotolo.packs();
+        let new_filter_maps = rotolos.iter().map(|r| r.clone().packs().0).flatten().collect::<Vec<_>>();
 
         // Check if any of the compiled filters have the same name as one that
         // we've already seen. If so, abort, as each Filter(Map) name must be
@@ -393,7 +395,7 @@ impl RotoScripts {
         // have been caught earlier in this method.
         if !reload {
             
-            for filter_map in &new_filter_maps.0 {
+            for filter_map in &new_filter_maps {
                 let filter_name = filter_map.get_filter_map_name();
 
                 if let Some(found) =
@@ -404,7 +406,7 @@ impl RotoScripts {
                             in {}",
                         found.parent_script.origin
                     ));
-                    return Err(RotoError::CompileError { origin, err });
+                    return Err(RotoError::CompileError { origin, err }.into());
                 }
             }
         }
@@ -414,7 +416,7 @@ impl RotoScripts {
             origin: origin.clone(),
             source_code: roto_script.to_string(),
             loaded_when: Instant::now(),
-            packs: new_filter_maps.0
+            packs: new_filter_maps
                 .into_iter()
                 .map(Arc::new)
                 .collect::<Vec<_>>(),

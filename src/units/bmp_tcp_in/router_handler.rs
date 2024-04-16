@@ -356,8 +356,16 @@ impl RouterHandler {
                 (bmp_state.router_id(), err.to_string())
             })? {
             if !south.is_empty() {
-                let payload =
-                    Payload::from_output_stream_queue(south, trace_id).into();
+                let context = RouteContext::new(
+                    None,
+                    NlriStatus::Empty,
+                    provenance.unwrap_or_else(||Provenance::mock())
+                );
+                let payload = Payload::from_output_stream_queue(
+                    south,
+                    context,
+                    trace_id
+                ).into();
                 self.gate.update_data(payload).await;
             }
 

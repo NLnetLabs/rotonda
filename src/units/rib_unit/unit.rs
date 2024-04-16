@@ -200,8 +200,8 @@ impl RibUnit {
 
     fn default_rib_keys() -> NonEmpty<BasicRouteToken> {
         NonEmpty::try_from(vec![
-            BasicRouteToken::PeerId,
-            BasicRouteToken::PeerAsn,
+            //BasicRouteToken::PeerId,
+            //BasicRouteToken::PeerAsn,
             BasicRouteToken::AsPath,
         ])
         .unwrap()

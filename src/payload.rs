@@ -208,6 +208,15 @@ impl Payload {
     ) -> SmallVec<[Payload; 8]> {
         let mut out_payloads = smallvec![];
 
+        // Add output stream messages to the result
+        if !filter_output.south.is_empty() {
+            out_payloads.extend(Self::from_output_stream_queue(
+                filter_output.south,
+                context.clone(),
+                trace_id,
+            ));
+        }
+
         // Make a payload out of it
         let new_payload = Payload::with_received(
             // source_id,
@@ -221,23 +230,17 @@ impl Payload {
         // Add the payload to the result
         out_payloads.push(new_payload);
 
-        // Add output stream messages to the result
-        if !filter_output.south.is_empty() {
-            out_payloads.extend(Self::from_output_stream_queue(
-                filter_output.south,
-                trace_id,
-            ));
-        }
 
         out_payloads
     }
 
     pub fn from_output_stream_queue(
         osq: OutputStreamQueue,
+        context: RouteContext,
         trace_id: Option<u8>,
     ) -> SmallVec<[Payload; 8]> {
         osq.into_iter()
-            .map(|osm| Payload::new(osm, None, trace_id))
+            .map(|osm| Payload::new(osm, context.clone(), trace_id))
             .collect()
     }
 }

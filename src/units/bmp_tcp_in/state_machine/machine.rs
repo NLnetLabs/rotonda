@@ -105,6 +105,7 @@ pub struct PeerState {
     pub session_config: SessionConfig,
 
     /// Did the peer advertise the GracefulRestart capability in its BGP OPEN message?
+    // Luuk: I don't think GR and EoR are related in this way here.
     pub eor_capable: bool,
 
     /// The set of End-of-RIB markers that we expect to see for this peer,
@@ -559,6 +560,8 @@ where
         &mut self,
         pph: &PerPeerHeader<Bytes>,
     ) -> SmallVec<[Payload; 8]> {
+        todo!()
+        /*
         // From https://datatracker.ietf.org/doc/html/rfc7854#section-4.9
         //
         //   "4.9.  Peer Down Notification
@@ -606,6 +609,7 @@ where
             //             // self.source_id.clone()
             //         ).ok())
             // .unwrap_or_default()
+        */
     }
 
     /// `filter` should return `None` if the BGP message should be ignored,
@@ -643,7 +647,7 @@ where
             );
         };
 
-        let mut peer_config = *peer_config;
+        let mut peer_config = peer_config.clone();
 
         let mut retry_due_to_err: Option<String> = None;
         loop {
@@ -657,7 +661,7 @@ where
                         );
 
                         // use this config from now on
-                        self.details.update_peer_config(&pph, peer_config);
+                        self.details.update_peer_config(&pph, peer_config.clone());
                     }
 
                     let mut saved_self =
@@ -746,7 +750,7 @@ where
                 }
 
                 Err(err) => {
-                    tried_peer_configs.push(peer_config);
+                    tried_peer_configs.push(peer_config.clone());
                     if let Some(alt_config) =
                         generate_alternate_config(&peer_config)
                     {
@@ -785,6 +789,8 @@ where
         trace_id: Option<u8>,
     ) -> Result<(SmallVec<[Payload; 8]>, UpdateReportMessage), session::Error>
     {
+        todo!()
+            /*
         let mut payloads: SmallVec<[Payload; 8]> = SmallVec::new();
         let mut update_report_msg =
             UpdateReportMessage::new(self.router_id.clone());
@@ -913,6 +919,7 @@ where
         }
 
         Ok((payloads, update_report_msg))
+            */
     }
 }
 
@@ -1034,7 +1041,7 @@ impl PeerAware for PeerStates {
         eor_capable: bool,
     ) -> bool {
         let mut added = false;
-        let _ = self.0.entry(pph).or_insert_with(|| {
+        let _ = self.0.entry(pph.clone()).or_insert_with(|| {
             added = true;
             PeerState {
                 session_config,

@@ -59,7 +59,8 @@ impl Default for HashedRib {
         // learned of (either the "tcp ip address:tcp port" or the BMP Initiation message sysName TLV), or for BGP
         // a string representation of the connected peers "tcp ip address:tcp port".
         Self::new(
-            &[BasicRouteToken::PeerIp, BasicRouteToken::PeerAsn, BasicRouteToken::AsPath],
+            //&[BasicRouteToken::PeerIp, BasicRouteToken::PeerAsn, BasicRouteToken::AsPath],
+            &[BasicRouteToken::AsPath],
             true,
             StoreEvictionPolicy::UpdateStatusOnWithdraw.into(),
         )
@@ -76,7 +77,29 @@ impl HashedRib {
             .iter()
             .map(|&v| vec![v as usize].into())
             .collect::<Vec<_>>();
-        Self::with_custom_type(TypeDef::Route, key_fields, physical, settings)
+        Self::with_custom_type(TypeDef::PrefixRoute, key_fields, physical, settings)
+    }
+
+    // Attempt to construct a HashedRib comprising both a PrefixRoute (like
+    // ::new() returns) and a RouteContext, packed in a TypeDef::Record.
+    // Not sure whether this makes sense at all, but adapting the `impl
+    // RouteExtra` from the old `Route` to the new `PrefixRoute` does not make
+    // sense without a `RouteContext` somewhere.
+    pub fn prefix_and_context(
+        key_fields: &[BasicRouteToken],
+        physical: bool,
+        settings: StoreMergeUpdateSettings,
+    ) -> Self {
+        let key_fields = key_fields
+            .iter()
+            .map(|&v| vec![v as usize].into())
+            .collect::<Vec<_>>();
+        let ty = TypeDef::Record(roto::types::typedef::RecordTypeDef::new(vec![
+                ("prefixroute".into(), Box::new(TypeDef::PrefixRoute)),
+                ("routecontext".into(), Box::new(TypeDef::RouteContext)),
+
+        ]));
+        Self::with_custom_type(ty, key_fields, physical, settings)
     }
 
     pub fn with_custom_type(
@@ -536,25 +559,34 @@ pub trait RouteExtra {
 
 impl RouteExtra for TypeValue {
     fn withdraw(&mut self) {
-        if let TypeValue::Builtin(BuiltinTypeValue::Route(route)) = self {
-            let delta_id = (RotondaId(0), 0); // TODO
-            route.update_status(delta_id, NlriStatus::Withdrawn);
+        // this could work assuming the RibValue comprises a
+        // RouteContext+PrefixRoute or something alike.
+        if let TypeValue::Builtin(BuiltinTypeValue::RouteContext(ctx)) = self {
+            ctx.update_nlri_status(NlriStatus::Withdrawn);
         }
     }
 
     fn peer_id(&self) -> Option<PeerId> {
         match self {
-            TypeValue::Builtin(BuiltinTypeValue::Route(route)) => {
-                Some(PeerId::new(route.peer_ip(), route.peer_asn()))
+            // unsure about this double layer of Option<_> here, is it
+            // necessary? Note that the Roto PeerId (from RouteContext) does
+            // not wrap the ip/asn in Options, it's the Rotonda PeerId that
+            // does that.
+            TypeValue::Builtin(BuiltinTypeValue::RouteContext(ctx)) => {
+                Some(PeerId::new(
+                        Some(ctx.provenance().peer_ip()),
+                        Some(ctx.provenance().peer_asn()),
+                ))
             }
             _ => None,
         }
     }
 
+    // What do we want here, remove in favour of a new SourceId kind of thing?
     fn router_id(&self) -> Option<Arc<RouterId>> {
         match self {
-            TypeValue::Builtin(BuiltinTypeValue::Route(route)) => {
-                route.router_id()
+            TypeValue::Builtin(BuiltinTypeValue::RouteContext(ctx)) => {
+                Some(Arc::from(ctx.provenance().connection_id.to_string()))
             }
             _ => None,
         }
@@ -565,7 +597,11 @@ impl RouteExtra for TypeValue {
     }
 
     fn is_withdrawn(&self) -> bool {
-        matches!(&self, TypeValue::Builtin(BuiltinTypeValue::Route(route)) if route.status() == NlriStatus::Withdrawn)
+        if let TypeValue::Builtin(BuiltinTypeValue::RouteContext(ctx)) = self {
+            ctx.nlri_status() == NlriStatus::Withdrawn
+        } else {
+            false
+        }
     }
 }
 

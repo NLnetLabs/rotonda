@@ -9,12 +9,9 @@ use std::{
 use arc_swap::{ArcSwap, ArcSwapAny};
 
 use crate::{
-    common::frim::FrimMap,
-    comms::{Gate, GateMetrics},
-    metrics::{
+    common::frim::FrimMap, comms::{Gate, GateMetrics}, ingress::IngressId, metrics::{
         self, util::append_per_router_metric, Metric, MetricType, MetricUnit,
-    },
-    payload::RouterId,
+    }, payload::RouterId
 };
 
 use super::statistics::RibMergeUpdateStatistics;
@@ -32,18 +29,23 @@ pub struct RibUnitMetrics {
     pub num_route_withdrawals_without_announcement: AtomicUsize,
     pub last_insert_duration_micros: AtomicU64,
     pub last_update_duration_micros: AtomicU64,
-    routers: Arc<FrimMap<Arc<RouterId>, Arc<RouterMetrics>>>,
+    //routers: Arc<FrimMap<Arc<RouterId>, Arc<RouterMetrics>>>,
+    routers: Arc<FrimMap<IngressId, Arc<RouterMetrics>>>,
     pub rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
 }
 
 impl RibUnitMetrics {
     pub fn router_metrics(
         &self,
-        router_id: Arc<RouterId>,
+        //router_id: Arc<RouterId>,
+        ingress_id: IngressId,
     ) -> Arc<RouterMetrics> {
         #[allow(clippy::unwrap_or_default)]
         self.routers
-            .entry(router_id)
+            //.entry(router_id)
+            .entry(ingress_id) // do we still need the Arc for Key K now that
+                               // it's basically a u32 instead of a
+                               // String/enum ?
             .or_insert_with(Default::default)
     }
 }
@@ -208,11 +210,13 @@ impl metrics::Source for RibUnitMetrics {
         });
 
         for (router_id, metrics) in self.routers.guard().iter() {
-            let router_id = router_id.as_str();
+            //let router_id = router_id.as_str();
             append_per_router_metric(
                 unit_name,
                 target,
-                router_id,
+                format!("{}", router_id), // TODO this should come from the
+                                          // ingress::Register and preferably
+                                          // be a nice name or ip address
                 Self::LAST_END_TO_END_DELAY_PER_ROUTER_METRIC,
                 metrics.last_e2e_delay_millis.load(SeqCst),
             );

@@ -1,37 +1,43 @@
 filter-map adj-rib-in {
     define {
-        rx route: Unicast | MultiCast | MplsVpnNlri;
-        tx rib_in_post_route: RibInPostRoute with Key { peer_id, router_id };
-        context context: Context;
+        rx route: Route; //Unicast  | MultiCast | MplsVpnNlri;
+        tx rib_in_post_route: RibInPostRoute; // with Key { peer_id, router_id };
+        context ctx: RouteContext;
 
         is_rib_in_post = false;
     }
 
     term is-rib-in-post {
-        context.provenance.rib_type == AjdRibInPost;
+        match {
+            ctx.provenance.peer_rib_type == AjdRibInPost;
+        }
     }
 
     action set-rib-in-post-true {
-        is_rib_in_post = true;
+        //is_rib_in_post = true;
+        is_rib_in_post.set(true);
     }
 
     action set-rib-in-post {
         rib_in_post_route.rib_in_post.set(is_rib_in_post);
-        rib_in_post_route.peer_id.set(context.provenance.peer_id);
-        rib_in_post_route.router_id.set(context.provenance.router_id);
+        rib_in_post_route.peer_id.set(ctx.provenance.peer_id);
+        rib_in_post_route.router_id.set(ctx.provenance.router_id);
     }
 
     apply {
-        filter match is-rib-in-post {
+        filter match is-rib-in-post matching {
             set-rib-in-post-true;
-        }
-        set-rib-in-post;
+            set-rib-in-post;
+        };
+        filter match is-rib-in-post not matching {
+            set-rib-in-post;
+        };
     }
 }
 
 type RibInPostRoute {
     peer_id: PeerId,
-    router_id: String
+    router_id: String,
     rib_in_post: Bool
 }
 

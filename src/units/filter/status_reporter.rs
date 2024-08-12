@@ -10,8 +10,7 @@ use roto::types::builtin::SourceId;
 use crate::{
     common::status_reporter::{
         sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter,
-    },
-    payload::FilterError,
+    }, ingress::IngressId, payload::FilterError
 };
 
 use super::metrics::RotoFilterMetrics;
@@ -38,13 +37,12 @@ impl RotoFilterStatusReporter {
     // metric.entry().and_modify().or_insert(1) to ensure that the key exists
     // if it didn't already.
 
-    pub fn message_filtered(&self, source_id: SourceId) {
-        if let SourceId::SocketAddr(router_addr) = source_id {
-            self.metrics
-                .router_metrics(router_addr)
-                .num_filtered_messages
-                .fetch_add(1, SeqCst);
-        }
+    //pub fn message_filtered(&self, source_id: SourceId) {
+    pub fn message_filtered(&self, ingress_id: IngressId) {
+        self.metrics
+            .router_metrics(ingress_id)
+            .num_filtered_messages
+            .fetch_add(1, SeqCst);
 
         self.metrics.num_filtered_messages.fetch_add(1, SeqCst);
     }

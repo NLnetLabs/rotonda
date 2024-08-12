@@ -1,6 +1,10 @@
 //! Things not implemented in the routecore crate that we use.
-use std::{collections::{hash_map::DefaultHasher, BTreeMap}, hash::{Hash, Hasher}, iter::Peekable, net::IpAddr, sync::Arc};
+// XXX we can get rid of most if not all of the things here?
 
+
+
+
+/*
 use bytes::Bytes;
 use chrono::Utc;
 use roto::types::builtin::{
@@ -8,28 +12,31 @@ use roto::types::builtin::{
 };
 use inetnum::{addr::Prefix, asn::Asn};
 use crate::units::bgp_tcp_in::peer_config::ConfigExt;
+*/
 
+/*
 use routecore::
-    bgp::{fsm::session::BgpConfig, message::{update::FourOctetAsn,
+    bgp::{fsm::session::BgpConfig, message::{update::FourOctetAsns,
         update_builder::{ComposeError, UpdateBuilder},
         SessionConfig, UpdateMessage,
-    }, nlri::afisafi::{AfiSafiNlri, AfiSafiParse, NlriCompose}, path_attributes::{BgpIdentifier, PathAttribute, PathAttributeType}, types::AfiSafi, workshop::route::RouteWorkshop};
+    }, nlri::afisafi::{AfiSafiNlri, NlriParse, NlriCompose}, path_attributes::{BgpIdentifier, PathAttribute, PathAttributeType}, types::AfiSafiType, workshop::route::RouteWorkshop};
 use smallvec::SmallVec;
 
 use roto::types::builtin::SourceId;
 
 use crate::payload::Payload;
+*/
+
+use routecore::bgp::message::{update::FourOctetAsns, SessionConfig};
 
 // Originally based on code in bgmp::main.rs.
 pub fn generate_alternate_config(
     peer_config: &SessionConfig,
 ) -> Option<SessionConfig> {
     let mut alt_peer_config = peer_config.clone();
-    if peer_config.four_octet_asn == FourOctetAsn::Disabled {
-        alt_peer_config.enable_four_octet_asn();
-    } else if peer_config.four_octet_asn == FourOctetAsn::Enabled {
-        alt_peer_config.disable_four_octet_asn();
-    }
+    alt_peer_config.set_four_octet_asns(
+        FourOctetAsns(!peer_config.four_octet_enabled())
+    );
     // We could try to be smart and toggle addpath settings for all or some
     // address families like below, but there is a chance we start storing
     // incorrect data. The proper solution is to fix the exporting side.
@@ -41,6 +48,7 @@ pub fn generate_alternate_config(
     Some(alt_peer_config)
 }
 
+/*
 pub fn mk_withdrawals_for_peers_announced_prefixes<'a, N, NI>(
     nlri: NI,
     // router_id: Arc<String>,
@@ -123,7 +131,9 @@ where
     Ok(payloads)
     */
 }
+*/
 
+/*
 // TODO: This probably lives in routes, get it from there.
 fn _mk_bgp_update<'a, N, NI>(
     withdrawals: &mut Peekable<NI>,
@@ -139,3 +149,4 @@ where
         Err(err) => Err(err),
     }
 }
+*/

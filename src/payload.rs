@@ -1,10 +1,11 @@
 use chrono::{DateTime, Utc};
-use roto::types::collections::BytesRecord;
-use roto::types::lazyrecord_types::BgpUpdateMessage;
+//use roto::types::collections::BytesRecord;
+//use roto::types::lazyrecord_types::BgpUpdateMessage;
 use roto::{types::typevalue::TypeValue, vm::OutputStreamQueue};
-use roto::types::builtin::{Provenance, RouteContext, SourceId};
+use roto::types::builtin::{RouteContext, SourceId};
 use rotonda_store::QueryResult;
 
+use routecore::bgp::types::AfiSafiType;
 use smallvec::{smallvec, SmallVec};
 use std::{
     fmt::Display,
@@ -12,6 +13,7 @@ use std::{
 };
 use uuid::Uuid;
 
+use crate::ingress::IngressId;
 use crate::{
     common::roto::{FilterOutput, FilterResult, RotoError},
     units::RibValue,
@@ -46,7 +48,8 @@ pub trait Filterable {
     where
         T: Fn(TypeValue, DateTime<Utc>, Option<u8>, RouteContext) -> FilterResult<E>
             + Clone,
-        U: Fn(SourceId) + Clone,
+        //U: Fn(SourceId) + Clone,
+        U: Fn(IngressId) + Clone,
         FilterError: From<E>;
 }
 
@@ -156,7 +159,8 @@ impl Filterable for Payload {
     where
         T: Fn(TypeValue, DateTime<Utc>, Option<u8>, RouteContext) -> FilterResult<E>
             + Clone,
-        U: Fn(SourceId) + Clone,
+        //U: Fn(SourceId) + Clone,
+        U: Fn(IngressId) + Clone,
         FilterError: From<E>,
     {
         if let ControlFlow::Continue(filter_output) =
@@ -170,7 +174,7 @@ impl Filterable for Payload {
                 self.context
             ))
         } else {
-            // filtered_fn(self.source_id);
+            filtered_fn(self.context.ingress_id());
             Ok(smallvec![])
         }
     }
@@ -185,7 +189,7 @@ impl Filterable for SmallVec<[Payload; 8]> {
     where
         T: Fn(TypeValue, DateTime<Utc>, Option<u8>, RouteContext) -> FilterResult<E>
             + Clone,
-        U: Fn(SourceId) + Clone,
+        U: Fn(IngressId) + Clone,
         FilterError: From<E>,
     {
         let mut out_payloads = smallvec![];
@@ -269,6 +273,13 @@ impl From<Payload> for SmallVec<[Update; 1]> {
 pub enum Update {
     Single(Payload),
     Bulk(SmallVec<[Payload; 8]>),
+    // Withdraw everything or a particular AFISAFI because the session ended.
+    // Not to be used for 'normal' withdrawals.
+    Withdraw(IngressId, Option<AfiSafiType>),
+    // Withdraw everything for multiple sessions. This is used when a BMP
+    // connection goes down and everything for the monitored sessions has to
+    // be marked Withdrawn.
+    WithdrawBulk(SmallVec<[IngressId; 8]>),
     QueryResult(Uuid, Result<QueryResult<RibValue>, String>),
     UpstreamStatusChange(UpstreamStatus),
 }
@@ -286,6 +297,9 @@ impl Update {
             Update::Bulk(payloads) => {
                 payloads.iter().filter(|p| p.trace_id().is_some()).collect()
             }
+            //Update::Withdraw(_ingress_id, _maybe_afisafi) => todo!(),
+            Update::Withdraw(_ingress_id, _maybe_afisafi) => smallvec![],
+            Update::WithdrawBulk(..) => smallvec![],
             Update::QueryResult(_, _) => smallvec![],
             Update::UpstreamStatusChange(_) => smallvec![],
         }

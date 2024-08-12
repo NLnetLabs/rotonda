@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use log::{debug, info, trace};
 use roto::{
     ast::{AcceptReject, ShortString},
-    compiler::{CompileError, Compiler, MirBlock, RotoPack, RotoPackArc},
+    compiler::{CompileError, MirBlock, RotoPack, RotoPackArc},
     types::{builtin::RouteContext, typevalue::TypeValue},
     vm::{
         ExtDataSource, LinearMemory, OutputStreamQueue, VirtualMachine,

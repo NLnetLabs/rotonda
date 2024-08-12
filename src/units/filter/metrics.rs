@@ -7,28 +7,27 @@ use std::{
 };
 
 use crate::{
-    common::frim::FrimMap,
-    comms::{Gate, GateMetrics},
-    metrics::{
+    common::frim::FrimMap, comms::{Gate, GateMetrics}, ingress::IngressId, metrics::{
         self, util::append_per_router_metric, Metric, MetricType, MetricUnit,
-    },
+    }
 };
 
 #[derive(Debug, Default)]
 pub struct RotoFilterMetrics {
     gate: Arc<GateMetrics>,
-    routers: Arc<FrimMap<Arc<SocketAddr>, Arc<RouterMetrics>>>,
+    routers: Arc<FrimMap<Arc<IngressId>, Arc<RouterMetrics>>>,
     pub num_filtered_messages: Arc<AtomicUsize>,
 }
 
 impl RotoFilterMetrics {
     pub fn router_metrics(
         &self,
-        socket_addr: SocketAddr,
+        //socket_addr: SocketAddr,
+        ingress_id: IngressId,
     ) -> Arc<RouterMetrics> {
         #[allow(clippy::unwrap_or_default)]
         self.routers
-            .entry(Arc::new(socket_addr))
+            .entry(Arc::new(ingress_id))
             .or_insert_with(Default::default)
     }
 }

@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+
 //! Data processing units.
 //!
 //! Rotonda provides the means for flexible data processing through

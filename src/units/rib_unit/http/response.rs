@@ -1,13 +1,13 @@
-use std::{ascii::escape_default, cmp::Ordering, sync::Arc};
+use std::{cmp::Ordering, sync::Arc};
 
 use hyper::{Body, Response};
 
-use log::debug;
+use log::{debug, error};
 use roto::types::{
-    builtin::BuiltinTypeValue, collections::ElementTypeValue,
+    builtin::{BuiltinTypeValue, PrefixRoute}, collections::ElementTypeValue,
     typevalue::TypeValue,
 };
-use rotonda_store::prelude::Prefix;
+use rotonda_store::{prelude::{multi::RouteStatus, Prefix}, PublicRecord};
 use inetnum::asn::Asn;
 
 use routecore::bgp::{
@@ -21,8 +21,7 @@ use routecore::bgp::{
 use serde_json::{json, Value};
 
 use crate::{
-    common::json::EasilyExtendedJSONObject,
-    units::rib_unit::rib::{PreHashedTypeValue, RibValue},
+    common::json::EasilyExtendedJSONObject, ingress::{self, IngressId, IngressInfo}, units::rib_unit::rib::RibValue
 };
 
 use super::{
@@ -39,20 +38,28 @@ impl PrefixesApi {
         details_cfg: Details,
         filters_cfg: Filters,
         sort_cfg: SortKey,
+        ingress_register: &Arc<ingress::Register>,
     ) -> Response<Body> {
         let mut out_prefixes = Vec::new();
         let mut out_less_specifics = Vec::new();
         let mut out_more_specifics = Vec::new();
 
+        //debug!("creating response for {:#?}", res);
+
+        
+
         if let Some(prefix) = res.prefix {
-            if let Some(routes_per_router) = res.prefix_meta {
+            // now a vec instead of an option
+            //if let Some(routes_per_router) = res.prefix_meta {
+            for public_record in res.prefix_meta {
                 Self::prefixes_as_json(
                     &prefix,
-                    &routes_per_router,
+                    &public_record,
                     &details_cfg,
                     &filters_cfg,
                     &sort_cfg,
                     &mut out_prefixes,
+                    &ingress_register,
                 );
             }
         }
@@ -60,14 +67,17 @@ impl PrefixesApi {
         if includes.less_specifics {
             if let Some(less_specifics) = res.less_specifics {
                 for record in less_specifics.iter() {
-                    Self::prefixes_as_json(
-                        &record.prefix,
-                        &record.meta,
-                        &details_cfg,
-                        &filters_cfg,
-                        &sort_cfg,
-                        &mut out_less_specifics,
-                    );
+                    for pub_record in record.meta {
+                        Self::prefixes_as_json(
+                            &record.prefix,
+                            &pub_record,
+                            &details_cfg,
+                            &filters_cfg,
+                            &sort_cfg,
+                            &mut out_less_specifics,
+                            &ingress_register,
+                        );
+                    }
                 }
             }
         }
@@ -75,14 +85,17 @@ impl PrefixesApi {
         if includes.more_specifics {
             if let Some(more_specifics) = res.more_specifics {
                 for record in more_specifics.iter() {
-                    Self::prefixes_as_json(
-                        &record.prefix,
-                        &record.meta,
-                        &details_cfg,
-                        &filters_cfg,
-                        &sort_cfg,
-                        &mut out_more_specifics,
-                    );
+                    for pub_record in record.meta {
+                        Self::prefixes_as_json(
+                            &record.prefix,
+                            &pub_record,
+                            &details_cfg,
+                            &filters_cfg,
+                            &sort_cfg,
+                            &mut out_more_specifics,
+                            &ingress_register,
+                        );
+                    }
                 }
             }
         }
@@ -110,16 +123,25 @@ impl PrefixesApi {
 
     fn prefixes_as_json(
         query_prefix: &Prefix,
-        rib_value: &RibValue,
+        //rib_value: &RibValue, // RibValue is basically PrefixRoute now
+        record: &PublicRecord<RibValue>,
         details_cfg: &Details,
         filter_cfg: &Filters,
         sort_cfg: &SortKey,
         result_prefixes: &mut Vec<Value>,
+        ingress_register: &Arc<ingress::Register>,
     ) {
-        let mut sortable_results = rib_value
+
+        let ingress_id = record.multi_uniq_id;
+        let status = record.status;
+
+        let ingress_info = ingress_register.get(ingress_id);
+
+        //let mut sortable_results = Some(Arc::new(TypeValue::from(rib_value.clone())))
+        let mut sortable_results = Some(record.meta.clone())
             .iter()
-            .filter(|&item| Self::include_item_in_results(filter_cfg, item))
-            .map(|item| Self::mk_result(query_prefix, item, details_cfg))
+            .filter(|&item| Self::include_item_in_results(filter_cfg, item, &ingress_info))
+            .map(|item| Self::mk_result(query_prefix, item, ingress_id, status, details_cfg, &ingress_info))
             .collect::<Vec<Value>>();
 
         Self::sort_results(sort_cfg, &mut sortable_results);
@@ -217,16 +239,32 @@ impl PrefixesApi {
 
     fn mk_result(
         _query_prefix: &Prefix,
-        route: &Arc<PreHashedTypeValue>,
+        //route: &Arc<TypeValue>,
+        route: &PrefixRoute,
+        ingress_id: IngressId,
+        status: RouteStatus,
         _details_cfg: &Details,
+        ingress_info: &Option<ingress::IngressInfo>,
     ) -> Value {
         // TODO: Honor details_cfg
-        serde_json::to_value(route).unwrap()
+
+        //serde_json::to_value((Id{ingress_id}, route)).unwrap()
+        serde_json::to_value(json!({
+            "ingress_id": ingress_id,
+            "ingress_info": ingress_info,
+            "prefix": route.prefix(),
+            "status": status.to_string(),
+            "next_hop": route.next_hop(),
+            "attributes": route.attributes(),
+
+        })).unwrap()
     }
 
     fn include_item_in_results(
         filter_cfg: &Filters,
-        item: &Arc<PreHashedTypeValue>,
+        //item: &Arc<TypeValue>,
+        item: &PrefixRoute,
+        ingress_info: &Option<IngressInfo>,
     ) -> bool {
         let no_selects = filter_cfg.selects().is_empty();
         let no_discards = filter_cfg.discards().is_empty();
@@ -244,7 +282,12 @@ impl PrefixesApi {
                 Self::match_community(item, community)
             }
 
-            FilterKind::PeerAs(peer_as) => Self::match_peer_as(item, peer_as),
+            //FilterKind::PeerAs(peer_as) => Self::match_peer_as(item, *peer_as),
+
+            // NB: we don't have a Provenance available here, but we should
+            // have a remote ASN in the ingress::Register for the
+            // MUI/ingress_id stored in the prefix store.
+            FilterKind::PeerAs(peer_as) => Self::match_peer_as(item, *peer_as, ingress_info),
         };
 
         let mut discards = filter_cfg.discards().iter();
@@ -263,12 +306,47 @@ impl PrefixesApi {
     }
 
     fn match_as_path(
-        item: &Arc<PreHashedTypeValue>,
+        //item: &Arc<TypeValue>,
+        item: &PrefixRoute,
         filter_as_path: &[Asn],
     ) -> bool {
-        match ***item {
+            let as_path = match &item.0 {
+                roto::types::builtin::PrefixRouteWs::Ipv4Unicast(a) => a.get_attr::<HopPath>(),
+                roto::types::builtin::PrefixRouteWs::Ipv4UnicastAddpath(a) => a.get_attr::<HopPath>(),
+                roto::types::builtin::PrefixRouteWs::Ipv6Unicast(a) => a.get_attr::<HopPath>(),
+                roto::types::builtin::PrefixRouteWs::Ipv6UnicastAddpath(a) => a.get_attr::<HopPath>(),
+                roto::types::builtin::PrefixRouteWs::Ipv4Multicast(a) => a.get_attr::<HopPath>(),
+                roto::types::builtin::PrefixRouteWs::Ipv4MulticastAddpath(a) => a.get_attr::<HopPath>(),
+                roto::types::builtin::PrefixRouteWs::Ipv6Multicast(a) => a.get_attr::<HopPath>(),
+                roto::types::builtin::PrefixRouteWs::Ipv6MulticastAddpath(a) => a.get_attr::<HopPath>(),
+            };
+            let as_path = if let Some(as_path) = as_path {
+                debug!("trying to match as_path {:?}", as_path);
+                as_path
+            } else {
+                debug!("Ignoring AS path matching for {:?} with {:?}", item.0, filter_as_path);
+                return false;
+            };
+            let mut actual_it = as_path.iter();
+            let mut wanted_it = filter_as_path.iter();
+
+            loop {
+                match (actual_it.next(), wanted_it.next()) {
+                    (Some(Hop::Asn(actual_asn)), Some(wanted_asn))
+                        if actual_asn == wanted_asn =>
+                    {
+                        continue
+                    }
+
+                    (None, None) => return true,
+
+                    _ => return false,
+                }
+            }
+            /*
+        match item {
             TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(ref route)) => {
-                let mut route = route.clone();
+                //let mut route = route.clone();
                 // let attrs = if let Ok(attrs) = route.0.attributes().get_attrs() {
                 //     attrs
                 // } else {
@@ -288,9 +366,9 @@ impl PrefixesApi {
                     match (actual_it.next(), wanted_it.next()) {
                         (Some(Hop::Asn(actual_asn)), Some(wanted_asn))
                             if actual_asn == wanted_asn =>
-                        {
-                            continue
-                        }
+                            {
+                                continue
+                            }
 
                         (None, None) => return true,
 
@@ -300,18 +378,55 @@ impl PrefixesApi {
             }
             _ => false,
         }
+            */
     }
 
     fn match_community(
-        item: &Arc<PreHashedTypeValue>,
+        //item: &Arc<TypeValue>,
+        item: &PrefixRoute,
         community: &Community,
     ) -> bool {
-        let wanted_c = BuiltinTypeValue::try_from(*community).unwrap();
-        match ***item {
+
+        #[allow(unused_variables)] // false positive
+        let wanted_c = community.0;
+        debug!("in match_community, wanted_c {:?}", &wanted_c);
+        if let Some(communities) = match &item.0 {
+            roto::types::builtin::PrefixRouteWs::Ipv4Unicast(ws) => ws.get_attr::<Vec<CommunityEnum>>(),
+            roto::types::builtin::PrefixRouteWs::Ipv4UnicastAddpath(ws) => ws.get_attr::<Vec<CommunityEnum>>(),
+            roto::types::builtin::PrefixRouteWs::Ipv6Unicast(ws) => ws.get_attr::<Vec<CommunityEnum>>(),
+            roto::types::builtin::PrefixRouteWs::Ipv6UnicastAddpath(ws) => ws.get_attr::<Vec<CommunityEnum>>(),
+            roto::types::builtin::PrefixRouteWs::Ipv4Multicast(ws) => ws.get_attr::<Vec<CommunityEnum>>(),
+            roto::types::builtin::PrefixRouteWs::Ipv4MulticastAddpath(ws) => ws.get_attr::<Vec<CommunityEnum>>(),
+            roto::types::builtin::PrefixRouteWs::Ipv6Multicast(ws) => ws.get_attr::<Vec<CommunityEnum>>(),
+            roto::types::builtin::PrefixRouteWs::Ipv6MulticastAddpath(ws) => ws.get_attr::<Vec<CommunityEnum>>(),
+        } {
+            #[allow(unused_variables)] // false positive
+            communities.iter().any(|item| {
+                //let match_res = matches!(
+                //    item,
+                //    //ElementTypeValue::Primitive(TypeValue::Builtin(possible_c)) if *possible_c == wanted_c
+                //    wanted_c
+                //);
+                let match_res = item == &wanted_c;
+                debug!("does {:?} match? {}", &item, match_res);
+                match_res
+            })
+        } else {
+            debug!("Ignoring community matching for {:?} with {:?}", item.0, community);
+            false
+        }
+
+
+
+        /*
+
+        //let wanted_c = BuiltinTypeValue::try_from(*community).unwrap();
+        match **item {
             TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(ref route)) => {
-                let mut route = route.clone();
+                //let mut route = route.clone();
                 //if let Ok(attrs) = route.get_attrs() {
                 if let Some(communities) = route.get_attr::<Vec<CommunityEnum>>() {
+                    #[allow(unused_variables)] // false positive
                     communities.iter().any(|item| {
                         matches!(
                             item,
@@ -327,18 +442,39 @@ impl PrefixesApi {
             _ => false,
         }
     }
+        */
+    }
 
-    fn match_peer_as(item: &Arc<PreHashedTypeValue>, peer_as: &Asn) -> bool {
-        // Should this come from Provenance now?
-        match ***item {
-            //TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(ref route)) => {
-            //    route.peer_asn() == Some(*peer_as)
-            //}
-            TypeValue::Builtin(BuiltinTypeValue::RouteContext(ref ctx)) => {
-                ctx.provenance().peer_asn() == *peer_as
-            }
+    //fn match_peer_as(item: &Arc<TypeValue>, peer_asn: Asn) -> bool {
+    fn match_peer_as(
+        _item: &PrefixRoute,
+        peer_asn: Asn,
+        ingress_info: &Option<IngressInfo>,
+        ) -> bool {
+        // FIXME we need the peer ASN here, which is not part of the TypeValue
+        // (anymore).
+        // We'll need to store (parts of) the provenance in the store or some
+        // such.
+        //item.as_ref().provenance().peer_asn == peer_asn
 
-            _ => false,
+        // possible workaround: get the neighbour AS from the HopPath in the
+        // RouteWorkshop for this PrefixRoute. This will not work for iBGP
+        // with empty AS_PATHs.
+
+
+
+        // NB:as long as we make sure the ingress_info describes the BGP
+        // session (even when it comes in via BMP), we can use the remote_asn
+        // from it.
+
+        if let Some(ingress_info) = ingress_info {
+            ingress_info.remote_asn == Some(peer_asn)
+        } else {
+            // possible workaround: check the right-most ASN in the AS_PATH
+            // for now, log an error, because ideally we have the ingress_info
+            // available anyway.
+            error!("no ingress_info to use in match_peer_as");
+            false
         }
     }
 }
@@ -390,7 +526,7 @@ mod test {
         );
 
         let details = Details::default();
-        let route = PreHashedTypeValue::new(raw_route.into(), 1);
+        let route = raw_route; //PreHashedTypeValue::new(raw_route.into(), 1);
         let json_out =
             PrefixesApi::mk_result(&prefix, &Arc::new(route), &details);
         println!("{}", json_out);

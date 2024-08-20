@@ -14,14 +14,11 @@ use non_empty_vec::NonEmpty;
 use roto::types::{builtin::BuiltinTypeValue, typevalue::TypeValue};
 use routecore::bgp::fsm::session::{Command, DisconnectReason};
 use inetnum::asn::Asn;
-use routecore::bgp::types::AfiSafi;
 use routecore::bgp::message::{
     SessionConfig,
-    UpdateMessage,
     update_builder::UpdateBuilder,
     Message as BgpMsg,
 };
-use routecore::bgp::nlri::afisafi::Nlri;
 
 use serde::Deserialize;
 use tokio::sync::mpsc;
@@ -66,7 +63,7 @@ pub struct BgpTcpIn {
     pub filter_name: FilterName,
 
     /// Outgoing BGP UPDATEs can come from these sources.
-    pub sources: NonEmpty<DirectLink>
+    pub sources: Vec<DirectLink>
 }
 
 impl PartialEq for BgpTcpIn {
@@ -156,6 +153,7 @@ trait ConfigAcceptor {
         child_status_reporter: Arc<BgpTcpInStatusReporter>,
         live_sessions: Arc<Mutex<LiveSessions>>,
         ingresses: Arc<ingress::Register>,
+        connector_ingress_id: ingress::IngressId,
     );
 }
 
@@ -221,7 +219,7 @@ impl BgpTcpInRunner {
 
     async fn run<T, U, V, F>(
         self,
-        mut sources: NonEmpty<DirectLink>,
+        mut sources: Vec<DirectLink>,
         listener_factory: Arc<T>,
     ) -> Result<(), Terminated>
     where
@@ -311,6 +309,7 @@ impl BgpTcpInRunner {
                                 child_status_reporter,
                                 arc_self.live_sessions.clone(),
                                 arc_self.ingresses.clone(),
+                                arc_self.ingresses.register(),
                             );
                         } else {
                             debug!("No config to accept {}", peer_addr.ip());
@@ -518,6 +517,7 @@ impl ConfigAcceptor for BgpTcpInRunner {
         child_status_reporter: Arc<BgpTcpInStatusReporter>,
         live_sessions: Arc<Mutex<LiveSessions>>,
         ingresses: Arc<ingress::Register>,
+        connector_ingress_id: ingress::IngressId,
     ) {
         let (cmds_tx, cmds_rx) = mpsc::channel(10*10); //XXX this is limiting and
                                                     //causes loss
@@ -534,7 +534,8 @@ impl ConfigAcceptor for BgpTcpInRunner {
                 cmds_rx,
                 child_status_reporter,
                 live_sessions,
-                ingresses
+                ingresses,
+                connector_ingress_id
             ),
         );
     }

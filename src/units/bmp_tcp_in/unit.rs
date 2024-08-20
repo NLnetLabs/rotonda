@@ -29,12 +29,7 @@ use crate::{
         roto::{FilterName, RotoScripts},
         status_reporter::Chainable,
         unit::UnitActivity,
-    },
-    comms::{Gate, GateStatus, Terminated},
-    manager::{Component, WaitPoint},
-    tokio::TokioTaskMetrics,
-    tracing::Tracer,
-    units::Unit,
+    }, comms::{Gate, GateStatus, Terminated}, ingress, manager::{Component, WaitPoint}, tokio::TokioTaskMetrics, tracing::Tracer, units::Unit
 };
 
 use super::{
@@ -174,6 +169,9 @@ impl BmpTcpIn {
         let roto_scripts = component.roto_scripts().clone();
         let tracer = component.tracer().clone();
 
+
+        let ingress_register = component.ingresses();
+
         // Wait for other components to be, and signal to other components
         // that we are, ready to start. All units and targets start together,
         // otherwise data passed from one component to another may be lost if
@@ -206,6 +204,7 @@ impl BmpTcpIn {
             filter_name,
             tracer,
             tracing_mode,
+            ingress_register,
         )
         .run::<_, _, StandardTcpStream, BmpTcpInRunner>(Arc::new(
             StandardTcpListenerFactory,
@@ -237,6 +236,7 @@ trait ConfigAcceptor {
             FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
         >, // Option is never None, instead Some is take()'n and replace()'d.
         router_info: &Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
+        ingress_register: Arc<ingress::Register>,
     );
 }
 
@@ -257,6 +257,7 @@ struct BmpTcpInRunner {
     filter_name: Arc<ArcSwap<FilterName>>,
     tracer: Arc<Tracer>,
     tracing_mode: Arc<ArcSwap<TracingMode>>,
+    ingress_register: Arc<ingress::Register>,
 }
 
 impl BmpTcpInRunner {
@@ -279,6 +280,7 @@ impl BmpTcpInRunner {
         filter_name: Arc<ArcSwap<FilterName>>,
         tracer: Arc<Tracer>,
         tracing_mode: Arc<ArcSwap<TracingMode>>,
+        ingress_register: Arc<ingress::Register>,
     ) -> Self {
         Self {
             component,
@@ -296,6 +298,7 @@ impl BmpTcpInRunner {
             filter_name,
             tracer,
             tracing_mode,
+            ingress_register,
         }
     }
 
@@ -434,6 +437,7 @@ impl BmpTcpInRunner {
                             &source_id,
                             &self.router_states,
                             &self.router_info,
+                            self.ingress_register.clone(),
                         );
                     }
                     ControlFlow::Continue(Err(_err)) => break 'inner,
@@ -554,6 +558,7 @@ impl BmpTcpInRunner {
             router_id,
             child_status_reporter,
             metrics,
+            self.ingress_register.clone(),
         )
     }
 
@@ -624,6 +629,7 @@ impl ConfigAcceptor for BmpTcpInRunner {
             FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
         >, // Option is never None, instead Some is take()'n and replace()'d.
         router_info: &Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
+        ingress_register: Arc<ingress::Register>,
     ) {
         let source_id = source_id.clone();
         let router_states = router_states.clone();
@@ -634,7 +640,7 @@ impl ConfigAcceptor for BmpTcpInRunner {
 
         crate::tokio::spawn(&child_name, async move {
             router_handler
-                .run(tcp_stream, client_addr, source_id.clone())
+                .run(tcp_stream, client_addr, source_id.clone(), ingress_register)
                 .await;
             router_states.remove(&source_id);
             router_info.remove(&source_id);

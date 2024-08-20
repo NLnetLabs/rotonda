@@ -1,9 +1,11 @@
-use core::sync::atomic::AtomicU64;
+use core::sync::atomic::AtomicU32;
+use std::net::IpAddr;
 use std::{
-    collections::HashMap, net::SocketAddr, path::PathBuf, sync::{atomic::Ordering, Arc, Mutex}
+    collections::HashMap, path::PathBuf, sync::atomic::Ordering,
 };
 
-use arc_swap::ArcSwap;
+use std::sync::RwLock;
+
 use inetnum::asn::Asn;
 
 /// Register of ingress/sources, tracked in a serial way.
@@ -17,19 +19,20 @@ use inetnum::asn::Asn;
 /// Any unit/target can query the Register.
 #[derive(Debug, Default)]
 pub struct Register {
-    serial: AtomicU64,
-    info: ArcSwap<HashMap<IngressId, IngressInfo>>,
-    write_lock: Arc<Mutex<()>>,
+    serial: AtomicU32,
+    info: RwLock<HashMap<IngressId, IngressInfo>>,
+    //write_lock: Mutex<()>,
 }
 
-pub type IngressId = u64;
+pub type IngressId = u32;
 
 impl Register {
     pub(crate) fn new() -> Self {
         Self {
             serial: 1.into(),
-            info: ArcSwap::from_pointee(HashMap::new()),
-            write_lock: Arc::new(Mutex::new(())),
+            //info: ArcSwap::from_pointee(HashMap::new()),
+            info: RwLock::new(HashMap::new()),
+            //WRITE_lock: Mutex::new(()),
         }
     }
 
@@ -42,24 +45,32 @@ impl Register {
         id: IngressId,
         info: IngressInfo,
     ) -> Option<IngressInfo> {
-        let old = self.info.load();
-        let mut new = old.clone();
-        let replaced = Arc::make_mut(&mut new).insert(id, info);
-        self.info.store(new.into());
-        replaced
+        let mut lock = self.info.write().unwrap();
+        //let old = self.info.load();
+        //let mut new = old.clone();
+        //let replaced = Arc::make_mut(&mut new).insert(id, info);
+        //self.info.store(new.into());
+        lock.insert(id, info) // returnst he replaced info
     }
 
     pub(crate) fn get(&self, id: IngressId) -> Option<IngressInfo> {
-        self.info.load().get(&id).cloned()
+        //self.info.load().get(&id).cloned()
+        self.info.read().unwrap().get(&id).cloned()
     }
 }
 
 #[derive(Clone, Debug, Default)]
+#[derive(serde::Serialize)]
 pub struct IngressInfo {
-    remote_addr: Option<SocketAddr>,
-    remote_asn: Option<Asn>,
-    filename: Option<PathBuf>,
-    name: Option<String>,
+    // changed to IpAddr because one of the BMP/BGP connectors did not have
+    // SocketAddr for us available. Ideally we change this back to SocketAddr
+    // though.
+    //remote_addr: Option<SocketAddr>,
+    pub remote_addr: Option<IpAddr>,
+    pub remote_asn: Option<Asn>,
+    pub filename: Option<PathBuf>,
+    pub name: Option<String>,
+    // pub last_active: Instant ? to enable 'reconnecting' remotes?
 }
 
 impl IngressInfo {
@@ -67,7 +78,8 @@ impl IngressInfo {
         Self::default()
     }
 
-    pub fn with_remote_addr(self, addr: SocketAddr) -> Self {
+    //pub fn with_remote_addr(self, addr: SocketAddr) -> Self {
+    pub fn with_remote_addr(self, addr: IpAddr) -> Self {
         Self { remote_addr: Some(addr), ..self }
     }
 

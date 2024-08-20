@@ -28,7 +28,9 @@ pin-project-lite   = "0.2"
 rand               = "0.8"
 reqwest            = { version = "0.11", default-features = false }
 inetnum            = { version = "0.1.0", features = ["arbitrary", "serde"] }
-routecore          = { git = "https://github.com/nlnetlabs/routecore", branch = "absorb-fsm", features = ["bgp", "bmp", "serde", "fsm"] }
+routecore           = { version = "0.5.0-rc1", features = ["bmp", "serde", "fsm"] }
+#routecore          = { git = "https://github.com/nlnetlabs/routecore", branch = "absorb-fsm", features = ["bgp", "bmp", "serde", "fsm"] }
+#routecore          = { path = "../routecore", features = ["bgp", "bmp", "serde", "fsm"] }
 sanitise-file-name = "1.0"
 serde              = { version = "1.0", features = ["derive", "rc"] }
 serde_json         = { version = "1.0", features = ["preserve_order"] }
@@ -55,8 +57,10 @@ layout-rs          = { version = "0.1" }
 mqtt               = { version = "0.23.0", package = "rumqttc", default-features = false }
 non-empty-vec      = { version = "0.2", features = ["serde"]}
 percent-encoding   = "2.3"
-roto               = { git = "https://github.com/nlnetlabs/roto", branch = "main" }
-rotonda-store      = { git = "https://github.com/nlnetlabs/rotonda-store", branch = "main" }
+#roto               = { git = "https://github.com/nlnetlabs/roto", branch = "main" }
+roto               = { path = "../roto" }
+#rotonda-store      = { git = "https://github.com/nlnetlabs/rotonda-store", branch = "main" }
+rotonda-store      = { path = "../rotonda-store" }
 serde_with         = "3"
 smallvec           = { version = "1.11", features = ["const_generics", "const_new", "union"] }
 tokio-metrics      = { version = "0.3", default-features = false }

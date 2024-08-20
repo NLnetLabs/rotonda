@@ -1,8 +1,7 @@
 use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeSet;
-use std::fmt;
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::net::SocketAddr;
 use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
@@ -16,21 +15,17 @@ use log::{debug, error, warn};
 // };
 use roto::types::builtin::{
     /*Asn as RotoAsn,*/
-    explode_announcements, explode_withdrawals, BuiltinTypeValue, Nlri, NlriStatus, PeerId, PeerRibType, Provenance, RouteContext
+    explode_announcements, explode_withdrawals, BuiltinTypeValue, Nlri, NlriStatus, Provenance, FreshRouteContext, RouteContext
 };
 use roto::types::collections::BytesRecord;
 use roto::types::lazyrecord_types::BgpUpdateMessage;
 // use roto::types::lazyrecord_types::BgpUpdateMessage;
 use roto::types::typevalue::TypeValue;
-use inetnum::addr::Prefix;
+//use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
-use routecore::bgp::message::update_builder::ComposeError;
+//use routecore::bgp::message::update_builder::ComposeError;
 // use routecore::bgp::message::UpdateMessage as UpdatePdu;
-use routecore::bgp::message::{SessionConfig, UpdateMessage, Message as BgpMsg};
-use routecore::bgp::nlri::afisafi::{AfiSafiNlri, Ipv4UnicastNlri};
-use routecore::bgp::path_attributes::PaMap;
-use routecore::bgp::types::AfiSafi;
-use routecore::bgp::workshop::route::RouteWorkshop;
+use routecore::bgp::message::Message as BgpMsg;
 use smallvec::SmallVec;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -49,7 +44,7 @@ use roto::types::builtin::basic_route::SourceId;
 
 //use crate::bgp::encode::Announcements;
 use crate::common::roto::{FilterOutput, RotoScripts, ThreadLocalVM};
-use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
+//use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
 use crate::comms::{Gate, GateStatus, Terminated};
 use crate::ingress;
 use crate::payload::{Payload, Update};
@@ -95,12 +90,15 @@ struct Processor {
     roto_scripts: RotoScripts,
     gate: Gate,
     unit_cfg: BgpTcpIn,
-    bgp_ltime: u64, // XXX or should this be on Unit level?
+    //bgp_ltime: u64, // XXX or should this be on Unit level?
     tx: mpsc::Sender<Command>,
     pdu_out_tx: mpsc::Sender<BgpMsg<Bytes>>,
     status_reporter: Arc<BgpTcpInStatusReporter>,
-    observed_nlri: BTreeSet<Nlri>,
+    observed_nlri: BTreeSet<Nlri>, // XXX this should go in favour of ingress_id
     ingresses: Arc<ingress::Register>,
+
+    /// The 'overall' IngressId for the BGP-IN unit.
+    ingress_id: ingress::IngressId,
 }
 
 impl Processor {
@@ -117,17 +115,19 @@ impl Processor {
         pdu_out_tx: mpsc::Sender<BgpMsg<Bytes>>,
         status_reporter: Arc<BgpTcpInStatusReporter>,
         ingresses: Arc<ingress::Register>,
+        ingress_id: ingress::IngressId,
     ) -> Self {
         Processor {
             roto_scripts,
             gate,
             unit_cfg,
-            bgp_ltime: 0,
+            //bgp_ltime: 0,
             tx,
             pdu_out_tx,
             status_reporter,
             observed_nlri: BTreeSet::new(),
-            ingresses
+            ingresses,
+            ingress_id,
         }
     }
 
@@ -142,7 +142,7 @@ impl Processor {
             roto_scripts: Default::default(),
             gate,
             unit_cfg,
-            bgp_ltime: 0,
+            //bgp_ltime: 0,
             tx: cmds_tx,
             pdu_out_tx,
             status_reporter: Default::default(),
@@ -165,13 +165,14 @@ impl Processor {
         let mut connection_id = DefaultHasher::new();
         session.connected_addr().hash(&mut connection_id);
 
-        let mut provenance = Provenance {
-            timestamp: Utc::now(),
-            // connection_id: connection_id.finish() as u32,
-            // Provisional PeerId!
-            connection_id: session.connected_addr().unwrap(),
-            peer_id: PeerId { addr: "0.0.0.0".parse().unwrap(), asn: 0.into() }, 
-            peer_bgp_id: session.config().bgp_id().into(),
+        let session_ingress_id = self.ingress_id;
+
+        //let mut provenance = Provenance::empty(ingress_id.into());
+        /*
+        provenance.peer_ip = Some(self.connection.
+        provenance.peer_asn = Some(
+            bmp_router_ip:
+
             peer_distuingisher: [0,0,0,0,0,0,0,0],
             peer_rib_type: PeerRibType::OutPost,
         };
@@ -190,24 +191,7 @@ impl Processor {
                 peer_rib_type: PeerRibType::OutPost,
             };
         }
-
-            //capabilities: Vec<Capability<Vec<u8>>,
-    // hold_time: u16, // smaller of the two OPENs, 0 or >= 3
-    // remote_bgp_id: [u8; 4],
-    // remote_asn: Asn,
-    // remote_addr: IpAddr,
-    // addpath: Vec<AddpathFamDir>,
-
-        // fn local_asn(&self) -> Asn;
-        // fn bgp_id(&self) -> [u8; 4];
-        // fn remote_addr_allowed(&self, remote_addr: IpAddr) -> bool;
-        // fn remote_asn_allowed(&self, remote_asn: Asn) -> bool;
-        // fn hold_time(&self) -> Option<u16>;
-        // fn is_exact(&self) -> bool;
-    
-        // fn protocols(&self) -> Vec<AfiSafi>;
-        // fn addpath(&self) -> Vec<AfiSafi>;
-        // let mut ticker = session.tick();
+        */
 
         // XXX is this all OK cancel-safety-wise?
         loop {
@@ -315,51 +299,44 @@ impl Processor {
                             // We can only receive UPDATE messages over an
                             // established session, so not having a
                             // NegotiatedConfig should never happen.
-                            if let Some(_negotiated) = session.negotiated() {
+                            if let Some(negotiated) = session.negotiated() {
+                                let provenance = Provenance::for_bgp(
+                                    session_ingress_id,
+                                    negotiated.remote_addr(),
+                                    negotiated.remote_asn(),
+                                );
+                                let msg = BytesRecord::<BgpUpdateMessage>::from(bgp_msg);
+                                let ctx = RouteContext::new(
+                                    Some(msg.clone()),
+                                    NlriStatus::InConvergence,
+                                    provenance
+                                );
+
                                 if let Ok(ControlFlow::Continue(FilterOutput { south, east, received })) = Self::VM.with(|vm| {
-                                    // let delta_id = (RotondaId(0), 0); // TODO
-                                    // let msg: BytesRecord<BgpUpdateMessage> = bgp_msg.into();
-                                    // let msg = BgpUpdateMessage::new(delta_id, roto_update_msg);
-                                    // let msg = Arc::new(msg);
-                                    let msg = BytesRecord::<BgpUpdateMessage>::from(bgp_msg);
-                                    let context = RouteContext::new(Some(msg.clone()), NlriStatus::InConvergence, provenance);
-                                    //if vm.borrow().is_none() {
-                                    //    self.roto_scripts.init_vm(vm, &self.unit_cfg.filter_name).unwrap();
-                                    //}
-                                    //if let Some(vm) = vm.borrow_mut().as_mut() {
-                                    //    vm.update_context(Arc::new(context));
-                                    //} else {
-                                    //    // LH: This shouldn't happen I suppose?
-                                    //    debug!("no vm, attempt to init");
-                                    //    //self.roto_scripts.init_vm(vm, &self.unit_cfg.filter_name);
-                                    //    //vm.update_context(Arc::new(context));
-                                    //}
-                                    //vm.borrow_mut().as_mut().map(|vm| vm.update_context(Arc::new(context)));
-                                    self.roto_scripts.exec(vm, &self.unit_cfg.filter_name, msg.into(), Utc::now(), context)
+                                    self.roto_scripts.exec(vm,
+                                        &self.unit_cfg.filter_name,
+                                        msg.into(), // TypeVal
+                                        Utc::now(),
+                                        ctx.clone(), // XXX or Arc?
+                                    )
                                 }) {
                                     if !south.is_empty() {
-                                        let context = RouteContext::new(
-                                            None,
-                                            NlriStatus::Empty,
-                                            provenance,
-                                        );
-                                        let update = Payload::from_output_stream_queue(south, context, None).into();
+                                        let update = Payload::from_output_stream_queue(south, ctx.clone(), None).into();
                                         self.gate.update_data(update).await;
                                     }
-                                    if let TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(pdu)) = east {
-                                        // let pdu = Arc::into_inner(pdu).unwrap(); // This should succeed
-                                        let pdu = pdu.bytes_parser().clone(); // Bytes is cheap to clone
-                                        let context = RouteContext::new(
-                                            Some(pdu.into()),
-                                            NlriStatus::InConvergence,
-                                            provenance,
-                                        );
+                                    // XXX LH: I assume the _pdu here is
+                                    // exactly the same as the `msg` that is
+                                    // in the ctx already? 
+                                    if let TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(_pdu)) = east {
+                                        let ctx = match ctx {
+                                            RouteContext::Reprocess => {
+                                                panic!("unexpected Reprocess context");
+                                            }
+                                            RouteContext::Fresh(fresh) => fresh
+                                        };
                                         let update = self.process_update(
                                             received,
-                                            // pdu,
-                                            context,
-                                            //negotiated.remote_addr(),
-                                            //negotiated.remote_asn()
+                                            ctx,
                                         ).await;
                                         match update {
                                             Ok(update) => { self.gate.update_data(update).await; },
@@ -421,7 +398,8 @@ impl Processor {
                             );
                             }
                             // register ingress
-                            let session_ingress_id = self.ingresses.register();
+                            //session_ingress_id = self.ingresses.register();
+                            
                             debug!(
                                 "got assigned {} for this session",
                                 session_ingress_id 
@@ -431,6 +409,7 @@ impl Processor {
                                 session_ingress_id,
                                 ingress::IngressInfo::new()
                                     .with_name("some-bgp-session".to_string())
+                                    .with_remote_addr(negotiated.remote_addr())
                                     .with_remote_asn(negotiated.remote_asn())
                                 );
                             debug!("get 2: {:?}", self.ingresses.get(session_ingress_id));
@@ -466,15 +445,16 @@ impl Processor {
                     live_sessions.lock().unwrap().len()
                 );
 
-                let prefixes = self.observed_nlri.iter();
+                //let prefixes = self.observed_nlri.iter();
                 // let router_id = Arc::new("TODO".into());
-                let source_id: SourceId = "TODO".into();
-                let peer_address = negotiated.remote_addr();
-                let peer_asn = negotiated.remote_asn();
+                //let source_id: SourceId = "TODO".into();f
+                //let peer_address = negotiated.remote_addr();
+                //let peer_asn = negotiated.remote_asn();
 
-                let ipv4_unicast_nlri = prefixes.filter_map(|n| if let Nlri::Ipv4Unicast(p) = n { Some(p) } else { None });
+                //let ipv4_unicast_nlri = prefixes.filter_map(|n| if let Nlri::Ipv4Unicast(p) = n { Some(p) } else { None });
 
                 // XXX mk_withdrawals_ is a todo!() now, so this will panic
+                /*
                 let payloads = mk_withdrawals_for_peers_announced_prefixes::<'_, Ipv4UnicastNlri, _>(
                     ipv4_unicast_nlri,
                     provenance,
@@ -484,6 +464,11 @@ impl Processor {
                 if let Ok(payloads) = payloads {
                     self.gate.update_data(Update::Bulk(payloads)).await;
                 }
+                */
+
+                self.gate.update_data(
+                    Update::Withdraw(session_ingress_id, None)
+                ).await;
             }
         }
 
@@ -505,7 +490,7 @@ impl Processor {
         &mut self,
         received: DateTime<Utc>,
         // bgp_msg: BgpUpdateMessage,
-        context: RouteContext,
+        context: FreshRouteContext,
         //peer_ip: IpAddr,
         //peer_asn: Asn
     ) -> Result<Update, session::Error> {
@@ -513,7 +498,8 @@ impl Processor {
             tv: TypeValue,
             received: DateTime<Utc>,
             //provenance: Option<Provenance>,
-            context: RouteContext,
+            //context: RouteContext,
+            context: FreshRouteContext,
         ) -> Payload {
             
 
@@ -528,7 +514,7 @@ impl Processor {
             
             Payload::with_received(
                 tv,
-                context,
+                context.into(),
                 None,
                 received
             )
@@ -572,15 +558,22 @@ impl Processor {
         let bgp_msg = context.message().clone().unwrap().into_inner();
     
         let rws = explode_announcements(&bgp_msg, &mut self.observed_nlri)?;
+        debug!("rws size: {}", rws.len());
 
         payloads.extend(
             rws.into_iter().map(|rws| mk_payload(rws, received, context.clone()))
         );
 
         let wds = explode_withdrawals(&bgp_msg, &mut self.observed_nlri)?;
+        debug!("exploded wds size: {}", wds.len());
+        debug!("raw routecore: {:?}", &bgp_msg.withdrawals().unwrap().collect::<Vec<_>>());
 
+        let context = FreshRouteContext{
+            nlri_status: NlriStatus::Withdrawn,
+            ..context
+        };
         payloads.extend(wds.into_iter().map(|wds|
-                mk_payload(wds, received, context.clone())
+            mk_payload(wds, received, context.clone())
         ));
 
         Ok(payloads.into())
@@ -599,6 +592,7 @@ pub async fn handle_connection(
     status_reporter: Arc<BgpTcpInStatusReporter>,
     live_sessions: Arc<Mutex<super::unit::LiveSessions>>,
     ingresses: Arc<ingress::Register>,
+    connector_ingress_id: ingress::IngressId,
 ) {
     // NB: when testing with an FRR instance configured with
     //  "neighbor 1.2.3.4 timers delayopen 15"
@@ -659,7 +653,8 @@ pub async fn handle_connection(
         cmds_tx,
         pdu_out_tx,
         status_reporter,
-        ingresses
+        ingresses,
+        connector_ingress_id,
     );
 
     tokio::spawn(async move {

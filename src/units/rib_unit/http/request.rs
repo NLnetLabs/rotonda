@@ -3,7 +3,7 @@ use std::{ops::Deref, str::FromStr, sync::Arc};
 use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
 use hyper::{Body, Method, Request, Response};
-use log::trace;
+use log::{debug, trace};
 use rotonda_store::{epoch, prelude::Prefix, MatchOptions};
 use inetnum::asn::Asn;
 use routecore::bgp::communities::HumanReadableCommunity as Community;
@@ -11,19 +11,17 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use crate::{
-    comms::{Link, TriggerData},
-    http::{
+    comms::{Link, TriggerData}, http::{
         extract_params, get_all_params, get_param, MatchedParam,
         PercentDecodedPath, ProcessRequest, QueryParams,
-    },
-    units::{
+    }, ingress, units::{
         rib_unit::{
             http::types::{FilterKind, FilterOp},
             rib::HashedRib,
             unit::{PendingVirtualRibQueryResults, QueryLimits},
         },
         RibType,
-    },
+    }
 };
 
 use super::types::{Details, Filter, FilterMode, Filters, Includes, SortKey};
@@ -35,6 +33,7 @@ pub struct PrefixesApi {
     rib_type: RibType,
     vrib_upstream: Arc<ArcSwapOption<Link>>,
     pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
+    ingress_register: Arc<ingress::Register>,
 }
 
 impl PrefixesApi {
@@ -45,6 +44,7 @@ impl PrefixesApi {
         rib_type: RibType,
         vrib_upstream: Option<Link>,
         pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
+        ingress_register: Arc<ingress::Register>,
     ) -> Self {
         Self {
             rib,
@@ -55,6 +55,7 @@ impl PrefixesApi {
                 vrib_upstream,
             )),
             pending_vrib_query_results,
+            ingress_register,
         }
     }
 
@@ -80,6 +81,9 @@ impl ProcessRequest for PrefixesApi {
         // we are at it...
         let req_path = &request.uri().decoded_path();
 
+        // FIXME LH: this is hit twice for a single request, why?
+        
+        debug!("RibUnit ProcessRequest {:?}", &req_path);
         // e.g. req_path = "/prefixes/2804:1398:100::/48"
         if request.method() == Method::GET
             && req_path.starts_with(self.http_api_path.deref())
@@ -107,6 +111,8 @@ impl PrefixesApi {
         req_path: &str,
         request: &Request<Body>,
     ) -> Result<Response<Body>, String> {
+        debug!("in handle_prefix_query");
+
         let prefix = Prefix::from_str(
             req_path.strip_prefix(self.http_api_path.as_str()).unwrap(),
         ) // SAFETY: unwrap() safe due to starts_with() check above
@@ -154,12 +160,15 @@ impl PrefixesApi {
             match_type: rotonda_store::MatchType::ExactMatch,
             include_less_specifics: includes.less_specifics,
             include_more_specifics: includes.more_specifics,
-            include_all_records: true,
+            include_withdrawn: true,
+            mui: None,
         };
 
+        // XXX res: QueryResult will be different 
         let res = match self.rib_type {
             RibType::Physical => {
                 let guard = &epoch::pin();
+                // XXX res: QueryResult will be different 
                 if let Ok(store) = self.rib.load().store() {
                     store.match_prefix(&prefix, &options, guard)
                 } else {
@@ -234,7 +243,7 @@ impl PrefixesApi {
         let res = match format {
             None => {
                 // default format
-                Self::mk_json_response(res, includes, details, filters, sort)
+                Self::mk_json_response(res, includes, details, filters, sort, &self.ingress_register)
             }
 
             Some(format) if format.value() == "dump" => {

@@ -9,6 +9,7 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use hash32::Hasher;
+use inetnum::asn::Asn;
 use roto::types::lazyrecord_types::BgpUpdateMessage;
 use roto::types::{
     builtin::BuiltinTypeValue, collections::BytesRecord,
@@ -23,6 +24,7 @@ use tokio::{io::AsyncRead, net::TcpStream};
 use crate::common::roto::{
     FilterName, FilterOutput, RotoScripts, ThreadLocalVM,
 };
+use crate::ingress::{self, IngressId};
 use crate::payload::RouterId;
 use crate::tracing::Tracer;
 use crate::{
@@ -137,6 +139,10 @@ impl RouterHandler {
         mut tcp_stream: TcpStream,
         router_addr: SocketAddr,
         source_id: SourceId,
+        //ingress_id: IngressId,
+        ingress_register: Arc<ingress::Register>,
+        // we need access to the ingress Register to register new IDs, for
+        // every peer / session in the BMP connection
     ) {
 
         // Discard the write half of the TCP stream as we are a "monitoring
@@ -144,7 +150,7 @@ impl RouterHandler {
         // ever sent from the monitoring station to the monitored router"_.
         // See: https://datatracker.ietf.org/doc/html/rfc7854#section-3.2
         let (rx, _tx) = tcp_stream.split();
-        self.read_from_router(rx, router_addr, source_id).await;
+        self.read_from_router(rx, router_addr, source_id, ingress_register).await;
     }
 
     async fn read_from_router<T: AsyncRead + Unpin>(
@@ -152,6 +158,7 @@ impl RouterHandler {
         rx: T,
         router_addr: SocketAddr,
         source_id: SourceId,
+        ingress_register: Arc<ingress::Register>,
     ) {
         // Setup BMP streaming
         let mut stream =
@@ -160,18 +167,23 @@ impl RouterHandler {
         let mut router_id = hash32::FnvHasher::default();
         router_addr.hash(&mut router_id);
 
-        let mut connection_id =  hash32::FnvHasher::default();
-        source_id.hash(&mut connection_id);
+        //let mut connection_id =  hash32::FnvHasher::default();
+        //source_id.hash(&mut connection_id);
 
-        // let provenance = Provenance {
-        //     timestamp: Utc::now(),
-        //     router_id: router_id.finish32(),
-        //     connection_id: connection_id.finish32(),
-        //     peer_bgp_id: [0,0,0,0].into(),
-        //     peer_distuingisher: [0,0,0,0,0,0,0,0],
-        //     peer_rib_type: PeerRibType::OutPost,
-        //     peer_id: PeerId { addr: "0.0.0.0".parse::<IpAddr>().unwrap().into(), asn: 0.into() }
-        // };
+
+        let router_ingress_id = ingress_register.register();
+
+
+        let provenance = Provenance::for_bmp(
+            router_ingress_id,
+            router_addr.ip(), // peer_ip: we are not diving into the BMP message to see
+                     // if this is a RouteMonitoring msg, just set to BMP IP
+                     // and overwrite later if necessary
+            Asn::from_u32(0), // peer_asn, set to Asn(0) for now, overwrite later
+            router_addr.ip(),
+            [0; 9],
+            PeerRibType::InPre,
+        );
 
         // Ensure that on first use the metrics for the "unknown" router are
         // correctly initialised.
@@ -264,7 +276,8 @@ impl RouterHandler {
                                 router_addr,
                                 source_id.clone(),
                                 bmp_msg,
-                                None,
+                                //None,
+                                Some(provenance),
                                 trace_id,
                             )
                             .await

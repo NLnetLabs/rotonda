@@ -8,27 +8,29 @@ use std::{
 
 use chrono::{Duration, Utc};
 use hash_hasher::{HashBuildHasher, HashedSet};
+use log::{debug, error};
 use roto::{types::{
-    builtin::{BuiltinTypeValue, RotondaId, NlriStatus, BasicRouteToken},
+    builtin::{BasicRouteToken, BuiltinTypeValue, NlriStatus, PrefixRoute, Provenance, RotondaId, RouteContext},
     datasources::Rib,
     typedef::{RibTypeDef, TypeDef},
     typevalue::TypeValue,
 }, vm::FieldIndex};
 use rotonda_store::{
-    custom_alloc::Upsert,
-    prelude::{multi::PrefixStoreError, MergeUpdate},
-    MultiThreadedStore,
+    custom_alloc::UpsertReport, prelude::multi::PrefixStoreError, MultiThreadedStore,
+    prelude::multi::RouteStatus,
 };
 use inetnum::{addr::Prefix, asn::Asn};
 use serde::Serialize;
 
-use crate::payload::RouterId;
+use crate::{ingress::IngressId, payload::RouterId};
 
 // -------- PhysicalRib -----------------------------------------------------------------------------------------------
 
 pub struct HashedRib {
     /// A prefix store, only physical RIBs have this.
     rib: Option<Rib<RibValue>>,
+
+    //eviction_policy: StoreEvictionPolicy,
 
     // This TypeDef should only ever be of variant `TypeDef::Rib`
     type_def_rib: TypeDef,
@@ -62,33 +64,37 @@ impl Default for HashedRib {
             //&[BasicRouteToken::PeerIp, BasicRouteToken::PeerAsn, BasicRouteToken::AsPath],
             &[BasicRouteToken::AsPath],
             true,
-            StoreEvictionPolicy::UpdateStatusOnWithdraw.into(),
+            //StoreEvictionPolicy::UpdateStatusOnWithdraw,
         )
     }
 }
 
 impl HashedRib {
     pub fn new(
-        key_fields: &[BasicRouteToken],
+        key_fields: &[BasicRouteToken], // XXX are these even used anywhere
+                                        // currently?
         physical: bool,
-        settings: StoreMergeUpdateSettings,
+        //eviction_policy: StoreEvictionPolicy,
     ) -> Self {
         let key_fields = key_fields
             .iter()
             .map(|&v| vec![v as usize].into())
             .collect::<Vec<_>>();
-        Self::with_custom_type(TypeDef::PrefixRoute, key_fields, physical, settings)
+        Self::with_custom_type(TypeDef::PrefixRoute, key_fields, physical, /*eviction_policy*/)
     }
 
+    /*
     // Attempt to construct a HashedRib comprising both a PrefixRoute (like
     // ::new() returns) and a RouteContext, packed in a TypeDef::Record.
     // Not sure whether this makes sense at all, but adapting the `impl
     // RouteExtra` from the old `Route` to the new `PrefixRoute` does not make
     // sense without a `RouteContext` somewhere.
-    pub fn prefix_and_context(
+    // XXX using a ::Record is not the way to go, that will store the entire
+    // context for each value in the Rib.
+    pub fn dont_do_this_prefix_and_context(
         key_fields: &[BasicRouteToken],
         physical: bool,
-        settings: StoreMergeUpdateSettings,
+        settings: StoreMergeUpdateUserData,
     ) -> Self {
         let key_fields = key_fields
             .iter()
@@ -101,18 +107,21 @@ impl HashedRib {
         ]));
         Self::with_custom_type(ty, key_fields, physical, settings)
     }
+    */
 
     pub fn with_custom_type(
         ty: TypeDef,
         ty_keys: Vec<FieldIndex>,
         physical: bool,
-        settings: StoreMergeUpdateSettings,
+        //eviction_policy: StoreEvictionPolicy,
     ) -> Self {
         let rib = match physical {
             true => {
                 let store = MultiThreadedStore::<RibValue>::new()
                     .unwrap() // TODO: handle this Err
-                    .with_user_data(settings);
+                    // setting the user_data here doesn't make sense as we
+                    //.with_user_data(eviction_policy);
+                    ;
                 let rib =
                     Rib::new("rib-names-are-not-used-yet", ty.clone(), store);
                 Some(rib)
@@ -121,18 +130,20 @@ impl HashedRib {
         };
         let rib_type_def: RibTypeDef = (Box::new(ty), Some(ty_keys));
         let type_def_rib = TypeDef::Rib(rib_type_def);
-        Self { rib, type_def_rib }
+        Self { rib, /*eviction_policy,*/ type_def_rib }
     }
 
     pub fn is_physical(&self) -> bool {
         self.rib.is_some()
     }
 
+    /*
     pub fn precompute_hash_code(&self, val: &TypeValue) -> u64 {
         let mut state = HashBuildHasher::default().build_hasher();
         self.type_def_rib.hash_key_values(&mut state, val).unwrap();
         state.finish()
     }
+    */
 
     pub fn store(
         &self,
@@ -143,16 +154,80 @@ impl HashedRib {
             .ok_or(PrefixStoreError::StoreNotReadyError)
     }
 
-    pub fn insert<T: Into<TypeValue>>(
+    //pub fn insert<T: Into<TypeValue>>(
+    pub fn insert(
         &self,
         prefix: &Prefix,
-        val: T,
-    ) -> Result<(Upsert<StoreInsertionReport>, u32), PrefixStoreError> {
+        //val: T,
+        val: PrefixRoute,
+        nlri_status: NlriStatus,
+        provenance: Provenance, // for ingress_id / mui
+        ltime: u64,
+    //) -> Result<(Upsert<StoreInsertionReport>, u32), PrefixStoreError> {
+    ) -> Result<UpsertReport, PrefixStoreError> {
         let store = self.store()?;
-        let ty_val = val.into();
-        let hash_code = self.precompute_hash_code(&ty_val);
-        let rib_value = PreHashedTypeValue::new(ty_val, hash_code).into();
-        store.insert(prefix, rib_value)
+        //let ty_val = val.into();
+        //let hash_code = self.precompute_hash_code(&ty_val);
+
+        let mui = provenance.ingress_id;
+
+        //debug!("pre store.insert, NlriStatus {:?}", nlri_status);
+
+        let route_status = match nlri_status {
+            NlriStatus::Withdrawn => RouteStatus::Withdrawn,
+            NlriStatus::InConvergence => RouteStatus::Active,
+            NlriStatus::UpToDate => RouteStatus::Active,
+
+            // XXX what do we do with these?
+            NlriStatus::Stale => todo!(),
+            NlriStatus::StartOfRouteRefresh => todo!(),
+            NlriStatus::Unparsable => todo!(),
+            NlriStatus::Empty => todo!(),
+        };
+
+        //debug!("pre store.insert, RouteStatus {:?}", route_status);
+
+        if route_status == RouteStatus::Withdrawn {
+            // instead of creating an empty PrefixRoute for this Prefix and
+            // putting that in the store, we use the new
+            // mark_mui_as_withdrawn_for_prefix . This way, we preserve the
+            // last seen attributes/nexthop for this {prefix,mui} combination,
+            // while setting the status to Withdrawn.
+            if let Err(e) = store.mark_mui_as_withdrawn_for_prefix(prefix, mui) {
+                error!(
+                    "failed to mark {} for {} as withdrawn: {}",
+                    prefix, mui, e
+                );
+                // TODO increase metric
+                return Err(e);
+            }
+            
+            // FIXME this is just to satisfy the function signature, but is
+            // quite useless as-is.
+            return Ok(UpsertReport{
+                cas_count: 0,
+                prefix_new: false,
+                mui_new: false, 
+                mui_count: 0,
+            });
+        }
+
+        debug!("creating pub rec with RibValue {:?}", val);
+
+        let pubrec = rotonda_store::PublicRecord::new(
+            mui,
+            ltime,
+            route_status,
+            RibValue::new(val) // meta M
+        );
+
+        debug!("calling store.insert(..) for {:?}", &prefix);
+        // XXX new API for the PrefixStore insert:
+        store.insert(
+            prefix,
+            pubrec,
+            None, // Option<TBI>
+        )
     }
 
     pub fn key_fields(&self) -> Vec<BasicRouteToken> {
@@ -197,26 +272,60 @@ impl HashedRib {
 /// value and the Hash trait impl passes the precomputed hash code to the HashedSet hasher which uses it effectively
 /// as-is, to avoid pointlessly calculating yet another hash code as would happen with the default Hasher.
 
-#[derive(Debug, Clone, Default)]
+//#[derive(Debug, Clone, Default)]
+//pub struct RibValue {
+//    per_prefix_items: Arc<HashedSet<Arc<PreHashedTypeValue>>>,
+//}
+#[derive(Debug, Clone)]
 pub struct RibValue {
-    per_prefix_items: Arc<HashedSet<Arc<PreHashedTypeValue>>>,
+    prefix_route: PrefixRoute,
 }
 
-impl PartialEq for RibValue {
-    fn eq(&self, other: &Self) -> bool {
-        self.per_prefix_items == other.per_prefix_items
+use routecore::bgp::path_selection::{OrdRoute, Rfc4271, TiebreakerInfo};
+impl rotonda_store::Meta for RibValue {
+    type Orderable<'a> = OrdRoute<'a, Rfc4271>;
+
+    type TBI = TiebreakerInfo;
+
+    fn as_orderable(&self, _tbi: Self::TBI) -> Self::Orderable<'_> {
+        todo!()
     }
 }
 
+//impl PartialEq for RibValue {
+//    fn eq(&self, other: &Self) -> bool {
+//        self.per_prefix_items == other.per_prefix_items
+//    }
+//}
+
 impl RibValue {
-    pub fn new(items: HashedSet<Arc<PreHashedTypeValue>>) -> Self {
+    pub fn new(prefix_route: PrefixRoute) -> Self {
         Self {
-            per_prefix_items: Arc::new(items),
+            prefix_route
         }
     }
 
+    /*
     pub fn iter(&self) -> hash_set::Iter<'_, Arc<PreHashedTypeValue>> {
         self.per_prefix_items.iter()
+    }
+    */
+}
+
+impl TryFrom<TypeValue> for RibValue {
+    type Error = &'static str;
+
+    fn try_from(tv: TypeValue) -> Result<Self, Self::Error> {
+        match tv {
+            TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(pr)) => { Ok(RibValue::new(pr)) },
+            _ => Err("expected TypeValue PrefixRoute")
+        }
+    }
+}
+
+impl From<RibValue> for TypeValue {
+    fn from(rv: RibValue) -> Self {
+        TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(rv.prefix_route))
     }
 }
 
@@ -227,6 +336,7 @@ impl RibValue {
     }
 }
 
+/*
 #[derive(Copy, Clone, Debug, Default)]
 pub enum StoreEvictionPolicy {
     #[default]
@@ -234,12 +344,17 @@ pub enum StoreEvictionPolicy {
 
     RemoveOnWithdraw,
 }
+*/
 
 impl RibValue {
+    // LH: I guess this is sort of a noop now that RibValue is basically a
+    // PrefixRoute
+    /*
     pub fn withdraw(
         &self,
         policy: StoreEvictionPolicy,
-        withdrawing_peer: &PeerId,
+        //withdrawing_peer: &PeerId,
+        withdrawing_ingress: IngressId,
     ) -> (HashedSet<Arc<PreHashedTypeValue>>, StoreInsertionEffect) {
         let mut out_items: HashedSet<Arc<PreHashedTypeValue>>;
         let effect: StoreInsertionEffect;
@@ -251,21 +366,31 @@ impl RibValue {
                 out_items = self
                     .iter()
                     .map(|route| {
-                        // If the route was not issued by this peer then
-                        // keep it as-is by including a clone of its Arc
-                        // in the result collection.
-                        if route.is_withdrawn()
-                            || !route.announced_by(withdrawing_peer)
-                        {
-                            Arc::clone(route)
+                        // XXX LH: is this better than the RouteExtra trait?
+                        if let TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(roto::types::builtin::PrefixRoute(rws, nlri_status))) = **route.deref() {
+                            // If the route was not issued by this peer then
+                            // keep it as-is by including a clone of its Arc
+                            // in the result collection.
+                            //if route.is_withdrawn()
+                            //    || !route.announced_by(withdrawing_peer) {
+                            if nlri_status == NlriStatus::Withdrawn 
+                                || !route.provenance().ingress_id != withdrawing_ingress {
+                                Arc::clone(route)
+                            } else {
+                                // Otherwise, return a clone of the Arc's
+                                // inner route having first set its status to
+                                // withdrawn.
+                                //let mut cloned = Arc::deref(route).clone();
+                                //cloned.withdraw();
+                                num_withdrawals += 1;
+                                //Arc::new(cloned)
+                                Arc::new(PreHashedTypeValue::new(
+                                    roto::types::builtin::PrefixRoute(rws, NlriStatus::Withdrawn).into(),
+                                    route.provenance(),
+                                ))
+                            }
                         } else {
-                            // Otherwise, return a clone of the Arc's
-                            // inner route having first set its status to
-                            // withdrawn.
-                            let mut cloned = Arc::deref(route).clone();
-                            cloned.withdraw();
-                            num_withdrawals += 1;
-                            Arc::new(cloned)
+                            Arc::clone(route) // not a PrefixRoute, keep it
                         }
                     })
                     .collect();
@@ -277,7 +402,8 @@ impl RibValue {
             StoreEvictionPolicy::RemoveOnWithdraw => {
                 out_items = self
                     .iter()
-                    .filter(|route| !route.announced_by(withdrawing_peer))
+                    //.filter(|route| !route.announced_by(withdrawing_peer))
+                    .filter(|route| route.provenance().ingress_id != withdrawing_ingress)
                     .cloned()
                     .collect();
 
@@ -290,31 +416,41 @@ impl RibValue {
 
         (out_items, effect)
     }
+    */
 }
 
-#[derive(Copy, Clone, Debug, Default)]
-pub struct StoreMergeUpdateSettings {
-    pub eviction_policy: StoreEvictionPolicy,
+/*
+#[derive(Clone, Debug)]
+pub struct StoreMergeUpdateUserData {
+    //pub eviction_policy: StoreEvictionPolicy,
+    pub route_context: RouteContext,
 
     #[cfg(test)]
     pub delay: Option<std::time::Duration>,
 }
 
-impl StoreMergeUpdateSettings {
-    pub fn new(eviction_policy: StoreEvictionPolicy) -> Self {
+impl StoreMergeUpdateUserData {
+    pub fn new(
+        //eviction_policy: StoreEvictionPolicy,
+        route_context: RouteContext,
+    ) -> Self {
         Self {
-            eviction_policy,
+            //eviction_policy,
+            route_context,
             #[cfg(test)]
             delay: None,
         }
     }
 }
+*/
 
-impl From<StoreEvictionPolicy> for StoreMergeUpdateSettings {
+/*
+impl From<StoreEvictionPolicy> for StoreMergeUpdateUserData {
     fn from(eviction_policy: StoreEvictionPolicy) -> Self {
-        StoreMergeUpdateSettings::new(eviction_policy)
+        StoreMergeUpdateUserData::new(eviction_policy)
     }
 }
+*/
 
 #[derive(Debug)]
 pub enum StoreInsertionEffect {
@@ -324,6 +460,7 @@ pub enum StoreInsertionEffect {
     RouteUpdated,
 }
 
+// XXX this will go, or will perhaps live in rotonda_store
 #[derive(Debug)]
 pub struct StoreInsertionReport {
     pub change: StoreInsertionEffect,
@@ -335,8 +472,10 @@ pub struct StoreInsertionReport {
     pub op_duration: Duration,
 }
 
+// XXX this will go and live in rotonda_store
+/*
 impl MergeUpdate for RibValue {
-    type UserDataIn = StoreMergeUpdateSettings;
+    type UserDataIn = StoreMergeUpdateUserData;
     type UserDataOut = StoreInsertionReport;
 
     fn merge_update(
@@ -349,10 +488,13 @@ impl MergeUpdate for RibValue {
 
     // NOTE: Do NOT return Err() as this will likely be changed in the
     // underlying rotonda-store definition to be infallible.
+    // LH: As the PrefixStore will take over the actual merging of values of
+    // type PrefixRoute, this method (and eventually, this entire trait impl)
+    // is merely a noop while the impl has not moved to the Store yet.
     fn clone_merge_update(
         &self,
         update_meta: &Self,
-        settings: Option<&StoreMergeUpdateSettings>,
+        user_data: Option<&StoreMergeUpdateUserData>,
     ) -> Result<(Self, StoreInsertionReport), Box<dyn std::error::Error>>
     where
         Self: std::marker::Sized,
@@ -360,9 +502,9 @@ impl MergeUpdate for RibValue {
         let pre_insert = Utc::now();
 
         #[cfg(test)]
-        if let Some(StoreMergeUpdateSettings {
+        if let Some(StoreMergeUpdateUserData {
             delay: Some(delay), ..
-        }) = settings
+        }) = user_data
         {
             eprintln!(
                 "Sleeping in clone_merge_update() [thread {:?}] for {}ms",
@@ -373,8 +515,12 @@ impl MergeUpdate for RibValue {
         }
 
         // There should only ever be one incoming item.
-        assert_eq!(update_meta.len(), 1);
-        let in_item = update_meta.per_prefix_items.iter().next().unwrap();
+        // LH: with RibValue being a wrapper for a single PrefixRoute, this
+        // assert does not make sense anymore.
+        //assert_eq!(update_meta.len(), 1);
+
+        //let in_item = update_meta.per_prefix_items.iter().next().unwrap();
+        let in_item = update_meta.prefix_route;
 
         // Create a new RIB value whose inner HashSet contains the same items
         // as this RIB value, but for which the HashSet itself is distinct, so
@@ -384,10 +530,22 @@ impl MergeUpdate for RibValue {
         // updated, i.e. don't dumbly clone and modify as the clone might not
         // be necessary.
 
-        let mut out_items: HashedSet<Arc<PreHashedTypeValue>>;
-        let change;
+        //let mut out_items: HashedSet<Arc<PreHashedTypeValue>>;
+        //let change;
 
-        if in_item.value.is_withdrawn() {
+        let to_withdraw = if let Some(ud) = user_data {
+            ud.route_context.nlri_status() == NlriStatus::Withdrawn
+        } else {
+            // Try to determine whether this is a withdrawal or not, even
+            // though we lack the RouteContext.
+            
+            // TODO create a metric for this situation
+            log::warn!("no user_data provided for MergeUpdate, missing RouteContext");
+            in_item.0.no_attributes()
+        };
+
+        /*
+        if to_withdraw {
             // Only routes can be withdrawn, other kinds of of items stored in
             // a RIB don't support the notion of being withdrawable. A route
             // withdrawal is defined as the prefix to which routing is no
@@ -395,15 +553,16 @@ impl MergeUpdate for RibValue {
             // routes to the prefix via various peers. To apply the withdrawal
             // we must therefore update/remove the routes to the prefix from
             // the peer that issued the withdrawal.
-            let withdrawing_peer = in_item.peer_id().unwrap();
+            //let withdrawing_peer = in_item.peer_id().unwrap();
+            let withdrawing_ingress = in_item.provenance().ingress_id;
 
             // Apply the withdrawal, either by updating the status of
             // affected routes, or by removing them entirely.
             let eviction_policy =
-                settings.map(|v| v.eviction_policy).unwrap_or_default();
+                user_data.map(|v| v.eviction_policy).unwrap_or_default();
 
             (out_items, change) =
-                self.withdraw(eviction_policy, &withdrawing_peer);
+                self.withdraw(eviction_policy, withdrawing_ingress);
         } else {
             // Merge the new items into the existing set, replacing any
             // existing item that has the same RIB key as a new item.
@@ -414,33 +573,40 @@ impl MergeUpdate for RibValue {
                 change = StoreInsertionEffect::RouteAdded;
             }
         }
+        */
 
         let post_insert = Utc::now();
         let op_duration = post_insert - pre_insert;
-        let user_data = StoreInsertionReport {
-            item_count: out_items.len(),
-            change,
+        let report = StoreInsertionReport {
+            item_count: 1,
+            //change,
+            // XXX as the PrefixStore will handle the actual merge eventually,
+            // we don't know whether this value was new (::RouteAdded) or
+            // updated (::RouteUpdated).
+            change: StoreInsertionEffect::RouteUpdated,
             op_duration,
         };
 
-        Ok((out_items.into(), user_data))
+        Ok((update_meta.clone(), report))
     }
 }
+*/
 
 impl std::fmt::Display for RibValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.per_prefix_items)
+        write!(f, "{:?}", self.prefix_route)
     }
 }
 
 impl std::ops::Deref for RibValue {
-    type Target = HashedSet<Arc<PreHashedTypeValue>>;
+    type Target = PrefixRoute;
 
     fn deref(&self) -> &Self::Target {
-        &self.per_prefix_items
+        &self.prefix_route
     }
 }
 
+/*
 impl From<PreHashedTypeValue> for RibValue {
     fn from(item: PreHashedTypeValue) -> Self {
         let mut items = HashedSet::with_capacity_and_hasher(
@@ -461,6 +627,7 @@ impl From<HashedSet<Arc<PreHashedTypeValue>>> for RibValue {
         }
     }
 }
+*/
 
 //------------ StoredValue ---------------------------------------------------
 
@@ -474,23 +641,33 @@ pub struct StoredValue {
 
 // -------- PreHashedTypeValue ----------------------------------------------------------------------------------------
 
+/*
+// this can go entirely now?
 #[derive(Debug, Clone, Serialize)]
 pub struct PreHashedTypeValue {
     /// The route to store.
     #[serde(flatten)]
     value: TypeValue,
 
-    #[serde(skip)]
-    /// The hash key as pre-computed based on the users chosen hash key fields.
-    precomputed_hash: u64,
+    provenance: Provenance,
+    
+    //#[serde(skip)]
+    ///// The hash key as pre-computed based on the users chosen hash key fields.
+    //precomputed_hash: u64,
 }
 
+// this can go entirely now?
 impl PreHashedTypeValue {
-    pub fn new(value: TypeValue, precomputed_hash: u64) -> Self {
+    pub fn new(value: TypeValue, provenance: Provenance/*, precomputed_hash: u64*/) -> Self {
         Self {
             value,
-            precomputed_hash,
+            provenance,
+            //precomputed_hash: provenance.ingress_id
         }
+    }
+
+    pub fn provenance(&self) -> Provenance {
+        self.provenance
     }
 }
 
@@ -513,17 +690,19 @@ impl std::hash::Hash for PreHashedTypeValue {
         // The Hasher is hash_hasher::HashHasher which:
         //     "does minimal work to create the required u64 output under the assumption that the input is already a
         //      hash digest or otherwise already suitable for use as a key in a HashSet or HashMap."
-        self.precomputed_hash.hash(state);
+        //self.precomputed_hash.hash(state);
+        self.provenance.ingress_id.hash(state);
     }
 }
 
 impl PartialEq for PreHashedTypeValue {
     fn eq(&self, other: &Self) -> bool {
-        self.precomputed_hash == other.precomputed_hash
+        self.provenance.ingress_id == other.provenance.ingress_id
     }
 }
 
 impl Eq for PreHashedTypeValue {}
+*/
 
 // --- Route related helpers ------------------------------------------------------------------------------------------
 
@@ -557,6 +736,7 @@ pub trait RouteExtra {
     fn is_withdrawn(&self) -> bool;
 }
 
+/*
 impl RouteExtra for TypeValue {
     fn withdraw(&mut self) {
         // this could work assuming the RibValue comprises a
@@ -604,6 +784,7 @@ impl RouteExtra for TypeValue {
         }
     }
 }
+*/
 
 // --- Tests ----------------------------------------------------------------------------------------------------------
 

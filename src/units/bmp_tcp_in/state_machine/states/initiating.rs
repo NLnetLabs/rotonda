@@ -4,8 +4,7 @@ use bytes::Bytes;
 use routecore::bmp::message::Message as BmpMsg;
 
 use crate::{
-    payload::RouterId,
-    units::bmp_tcp_in::state_machine::machine::BmpStateIdx,
+    ingress, payload::RouterId, units::bmp_tcp_in::state_machine::machine::BmpStateIdx
 };
 
 use roto::types::builtin::SourceId;
@@ -52,11 +51,13 @@ impl BmpStateDetails<Initiating> {
         source_id: SourceId,
         router_id: Arc<RouterId>,
         status_reporter: Arc<BmpStateMachineStatusReporter>,
+        ingress_register: Arc<ingress::Register>,
     ) -> Self {
         BmpStateDetails {
             source_id,
             router_id,
             status_reporter,
+            ingress_register,
             details: Initiating::default(),
         }
     }

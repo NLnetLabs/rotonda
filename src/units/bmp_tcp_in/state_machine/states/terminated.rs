@@ -29,6 +29,7 @@ impl From<BmpStateDetails<Initiating>> for BmpStateDetails<Terminated> {
             source_id: v.source_id,
             router_id: v.router_id,
             status_reporter: v.status_reporter,
+            ingress_register: v.ingress_register,
             details: v.details.into(),
         }
     }
@@ -40,6 +41,7 @@ impl From<BmpStateDetails<Dumping>> for BmpStateDetails<Terminated> {
             source_id: v.source_id,
             router_id: v.router_id,
             status_reporter: v.status_reporter,
+            ingress_register: v.ingress_register,
             details: v.details.into(),
         }
     }
@@ -51,6 +53,7 @@ impl From<BmpStateDetails<Updating>> for BmpStateDetails<Terminated> {
             source_id: v.source_id,
             router_id: v.router_id,
             status_reporter: v.status_reporter,
+            ingress_register: v.ingress_register,
             details: v.details.into(),
         }
     }

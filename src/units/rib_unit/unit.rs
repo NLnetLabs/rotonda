@@ -3,39 +3,35 @@ use crate::{
         frim::FrimMap,
         roto::{FilterName, RotoScripts, ThreadLocalVM},
         status_reporter::{AnyStatusReporter, UnitStatusReporter},
-    },
-    comms::{
+    }, comms::{
         AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus, Link,
         Terminated, TriggerData,
-    },
-    manager::{Component, WaitPoint},
-    payload::{
+    }, ingress, manager::{Component, WaitPoint}, payload::{
         FilterError, Filterable, Payload, RouterId, Update, UpstreamStatus,
-    },
-    tokio::TokioTaskMetrics,
-    tracing::{BoundTracer, Tracer},
-    units::Unit,
+    }, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::Unit
 };
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 
 use chrono::Utc;
 use hash_hasher::{HashBuildHasher, HashedSet};
-use log::{error, log_enabled, trace, warn};
+use log::{debug, error, log_enabled, trace, warn};
 use non_empty_vec::NonEmpty;
 use roto::types::{
-    builtin::{BuiltinTypeValue, BasicRouteToken},
+    builtin::{BasicRouteToken, BuiltinTypeValue, NlriStatus, PrefixRoute, RouteContext},
     collections::ElementTypeValue,
     typevalue::TypeValue,
 };
 use rotonda_store::{
-    custom_alloc::Upsert,
+    custom_alloc::UpsertReport,
     epoch,
-    prelude::{multi::PrefixStoreError, MergeUpdate},
-    QueryResult, RecordSet,
+    prelude::multi::PrefixStoreError,
+    QueryResult,
+    RecordSet,
 };
 
 use inetnum::addr::Prefix;
+use routecore::bgp::types::AfiSafiType;
 use serde::Deserialize;
 use smallvec::SmallVec;
 use std::{
@@ -48,8 +44,8 @@ use super::{
     http::PrefixesApi,
     metrics::RibUnitMetrics,
     rib::{
-        HashedRib, PreHashedTypeValue, RibValue, RouteExtra,
-        StoreEvictionPolicy, StoreInsertionEffect, StoreMergeUpdateSettings,
+        HashedRib, /*PreHashedTypeValue,*/ RibValue, RouteExtra,
+        /*StoreEvictionPolicy, */StoreInsertionEffect, /*StoreMergeUpdateUserData,*/
     },
     status_reporter::RibUnitStatusReporter,
 };
@@ -229,9 +225,10 @@ pub struct RibUnitRunner {
 impl DirectUpdate for RibUnitRunner {
     async fn direct_update(&self, update: Update) {
         if let Err(err) = self
-            .process_update(update, |pfx, meta, store| {
-                store.insert(pfx, meta)
-            })
+            .process_update(update)
+            //.process_update(update, |pfx, meta, store, nlri_status, provenance, ltime| {
+            //    store.insert(pfx, meta, nlri_status, provenance, ltime)
+            //})
             .await
         {
             error!("Error handling update: {err}");
@@ -274,7 +271,7 @@ impl RibUnitRunner {
         let rib = Self::mk_rib(
             rib_type,
             rib_keys,
-            StoreEvictionPolicy::UpdateStatusOnWithdraw.into(),
+            //StoreEvictionPolicy::UpdateStatusOnWithdraw.into(),
         );
         let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> =
             Default::default();
@@ -309,6 +306,7 @@ impl RibUnitRunner {
             rib_type,
             vrib_upstream,
             pending_vrib_query_results.clone(),
+            component.ingresses(),
         );
         let http_processor = Arc::new(http_processor);
         if is_sub_resource {
@@ -346,7 +344,7 @@ impl RibUnitRunner {
     pub(crate) fn mock(
         roto_script: &str,
         rib_type: RibType,
-        settings: StoreMergeUpdateSettings,
+        settings: StoreMergeUpdateUserData,
     ) -> (Self, crate::comms::GateAgent) {
         use crate::common::roto::RotoScriptOrigin;
 
@@ -419,7 +417,7 @@ impl RibUnitRunner {
     fn mk_rib(
         rib_type: RibType,
         rib_keys: &[BasicRouteToken],
-        settings: StoreMergeUpdateSettings,
+        //settings: StoreMergeUpdateUserData,
     ) -> Arc<ArcSwap<HashedRib>> {
         //
         // --- TODO: Create the Rib based on the Roto script Rib 'contains' type
@@ -433,7 +431,7 @@ impl RibUnitRunner {
         // --- End: Create the Rib based on the Roto script Rib 'contains' type
         //
         let physical = matches!(rib_type, RibType::Physical);
-        let rib = HashedRib::new(rib_keys, physical, settings);
+        let rib = HashedRib::new(rib_keys, physical, /*settings*/);
         Arc::new(ArcSwap::from_pointee(rib))
     }
 
@@ -450,6 +448,92 @@ impl RibUnitRunner {
     #[cfg(test)]
     pub(super) fn rib(&self) -> Arc<HashedRib> {
         self.rib.load().clone()
+    }
+
+
+    fn signal_withdraw(
+        &self,
+        ingress_id: ingress::IngressId,
+        specific_afisafi: Option<AfiSafiType>,
+    ) {
+
+        // This signals a withdraw-all-for-peer, because a BGP session
+        // was lost or because a BMP PeerDownNotification was
+        // received.
+
+        // Things to take care of, here of elsewhere:
+        //
+        // * mark all (active) prefixes for this ingress as
+        //   'withdrawn' in the store
+        // * generate BGP UPDATEs for those prefixes that were
+        //   actually updated to the withdrawn state. Note that there
+        //   might have been prefixes for this ingress that were
+        //   previously withdrawn already, for which no UPDATEs should
+        //   be generated!
+        // * send out these UPDATEs as Update::Bulk payloads to the
+        //   east:
+        //     - what if the first unit eastwards is another RIB, does
+        //     it make sense to create the UPDATEs? might make more
+        //     sense to forward the current Update::Withdraw(..)
+        //     instead.
+        //     - the UPDATEs only make sense if anything needs to go
+        //     out over a BGP session again. But, in that case, the
+        //     UPDATE can only be correctly generated by the BGP
+        //     connection (in the ingress unit) itself, because of
+        //     possible session-level state (e.g. ADDPATH or Extended
+        //     PDU size capabilities).
+        //     Moreover, it only makes sense to send out the UPDATE if
+        //     the specific prefix was previously annouced, i.e. it is
+        //     in the Adj-RIB-Out for that session. This might be
+        //     differ from session to session because of local policy,
+        //     roto scripts, or what not.
+        //     As such, perhaps we should leave the generation of
+        //     those withdrawals to the very latest (most-East) point?
+
+        match specific_afisafi {
+            None => {
+                // Set all address families to withdrawn.
+                // In addition to unicast prefixes, stored in the
+                // store proper, we might need to update other data
+                // structures holding more exotic families.
+
+
+                //The store seems to lack a 'mark_mui_as_withdrawn'
+                //that handles both v4 and v6 in one go.
+
+                //if let Err(e) = self.rib.load().store().unwrap().mark_mui_as_withdrawn_v4(ingress_id) {
+                //    error!("failed to mark MUI as withdrawn for v4: {}", e)
+                //}
+
+                //if let Err(e) = self.rib.load().store().unwrap().mark_mui_as_withdrawn_v6(ingress_id) {
+                //    error!("failed to mark MUI as withdrawn for v6: {}", e)
+                //}
+
+                if let Err(e) = self.rib.load().store().unwrap()
+                    .mark_mui_as_withdrawn(ingress_id)
+                {
+                    error!("failed to mark MUI as withdrawn: {}", e)
+                }
+
+            }
+            Some(AfiSafiType::Ipv4Unicast) => {
+                if let Err(e) = self.rib.load().store().unwrap()
+                    .mark_mui_as_withdrawn_v4(ingress_id)
+                {
+                    error!("failed to mark MUI as withdrawn for v4: {}", e)
+                }
+            }
+            Some(AfiSafiType::Ipv6Unicast) => {
+                if let Err(e) = self.rib.load().store().unwrap()
+                    .mark_mui_as_withdrawn_v6(ingress_id)
+                {
+                    error!("failed to mark MUI as withdrawn for v6: {}", e)
+                }
+            }
+            afisafi => {
+                panic!("no support to withdraw {:?} yet", afisafi)
+            }
+        }
     }
 
     pub async fn run(
@@ -637,23 +721,29 @@ impl RibUnitRunner {
         }
     }
 
-    pub(super) async fn process_update<F>(
+    pub(super) async fn process_update/*<F>*/(
         &self,
         update: Update,
-        insert_fn: F,
+        /*insert_fn: F,*/
     ) -> Result<(), FilterError>
     where
+        /*
         F: Fn(
                 &Prefix,
-                TypeValue,
+                PrefixRoute,
                 &HashedRib,
+                NlriStatus,
+                roto::types::builtin::Provenance,
+                u64, // ltime
             ) -> Result<
-                (Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                //(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                UpsertReport,
                 PrefixStoreError,
             > + Copy
             + Clone
             + Send
             + 'static,
+        */
     {
         match update {
             Update::UpstreamStatusChange(UpstreamStatus::EndOfStream {
@@ -664,11 +754,20 @@ impl RibUnitRunner {
             }
 
             Update::Bulk(payloads) => {
-                self.filter_payload(payloads, insert_fn).await?
+                self.filter_payload(payloads,/* insert_fn*/).await?
             }
 
             Update::Single(payload) => {
-                self.filter_payload(payload, insert_fn).await?
+                self.filter_payload(payload,/* insert_fn*/).await?
+            }
+
+            Update::WithdrawBulk(ingress_ids) => {
+                ingress_ids.iter()
+                    .for_each(|&id| self.signal_withdraw(id, None));
+            }
+            
+            Update::Withdraw(ingress_id, maybe_afisafi) => {
+                self.signal_withdraw(ingress_id, maybe_afisafi)
             }
 
             Update::QueryResult(uuid, upstream_query_result) => {
@@ -699,24 +798,31 @@ impl RibUnitRunner {
         Ok(())
     }
 
-    async fn filter_payload<T, F>(
+    async fn filter_payload<T/*, F*/>(
         &self,
         payload: T,
-        insert_fn: F,
+        /*insert_fn: F,*/
     ) -> Result<(), FilterError>
     where
         T: Filterable,
+        /*
         F: Fn(
                 &Prefix,
-                TypeValue,
+                //TypeValue,
+                PrefixRoute,
                 &HashedRib,
+                NlriStatus,
+                roto::types::builtin::Provenance,
+                u64, // ltime
             ) -> Result<
-                (Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                //(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                UpsertReport,
                 PrefixStoreError,
             > + Copy
             + Clone
             + Send
             + 'static,
+        */
     {
         let bound_tracer = self.tracer.bind(self.gate.id());
         if let Some(filtered_update) = Self::VM
@@ -735,7 +841,7 @@ impl RibUnitRunner {
                     },
                     |_source_id| { /* TODO: self.status_reporter.message_filtered(source_id) */ })
                     .map(|filtered_payloads| {
-                        self.insert_payloads(filtered_payloads, insert_fn)
+                        self.insert_payloads(filtered_payloads,/* insert_fn*/)
                     })
             })
             .map_err(|err| {
@@ -754,25 +860,32 @@ impl RibUnitRunner {
         Ok(())
     }
 
-    pub fn insert_payloads<F>(
+    pub fn insert_payloads/*<F>*/(
         &self,
         mut payloads: SmallVec<[Payload; 8]>,
-        insert_fn: F,
+        /*insert_fn: F,*/
     ) -> Option<Update>
     where
+        /*
         F: Fn(
                 &Prefix,
-                TypeValue,
+                //TypeValue,
+                PrefixRoute,
                 &HashedRib,
+                NlriStatus,
+                roto::types::builtin::Provenance,
+                u64, // ltime
             ) -> Result<
-                (Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                //(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                UpsertReport,
                 PrefixStoreError,
             > + Copy
             + Send
             + 'static,
+        */
     {
         for payload in &payloads {
-            self.insert_payload(payload, insert_fn);
+            self.insert_payload(payload/*, insert_fn*/);
         }
 
         match payloads.len() {
@@ -782,106 +895,176 @@ impl RibUnitRunner {
         }
     }
 
-    pub fn insert_payload<F>(&self, payload: &Payload, insert_fn: F)
+    pub fn insert_payload/*<F>*/(&self, payload: &Payload/*, insert_fn: F*/)
+        /*
     where
         F: Fn(
                 &Prefix,
                 TypeValue,
                 &HashedRib,
+                roto::types::builtin::Provenance,
             ) -> Result<
-                (Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                //(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                UpsertReport,
                 PrefixStoreError,
             > + Send
             + 'static,
+        */
     {
         let rib = self.rib.load();
-        if rib.is_physical() {
-            let prefix: Option<Prefix> = match &payload.rx_value {
-                TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(route)) => {
-                    Some(route.prefix())
+        if !rib.is_physical() {
+            return
+        }
+
+
+        /*
+         * HashedRib only has PrefixRoute for its RibValues now.
+         * Perhaps we can store Record.prefix things in a separate
+         * RIB/HashMap like we'll do with more exotic AFI/SAFI NLRIs.
+         *
+         TypeValue::Record(record) => match record
+         .get_value_for_field("prefix")
+         {
+         Some(ElementTypeValue::Primitive(
+         TypeValue::Builtin(BuiltinTypeValue::Prefix(prefix)),
+         )) => Some(*prefix),
+         _ => None,
+         },
+         */
+        if let TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(prefix_route)) = &payload.rx_value {
+            let prefix = prefix_route.prefix();
+            //let is_announcement = payload.context.nlri_status() != NlriStatus::Withdrawn;
+            //let is_announcement = !payload.rx_value.is_withdrawn();
+            //let router_id =
+            //    payload.rx_value.router_id().unwrap_or_else(|| {
+            //        Arc::new(RouterId::from_str("unknown").unwrap())
+            //    });
+
+            //let ingress_id = payload.context.provenance().ingress_id;
+
+            let pre_insert = Utc::now();
+
+            // XXX this is where we need to adapt to the new store
+            // this basically translates to
+            // rib.insert(prefix, rx_value, prov)
+            // returning a Result<(Upsert<StoreInsertionReport, u32)>
+            //
+            // this has to become
+            //
+            //
+            //match insert_fn(&prefix, payload.rx_value.clone(), &rib, payload.context.provenance()) {
+
+            let route_context = match &payload.context {
+                RouteContext::Fresh(ctx) => { ctx },
+                RouteContext::Reprocess => {
+                    error!("unexpected RouteContext::Reprocess in insert_payload");
+                    self.status_reporter.insert_failed(prefix, "unexpected RouteContext::Reprocess");
+                    return;
                 }
-
-                TypeValue::Record(record) => match record
-                    .get_value_for_field("prefix")
-                {
-                    Some(ElementTypeValue::Primitive(
-                        TypeValue::Builtin(BuiltinTypeValue::Prefix(prefix)),
-                    )) => Some(*prefix),
-                    _ => None,
-                },
-
-                _ => None,
             };
 
-            if let Some(prefix) = prefix {
-                let is_announcement = !payload.rx_value.is_withdrawn();
-                let router_id =
-                    payload.rx_value.router_id().unwrap_or_else(|| {
-                        Arc::new(RouterId::from_str("unknown").unwrap())
-                    });
+            let ltime = 0_u64;
+            debug!("pre rib.insert for {}, status {}", &prefix, &route_context.nlri_status());
+            match rib.insert(&prefix, prefix_route.clone(), route_context.nlri_status(), route_context.provenance(), ltime) {
 
-                let pre_insert = Utc::now();
-                match insert_fn(&prefix, payload.rx_value.clone(), &rib) {
-                    Ok((upsert, num_retries)) => {
-                        let post_insert = Utc::now();
-                        let store_op_delay =
-                            (post_insert - pre_insert).to_std().unwrap();
-                        let propagation_delay = (post_insert
-                            - payload.received)
-                            .to_std()
-                            .unwrap();
+                Ok(report) => {
+                    let post_insert = Utc::now();
+                    let store_op_delay =
+                        (post_insert - pre_insert).to_std().unwrap();
+                    let propagation_delay = (post_insert
+                        - payload.received)
+                        .to_std()
+                        .unwrap();
 
-                        match upsert {
-                            Upsert::Insert => {
-                                let change = if is_announcement {
-                                    StoreInsertionEffect::RouteAdded
-                                } else {
-                                    // WTF - a withdrawal should NOT result in 'Insert' as that means
-                                    // that the prefix didn't yet have any routes associated with it
-                                    // so what was there to withdraw?
-                                    StoreInsertionEffect::RoutesWithdrawn(0)
-                                };
-                                self.status_reporter.insert_ok(
-                                    router_id,
-                                    store_op_delay,
-                                    propagation_delay,
-                                    num_retries,
-                                    change,
-                                );
-                            }
-                            Upsert::Update(StoreInsertionReport {
-                                change,
-                                item_count,
-                                op_duration,
-                            }) => {
-                                STATS_COUNTER.with(|counter| {
-                                    *counter.borrow_mut() += 1;
-                                    let res = *counter.borrow();
-                                    if res % RECORD_MERGE_UPDATE_SPEED_EVERY_N_CALLS == 0 {
-                                        self.rib_merge_update_stats.add(
-                                            op_duration.num_microseconds().unwrap_or(i64::MAX)
-                                                as u64,
-                                            item_count,
-                                            is_announcement,
-                                        );
-                                    }
-                                });
+                    let change = if report.prefix_new {
+                        StoreInsertionEffect::RouteAdded
+                    } else {
+                        StoreInsertionEffect::RouteUpdated
+                    };
 
-                                self.status_reporter.update_ok(
-                                    router_id,
-                                    store_op_delay,
-                                    propagation_delay,
-                                    num_retries,
-                                    change,
-                                );
-                            }
-                        }
-                    }
-
-                    Err(err) => {
-                        self.status_reporter.insert_failed(prefix, err);
-                    }
+                    self.status_reporter.insert_ok(
+                        route_context.provenance().ingress_id,
+                        store_op_delay,
+                        propagation_delay,
+                        //num_retries,
+                        report.cas_count.try_into().unwrap_or(u32::MAX),
+                        change,
+                    );
                 }
+                Err(err) => {
+                    self.status_reporter.insert_failed(prefix, err);
+                }
+
+                /*
+
+                   Ok((upsert, num_retries)) => {
+                   let post_insert = Utc::now();
+                   let store_op_delay =
+                   (post_insert - pre_insert).to_std().unwrap();
+                   let propagation_delay = (post_insert
+                   - payload.received)
+                   .to_std()
+                   .unwrap();
+
+                // are we still going to get a Upsert:: back from the
+                // new rotonda_store methods? If so, what will be the
+                // T in Upsert::Update<T> ?
+                // would be nice to have the change/effect, the
+                // op_duraiton we can do ourselves here, and the
+                // item_count... not sure how interesting that is, and
+                // moreover, what would it entail: the number of Metas
+                // for the Prefix? Or something for the Prefix+UniqId?
+                match upsert {
+                Upsert::Insert => {
+                let change = if is_announcement {
+                StoreInsertionEffect::RouteAdded
+                } else {
+                // WTF - a withdrawal should NOT result in 'Insert' as that means
+                // that the prefix didn't yet have any routes associated with it
+                // so what was there to withdraw?
+                StoreInsertionEffect::RoutesWithdrawn(0)
+                };
+                self.status_reporter.insert_ok(
+                //router_id,
+                ingress_id,
+                store_op_delay,
+                propagation_delay,
+                num_retries,
+                change,
+                );
+                }
+                Upsert::Update(StoreInsertionReport { change,
+                item_count,
+                op_duration,
+                }) => {
+                STATS_COUNTER.with(|counter| {
+                 *counter.borrow_mut() += 1;
+                 let res = *counter.borrow();
+                 if res % RECORD_MERGE_UPDATE_SPEED_EVERY_N_CALLS == 0 {
+                 self.rib_merge_update_stats.add(
+                 op_duration.num_microseconds().unwrap_or(i64::MAX)
+                 as u64,
+                 item_count,
+                 is_announcement,
+                 );
+                 }
+                 });
+
+                 self.status_reporter.update_ok(
+                //router_id,
+                ingress_id,
+                store_op_delay,
+                propagation_delay,
+                num_retries,
+                change,
+                );
+                }
+                }
+                }
+
+                Err(err) => {
+                self.status_reporter.insert_failed(prefix, err);
+                } */
             }
         }
     }
@@ -893,16 +1076,33 @@ impl RibUnitRunner {
         let mut processed_res = QueryResult::<RibValue> {
             match_type: res.match_type,
             prefix: res.prefix,
-            prefix_meta: None,
+            prefix_meta: vec![],
             less_specifics: None,
             more_specifics: None,
         };
 
-        let is_in_prefix_meta_set = res.prefix_meta.is_some();
+        let is_in_prefix_meta_set = !res.prefix_meta.is_empty();
 
-        if let Some(rib_value) = res.prefix_meta {
-            processed_res.prefix_meta =
-                self.reprocess_rib_value(rib_value).await;
+        //if let Some(rib_value) = res.prefix_meta {
+        //    processed_res.prefix_meta =
+        //        self.reprocess_rib_value(rib_value).await;
+        //}
+        for record in res.prefix_meta {
+            let (mui, ltime, status) = (record.multi_uniq_id, record.ltime, record.status);
+            
+            // XXX how can we do without the clone here?
+            // we can not keep track of the other fields and create a new
+            // PublicRecord only if reprocess_rib_value returns Some(..),
+            // because PublicRecord is not public.
+            //
+            //let mut maybe_keep = record.clone();
+            if let Some(meta)  = self.reprocess_rib_value(record.meta).await {
+                //maybe_keep.meta = meta;
+                processed_res.prefix_meta.push(
+                    //maybe_keep
+                    rotonda_store::PublicRecord::<RibValue>::new(mui, ltime, status, meta)
+                );
+            }
         }
 
         if let Some(record_set) = &res.less_specifics {
@@ -916,7 +1116,7 @@ impl RibUnitRunner {
         }
 
         if log_enabled!(log::Level::Trace) {
-            let is_out_prefix_meta_set = processed_res.prefix_meta.is_some();
+            let is_out_prefix_meta_set = !processed_res.prefix_meta.is_empty();
             let exact_match_diff = (is_in_prefix_meta_set as u8)
                 - (is_out_prefix_meta_set as u8);
             let less_specifics_diff =
@@ -951,31 +1151,59 @@ impl RibUnitRunner {
         &self,
         rib_value: RibValue,
     ) -> Option<RibValue> {
+        /*
         let mut new_values = HashedSet::with_capacity_and_hasher(
             1,
             HashBuildHasher::default(),
         );
+        */
 
         let tracer = BoundTracer::new(self.tracer.clone(), self.gate.id());
 
-        let ctx = roto::types::builtin::RouteContext::new(
-                    None,
-                    roto::types::builtin::NlriStatus::Empty,
-                    roto::types::builtin::Provenance::mock()
-                );
-        for route in rib_value.iter() {
-            let in_type_value: &TypeValue = route.deref();
-            //let payload = Payload::from(in_type_value.clone()); // TODO: Do we really want to clone here? Or pass the Arc on?
-            let payload = Payload::new(
-                in_type_value.clone(),
-                ctx.clone(),
-                None
-            );
 
-            trace!("Re-processing route");
+        // LH: not sure Deref is idiomatic here
+        let in_type_value = rib_value.deref();
 
-            if let Ok(filtered_payloads) = Self::VM.with(|vm| {
-                payload.filter(|value, received, trace_id, context| {
+        // XXX where is our ingress_id ?
+        //let prov = self.ingresses.get(
+
+        // XXX What is the RouteContext for a re-processed RibValue?
+        // We can add a bool to RouteContext signalling we are
+        // re-processing a value and the bgp_pdu is (likely) not available
+        // in this context. Then, Roto filters can act upon that bool.
+        // This might cause discrepancies between 'normal' processing and
+        // re-processing, though.
+        
+        //let ctx = RouteContext::for_reprocessing(
+        //    NlriStatus::UpToDate, // XXX is this
+        //    provenance,
+        //);
+        let ctx = RouteContext::for_reprocessing();
+
+        let payload = Payload::new(
+            in_type_value.clone(),
+            ctx.clone(),
+            None
+        );
+
+        trace!("Re-processing route");
+
+        // LH:
+        // Let's see if I get this straight. It seems that payload.filter(..)
+        // comes from trait Filterable which always returns a
+        // SmallVec<Payload> even if the input is a single Payload.
+        // However, we work on a single RibValue here, so whatever comes out
+        // of the filter is a SmallVec of either 0 or 1 items.
+        // or perhaps not: can a single Payload going in result in both the 
+        // input Payload (PrefixRoute) _AND_ a OutputStreamMessage (is that
+        // something going out South?)
+
+        //let res: Option<RibValue>;
+
+        //let res = 
+        if let Ok(filtered_payloads) = Self::VM.with(|vm| {
+            payload.filter(
+                |value, received, trace_id, context| {
                     self.roto_scripts.exec_with_tracer(
                         vm,
                         &self.filter_name.load(),
@@ -985,35 +1213,51 @@ impl RibUnitRunner {
                         trace_id,
                         context
                     )
-                }, |_source_id| { /* TODO: self.status_reporter.message_filtered(source_id) */ })
-            }) {
-                new_values.extend(
-                    filtered_payloads
-                        .into_iter()
-                        .filter(|payload| {
-                            !matches!(
-                                payload.rx_value,
-                                TypeValue::OutputStreamMessage(_)
-                            )
-                        })
-                        .map(|payload| {
-                            // Add this processed query result route into the new query result
-                            let hash = self
-                                .rib
-                                .load()
-                                .precompute_hash_code(&payload.rx_value);
-                            PreHashedTypeValue::new(payload.rx_value, hash)
-                                .into()
-                        }),
-                );
-            }
-        }
-
-        if new_values.is_empty() {
-            None
+                },
+                |_source_id| {
+                    /* TODO:
+                     * self.status_reporter.message_filtered(source_id) */
+                }
+            )
+        }) {
+            // LH: so, filtered_payloads is a mixed SmallVec where a Payload
+            // can be either a Output Stream Message ('south') and/or a
+            // Payload to be passed on east-wards.
+            filtered_payloads
+                .into_iter()
+                //.filter(|payload| {
+                .find(|payload| {
+                    !matches!(
+                        payload.rx_value,
+                        TypeValue::OutputStreamMessage(_)
+                    )
+                })
+            .map(|payload| {
+                // Add this processed query result route into the new query result
+                //let hash = self
+                //    .rib
+                //    .load()
+                //    .precompute_hash_code(&payload.rx_value);
+                /*
+                   PreHashedTypeValue::new(
+                   payload.rx_value,
+                   route.provenance(),
+                /*hash*/)
+                .into()
+                    */
+                    payload.rx_value.try_into().unwrap()
+            })
         } else {
-            Some(new_values.into())
-        }
+            None
+        }//;
+
+        //res
+
+        //if new_values.is_empty() {
+        //    None
+        //} else {
+        //    Some(new_values.into())
+        //}
     }
 
     async fn reprocess_record_set(
@@ -1023,10 +1267,13 @@ impl RibUnitRunner {
         let mut new_record_set = RecordSet::<RibValue>::new();
 
         for record in record_set.iter() {
-            let rib_value = record.meta;
-            if let Some(rib_value) = self.reprocess_rib_value(rib_value).await
-            {
-                new_record_set.push(record.prefix, rib_value);
+            // XXX can we safely do this?
+            for mut pub_rec in record.meta {
+                if let Some(rib_value) = self.reprocess_rib_value(pub_rec.meta).await
+                {
+                    pub_rec.meta = rib_value;
+                    new_record_set.push(record.prefix, vec![pub_rec]);
+                }
             }
         }
 

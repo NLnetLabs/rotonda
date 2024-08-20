@@ -147,6 +147,7 @@ impl Component {
         process: Arc<dyn http::ProcessRequest>,
         rel_base_url: &str,
     ) {
+        debug!("registering resource {:?}", &rel_base_url);
         self.http_resources.register(
             Arc::downgrade(&process),
             self.name.clone(),
@@ -162,6 +163,7 @@ impl Component {
         process: Arc<dyn http::ProcessRequest>,
         rel_base_url: &str,
     ) {
+        debug!("registering resource {:?}", &rel_base_url);
         self.http_resources.register(
             Arc::downgrade(&process),
             self.name.clone(),

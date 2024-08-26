@@ -131,7 +131,7 @@ pub mod bgp {
         use routecore::bgp::aspath::HopPath;
         use routecore::bgp::communities::Community;
         use routecore::bgp::types::{
-            NextHop, OriginType, PathAttributeType, AfiSafi,
+            AfiSafiType, NextHop, OriginType, PathAttributeType
         };
         use routecore::bmp::message::{
             InformationTlvType, MessageType, PeerType, TerminationInformation,
@@ -671,11 +671,14 @@ pub mod bgp {
                     IpAddr::V6(addr) => {
                         // https://datatracker.ietf.org/doc/html/rfc4760#section-4
                         if mp_unreach_nlri.is_empty() {
-                            mp_unreach_nlri.put_u16(AfiSafi::Ipv6Unicast.into());
-                            mp_unreach_nlri.put_u8(
-                                u8::from(AfiSafi::Ipv6Unicast)
-                                    | u8::from(AfiSafi::Ipv6Multicast),
-                            );
+                            let (afi, safi) = AfiSafiType::Ipv6Unicast.into();
+                            mp_unreach_nlri.put_u16(afi);
+                            mp_unreach_nlri.put_u8(safi);
+                            //mp_unreach_nlri.put_u16(Afi::Ipv6.into());
+                            //mp_unreach_nlri.put_u8(
+                            //    u8::from(AfiSafiType::Ipv6Unicast)
+                            //        | u8::from(AfiSafiType::Ipv6Multicast),
+                            //);
                         }
                         mp_unreach_nlri.extend_from_slice(&[len]);
                         if len > 0 {
@@ -790,7 +793,7 @@ pub mod bgp {
 
                         let (optional, transitive, complete) = match r#type {
                             PathAttributeType::AsPath
-                            | PathAttributeType::NextHop
+                            | PathAttributeType::ConventionalNextHop
                             | PathAttributeType::Origin => {
                                 (false, true, true)
                             }
@@ -881,7 +884,7 @@ pub mod bgp {
                     if let NextHop::Unicast(IpAddr::V4(addr)) | NextHop::Multicast(IpAddr::V4(addr)) = next_hop.0 {
                         push_attributes(
                             &mut path_attributes,
-                            PathAttributeType::NextHop,
+                            PathAttributeType::ConventionalNextHop,
                             &addr.octets(),
                         );
                     }
@@ -982,9 +985,12 @@ pub mod bgp {
                             IpAddr::V6(addr) => {
                                 // https://datatracker.ietf.org/doc/html/rfc4760#section-3
                                 if mp_reach_nlri.is_empty() {
-                                    mp_reach_nlri.put_u16(AfiSafi::Ipv6Unicast.into());
-                                    mp_reach_nlri
-                                        .put_u8(u8::from(AfiSafi::Unicast));
+                                    let (afi, safi) = AfiSafiType::Ipv6Unicast.into();
+                                    mp_unreach_nlri.put_u16(afi);
+                                    mp_unreach_nlri.put_u8(safi);
+                                    //mp_reach_nlri.put_u16(AfiSafiType::Ipv6Unicast.into());
+                                    //mp_reach_nlri
+                                    //    .put_u8(u8::from(AfiSafiType::Unicast));
                                     if let NextHop::Unicast(IpAddr::V6(addr)) | NextHop::Ipv6LL(addr, _) | NextHop::Multicast(IpAddr::V6(addr)) = next_hop.0 {
                                         mp_reach_nlri.put_u8(addr.octets().len() as u8);
                                         mp_reach_nlri.extend_from_slice(

@@ -292,7 +292,7 @@ mod tests {
 
     use bytes::Bytes;
     use roto::types::{
-        builtin::BuiltinTypeValue, collections::BytesRecord,
+        builtin::{BuiltinTypeValue, RouteContext}, collections::BytesRecord,
         lazyrecord_types::BmpMessage, typevalue::TypeValue,
     };
     use inetnum::asn::Asn;
@@ -545,7 +545,12 @@ mod tests {
         let bmp_msg =
             BytesRecord::from(BmpMessage::from_octets(msg_buf).unwrap());
         let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
-        Update::Single(Payload::new(value, None, None))
+        //Update::Single(Payload::new(value, None, None))
+        Update::Single(Payload::new(
+                value,
+                RouteContext::for_reprocessing(),
+                None
+        ))
     }
 
     async fn is_filtered(filter: &RotoFilterRunner, update: Update) -> bool {

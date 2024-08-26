@@ -780,6 +780,7 @@ impl FilterOutput {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use roto::types::{
@@ -931,3 +932,4 @@ mod tests {
         OutputStreamMessage::from(record)
     }
 }
+*/

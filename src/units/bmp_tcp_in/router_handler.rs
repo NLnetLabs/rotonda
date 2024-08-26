@@ -111,6 +111,7 @@ impl RouterHandler {
             router_id,
             parent_status_reporter.clone(),
             bmp_metrics.clone(),
+            Arc::new(ingress::Register::new()),
         );
 
         let state_machine = Arc::new(Mutex::new(Some(state_machine)));
@@ -547,7 +548,12 @@ mod tests {
         eprintln!("STARTING ROUTER READER");
         let router_addr = "1.2.3.4:12345".parse().unwrap();
         let source_id = "dummy".into();
-        let join_handle = runner.read_from_router(rx, router_addr, source_id);
+        let join_handle = runner.read_from_router(
+            rx,
+            router_addr,
+            source_id,
+            Arc::new(ingress::Register::default()),
+        );
 
         // Simulate the unit terminating. Without this the reader continues
         // forever.
@@ -627,7 +633,12 @@ mod tests {
             0
         );
 
-        runner.read_from_router(rx, router_addr, source_id).await;
+        runner.read_from_router(
+            rx,
+            router_addr,
+            source_id,
+            Arc::new(ingress::Register::default()),
+        ).await;
 
         let metrics = get_testable_metrics_snapshot(
             &runner.status_reporter.metrics().unwrap(),

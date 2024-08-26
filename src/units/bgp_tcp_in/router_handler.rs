@@ -147,6 +147,8 @@ impl Processor {
             pdu_out_tx,
             status_reporter: Default::default(),
             observed_nlri: BTreeSet::new(),
+            ingresses: Arc::new(ingress::Register::default()),
+            ingress_id: 0,
         };
 
         (processor, gate_agent)

@@ -1,9 +1,9 @@
-use std::{str::FromStr, sync::Arc};
+use std::{collections::BTreeSet, str::FromStr, sync::Arc};
 
 use arc_swap::ArcSwap;
 use assert_json_diff::{assert_json_matches_no_panic, CompareMode, Config};
 use hyper::{body::Bytes, Body, Request, StatusCode};
-use roto::types::{builtin::{PrefixRoute, NlriStatus, Provenance, RotondaId}, collections::BytesRecord, lazyrecord_types::BgpUpdateMessage};
+use roto::types::{builtin::{BuiltinTypeValue, NlriStatus, PrefixRoute, Provenance, RotondaId}, collections::BytesRecord, lazyrecord_types::BgpUpdateMessage, typevalue::TypeValue};
 use inetnum::{
     addr::Prefix,
     asn::Asn
@@ -13,7 +13,7 @@ use routecore::bgp::{
         communities::{
             Community, ExtendedCommunity, LargeCommunity, ParseError,
             StandardCommunity, Wellknown,
-        }, message::SessionConfig, nlri::afisafi::Ipv4UnicastNlri, types::AfiSafi, workshop::route::RouteWorkshop
+        }, message::{SessionConfig, UpdateMessage}, nlri::afisafi::Ipv4UnicastNlri, types::AfiSafiType, workshop::route::RouteWorkshop
 };
 use serde_json::{json, Value};
 
@@ -21,16 +21,13 @@ use crate::{
     bgp::{
         encode::{mk_bgp_update, Announcements, Prefixes},
         raw::communities::{extended::*, large::*, standard::*},
-    },
-    common::{frim::FrimMap, json::EasilyExtendedJSONObject},
-    http::ProcessRequest,
-    units::{
+    }, common::{frim::FrimMap, json::EasilyExtendedJSONObject}, http::ProcessRequest, ingress, units::{
         rib_unit::{
             rib::HashedRib,
             unit::{MoreSpecifics, QueryLimits},
         },
         RibType,
-    },
+    }
 };
 
 use super::PrefixesApi;
@@ -86,7 +83,7 @@ async fn exact_match_ipv4() {
         "/prefixes/1.2.3.4/32",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix("1.2.3.4/32", AfiSafi::Ipv4Unicast, 1)],
+            "data": [mk_response_announced_prefix("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 1)],
             "included": {}
         })),
     )
@@ -106,7 +103,7 @@ async fn exact_match_with_more_and_less_specifics_ipv4() {
         "/prefixes/1.2.3.0/24",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix("1.2.3.0/24", AfiSafi::Ipv4Unicast, 2)],
+            "data": [mk_response_announced_prefix("1.2.3.0/24", AfiSafiType::Ipv4Unicast, 2)],
             "included": {}
         })),
     )
@@ -117,9 +114,9 @@ async fn exact_match_with_more_and_less_specifics_ipv4() {
         "/prefixes/1.2.3.0/24?include=lessSpecifics",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix("1.2.3.0/24", AfiSafi::Ipv4Unicast, 2)],
+            "data": [mk_response_announced_prefix("1.2.3.0/24", AfiSafiType::Ipv4Unicast, 2)],
             "included": {
-                "lessSpecifics": [mk_response_announced_prefix("1.2.0.0/16", AfiSafi::Ipv4Unicast, 1)]
+                "lessSpecifics": [mk_response_announced_prefix("1.2.0.0/16", AfiSafiType::Ipv4Unicast, 1)]
             }
         })),
     )
@@ -130,9 +127,9 @@ async fn exact_match_with_more_and_less_specifics_ipv4() {
         "/prefixes/1.2.3.0/24?include=moreSpecifics",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix("1.2.3.0/24", AfiSafi::Ipv4Unicast, 2)],
+            "data": [mk_response_announced_prefix("1.2.3.0/24", AfiSafiType::Ipv4Unicast, 2)],
             "included": {
-                "moreSpecifics": [mk_response_announced_prefix("1.2.3.4/32", AfiSafi::Ipv4Unicast, 3)]
+                "moreSpecifics": [mk_response_announced_prefix("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 3)]
             }
         })),
     )
@@ -143,10 +140,10 @@ async fn exact_match_with_more_and_less_specifics_ipv4() {
         "/prefixes/1.2.3.0/24?include=lessSpecifics,moreSpecifics",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix("1.2.3.0/24", AfiSafi::Ipv4Unicast, 2)],
+            "data": [mk_response_announced_prefix("1.2.3.0/24", AfiSafiType::Ipv4Unicast, 2)],
             "included": {
-                "lessSpecifics": [mk_response_announced_prefix("1.2.0.0/16", AfiSafi::Ipv4Unicast, 1)],
-                "moreSpecifics": [mk_response_announced_prefix("1.2.3.4/32", AfiSafi::Ipv4Unicast, 3)]
+                "lessSpecifics": [mk_response_announced_prefix("1.2.0.0/16", AfiSafiType::Ipv4Unicast, 1)],
+                "moreSpecifics": [mk_response_announced_prefix("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 3)]
             }
         })),
     )
@@ -166,7 +163,7 @@ async fn issue_79_exact_match() {
         "/prefixes/8.8.8.0/24",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix("8.8.8.0/24", AfiSafi::Ipv4Unicast, 1)],
+            "data": [mk_response_announced_prefix("8.8.8.0/24", AfiSafiType::Ipv4Unicast, 1)],
             "included": {}
         })),
     )
@@ -180,9 +177,9 @@ async fn issue_79_exact_match() {
             "data": [],
             "included": {
                 "lessSpecifics": [
-                    mk_response_announced_prefix("8.8.8.0/24", AfiSafi::Ipv4Unicast, 1),
-                    mk_response_announced_prefix("8.0.0.0/12", AfiSafi::Ipv4Unicast, 2),
-                    mk_response_announced_prefix("8.0.0.0/9", AfiSafi::Ipv4Unicast, 3)
+                    mk_response_announced_prefix("8.8.8.0/24", AfiSafiType::Ipv4Unicast, 1),
+                    mk_response_announced_prefix("8.0.0.0/12", AfiSafiType::Ipv4Unicast, 2),
+                    mk_response_announced_prefix("8.0.0.0/9", AfiSafiType::Ipv4Unicast, 3)
                 ]
             }
         })),
@@ -203,11 +200,11 @@ async fn prefix_normalization_ipv6() {
         "/prefixes/2001:DB8:2222::/48?include=moreSpecifics",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix("2001:db8:2222::/48", AfiSafi::Ipv6Unicast, 1)], // note: DB8 was queried but db8 was reported
+            "data": [mk_response_announced_prefix("2001:db8:2222::/48", AfiSafiType::Ipv6Unicast, 1)], // note: DB8 was queried but db8 was reported
             "included": {
                 "moreSpecifics": [
-                    mk_response_announced_prefix("2001:db8:2222::/64", AfiSafi::Ipv6Unicast, 2),   // note: 2222:0000:: compressed to 2222::
-                    mk_response_announced_prefix("2001:db8:2222:1::/64", AfiSafi::Ipv6Unicast, 3)  // note: 2222:0001:: compressed to 2222:1::
+                    mk_response_announced_prefix("2001:db8:2222::/64", AfiSafiType::Ipv6Unicast, 2),   // note: 2222:0000:: compressed to 2222::
+                    mk_response_announced_prefix("2001:db8:2222:1::/64", AfiSafiType::Ipv6Unicast, 3)  // note: 2222:0001:: compressed to 2222:1::
                 ]
             }
         })),
@@ -347,7 +344,7 @@ async fn exact_match_ipv4_with_normal_communities() {
         "/prefixes/1.2.3.4/32?details=communities",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 1, &[18], Some(expected_communities))],//, "Pre")],
+            "data": [mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 1, &[18], Some(expected_communities))],//, "Pre")],
             "included": {}
         })),
     )
@@ -413,7 +410,7 @@ async fn exact_match_ipv4_with_extended_communities() {
         "/prefixes/1.2.3.4/32?details=communities",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 1, &[18], Some(expected_communities))],//, "Pre")],
+            "data": [mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 1, &[18], Some(expected_communities))],//, "Pre")],
             "included": {}
         })),
     )
@@ -451,7 +448,7 @@ async fn exact_match_ipv4_with_large_communities() {
         "/prefixes/1.2.3.4/32?details=communities",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 1, &[18], Some(expected_communities))],//, "Pre")],
+            "data": [mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 1, &[18], Some(expected_communities))],//, "Pre")],
             "included": {}
         })),
     )
@@ -539,8 +536,8 @@ async fn select_and_discard() {
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 1, &[19, 20, 21], Some(blackhole_json.clone())),
-                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 2, &[19, 20, 21], None),
+                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 1, &[19, 20, 21], Some(blackhole_json.clone())),
+                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 2, &[19, 20, 21], None),
             ],
             "included": {}
         })),
@@ -554,9 +551,9 @@ async fn select_and_discard() {
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 2, &[1, 2, 3], Some(no_export_json.clone())),
-                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 2, &[19, 20, 21], None),
-                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 2, &[20, 21, 22], None),
+                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 2, &[1, 2, 3], Some(no_export_json.clone())),
+                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 2, &[19, 20, 21], None),
+                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 2, &[20, 21, 22], None),
             ],
             "included": {}
         })),
@@ -570,8 +567,8 @@ async fn select_and_discard() {
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 1, &[19, 20, 21], Some(blackhole_json.clone())),
-                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 3, &[21, 22, 23], Some(blackhole_json.clone())),
+                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 1, &[19, 20, 21], Some(blackhole_json.clone())),
+                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 3, &[21, 22, 23], Some(blackhole_json.clone())),
             ],
             "included": {}
         })),
@@ -585,9 +582,9 @@ async fn select_and_discard() {
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 2, &[1, 2, 3], Some(no_export_json.clone())),
-                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 2, &[20, 21, 22], None),
-                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 3, &[21, 22, 23], Some(blackhole_json.clone())),
+                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 2, &[1, 2, 3], Some(no_export_json.clone())),
+                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 2, &[20, 21, 22], None),
+                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 3, &[21, 22, 23], Some(blackhole_json.clone())),
             ],
             "included": {}
         })),
@@ -601,8 +598,8 @@ async fn select_and_discard() {
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 2, &[20, 21, 22], None),
-                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 3, &[21, 22, 23], Some(blackhole_json.clone())),
+                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 2, &[20, 21, 22], None),
+                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 3, &[21, 22, 23], Some(blackhole_json.clone())),
             ],
             "included": {}
         })),
@@ -616,10 +613,10 @@ async fn select_and_discard() {
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 2, &[1, 2, 3], Some(no_export_json.clone())),
-                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 2, &[19, 20, 21], None),
-                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 2, &[20, 21, 22], None),
-                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 3, &[21, 22, 23], Some(blackhole_json.clone())),
+                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 2, &[1, 2, 3], Some(no_export_json.clone())),
+                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 2, &[19, 20, 21], None),
+                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 2, &[20, 21, 22], None),
+                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 3, &[21, 22, 23], Some(blackhole_json.clone())),
             ],
             "included": {}
         })),
@@ -633,9 +630,9 @@ async fn select_and_discard() {
         StatusCode::OK,
         Some(json!({
             "data": [
-                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 2, &[1, 2, 3], Some(no_export_json.clone())),
-                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 2, &[19, 20, 21], None),
-                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 2, &[20, 21, 22], None),
+                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 2, &[1, 2, 3], Some(no_export_json.clone())),
+                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 2, &[19, 20, 21], None),
+                mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 2, &[20, 21, 22], None),
             ],
             "included": {}
         })),
@@ -649,7 +646,7 @@ async fn select_and_discard() {
         "/prefixes/1.2.3.4/32?select[as_path]=19,20,21&discard[community]=BLACKHOLE&discard[community]=NO_EXPORT&sort=/route/router_id",
         StatusCode::OK,
         Some(json!({
-            "data": [mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 2, &[19, 20, 21], None)],
+            "data": [mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 2, &[19, 20, 21], None)],
             "included": {}
         })),
     )
@@ -668,8 +665,8 @@ async fn select_and_discard() {
             StatusCode::OK,
             Some(json!({
                 "data": [
-                    mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 1, &[19, 20, 21], Some(blackhole_json.clone())),
-                    mk_response_announced_prefix_full("1.2.3.4/32", AfiSafi::Ipv4Unicast, 2, &[1, 2, 3], Some(no_export_json.clone())),
+                    mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 1, &[19, 20, 21], Some(blackhole_json.clone())),
+                    mk_response_announced_prefix_full("1.2.3.4/32", AfiSafiType::Ipv4Unicast, 2, &[1, 2, 3], Some(no_export_json.clone())),
                 ],
                 "included": {}
             })),
@@ -696,6 +693,7 @@ async fn do_query(
         RibType::Physical,
         None,
         Arc::new(FrimMap::default()),
+        Arc::new(ingress::Register::default()),
     );
 
     let request = Request::builder()
@@ -790,8 +788,35 @@ fn insert_routes(
         prefixes,
     } = announcements
     {
+        let roto_update_msg = BytesRecord::<BgpUpdateMessage>::new(
+            bgp_update_bytes.clone(),
+            SessionConfig::modern(),
+        ).unwrap();
+
         let loaded_rib = rib.load();
-        let rws_vec = roto::types::builtin::explode_announcements(bgp_update_bytes).unwrap();
+        for p in prefixes.iter() {
+            if p.is_v4() {
+                loaded_rib.insert(
+                    p,
+                    RouteWorkshop::new(Ipv4UnicastNlri::try_from(*p).unwrap()).into(),
+                    NlriStatus::InConvergence,
+                    Provenance::for_bgp(
+                        0,
+                        format!("192.168.0.{n}").parse().unwrap(), //peer_ip,
+                        Asn::from_u32(1000 + (n as u32)),
+                    ),
+                    0, //ltime,
+                ).unwrap();
+            }
+        }
+        /*
+
+        let rws_vec = roto::types::builtin::explode_announcements(
+            //bgp_update_bytes,
+            &UpdateMessage::from_octets(
+                bgp_update_bytes, &SessionConfig::modern()
+            ).unwrap(),
+            &mut BTreeSet::new()).unwrap();
 
         for rws in rws_vec {
             // let roto_update_msg = BytesRecord::<BgpUpdateMessage>::new(
@@ -819,9 +844,20 @@ fn insert_routes(
             // .with_peer_ip(format!("192.168.0.{n}").parse().unwrap())
             // .with_peer_asn(Asn::from_u32(1000 + (n as u32)))
             // .with_router_id(Arc::new(format!("router{n}")));
-            if rws.nlri() {};
-            loaded_rib.insert(rws.prefix(), rws).unwrap();
+            //if rws.nlri() {};
+            loaded_rib.insert(
+                rws.prefix(),
+                rws.into(),
+                NlriStatus::InConvergence,
+                Provenance::for_bgp(
+                    0.into(), //ingress_id,
+                    format!("192.168.0.{n}").parse().unwrap(), //peer_ip,
+                    Asn::from_u32(1000 + (n as u32)),
+                ),
+                0.into(), //ltime,
+            ).unwrap();
         }
+        */
     }
 }
 
@@ -887,13 +923,13 @@ fn insert_announcement_full<C: Into<Community> + Copy>(
     );
 }
 
-fn mk_response_announced_prefix(prefix: &str, afi_safi: AfiSafi, router_n: u8) -> Value {
+fn mk_response_announced_prefix(prefix: &str, afi_safi: AfiSafiType, router_n: u8) -> Value {
     mk_response_announced_prefix_full(prefix, afi_safi, router_n, &[123, 456], None)
 }
 
 fn mk_response_announced_prefix_full(
     prefix: &str,
-    afi_safi: AfiSafi,
+    afi_safi: AfiSafiType,
     router_n: u8,
     as_path: &[u32],
     communities: Option<Value>,

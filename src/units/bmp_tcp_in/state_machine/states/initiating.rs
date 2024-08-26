@@ -258,6 +258,7 @@ mod tests {
             source_id,
             router_id,
             Arc::default(),
+            Arc::default(),
         )
     }
 }

@@ -324,6 +324,7 @@ impl BmpTcpInRunner {
             filter_name: Default::default(),
             tracer: Default::default(),
             tracing_mode: Default::default(),
+            ingress_register: Arc::default(),
         };
 
         (runner, gate_agent)
@@ -674,15 +675,12 @@ mod tests {
         common::{
             frim::FrimMap, net::TcpStreamWrapper,
             status_reporter::AnyStatusReporter,
-        },
-        comms::{Gate, GateAgent, Terminated},
-        tests::util::{
+        }, comms::{Gate, GateAgent, Terminated}, ingress, tests::util::{
             internal::{enable_logging, get_testable_metrics_snapshot},
             net::{
                 MockTcpListener, MockTcpListenerFactory, MockTcpStreamWrapper,
             },
-        },
-        units::{
+        }, units::{
             bmp_tcp_in::{
                 metrics::BmpTcpInMetrics, router_handler::RouterHandler,
                 state_machine::BmpState,
@@ -690,7 +688,7 @@ mod tests {
                 unit::BmpTcpInRunner,
             },
             Unit,
-        },
+        }
     };
 
     use super::{BmpTcpIn, ConfigAcceptor};
@@ -1041,6 +1039,7 @@ mod tests {
             filter_name: Default::default(),
             tracing_mode: Default::default(),
             tracer: Default::default(),
+            ingress_register: Arc::new(ingress::Register::default()),
         };
 
         (runner, gate_agent, status_reporter)
@@ -1059,6 +1058,7 @@ mod tests {
                 FrimMap<SourceId, Arc<Mutex<Option<BmpState>>>>,
             >, // Option is never None, instead Some is take()'n and replace()'d.
             _router_info: &Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
+            _ingress_register: Arc<ingress::Register>,
         ) {
         }
     }

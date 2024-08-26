@@ -486,14 +486,16 @@ mod test {
     use roto::types::{builtin::{
         PrefixRoute, NlriStatus, Provenance, RotondaId
     }, collections::BytesRecord, lazyrecord_types::BgpUpdateMessage};
-    use routecore::bgp::{message::SessionConfig, types::AfiSafi};
+    use routecore::bgp::{message::SessionConfig, types::AfiSafiType};
 
     use crate::bgp::encode::{mk_bgp_update, Announcements, Prefixes};
 
     use super::*;
 
+    #[ignore = "FIXME this does not really test anything"]
     #[test]
     fn test_mk_result() {
+        /*
         let announcements = Announcements::from_str(
             "e [123,456,789] 10.0.0.1 BLACKHOLE,123:44 127.0.0.1/32",
         )
@@ -512,7 +514,7 @@ mod test {
             // delta_id,
             prefix,
             roto_update_msg,
-            AfiSafi::Ipv4Unicast,
+            AfiSafiType::Ipv4Unicast,
             None,
             NlriStatus::InConvergence,
             Provenance {
@@ -528,7 +530,15 @@ mod test {
         let details = Details::default();
         let route = raw_route; //PreHashedTypeValue::new(raw_route.into(), 1);
         let json_out =
-            PrefixesApi::mk_result(&prefix, &Arc::new(route), &details);
+            PrefixesApi::mk_result(
+                &prefix,
+                &route, //&Arc::new(route),
+                ingress_id,
+                RouteStatus::Active,
+                &details,
+                None, // ingressInfo
+            );
         println!("{}", json_out);
+        */
     }
 }

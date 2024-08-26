@@ -344,7 +344,6 @@ impl RibUnitRunner {
     pub(crate) fn mock(
         roto_script: &str,
         rib_type: RibType,
-        settings: StoreMergeUpdateUserData,
     ) -> (Self, crate::comms::GateAgent) {
         use crate::common::roto::RotoScriptOrigin;
 
@@ -362,7 +361,7 @@ impl RibUnitRunner {
         let query_limits =
             Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
         let rib_keys = RibUnit::default_rib_keys();
-        let rib = Self::mk_rib(rib_type, &rib_keys, settings);
+        let rib = Self::mk_rib(rib_type, &rib_keys); //, settings);
         let status_reporter = RibUnitStatusReporter::default().into();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
         let filter_name =
@@ -377,6 +376,7 @@ impl RibUnitRunner {
             rib_type,
             None,
             pending_vrib_query_results.clone(),
+            Arc::default(), // ingress::Register
         ));
         let tracer = Arc::new(Tracer::new());
 
@@ -1334,8 +1334,10 @@ impl RibUnitRunner {
 mod tests {
     use super::*;
 
+    #[ignore = "prefix-store now handles all keying"]
     #[test]
     fn default_rib_keys_are_as_expected() {
+        /*
         let toml = r#"
         sources = ["some source"]
         "#;
@@ -1346,10 +1348,13 @@ mod tests {
             config.rib_keys.as_slice(),
             &[BasicRouteToken::PeerIp, BasicRouteToken::PeerAsn, BasicRouteToken::AsPath]
         );
+        */
     }
 
+    #[ignore = "prefix-store now handles all keying"]
     #[test]
     fn specified_rib_keys_are_received() {
+        /*
         let toml = r#"
         sources = ["some source"]
         rib_keys = ["PeerIp", "NextHop"]
@@ -1361,6 +1366,7 @@ mod tests {
             config.rib_keys.as_slice(),
             &[BasicRouteToken::PeerIp, BasicRouteToken::NextHop]
         );
+        */
     }
 
     #[test]

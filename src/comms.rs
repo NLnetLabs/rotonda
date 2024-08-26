@@ -1836,6 +1836,8 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[cfg(not(tarpaulin))]
     async fn gate_link_lifecycle_test() {
+        use roto::types::builtin::RouteContext;
+
         // Lifecycle of a connected gate and link:
         //
         //   Client    Unit       Gate    Gate Agent    Link
@@ -1901,7 +1903,7 @@ mod tests {
         //     │                    Err(UnitStatus::Gone) │      None │
         //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│◀╌╌╌╌╌╌╌╌╌╌┘
         fn mk_test_payload() -> Payload {
-            Payload::new(18_u8, None, None)
+            Payload::new(18_u8, RouteContext::for_reprocessing(), None)
         }
 
         eprintln!("STARTING");

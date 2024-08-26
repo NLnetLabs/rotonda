@@ -83,7 +83,7 @@ impl BgpTcpIn {
             my_bgp_id: Default::default(),
             peer_configs: Default::default(),
             filter_name: Default::default(),
-            //TODO sources
+            sources: Vec::new(),
         }
     }
 
@@ -206,12 +206,13 @@ impl BgpTcpInRunner {
         let (gate, gate_agent) = Gate::new(0);
 
         let runner = BgpTcpInRunner {
-            bgp,
+            bgp: Arc::new(ArcSwap::from_pointee(bgp)),
             gate,
             metrics: Default::default(),
             status_reporter: Default::default(),
             roto_scripts: Default::default(),
             live_sessions: Arc::new(Mutex::new(HashMap::new())),
+            ingresses: Arc::new(ingress::Register::default()),
         };
 
         (runner, gate_agent)
@@ -558,19 +559,16 @@ mod tests {
         common::{
             net::TcpStreamWrapper, roto::RotoScripts,
             status_reporter::AnyStatusReporter,
-        },
-        comms::{Gate, GateAgent, Terminated},
-        tests::util::{
+        }, comms::{Gate, GateAgent, Terminated}, ingress, tests::util::{
             internal::get_testable_metrics_snapshot,
             net::{
                 MockTcpListener, MockTcpListenerFactory, MockTcpStreamWrapper,
             },
-        },
-        units::bgp_tcp_in::{
+        }, units::bgp_tcp_in::{
             peer_config::{PeerConfig, PrefixOrExact},
             status_reporter::BgpTcpInStatusReporter,
             unit::{BgpTcpIn, BgpTcpInRunner, ConfigAcceptor, LiveSessions},
-        },
+        }
     };
 
     #[tokio::test(flavor = "multi_thread")]
@@ -718,7 +716,7 @@ mod tests {
         let status_reporter = runner.status_reporter.clone();
 
         let runner_fut = runner
-            .run::<_, _, _, NoOpConfigAcceptor>(mock_listener_factory.into());
+            .run::<_, _, _, NoOpConfigAcceptor>(vec![], mock_listener_factory.into());
 
         (runner_fut, gate_agent, status_reporter)
     }
@@ -738,6 +736,8 @@ mod tests {
             _remote_net: PrefixOrExact,
             _child_status_reporter: Arc<BgpTcpInStatusReporter>,
             _live_sessions: Arc<std::sync::Mutex<LiveSessions>>,
+            _ingressess: Arc<ingress::Register>,
+            _connector_ingress_id: ingress::IngressId,
         ) {
         }
     }

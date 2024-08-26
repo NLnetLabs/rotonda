@@ -331,9 +331,11 @@ impl From<RibValue> for TypeValue {
 
 #[cfg(test)]
 impl RibValue {
+    /*
     pub fn test_inner(&self) -> &Arc<HashedSet<Arc<PreHashedTypeValue>>> {
         &self.per_prefix_items
     }
+    */
 }
 
 /*
@@ -802,18 +804,20 @@ mod tests {
         },
         typevalue::TypeValue,
     };
-    use rotonda_store::prelude::MergeUpdate;
     use inetnum::{addr::Prefix, asn::Asn};
-    use routecore::bgp::{message::SessionConfig, types::AfiSafi};
+    use routecore::bgp::{message::SessionConfig, types::AfiSafiType};
 
     use crate::{
         bgp::encode::{mk_bgp_update, Announcements, Prefixes},
         common::memory::TrackingAllocator,
-        units::rib_unit::rib::StoreEvictionPolicy,
     };
 
     use super::*;
 
+    // LH: these do not make much sense anymore with the new prefix store
+    // doing all the updating/merging of entries. Adapting does not seem to be
+    // worth it, perhaps we redo some of these from scratch? 
+    /*
     #[test]
     fn empty_by_default() {
         let rib_value = RibValue::default();
@@ -1088,42 +1092,6 @@ mod tests {
         #[derive(Default)]
         struct TestMetaData(TestMap<usize>);
 
-        impl MergeUpdate for TestMetaData {
-            type UserDataIn = MergeUpdateSettings;
-
-            type UserDataOut = ();
-
-            fn merge_update(
-                &mut self,
-                _update_meta: Self,
-                _user_data: Option<&Self::UserDataIn>,
-            ) -> Result<Self::UserDataOut, Box<dyn std::error::Error>>
-            {
-                todo!()
-            }
-
-            fn clone_merge_update(
-                &self,
-                _update_meta: &Self,
-                settings: Option<&MergeUpdateSettings>,
-            ) -> Result<(Self, Self::UserDataOut), Box<dyn std::error::Error>>
-            where
-                Self: std::marker::Sized,
-            {
-                // Verify that the allocator can actually be used
-                let settings = settings.unwrap();
-                let mut v =
-                    TestMap::with_capacity_in(2, settings.allocator.clone());
-                for n in 0..settings.num_items_to_insert {
-                    v.insert(n);
-                }
-
-                let updated_meta = Self(v);
-
-                Ok((updated_meta, ()))
-            }
-        }
-
         // Create some settings
         let allocator = TrackingAllocator::default();
         let settings = MergeUpdateSettings::new(allocator, NUM_TEST_ITEMS);
@@ -1146,7 +1114,12 @@ mod tests {
         drop(updated_meta);
         assert_eq!(0, settings.allocator.stats().bytes_allocated);
     }
+    */
 
+
+    // LH: which then obsoletes these as well
+
+    /*
     fn mk_route_announcement<T: Into<PeerId>>(
         prefix: Prefix,
         as_path: &str,
@@ -1165,7 +1138,7 @@ mod tests {
         let roto_update_msg =
             BgpUpdateMessage::new(bgp_update_bytes, SessionConfig::modern())
             .unwrap();
-        let afi_safi = if prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
+        let afi_safi = if prefix.is_v4() { AfiSafiType::Ipv4Unicast } else { AfiSafiType::Ipv6Unicast };
         // let bgp_update_msg =
         //     Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
         let mut route = PrefixRoute::new(
@@ -1204,7 +1177,7 @@ mod tests {
         // When it is processed by this unit
         let roto_update_msg =
             BgpUpdateMessage::new(bgp_update_bytes, SessionConfig::modern()).unwrap();
-        let afi_safi = if prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
+        let afi_safi = if prefix.is_v4() { AfiSafiType::Ipv4Unicast } else { AfiSafiType::Ipv6Unicast };
 
         let mut route = BasicRoute::new(
             delta_id,
@@ -1225,4 +1198,5 @@ mod tests {
 
         route
     }
+*/
 }

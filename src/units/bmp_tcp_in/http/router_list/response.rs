@@ -2,13 +2,13 @@ use std::sync::{atomic::Ordering::SeqCst, Arc};
 
 use hyper::{Body, Response};
 use indoc::formatdoc;
-use roto::types::builtin::SourceId;
+//use roto::types::builtin::ingress::IngressId;
 
 use crate::{
-    units::bmp_tcp_in::{
+    ingress, units::bmp_tcp_in::{
         state_machine::{BmpState, BmpStateDetails},
         util::{calc_u8_pc, format_source_id},
-    },
+    }
 };
 
 use super::request::RouterListApi;
@@ -18,7 +18,7 @@ const MAX_INFO_TLV_LEN: usize = 60;
 impl RouterListApi {
     pub async fn build_response(
         &self,
-        keys: Vec<SourceId>,
+        keys: Vec<ingress::IngressId>,
         http_api_path: std::borrow::Cow<'_, str>,
     ) -> Response<Body> {
         let mut response_body = self.build_response_header(&keys);
@@ -34,7 +34,7 @@ impl RouterListApi {
             .unwrap()
     }
 
-    fn build_response_header(&self, keys: &[SourceId]) -> String {
+    fn build_response_header(&self, keys: &[ingress::IngressId]) -> String {
         formatdoc! {
             r#"
             <!DOCTYPE html>
@@ -76,7 +76,7 @@ impl RouterListApi {
 
     async fn build_response_body(
         &self,
-        keys: &[SourceId],
+        keys: &[ingress::IngressId],
         http_api_path: std::borrow::Cow<'_, str>,
         response_body: &mut String,
     ) {
@@ -128,7 +128,7 @@ impl RouterListApi {
                         let router_id = Arc::new(format_source_id(
                             &self.router_id_template.load(),
                             sys_name,
-                            addr,
+                            *addr,
                         ));
                         let metrics = self
                             .bmp_metrics

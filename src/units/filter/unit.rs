@@ -1,14 +1,14 @@
 use crate::{
     common::{
-        roto::{FilterName, RotoScripts, ThreadLocalVM},
-        status_reporter::{AnyStatusReporter, UnitStatusReporter},
+        //roto::{FilterName, RotoScripts, ThreadLocalVM},
+        roto_new::{FilterName, RotoScripts}, status_reporter::{AnyStatusReporter, UnitStatusReporter}
     },
     comms::{
         AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus,
         Terminated,
     },
     manager::{Component, WaitPoint},
-    payload::{FilterError, Filterable, Update, UpstreamStatus},
+    payload::{/*FilterError, Filterable,*/ Payload, RotondaRoute, Update, UpstreamStatus},
     tracing::Tracer,
     units::Unit,
 };
@@ -55,9 +55,11 @@ struct RotoFilterRunner {
 }
 
 impl RotoFilterRunner {
+    /*
     thread_local!(
         static VM: ThreadLocalVM = RefCell::new(None);
     );
+    */
 
     fn new(
         gate: Gate,
@@ -93,7 +95,7 @@ impl RotoFilterRunner {
         roto_script: &str,
         filter_name: &str,
     ) -> (Self, crate::comms::GateAgent) {
-        use crate::common::roto::RotoScriptOrigin;
+        //use crate::common::roto::RotoScriptOrigin;
 
         let roto_scripts = RotoScripts::default();
         roto_scripts
@@ -202,7 +204,7 @@ impl RotoFilterRunner {
     async fn process_update(
         &self,
         update: Update,
-    ) -> Result<(), FilterError> {
+    ) -> Result<(), String /*FilterError*/> {
         match update {
             Update::UpstreamStatusChange(UpstreamStatus::EndOfStream {
                 ..
@@ -211,7 +213,7 @@ impl RotoFilterRunner {
                 self.gate.update_data(update).await;
             }
 
-            Update::Single(payload) => self.filter_payload(payload).await?,
+            Update::Single(payload) => self.filter_payload([payload]).await?,
 
             Update::Bulk(payloads) => self.filter_payload(payloads).await?,
 
@@ -224,10 +226,13 @@ impl RotoFilterRunner {
         Ok(())
     }
 
-    async fn filter_payload<T: Filterable>(
+    async fn filter_payload(
         &self,
-        payload: T,
-    ) -> Result<(), FilterError> {
+        _payloads: impl IntoIterator<Item = Payload>, 
+    ) -> Result<(), String /*FilterError*/> {
+        todo!()
+
+        /*
         let tracer = self.tracer.bind(self.gate.id());
 
         if let Some(filtered_update) = Self::VM
@@ -268,6 +273,7 @@ impl RotoFilterRunner {
         }
 
         Ok(())
+        */
     }
 }
 

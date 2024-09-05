@@ -1,9 +1,10 @@
 //! Controlling the entire operation.
 
 use crate::common::file_io::{FileIo, TheFileIo};
-use crate::common::roto::{
-    FilterName, LoadErrorKind, RotoError, RotoScriptOrigin, RotoScripts,
-};
+//use crate::common::roto::{
+//    FilterName, LoadErrorKind, RotoError, RotoScriptOrigin, RotoScripts,
+//};
+use crate::common::roto_new::{FilterName, RotoScripts};
 use crate::comms::{
     DirectLink, Gate, GateAgent, GraphStatus, Link, DEF_UPDATE_QUEUE_LEN,
 };
@@ -830,6 +831,7 @@ impl Manager {
         // longer exist)
         self.load_roto_scripts(&config.roto_scripts_path).or_else(|err| {
             let msg = format!("Unable to load Roto scripts: {err}.");
+            /*
             if matches!(err, RotoError::LoadError { .. })
                 && config.mvp_overrides.ignore_missing_filters
             {
@@ -839,6 +841,10 @@ impl Manager {
                 error!("{msg}");
                 Err(Terminate::error())
             }
+            */
+            //Ok::<(), Terminate>(())
+            error!("TODO get new roto infra in place");
+            Err(Terminate::error())
         })?;
 
         // Drain the singleton static ROTO_FILTER_NAMES contents to a local
@@ -934,7 +940,9 @@ impl Manager {
     pub fn load_roto_scripts(
         &mut self,
         roto_scripts_path: &Option<std::path::PathBuf>,
-    ) -> Result<(), RotoError> {
+    ) -> Result<(), String> {
+        todo!()
+        /*
         let mut new_origins = HashSet::<RotoScriptOrigin>::new();
 
         if let Some(roto_scripts_path) = roto_scripts_path {
@@ -973,6 +981,7 @@ impl Manager {
         }
 
         Ok(())
+        */
     }
 
     /// Spawns all units and targets in the config into the given runtime.

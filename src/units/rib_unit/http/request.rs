@@ -16,9 +16,7 @@ use crate::{
         PercentDecodedPath, ProcessRequest, QueryParams,
     }, ingress, units::{
         rib_unit::{
-            http::types::{FilterKind, FilterOp},
-            rib::HashedRib,
-            unit::{PendingVirtualRibQueryResults, QueryLimits},
+            http::types::{FilterKind, FilterOp}, rib::Rib, unit::{PendingVirtualRibQueryResults, QueryLimits}
         },
         RibType,
     }
@@ -27,7 +25,7 @@ use crate::{
 use super::types::{Details, Filter, FilterMode, Filters, Includes, SortKey};
 
 pub struct PrefixesApi {
-    rib: Arc<ArcSwap<HashedRib>>,
+    rib: Arc<ArcSwap<Rib>>,
     http_api_path: Arc<String>,
     query_limits: Arc<ArcSwap<QueryLimits>>,
     rib_type: RibType,
@@ -38,7 +36,7 @@ pub struct PrefixesApi {
 
 impl PrefixesApi {
     pub fn new(
-        rib: Arc<ArcSwap<HashedRib>>,
+        rib: Arc<ArcSwap<Rib>>,
         http_api_path: Arc<String>,
         query_limits: Arc<ArcSwap<QueryLimits>>,
         rib_type: RibType,
@@ -169,6 +167,24 @@ impl PrefixesApi {
             RibType::Physical => {
                 let guard = &epoch::pin();
                 // XXX res: QueryResult will be different 
+                match self.rib.load().match_unicast_prefix(
+                    &prefix, &options, guard
+                ) {
+                    Ok(res) => res,
+                    Err(e) =>{
+                        let res = Response::builder()
+                            .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
+                            .header("Content-Type", "text/plain")
+                            .body(
+                                "Cannot query non-existent RIB store"
+                                .to_string()
+                                .into(),
+                            )
+                            .unwrap();
+                        return Ok(res);
+                    }
+                }
+                /*
                 if let Ok(store) = self.rib.load().store() {
                     store.match_prefix(&prefix, &options, guard)
                 } else {
@@ -183,11 +199,14 @@ impl PrefixesApi {
                         .unwrap();
                     return Ok(res);
                 }
+                */
             }
             RibType::GeneratedVirtual(_) | RibType::Virtual => {
                 trace!("Handling virtual RIB query");
                 // Generate a unique query ID to tie the request and later response together.
                 let uuid = Uuid::new_v4();
+                // XXX LH: eventually, this should be broadened to carry NLRI
+                // other than simple prefixes.
                 let data = TriggerData::MatchPrefix(uuid, prefix, options);
 
                 // Create a oneshot channel and store the sender to it by the query ID we generated.

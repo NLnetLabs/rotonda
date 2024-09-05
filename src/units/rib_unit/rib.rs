@@ -1,5 +1,5 @@
 use std::{
-    collections::hash_set,
+    collections::{hash_set, HashMap},
     hash::{BuildHasher, Hasher},
     net::IpAddr,
     ops::Deref,
@@ -9,23 +9,292 @@ use std::{
 use chrono::{Duration, Utc};
 use hash_hasher::{HashBuildHasher, HashedSet};
 use log::{debug, error};
-use roto::{types::{
-    builtin::{BasicRouteToken, BuiltinTypeValue, NlriStatus, PrefixRoute, Provenance, RotondaId, RouteContext},
-    datasources::Rib,
-    typedef::{RibTypeDef, TypeDef},
-    typevalue::TypeValue,
-}, vm::FieldIndex};
+//use roto::{types::{
+//    builtin::{BasicRouteToken, BuiltinTypeValue, NlriStatus, PrefixRoute, Provenance, RotondaId, RouteContext},
+//    datasources::Rib,
+//    typedef::{RibTypeDef, TypeDef},
+//    typevalue::TypeValue,
+//}, vm::FieldIndex};
 use rotonda_store::{
-    custom_alloc::UpsertReport, prelude::multi::PrefixStoreError, MultiThreadedStore,
-    prelude::multi::RouteStatus,
+    custom_alloc::UpsertReport, prelude::multi::{PrefixStoreError, RouteStatus}, Guard, MatchOptions, MultiThreadedStore, QueryResult
 };
 use inetnum::{addr::Prefix, asn::Asn};
+use routecore::bgp::{nlri::afisafi::{IsPrefix, Nlri}, path_attributes::PaMap, path_selection::{OrdRoute, Rfc4271, TiebreakerInfo}, types::AfiSafiType};
 use serde::Serialize;
 
-use crate::{ingress::IngressId, payload::RouterId};
+use crate::{common::roto_new::Provenance, ingress::IngressId, payload::{RotondaRoute, RouterId}};
 
 // -------- PhysicalRib -----------------------------------------------------------------------------------------------
 
+
+// XXX is this actually used for something in the Store right now?
+impl rotonda_store::Meta for RotondaRoute {
+    type Orderable<'a> = OrdRoute<'a, Rfc4271>;
+
+    type TBI = TiebreakerInfo;
+
+    fn as_orderable(&self, _tbi: Self::TBI) -> Self::Orderable<'_> {
+        todo!()
+    }
+}
+
+pub struct Rib {
+    unicast: Option<MultiThreadedStore<RotondaRoute>>,
+    multicast: Option<MultiThreadedStore<RotondaRoute>>,
+    other_fams: HashMap<AfiSafiType, HashMap<(IngressId, Nlri<bytes::Bytes>), PaMap>>,
+}
+
+#[derive(Copy, Clone)]
+struct Multicast(bool);
+
+impl Rib {
+    pub fn new_physical() -> Self {
+        Rib {
+            // FIXME are these always safe to unwrap?
+            unicast: Some(MultiThreadedStore::new().unwrap()),
+            multicast: Some(MultiThreadedStore::new().unwrap()),
+            other_fams: HashMap::new(),
+        }
+    }
+
+    pub fn new_virtual() -> Self {
+        Rib {
+            unicast: None,
+            multicast: None,
+            other_fams: HashMap::new(),
+        }
+    }
+
+
+    // XXX LH perhaps this should become a characteristic of the Unit instead
+    // of the Rib. Currently, rib_unit::unit::insert_payload() is the only
+    // place that calls this is_physical() and uses it for an early return.
+    // Instead, we could make it a bool flag on the Unit and get rid of the
+    // Option wrapped stores in Rib itself?
+    pub fn is_physical(&self) -> bool {
+        self.unicast.is_some()
+    }
+
+    // pub fn store() {} ? // still needed? probably going via fn get makes
+    // more sense as we store multiple (all) afisafis now
+
+
+    pub fn insert(&self,
+        val: &RotondaRoute,
+        route_status: RouteStatus,
+        provenance: Provenance,
+        ltime: u64
+    ) -> Result<UpsertReport, String> {
+        
+        let res = match val {
+            RotondaRoute::Ipv4Unicast(ref rws) => self.insert_prefix(&rws.nlri().prefix(), Multicast(false), val, route_status, provenance, ltime),
+            RotondaRoute::Ipv6Unicast(ref rws) => self.insert_prefix(&rws.nlri().prefix(), Multicast(false), val, route_status, provenance, ltime),
+            RotondaRoute::Ipv4Multicast(ref rws) => self.insert_prefix(&rws.nlri().prefix(), Multicast(true), val, route_status, provenance, ltime),
+            RotondaRoute::Ipv6Multicast(ref rws) => self.insert_prefix(&rws.nlri().prefix(), Multicast(true), val, route_status, provenance, ltime),
+        };
+        res.map_err(|e| e.to_string())
+    }
+
+    fn insert_prefix(
+        &self,
+        prefix: &Prefix,
+        multicast: Multicast,
+        val: &RotondaRoute,
+        route_status: RouteStatus,
+        provenance: Provenance, // for ingress_id / mui
+        ltime: u64,
+    ) -> Result<UpsertReport, PrefixStoreError> {
+        // Check whether our self.rib is Some(..) or bail out.
+        let store = match multicast.0 {
+            true => &self.multicast,
+            false => &self.unicast
+        };
+        let store = store.as_ref()
+            .ok_or(PrefixStoreError::StoreNotReadyError)?;
+
+        let mui = provenance.ingress_id;
+
+        //debug!("pre store.insert, RouteStatus {:?}", route_status);
+
+        if route_status == RouteStatus::Withdrawn {
+            // instead of creating an empty PrefixRoute for this Prefix and
+            // putting that in the store, we use the new
+            // mark_mui_as_withdrawn_for_prefix . This way, we preserve the
+            // last seen attributes/nexthop for this {prefix,mui} combination,
+            // while setting the status to Withdrawn.
+            store.mark_mui_as_withdrawn_for_prefix(prefix, mui)
+                .inspect_err(|e| {
+                    error!(
+                        "failed to mark {} for {} as withdrawn: {}",
+                        prefix, mui, e
+                    );
+                    // TODO increase metric
+                })?;
+
+            // FIXME this is just to satisfy the function signature, but is
+            // quite useless as-is.
+            return Ok(UpsertReport{
+                cas_count: 0,
+                prefix_new: false,
+                mui_new: false, 
+                mui_count: 0,
+            });
+        }
+
+        debug!("creating pub rec with RibValue {:?}", val);
+
+        let pubrec = rotonda_store::PublicRecord::new(
+            mui,
+            ltime,
+            route_status,
+            val.clone(), // RotondaRoute
+        );
+
+        debug!("calling store.insert(..) for {:?}", &prefix);
+        store.insert(
+            prefix,
+            pubrec,
+            None, // Option<TBI>
+        )
+    }
+
+    pub fn withdraw_for_ingress(
+        &self,
+        ingress_id: IngressId,
+        specific_afisafi: Option<AfiSafiType>
+    ) {
+        // This signals a withdraw-all-for-peer, because a BGP session
+        // was lost or because a BMP PeerDownNotification was
+        // received.
+
+        // Things to take care of, here of elsewhere:
+        //
+        // * mark all (active) prefixes for this ingress as
+        //   'withdrawn' in the store
+        // * generate BGP UPDATEs for those prefixes that were
+        //   actually updated to the withdrawn state. Note that there
+        //   might have been prefixes for this ingress that were
+        //   previously withdrawn already, for which no UPDATEs should
+        //   be generated!
+        // * send out these UPDATEs as Update::Bulk payloads to the
+        //   east:
+        //     - what if the first unit eastwards is another RIB, does
+        //     it make sense to create the UPDATEs? might make more
+        //     sense to forward the current Update::Withdraw(..)
+        //     instead.
+        //     - the UPDATEs only make sense if anything needs to go
+        //     out over a BGP session again. But, in that case, the
+        //     UPDATE can only be correctly generated by the BGP
+        //     connection (in the ingress unit) itself, because of
+        //     possible session-level state (e.g. ADDPATH or Extended
+        //     PDU size capabilities).
+        //     Moreover, it only makes sense to send out the UPDATE if
+        //     the specific prefix was previously annouced, i.e. it is
+        //     in the Adj-RIB-Out for that session. This might be
+        //     differ from session to session because of local policy,
+        //     roto scripts, or what not.
+        //     As such, perhaps we should leave the generation of
+        //     those withdrawals to the very latest (most-East) point?
+
+        match specific_afisafi {
+            None => {
+                // Set all address families to withdrawn.
+                // In addition to unicast prefixes, stored in the
+                // store proper, we might need to update other data
+                // structures holding more exotic families.
+
+
+                //The store seems to lack a 'mark_mui_as_withdrawn'
+                //that handles both v4 and v6 in one go.
+
+                //if let Err(e) = self.rib.load().store().unwrap().mark_mui_as_withdrawn_v4(ingress_id) {
+                //    error!("failed to mark MUI as withdrawn for v4: {}", e)
+                //}
+
+                //if let Err(e) = self.rib.load().store().unwrap().mark_mui_as_withdrawn_v6(ingress_id) {
+                //    error!("failed to mark MUI as withdrawn for v6: {}", e)
+                //}
+
+                if let Err(e) = self.unicast.as_ref().unwrap()
+                    .mark_mui_as_withdrawn(ingress_id)
+                {
+                    error!("failed to mark MUI as withdrawn in unicast rib: {}", e)
+                }
+
+                if let Err(e) = self.multicast.as_ref().unwrap()
+                    .mark_mui_as_withdrawn(ingress_id)
+                {
+                        error!("failed to mark MUI as withdrawn in multicast rib: {}", e)
+                }
+
+
+                // TODO withdraw all other afisafis as well!
+
+            }
+            Some(AfiSafiType::Ipv4Unicast) => {
+                if let Err(e) = self.unicast.as_ref().unwrap()
+                    .mark_mui_as_withdrawn_v4(ingress_id)
+                {
+                    error!("failed to mark MUI as withdrawn for v4: {}", e)
+                }
+            }
+            Some(AfiSafiType::Ipv6Unicast) => {
+                if let Err(e) = self.unicast.as_ref().unwrap()
+                    .mark_mui_as_withdrawn_v6(ingress_id)
+                {
+                    error!("failed to mark MUI as withdrawn for v6: {}", e)
+                }
+            }
+            Some(AfiSafiType::Ipv4Multicast) => {
+                if let Err(e) = self.multicast.as_ref().unwrap()
+                    .mark_mui_as_withdrawn_v4(ingress_id)
+                {
+                    error!("failed to mark MUI as withdrawn for v4: {}", e)
+                }
+            }
+            Some(AfiSafiType::Ipv6Multicast) => {
+                if let Err(e) = self.multicast.as_ref().unwrap()
+                    .mark_mui_as_withdrawn_v6(ingress_id)
+                {
+                    error!("failed to mark MUI as withdrawn for v6: {}", e)
+                }
+            }
+
+            afisafi => {
+                panic!("no support to withdraw {:?} yet", afisafi)
+            }
+        }
+    }
+
+    // TODO: figure out how we do match options like less/more specifics for
+    // AfiSafiTypes where this either does not make sense, or, is non-trivial
+    // to process.
+    // Note that where .store() is used in the old code, we somehow need to
+    // bend it to use this new .get().
+    // Alternatively, we could create a .store::<AfiSafiType>() that returns
+    // the specific store for that family, if any.
+    pub fn get(&self) -> Option<()> { todo!() }
+
+
+    pub fn match_unicast_prefix(
+        &self,
+        prefix: &Prefix,
+        match_options: &MatchOptions,
+        guard: &Guard
+    ) -> Result<QueryResult<RotondaRoute>, String> {
+        let store = self.unicast.as_ref()
+            .ok_or(PrefixStoreError::StoreNotReadyError.to_string())?;
+        Ok(store.match_prefix(prefix, match_options, guard))
+    }
+}
+
+impl Default for Rib {
+    fn default() -> Self {
+        Self::new_physical()
+    }
+}
+
+/*
 pub struct HashedRib {
     /// A prefix store, only physical RIBs have this.
     rib: Option<Rib<RibValue>>,
@@ -35,7 +304,9 @@ pub struct HashedRib {
     // This TypeDef should only ever be of variant `TypeDef::Rib`
     type_def_rib: TypeDef,
 }
+*/
 
+/*
 impl Default for HashedRib {
     fn default() -> Self {
         // What is the key that uniquely identifies routes to be withdrawn when a BGP peering session is lost?
@@ -68,7 +339,9 @@ impl Default for HashedRib {
         )
     }
 }
+*/
 
+/*
 impl HashedRib {
     pub fn new(
         key_fields: &[BasicRouteToken], // XXX are these even used anywhere
@@ -241,7 +514,9 @@ impl HashedRib {
             .collect()
     }
 }
+*/
 
+/*
 // -------- RibValue --------------------------------------------------------------------------------------------------
 
 /// The metadata value associated with a prefix in the store of a physical RIB.
@@ -281,7 +556,7 @@ pub struct RibValue {
     prefix_route: PrefixRoute,
 }
 
-use routecore::bgp::path_selection::{OrdRoute, Rfc4271, TiebreakerInfo};
+use routecore::bgp::{nlri::afisafi::{AfiSafiNlri, Nlri}, path_attributes::PaMap, path_selection::{OrdRoute, Rfc4271, TiebreakerInfo}, types::AfiSafiType};
 impl rotonda_store::Meta for RibValue {
     type Orderable<'a> = OrdRoute<'a, Rfc4271>;
 
@@ -329,6 +604,9 @@ impl From<RibValue> for TypeValue {
     }
 }
 
+*/
+
+/*
 #[cfg(test)]
 impl RibValue {
     /*
@@ -337,6 +615,7 @@ impl RibValue {
     }
     */
 }
+*/
 
 /*
 #[derive(Copy, Clone, Debug, Default)]
@@ -348,6 +627,7 @@ pub enum StoreEvictionPolicy {
 }
 */
 
+/*
 impl RibValue {
     // LH: I guess this is sort of a noop now that RibValue is basically a
     // PrefixRoute
@@ -420,6 +700,7 @@ impl RibValue {
     }
     */
 }
+*/
 
 /*
 #[derive(Clone, Debug)]
@@ -594,6 +875,7 @@ impl MergeUpdate for RibValue {
 }
 */
 
+/*
 impl std::fmt::Display for RibValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}", self.prefix_route)
@@ -607,6 +889,7 @@ impl std::ops::Deref for RibValue {
         &self.prefix_route
     }
 }
+*/
 
 /*
 impl From<PreHashedTypeValue> for RibValue {

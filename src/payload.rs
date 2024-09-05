@@ -1,22 +1,25 @@
 use chrono::{DateTime, Utc};
 //use roto::types::collections::BytesRecord;
 //use roto::types::lazyrecord_types::BgpUpdateMessage;
-use roto::{types::typevalue::TypeValue, vm::OutputStreamQueue};
-use roto::types::builtin::{RouteContext, SourceId};
+//use roto::{types::typevalue::TypeValue, vm::OutputStreamQueue};
+//use roto::types::builtin::{RouteContext, ingress::IngressId};
 use rotonda_store::QueryResult;
 
 use routecore::bgp::types::AfiSafiType;
+use routecore::bgp::workshop::route::RouteWorkshop;
 use smallvec::{smallvec, SmallVec};
+use std::fmt;
 use std::{
     fmt::Display,
     ops::ControlFlow,
 };
 use uuid::Uuid;
 
-use crate::ingress::IngressId;
+use crate::common::roto_new::RouteContext;
+use crate::ingress::{self, IngressId};
 use crate::{
-    common::roto::{FilterOutput, FilterResult, RotoError},
-    units::RibValue,
+    //common::roto::{FilterOutput, FilterResult, RotoError},
+    //units::RibValue,
 };
 
 // TODO: make this a reference
@@ -34,11 +37,12 @@ pub enum UpstreamStatus {
     /// related. E.g. it could be that the last message in a replay file has
     /// been loaded and replayed, or the last message in a test set has been
     /// pushed into the pipeline, etc.
-    EndOfStream { source_id: SourceId },
+    EndOfStream { ingress_id: ingress::IngressId },
 }
 
 //------------ Payload -------------------------------------------------------
 
+/*
 pub trait Filterable {
     fn filter<E, T, U>(
         self,
@@ -48,11 +52,13 @@ pub trait Filterable {
     where
         T: Fn(TypeValue, DateTime<Utc>, Option<u8>, RouteContext) -> FilterResult<E>
             + Clone,
-        //U: Fn(SourceId) + Clone,
+        //U: Fn(ingress::IngressId) + Clone,
         U: Fn(IngressId) + Clone,
         FilterError: From<E>;
 }
+*/
 
+/*
 #[derive(Debug)]
 pub enum FilterError {
     RotoScriptError(RotoError),
@@ -78,14 +84,48 @@ impl Display for FilterError {
         }
     }
 }
+*/
+
+// TODO macrofy
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+pub enum RotondaRoute {
+     Ipv4Unicast(RouteWorkshop<routecore::bgp::nlri::afisafi::Ipv4UnicastNlri>),
+     Ipv6Unicast(RouteWorkshop<routecore::bgp::nlri::afisafi::Ipv6UnicastNlri>),
+     Ipv4Multicast(RouteWorkshop<routecore::bgp::nlri::afisafi::Ipv4MulticastNlri>),
+     Ipv6Multicast(RouteWorkshop<routecore::bgp::nlri::afisafi::Ipv6MulticastNlri>),
+     // TODO support all routecore AfiSafiTypes
+}
+
+/*
+impl RotondaRoute {
+    pub fn get_attr<A>(&self) -> Option<A> {
+        match self {
+            RotondaRoute::Ipv4Unicast(rws) => rws.get_attr::<A>(),
+            RotondaRoute::Ipv6Unicast(rws) => todo!(),
+            RotondaRoute::Ipv4Multicast(rws) => todo!(),
+            RotondaRoute::Ipv6Multicast(rws) => todo!(),
+        }
+    }
+}
+*/
+
+impl fmt::Display for RotondaRoute {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", 
+            match self {
+                RotondaRoute::Ipv4Unicast(_) => "RR-Ipv4Unicast",
+                RotondaRoute::Ipv6Unicast(_) => "RR-Ipv6Unicast",
+                RotondaRoute::Ipv4Multicast(_) => "RR-Ipv4Multicast",
+                RotondaRoute::Ipv6Multicast(_) => "RR-Ipv6Multicast",
+            }
+        )
+    }
+}
 
 #[derive(Clone, Debug, Eq)]
 pub struct Payload {
-    // pub source_id: SourceId,
-    pub rx_value: TypeValue,
+    pub rx_value: RotondaRoute,//RouteWorkshop<N>, //was: TypeValue,
     pub context: RouteContext,
-    // pub provenance: Option<Provenance>,
-    // pub bgp_msg: Option<BgpUpdateMessage>,
     pub trace_id: Option<u8>,
     pub received: DateTime<Utc>,
 }
@@ -94,26 +134,20 @@ impl PartialEq for Payload {
     fn eq(&self, other: &Self) -> bool {
         // Don't compare the received timestamp
         // self.source_id == other.source_id &&
-            self.rx_value == other.rx_value && 
+        self.rx_value == other.rx_value && 
             self.trace_id == other.trace_id
     }
 }
 
 impl Payload {
-    pub fn new<T>(
-        // source_id: S,
-        value: T,
+    pub fn new(
+        rx_value: RotondaRoute,
         context: RouteContext,
-        // provenance: Option<Provenance>,
-        // bgp_msg: Option<BgpUpdateMessage>,
         trace_id: Option<u8>) -> Self
-    where
-        // S: Into<SourceId>,
-        T: Into<TypeValue>,
     {
         Self {
             // source_id: source_id.into(),
-            rx_value: value.into(),
+            rx_value,
             context,
             // bgp_msg,
             trace_id,
@@ -121,35 +155,26 @@ impl Payload {
         }
     }
 
-    pub fn with_received<T>(
-        // source_id: S,
-        value: T,
+    pub fn with_received(
+        rx_value: RotondaRoute,
         context: RouteContext,
         trace_id: Option<u8>,
         received: DateTime<Utc>,
-    ) -> Self
-    where
-        // S: Into<SourceId>,
-        T: Into<TypeValue>,
-    {
+    ) -> Self {
         Self {
-            // source_id: source_id.into(),
-            rx_value: value.into(),
+            rx_value,
             context,
             trace_id,
             received,
         }
     }
 
-    // pub fn source_id(&self) -> &SourceId {
-    //     &self.source_id
-    // }
-
     pub fn trace_id(&self) -> Option<u8> {
         self.trace_id
     }
 }
 
+/*
 impl Filterable for Payload {
     fn filter<E, T, U>(
         self,
@@ -159,7 +184,7 @@ impl Filterable for Payload {
     where
         T: Fn(TypeValue, DateTime<Utc>, Option<u8>, RouteContext) -> FilterResult<E>
             + Clone,
-        //U: Fn(SourceId) + Clone,
+        //U: Fn(ingress::IngressId) + Clone,
         U: Fn(IngressId) + Clone,
         FilterError: From<E>,
     {
@@ -267,6 +292,7 @@ impl From<Payload> for SmallVec<[Update; 1]> {
 //     }
 // }
 
+*/
 //------------ Update --------------------------------------------------------
 
 #[derive(Clone, Debug)]
@@ -280,8 +306,10 @@ pub enum Update {
     // connection goes down and everything for the monitored sessions has to
     // be marked Withdrawn.
     WithdrawBulk(SmallVec<[IngressId; 8]>),
-    QueryResult(Uuid, Result<QueryResult<RibValue>, String>),
+    QueryResult(Uuid, Result<QueryResult<RotondaRoute>, String>),
     UpstreamStatusChange(UpstreamStatus),
+
+    OutputStream(SmallVec<[crate::common::roto_new::OutputStreamMessage; 8]>)
 }
 
 impl Update {
@@ -302,6 +330,7 @@ impl Update {
             Update::WithdrawBulk(..) => smallvec![],
             Update::QueryResult(_, _) => smallvec![],
             Update::UpstreamStatusChange(_) => smallvec![],
+            Update::OutputStream(..) => smallvec![],
         }
     }
 }

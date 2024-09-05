@@ -6,31 +6,29 @@ use std::{
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use hyper::{Body, Method, Request, Response};
-use roto::types::builtin::SourceId;
+//use roto::types::builtin::ingress::IngressId;
 
 use crate::{
-    common::frim::FrimMap,
-    http::{
+    common::frim::FrimMap, http::{
         self, extract_params, get_param, MatchedParam, PercentDecodedPath,
         ProcessRequest,
-    },
-    units::bmp_tcp_in::{
+    }, ingress, units::bmp_tcp_in::{
         metrics::BmpTcpInMetrics,
         state_machine::{BmpState, BmpStateDetails, BmpStateMachineMetrics},
         types::RouterInfo,
         util::{calc_u8_pc, format_source_id},
-    },
+    }
 };
 
 pub struct RouterListApi {
     pub http_resources: http::Resources,
     pub http_api_path: Arc<String>,
-    pub router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
+    pub router_info: Arc<FrimMap<ingress::IngressId, Arc<RouterInfo>>>,
     pub router_metrics: Arc<BmpTcpInMetrics>,
     pub bmp_metrics: Arc<BmpStateMachineMetrics>,
     pub router_id_template: Arc<ArcSwap<String>>,
     pub router_states:
-        Arc<FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>,
+        Arc<FrimMap<ingress::IngressId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>,
 }
 
 #[async_trait]
@@ -75,12 +73,12 @@ impl RouterListApi {
     pub fn new(
         http_resources: http::Resources,
         http_api_path: Arc<String>,
-        router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
+        router_info: Arc<FrimMap<ingress::IngressId, Arc<RouterInfo>>>,
         router_metrics: Arc<BmpTcpInMetrics>,
         bmp_metrics: Arc<BmpStateMachineMetrics>,
         router_id_template: Arc<ArcSwap<String>>,
         router_states: Arc<
-            FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
+            FrimMap<ingress::IngressId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
         >,
     ) -> Self {
         Self {
@@ -98,10 +96,10 @@ impl RouterListApi {
         &self,
         sort_by: Option<MatchedParam<'a>>,
         sort_order: Option<MatchedParam<'a>>,
-    ) -> Result<Vec<SourceId>, String> {
+    ) -> Result<Vec<ingress::IngressId>, String> {
         let sort_by = sort_by.as_ref().map(MatchedParam::value);
 
-        let mut keys: Vec<SourceId> = match sort_by {
+        let mut keys: Vec<ingress::IngressId> = match sort_by {
             None | Some("addr") => self
                 .router_info
                 .guard()
@@ -110,7 +108,7 @@ impl RouterListApi {
                 .collect(),
 
             Some("sys_name") | Some("sys_desc") => {
-                let mut sort_tmp: Vec<(String, SourceId)> = Vec::new();
+                let mut sort_tmp: Vec<(String, ingress::IngressId)> = Vec::new();
 
                 for (source_id, state_machine) in
                     self.router_states.guard().iter()
@@ -163,9 +161,9 @@ impl RouterListApi {
             | Some("invalid_messages")
             | Some("soft_parse_errors")
             | Some("hard_parse_errors") => {
-                let mut sort_tmp: Vec<(usize, SourceId)> = Vec::new();
+                let mut sort_tmp: Vec<(usize, ingress::IngressId)> = Vec::new();
 
-                for (source_id, state_machine) in
+                for (ingress_id, state_machine) in
                     self.router_states.guard().iter()
                 {
                     if let Some(sm) = state_machine.lock().await.as_ref() {
@@ -190,7 +188,7 @@ impl RouterListApi {
                             let router_id = Arc::new(format_source_id(
                                 &self.router_id_template.load(),
                                 &sys_name,
-                                source_id,
+                                *ingress_id,
                             ));
                             let metrics = self
                                 .bmp_metrics
@@ -238,7 +236,7 @@ impl RouterListApi {
                             0
                         };
 
-                        sort_tmp.push((resolved_v, source_id.clone()));
+                        sort_tmp.push((resolved_v, *ingress_id));
                     }
                 }
 

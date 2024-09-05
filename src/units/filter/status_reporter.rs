@@ -5,12 +5,13 @@ use std::{
 
 use log::error;
 
-use roto::types::builtin::SourceId;
+//use roto::types::builtin::SourceId;
 
 use crate::{
     common::status_reporter::{
         sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter,
-    }, ingress::IngressId, payload::FilterError
+    }, ingress::IngressId,
+    // payload::FilterError
 };
 
 use super::metrics::RotoFilterMetrics;
@@ -47,9 +48,11 @@ impl RotoFilterStatusReporter {
         self.metrics.num_filtered_messages.fetch_add(1, SeqCst);
     }
 
+    /*
     pub fn message_filtering_failure(&self, err: &FilterError) {
         sr_log!(error: self, "Filtering error: {}", err);
     }
+    */
 }
 
 impl UnitStatusReporter for RotoFilterStatusReporter {}

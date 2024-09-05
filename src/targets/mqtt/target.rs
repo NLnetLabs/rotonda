@@ -9,7 +9,7 @@ use super::{
 };
 
 use crate::{
-    common::status_reporter::{AnyStatusReporter, TargetStatusReporter},
+    common::{roto_new::OutputStreamMessage, status_reporter::{AnyStatusReporter, TargetStatusReporter}},
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
     manager::{Component, TargetCommand, WaitPoint},
     payload::{Payload, Update, UpstreamStatus},
@@ -21,7 +21,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use mqtt::{MqttOptions, QoS};
 use non_empty_vec::NonEmpty;
-use roto::types::{outputs::OutputStreamMessage, typevalue::TypeValue};
+//use roto::types::{outputs::OutputStreamMessage, typevalue::TypeValue};
 use serde::Deserialize;
 use tokio::{sync::mpsc, time::timeout};
 
@@ -384,9 +384,10 @@ where
 
     pub fn output_stream_message_to_msg(
         &self,
-        osm: Arc<OutputStreamMessage>,
+        //osm: Arc<OutputStreamMessage>,
+        osm: OutputStreamMessage,
     ) -> Option<SenderMsg> {
-        if osm.get_name() == self.component.name() {
+        if *osm.get_name() == **self.component.name() {
             match serde_json::to_string(osm.get_record()) {
                 Ok(content) => {
                     let topic = self
@@ -454,6 +455,22 @@ where
                 // Nothing to do
             }
 
+            Update::OutputStream(msgs) => {
+                for osm in msgs {
+                    if let Some(msg) =
+                        self.output_stream_message_to_msg(osm)
+                    {
+                        if let Err(_err) =
+                            self.pub_q_tx.as_ref().unwrap().send(msg)
+                        {
+                            // TODO
+                        }
+                    }
+
+                }
+            }
+
+            /*
             Update::Single(Payload {
                 rx_value: TypeValue::OutputStreamMessage(osm),
                 ..
@@ -486,6 +503,7 @@ where
                     }
                 }
             }
+            */
 
             _ => { /* We may have received the output from another unit, but we are not interested in it */
             }

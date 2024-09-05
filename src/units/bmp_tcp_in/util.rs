@@ -1,4 +1,6 @@
-use roto::types::builtin::SourceId;
+//use roto::types::builtin::SourceId;
+
+use crate::ingress;
 
 pub fn calc_u8_pc(total: usize, v: usize) -> u8 {
     if total > 0 {
@@ -40,9 +42,11 @@ pub fn calc_u8_pc(total: usize, v: usize) -> u8 {
 ///   - The peer IP address, AS number and BGP ID bytes.
 pub fn format_source_id(
     router_id_template: &str,
-    sys_name: &str,
-    source_id: &SourceId,
+    _sys_name: &str,
+    //source_id: &SourceId,
+    ingress_id: ingress::IngressId,
 ) -> String {
+    /*
     match source_id.socket_addr() {
         Some(addr) => router_id_template
             .replace("{sys_name}", sys_name)
@@ -54,4 +58,10 @@ pub fn format_source_id(
             .replace("{router_ip}", "IP")
             .replace("{router_port}", "PORT"),
     }
+    */
+    router_id_template
+            .replace("{sys_name}", &ingress_id.to_string())
+            .replace("{router_ip}", "IP")
+            .replace("{router_port}", "PORT")
+
 }

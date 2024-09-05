@@ -2,8 +2,9 @@ use atomic_enum::atomic_enum;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use log::{debug, error};
-use roto::types::{builtin::{explode_announcements, explode_withdrawals, BytesRecord, FreshRouteContext, NlriStatus, PeerId, PeerRibType, Provenance, RouteContext}, lazyrecord_types::BgpUpdateMessage};
+//use roto::types::{builtin::{explode_announcements, explode_withdrawals, BytesRecord, FreshRouteContext, NlriStatus, PeerId, PeerRibType, Provenance, RouteContext}, lazyrecord_types::BgpUpdateMessage};
 
+use rotonda_store::prelude::multi::RouteStatus;
 use routecore::bgp::fsm::session;
 /// RFC 7854 BMP processing.
 ///
@@ -42,7 +43,7 @@ use routecore::{
         RouteMonitoring,
     },
 };
-use roto::types::builtin::SourceId;
+//use roto::types::builtin::ingress::IngressId;
 
 use smallvec::SmallVec;
 
@@ -52,8 +53,7 @@ use std::{
 
 use crate::{
     common::{
-        routecore_extra::generate_alternate_config,
-        status_reporter::AnyStatusReporter,
+        roto_new::{explode_announcements, explode_withdrawals, FreshRouteContext, PeerId, PeerRibType, Provenance}, routecore_extra::generate_alternate_config, status_reporter::AnyStatusReporter
     }, ingress, payload::{Payload, RouterId, Update}
 };
 
@@ -94,7 +94,7 @@ pub struct PeerDetails {
     peer_bgp_id: [u8; 4],
     peer_distinguisher: [u8; 8],
     peer_rib_type: RibType,
-    peer_id: PeerId
+    peer_id: PeerId,
 }
 
 pub struct PeerState {
@@ -163,7 +163,7 @@ pub enum BmpState {
     Dumping(BmpStateDetails<Dumping>),
     Updating(BmpStateDetails<Updating>),
     Terminated(BmpStateDetails<Terminated>),
-    _Aborted(SourceId, Arc<RouterId>),
+    _Aborted(ingress::IngressId, Arc<RouterId>),
 }
 
 // Rust enums with fields cannot have custom discriminant values assigned to them so we have to use separate
@@ -204,7 +204,7 @@ pub struct BmpStateDetails<T>
 where
     BmpState: From<BmpStateDetails<T>>,
 {
-    pub source_id: SourceId,
+    pub source_id: ingress::IngressId,
     pub router_id: Arc<String>,
     pub status_reporter: Arc<BmpStateMachineStatusReporter>,
     pub ingress_register: Arc<ingress::Register>,
@@ -212,7 +212,7 @@ where
 }
 
 impl BmpState {
-    pub fn _source_id(&self) -> SourceId {
+    pub fn _source_id(&self) -> ingress::IngressId {
         match self {
             BmpState::Initiating(v) => v.source_id.clone(),
             BmpState::Dumping(v) => v.source_id.clone(),
@@ -812,16 +812,16 @@ where
         &mut self,
         received: DateTime<Utc>,
         pph: PerPeerHeader<Bytes>,
-        bgp_msg: &BgpUpdateMessage,
+        bgp_msg: &UpdateMessage<Bytes>,
         //route_status: NlriStatus,
         _trace_id: Option<u8>,
     ) -> Result<(SmallVec<[Payload; 8]>, UpdateReportMessage), session::Error>
     {
         // XXX do we still need to track the prefixes here, now that
         // withdrawals are handled by the store itself?
-        let mut nlri_set = BTreeSet::new();
-        let announcements = explode_announcements(&bgp_msg, &mut nlri_set)?;
-        let withdrawals = explode_withdrawals(&bgp_msg, &mut nlri_set)?;
+        //let mut nlri_set = BTreeSet::new();
+        let rr_reach = explode_announcements(&bgp_msg)?;
+        let rr_unreach = explode_withdrawals(&bgp_msg)?;
 
 
         let ingress_id = if let Some(ingress_id) = self.details.get_peer_ingress_id(&pph) {
@@ -836,7 +836,7 @@ where
         let mut update_report_msg =
             UpdateReportMessage::new(self.router_id.clone());
 
-        let bgp_msg = BytesRecord::<BgpUpdateMessage>::from(bgp_msg.clone());
+        //let bgp_msg = BytesRecord::<BgpUpdateMessage>::from(bgp_msg.clone());
         
         //let provenance = Provenance::mock();
         
@@ -859,12 +859,18 @@ where
             //connection_id: self.source_id.socket_addr(),
         );
 
-        let ctx = FreshRouteContext:: new(
-            Some(bgp_msg.clone()),
-            NlriStatus::InConvergence,
+        //let ctx = FreshRouteContext:: new(
+        //    Some(bgp_msg.clone()),
+        //    NlriStatus::InConvergence,
+        //    provenance
+        //);
+        let context = FreshRouteContext::new(
+            bgp_msg.clone(),
+            RouteStatus::Active,
             provenance
         );
 
+        /*
         payloads.extend(
             announcements.into_iter().map(|rws|{
                 //mk_payload(rws, received, context.clone())
@@ -876,12 +882,32 @@ where
             )
             })
         );
+        */
 
-        let ctx = FreshRouteContext{
+        payloads.extend(
+            //rws.into_iter().map(|rws| mk_payload(rws, received, context.clone()))
+            rr_reach.into_iter().map(|rr|
+                Payload::with_received(
+                    rr,
+                    context.clone().into(),
+                    None,
+                    received
+                )
+            )
+        );
+
+        /*
+        let context = FreshRouteContext{
             nlri_status: NlriStatus::Withdrawn,
-            ..ctx
+            ..context
+        };
+        */
+        let context = FreshRouteContext{
+            status: RouteStatus::Withdrawn,
+            ..context
         };
 
+        /*
         payloads.extend(
             withdrawals.into_iter().map(|rws|{
                 //mk_payload(rws, received, context.clone())
@@ -893,6 +919,17 @@ where
             )
             })
         );
+        */
+
+        payloads.extend(rr_unreach.into_iter().map(|rr|
+            //mk_payload(wds, received, context.clone())
+            Payload::with_received(
+                rr,
+                context.clone().into(),
+                None,
+                received
+            )
+        ));
         
 
 
@@ -1044,7 +1081,7 @@ where
 
 impl BmpState {
     pub fn new<T: AnyStatusReporter>(
-        source_id: SourceId,
+        source_id: ingress::IngressId,
         router_id: Arc<RouterId>,
         parent_status_reporter: Arc<T>,
         metrics: Arc<BmpStateMachineMetrics>,

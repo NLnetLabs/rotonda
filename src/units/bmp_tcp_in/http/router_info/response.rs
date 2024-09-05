@@ -4,15 +4,13 @@ use chrono::{DateTime, Utc};
 use hyper::{Body, Response};
 use indoc::formatdoc;
 
-use roto::types::builtin::SourceId;
+//use roto::types::builtin::SourceId;
 
 use crate::{
-    http,
-    payload::RouterId,
-    units::bmp_tcp_in::{
+    http, ingress, payload::RouterId, units::bmp_tcp_in::{
         metrics::{BmpTcpInMetrics, RouterMetrics},
         state_machine::{BmpStateMachineMetrics, PeerAware, PeerStates},
-    },
+    }
 };
 
 use super::RouterInfoApi;
@@ -33,7 +31,8 @@ impl RouterInfoApi {
     pub fn build_response(
         http_resources: http::Resources,
         base_http_path: String,
-        source_id: SourceId,
+        //source_id: SourceId, // use ingress_id now
+        ingress_id: ingress::IngressId,
         router_id: Arc<RouterId>,
         sys_name: &str,
         sys_desc: &str,
@@ -52,7 +51,8 @@ impl RouterInfoApi {
         response_body.push_str(&Self::build_response_body(
             http_resources,
             base_http_path,
-            source_id,
+            //source_id,
+            ingress_id,
             router_id,
             router_conn_metrics,
             sys_name,
@@ -100,7 +100,8 @@ impl RouterInfoApi {
     pub fn build_response_body(
         http_resources: http::Resources,
         base_http_path: String,
-        source_id: SourceId,
+        //source_id: SourceId,
+        ingress_id: ingress::IngressId,
         router_id: Arc<RouterId>,
         router_conn_metrics: Arc<RouterMetrics>,
         sys_name: &str,
@@ -248,7 +249,7 @@ impl RouterInfoApi {
         let response_body = formatdoc!(
             r#"
             Router:
-                Source       : {source_id}
+                Ingress       : {ingress_id}
                 State:       : {state} [Initiating -> Dumping -> Updating -> Terminated, or Aborted]
                 SysName      : {sys_name}
                 SysDesc      : {sys_desc}

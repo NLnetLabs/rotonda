@@ -11,7 +11,7 @@ use futures::future::select;
 use futures::{pin_mut, Future};
 use log::{debug, warn};
 use non_empty_vec::NonEmpty;
-use roto::types::{builtin::BuiltinTypeValue, typevalue::TypeValue};
+//use roto::types::{builtin::BuiltinTypeValue, typevalue::TypeValue};
 use routecore::bgp::fsm::session::{Command, DisconnectReason};
 use inetnum::asn::Asn;
 use routecore::bgp::message::{
@@ -28,7 +28,8 @@ use crate::common::net::{
     StandardTcpListenerFactory, StandardTcpStream, TcpListener,
     TcpListenerFactory, TcpStreamWrapper,
 };
-use crate::common::roto::{FilterName, RotoScripts};
+use crate::common::roto_new::{FilterName, RotoScripts};
+//use crate::common::roto::{FilterName, RotoScripts};
 use crate::common::status_reporter::{Chainable, UnitStatusReporter};
 use crate::ingress;
 use crate::payload::Update;
@@ -401,6 +402,8 @@ impl BgpTcpInRunner {
 #[async_trait]
 impl DirectUpdate for BgpTcpInRunner {
     async fn direct_update(&self, update: Update) {
+        todo!()
+            /*
         let process_update = |value: TypeValue| async {
             if let TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(pfr)) = value {
                 //debug!("got {} for prefix {} from {:?}@{:?}",
@@ -501,6 +504,7 @@ impl DirectUpdate for BgpTcpInRunner {
             },
             _ => todo!(),
         }
+        */
     }
 }
 

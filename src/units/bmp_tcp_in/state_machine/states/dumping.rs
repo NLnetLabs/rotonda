@@ -3,7 +3,7 @@ use std::{collections::hash_map::Keys, fmt::Debug, ops::ControlFlow, sync::Arc};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use log::debug;
-use roto::types::builtin::NlriStatus;
+//use roto::types::builtin::NlriStatus;
 use routecore::bgp::nlri::afisafi::Nlri;
 use inetnum::addr::Prefix;
 use routecore::bgp::{

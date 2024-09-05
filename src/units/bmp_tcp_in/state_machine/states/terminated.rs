@@ -7,7 +7,7 @@ use crate::units::bmp_tcp_in::state_machine::{
 use super::{dumping::Dumping, initiating::Initiating, updating::Updating};
 
 use bytes::Bytes;
-use roto::{types::lazyrecord_types::BgpUpdateMessage, vm::OutputStreamQueue};
+//use roto::{types::lazyrecord_types::BgpUpdateMessage, vm::OutputStreamQueue};
 use routecore::bmp::message::Message as BmpMsg;
 
 /// BmpState machine state 'Terminated'.
@@ -84,11 +84,18 @@ impl BmpStateDetails<Terminated> {
         bmp_msg: BmpMsg<Bytes>,
         _trace_id: Option<u8>,
     ) -> ProcessingResult {
+        self.mk_invalid_message_result(format!(
+            "RFC 7854 4.3 violation: No messages should be received in the terminated state but received: {}",
+            bmp_msg
+        ), None, Some(Bytes::copy_from_slice(bmp_msg.as_ref())))
+        /*
         self.process_msg_with_filter(bmp_msg, None::<()>, |msg, _| {
             Ok(ControlFlow::Continue((msg, OutputStreamQueue::new())))
         })
+        */
     }
 
+    /*
     pub fn process_msg_with_filter<F, D>(
         self,
         bmp_msg: BmpMsg<Bytes>,
@@ -109,4 +116,5 @@ impl BmpStateDetails<Terminated> {
             bmp_msg
         ), None, Some(Bytes::copy_from_slice(bmp_msg.as_ref())))
     }
+    */
 }

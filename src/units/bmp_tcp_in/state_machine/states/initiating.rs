@@ -7,7 +7,7 @@ use crate::{
     ingress, payload::RouterId, units::bmp_tcp_in::state_machine::machine::BmpStateIdx
 };
 
-use roto::types::builtin::SourceId;
+//use roto::types::builtin::ingress::IngressId;
 
 use super::super::{
     machine::{BmpState, BmpStateDetails, Initiable},
@@ -48,7 +48,7 @@ pub struct Initiating {
 
 impl BmpStateDetails<Initiating> {
     pub fn new(
-        source_id: SourceId,
+        source_id: ingress::IngressId,
         router_id: Arc<RouterId>,
         status_reporter: Arc<BmpStateMachineStatusReporter>,
         ingress_register: Arc<ingress::Register>,
@@ -252,7 +252,7 @@ mod tests {
 
     fn mk_test_processor() -> BmpStateDetails<Initiating> {
         let router_addr = "127.0.0.1:1818".parse().unwrap();
-        let source_id = SourceId::SocketAddr(router_addr);
+        let source_id = ingress::IngressId::SocketAddr(router_addr);
         let router_id = Arc::new(TEST_ROUTER_ID.to_string());
         BmpStateDetails::<Initiating>::new(
             source_id,

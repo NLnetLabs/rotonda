@@ -13,19 +13,20 @@ use log::{debug, error, warn};
 //     BgpUpdateMessage, /*IpAddress,*/
 //     RotondaId, RouteStatus, UpdateMessage,
 // };
-use roto::types::builtin::{
-    /*Asn as RotoAsn,*/
-    explode_announcements, explode_withdrawals, BuiltinTypeValue, Nlri, NlriStatus, Provenance, FreshRouteContext, RouteContext
-};
-use roto::types::collections::BytesRecord;
-use roto::types::lazyrecord_types::BgpUpdateMessage;
+//use roto::types::builtin::{
+//    /*Asn as RotoAsn,*/
+//    explode_announcements, explode_withdrawals, BuiltinTypeValue, Nlri, NlriStatus, Provenance, FreshRouteContext, RouteContext
+//};
+//use roto::types::collections::BytesRecord;
+//use roto::types::lazyrecord_types::BgpUpdateMessage;
 // use roto::types::lazyrecord_types::BgpUpdateMessage;
-use roto::types::typevalue::TypeValue;
+//use roto::types::typevalue::TypeValue;
 //use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
+use rotonda_store::prelude::multi::RouteStatus;
 //use routecore::bgp::message::update_builder::ComposeError;
 // use routecore::bgp::message::UpdateMessage as UpdatePdu;
-use routecore::bgp::message::Message as BgpMsg;
+use routecore::bgp::message::{Message as BgpMsg, UpdateMessage};
 use smallvec::SmallVec;
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
@@ -40,14 +41,15 @@ use routecore::bgp::fsm::session::{
     Session,
 };
 
-use roto::types::builtin::basic_route::SourceId;
+//use roto::types::builtin::basic_route::SourceId;
 
+use crate::common::roto_new::{explode_announcements, explode_withdrawals, FreshRouteContext, Provenance, RotoScripts, RouteContext};
 //use crate::bgp::encode::Announcements;
-use crate::common::roto::{FilterOutput, RotoScripts, ThreadLocalVM};
+//use crate::common::roto::{FilterOutput, RotoScripts, ThreadLocalVM};
 //use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
 use crate::comms::{Gate, GateStatus, Terminated};
 use crate::ingress;
-use crate::payload::{Payload, Update};
+use crate::payload::{Payload, RotondaRoute, Update};
 use crate::units::bgp_tcp_in::status_reporter::BgpTcpInStatusReporter;
 use crate::units::Unit;
 
@@ -94,7 +96,7 @@ struct Processor {
     tx: mpsc::Sender<Command>,
     pdu_out_tx: mpsc::Sender<BgpMsg<Bytes>>,
     status_reporter: Arc<BgpTcpInStatusReporter>,
-    observed_nlri: BTreeSet<Nlri>, // XXX this should go in favour of ingress_id
+    //observed_nlri: BTreeSet<Nlri>, // XXX this should go in favour of ingress_id
     ingresses: Arc<ingress::Register>,
 
     /// The 'overall' IngressId for the BGP-IN unit.
@@ -102,9 +104,9 @@ struct Processor {
 }
 
 impl Processor {
-    thread_local!(
-        static VM: ThreadLocalVM = RefCell::new(None);
-    );
+    //thread_local!(
+    //    static VM: ThreadLocalVM = RefCell::new(None);
+    //);
 
     fn new(
         roto_scripts: RotoScripts,
@@ -125,7 +127,7 @@ impl Processor {
             tx,
             pdu_out_tx,
             status_reporter,
-            observed_nlri: BTreeSet::new(),
+            //observed_nlri: BTreeSet::new(),
             ingresses,
             ingress_id,
         }
@@ -146,7 +148,7 @@ impl Processor {
             tx: cmds_tx,
             pdu_out_tx,
             status_reporter: Default::default(),
-            observed_nlri: BTreeSet::new(),
+            //observed_nlri: BTreeSet::new(),
             ingresses: Arc::new(ingress::Register::default()),
             ingress_id: 0,
         };
@@ -307,13 +309,25 @@ impl Processor {
                                     negotiated.remote_addr(),
                                     negotiated.remote_asn(),
                                 );
-                                let msg = BytesRecord::<BgpUpdateMessage>::from(bgp_msg);
-                                let ctx = RouteContext::new(
-                                    Some(msg.clone()),
-                                    NlriStatus::InConvergence,
-                                    provenance
-                                );
 
+                                // pre-explosion roto filter
+                                // - get the right compiled script ('bgp-in.roto') from .. somewhere
+                                // - get_function('main') on it  
+                                // - call it
+                                // - based on the Verdict, either:
+                                //      - 
+                                //      - 
+                                // - check the OutputQueue:
+                                //      - drain and deal with any items there
+
+
+                                // then: explode reach/unreach
+                                // create update
+                                // self.gate.update_data(update).await; 
+
+
+
+                                /*
                                 if let Ok(ControlFlow::Continue(FilterOutput { south, east, received })) = Self::VM.with(|vm| {
                                     self.roto_scripts.exec(vm,
                                         &self.unit_cfg.filter_name,
@@ -345,7 +359,15 @@ impl Processor {
                                             Err(e) => { error!("unexpected state: {e}"); },
                                         };
                                     }
+                                    //LH: with removal of old roto /
+                                    //typevalue, we need to
+                                    // - get afisafis for reach/unreach from
+                                    // pdu
+                                    // - call process_update<N> for all those
+                                    // - call update_data(bulk_update) for all
+                                    // those invidivually
                                 }
+                                */
                             } else {
                                 error!("unexpected state: no NegotiatedConfig for session");
                             }
@@ -425,9 +447,11 @@ impl Processor {
             }
         }
 
+        /*
         if rejected {
             assert!(self.observed_nlri.is_empty());
         }
+        */
 
         // Done, for whatever reason. Remove ourselves form the live sessions.
         // But only if this was not an 'early reject' case, because we would
@@ -491,13 +515,14 @@ impl Processor {
     async fn process_update(
         &mut self,
         received: DateTime<Utc>,
-        // bgp_msg: BgpUpdateMessage,
-        context: FreshRouteContext,
+        bgp_msg: UpdateMessage<bytes::Bytes>,
+        provenance: Provenance,
+        //context: FreshRouteContext,
         //peer_ip: IpAddr,
         //peer_asn: Asn
     ) -> Result<Update, session::Error> {
         fn mk_payload(
-            tv: TypeValue,
+            rr: RotondaRoute,
             received: DateTime<Utc>,
             //provenance: Option<Provenance>,
             //context: RouteContext,
@@ -515,7 +540,7 @@ impl Processor {
             // }
             
             Payload::with_received(
-                tv,
+                rr,
                 context.into(),
                 None,
                 received
@@ -557,25 +582,48 @@ impl Processor {
         // let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
         // let target = bytes::BytesMut::new();
 
-        let bgp_msg = context.message().clone().unwrap().into_inner();
-    
-        let rws = explode_announcements(&bgp_msg, &mut self.observed_nlri)?;
-        debug!("rws size: {}", rws.len());
+        //let bgp_msg = context.message().clone().unwrap().into_inner();
+        //let bgp_msg = context.message();
+        
+        //explode_announcements(&bgp_msg).
 
-        payloads.extend(
-            rws.into_iter().map(|rws| mk_payload(rws, received, context.clone()))
+    
+        //let rws = explode_announcements(&bgp_msg, &mut self.observed_nlri)?;
+        
+        //  RotondaRoute announcements:
+        let rr_reach = explode_announcements(&bgp_msg)?;
+        let rr_unreach = explode_withdrawals(&bgp_msg)?;
+        let context = FreshRouteContext::new(
+            bgp_msg.clone(),
+            RouteStatus::Active,
+            provenance
         );
 
-        let wds = explode_withdrawals(&bgp_msg, &mut self.observed_nlri)?;
-        debug!("exploded wds size: {}", wds.len());
-        debug!("raw routecore: {:?}", &bgp_msg.withdrawals().unwrap().collect::<Vec<_>>());
+        payloads.extend(
+            //rws.into_iter().map(|rws| mk_payload(rws, received, context.clone()))
+            rr_reach.into_iter().map(|rr|
+                Payload::with_received(
+                    rr,
+                    context.clone().into(),
+                    None,
+                    received
+                )
+            )
+        );
 
         let context = FreshRouteContext{
-            nlri_status: NlriStatus::Withdrawn,
+            status: RouteStatus::Withdrawn,
             ..context
         };
-        payloads.extend(wds.into_iter().map(|wds|
-            mk_payload(wds, received, context.clone())
+
+        payloads.extend(rr_unreach.into_iter().map(|rr|
+            //mk_payload(wds, received, context.clone())
+            Payload::with_received(
+                rr,
+                context.clone().into(),
+                None,
+                received
+            )
         ));
 
         Ok(payloads.into())

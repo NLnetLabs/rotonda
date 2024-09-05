@@ -10,20 +10,21 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use hash32::Hasher;
 use inetnum::asn::Asn;
-use roto::types::lazyrecord_types::BgpUpdateMessage;
-use roto::types::{
-    builtin::BuiltinTypeValue, collections::BytesRecord,
-    lazyrecord_types::BmpMessage, typevalue::TypeValue,
-};
+//use roto::types::lazyrecord_types::BgpUpdateMessage;
+//use roto::types::{
+//    builtin::BuiltinTypeValue, collections::BytesRecord,
+//    lazyrecord_types::BmpMessage, typevalue::TypeValue,
+//};
 use routecore::bmp::message::Message;
-use roto::types::builtin::{NlriStatus, PeerId, PeerRibType, Provenance, RouteContext, SourceId};
+//use roto::types::builtin::{NlriStatus, PeerId, PeerRibType, Provenance, RouteContext, SourceId};
 
 use tokio::sync::Mutex;
 use tokio::{io::AsyncRead, net::TcpStream};
 
-use crate::common::roto::{
-    FilterName, FilterOutput, RotoScripts, ThreadLocalVM,
-};
+use crate::common::roto_new::{FilterName, PeerRibType, Provenance, RotoScripts, RouteContext};
+//use crate::common::roto::{
+//    FilterName, FilterOutput, RotoScripts, ThreadLocalVM,
+//};
 use crate::ingress::{self, IngressId};
 use crate::payload::RouterId;
 use crate::tracing::Tracer;
@@ -57,9 +58,11 @@ pub struct RouterHandler {
 }
 
 impl RouterHandler {
+    /*
     thread_local!(
         static VM: ThreadLocalVM = RefCell::new(None);
     );
+    */
 
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -139,8 +142,8 @@ impl RouterHandler {
         &self,
         mut tcp_stream: TcpStream,
         router_addr: SocketAddr,
-        source_id: SourceId,
-        //ingress_id: IngressId,
+        //source_id: SourceId,
+        ingress_id: IngressId,
         ingress_register: Arc<ingress::Register>,
         // we need access to the ingress Register to register new IDs, for
         // every peer / session in the BMP connection
@@ -151,14 +154,15 @@ impl RouterHandler {
         // ever sent from the monitoring station to the monitored router"_.
         // See: https://datatracker.ietf.org/doc/html/rfc7854#section-3.2
         let (rx, _tx) = tcp_stream.split();
-        self.read_from_router(rx, router_addr, source_id, ingress_register).await;
+        self.read_from_router(rx, router_addr, ingress_id, ingress_register).await;
     }
 
     async fn read_from_router<T: AsyncRead + Unpin>(
         &self,
         rx: T,
         router_addr: SocketAddr,
-        source_id: SourceId,
+        //source_id: SourceId,
+        ingress_id: IngressId,
         ingress_register: Arc<ingress::Register>,
     ) {
         // Setup BMP streaming
@@ -258,7 +262,7 @@ impl RouterHandler {
                         self.tracer.clear_trace_id(trace_id);
                     }
 
-                    if let Ok(bmp_msg) = BmpMessage::from_octets(msg_buf) {
+                    if let Ok(bmp_msg) = Message::from_octets(msg_buf) {
                         let trace_id = if trace_id > 0
                             || tracing_mode == TracingMode::On
                         {
@@ -275,7 +279,8 @@ impl RouterHandler {
                             .process_msg(
                                 received,
                                 router_addr,
-                                source_id.clone(),
+                                //source_id.clone(),
+                                ingress_id,
                                 bmp_msg,
                                 //None,
                                 Some(provenance),
@@ -303,7 +308,8 @@ impl RouterHandler {
         // Notify downstream units that the data stream for this
         // particular monitored router has ended.
         let new_status = UpstreamStatus::EndOfStream {
-            source_id: router_addr.into(),
+            //source_id: router_addr.into(),
+            ingress_id
         };
         self.gate
             .update_data(Update::UpstreamStatusChange(new_status))
@@ -314,7 +320,8 @@ impl RouterHandler {
         &self,
         received: DateTime<Utc>,
         addr: SocketAddr,
-        source_id: SourceId,
+        //source_id: SourceId,
+        ingress_id: IngressId,
         msg: Message<Bytes>,
         provenance: Option<Provenance>,
         trace_id: Option<u8>,
@@ -337,6 +344,16 @@ impl RouterHandler {
             msg.common_header().msg_type().into(),
         );
 
+        todo!();
+
+        //LH: we'll need roughly the same as in the BGP handler here:
+        //- execute the BMP pre-explosion filter
+        //- based on the verdict, call process_msg or not
+        //- handle any items in the outputstream queue
+
+
+        /*
+        
         let next_state = if let ControlFlow::Continue(FilterOutput {
             south,
             east,
@@ -459,12 +476,14 @@ impl RouterHandler {
 
         *bmp_state_lock = Some(next_state);
         Ok(())
+        */
     }
 
     fn check_update_router_id(
         &self,
         _addr: SocketAddr, // TODO: Why both socket address AND source id?
-        source_id: &SourceId,
+        //source_id: &SourceId,
+        ingress_id: IngressId,
         next_state: &mut BmpState,
     ) {
         let new_sys_name = match next_state {
@@ -479,7 +498,8 @@ impl RouterHandler {
         let new_router_id = Arc::new(format_source_id(
             &self.router_id_template.load(),
             new_sys_name,
-            source_id,
+            //sources_id,
+            ingress_id,
         ));
 
         let old_router_id = next_state.router_id();

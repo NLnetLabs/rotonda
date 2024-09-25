@@ -43,7 +43,7 @@ use routecore::bgp::fsm::session::{
 
 //use roto::types::builtin::basic_route::SourceId;
 
-use crate::common::roto_new::{explode_announcements, explode_withdrawals, FreshRouteContext, Provenance, RotoScripts, RouteContext};
+use crate::common::roto_new::{ensure_compiled, explode_announcements, explode_withdrawals, rotonda_roto_runtime, CompiledRoto, FreshRouteContext, Output, OutputStream, Provenance, RotoOutputStream, RotoScripts, RouteContext};
 //use crate::bgp::encode::Announcements;
 //use crate::common::roto::{FilterOutput, RotoScripts, ThreadLocalVM};
 //use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
@@ -55,6 +55,7 @@ use crate::units::Unit;
 
 use super::peer_config::{CombinedConfig, ConfigExt};
 use super::unit::BgpTcpIn;
+use super::unit::RotoFunc;
 
 #[async_trait::async_trait]
 trait BgpSession<C: BgpConfig + ConfigExt> {
@@ -88,8 +89,11 @@ impl BgpSession<CombinedConfig> for Session<CombinedConfig> {
     }
 }
 
+
 struct Processor {
     roto_scripts: RotoScripts,
+    roto_compiled: Option<Arc<CompiledRoto>>,
+    roto_function: Option<RotoFunc>,
     gate: Gate,
     unit_cfg: BgpTcpIn,
     //bgp_ltime: u64, // XXX or should this be on Unit level?
@@ -108,8 +112,16 @@ impl Processor {
     //    static VM: ThreadLocalVM = RefCell::new(None);
     //);
 
+    /*
+    thread_local!(
+        static ROTO: crate::common::roto_new::CompiledRoto = const { RefCell::new(None) };
+    );
+    */
+
     fn new(
         roto_scripts: RotoScripts,
+        roto_compiled: Option<Arc<CompiledRoto>>,
+        roto_function: Option<RotoFunc>,
         gate: Gate,
         unit_cfg: BgpTcpIn,
         //rx: mpsc::Receiver<Message>,
@@ -119,8 +131,12 @@ impl Processor {
         ingresses: Arc<ingress::Register>,
         ingress_id: ingress::IngressId,
     ) -> Self {
+
+
         Processor {
             roto_scripts,
+            roto_compiled,
+            roto_function,
             gate,
             unit_cfg,
             //bgp_ltime: 0,
@@ -156,8 +172,8 @@ impl Processor {
         (processor, gate_agent)
     }
 
-    async fn process<C: BgpConfig + ConfigExt, T: BgpSession<C>>(
-        &mut self,
+    async fn process<'a, C: BgpConfig + ConfigExt, T: BgpSession<C>>(
+        &'a mut self,
         mut session: T,
         mut rx_sess: mpsc::Receiver<Message>,
         //mut pdu_out_rx: mpsc::Receiver<BgpMsg<Bytes>>,
@@ -171,6 +187,17 @@ impl Processor {
 
         let session_ingress_id = self.ingress_id;
 
+        /*
+        thread_local!(
+            static ROTO_MAIN_FUNC: RefCell<Option<
+                roto::TypedFunc<'a,
+                    (*mut OutputStream<Output>, *mut UpdateMessage<Bytes>, *mut Provenance),
+                    roto::Verdict<(), ()>
+                >
+                >>
+             = const { RefCell::new(None) };
+        );
+        */
         //let mut provenance = Provenance::empty(ingress_id.into());
         /*
         provenance.peer_ip = Some(self.connection.
@@ -196,6 +223,28 @@ impl Processor {
             };
         }
         */
+
+
+        
+        // XXX this should happen earlier, now any roto error will cause a
+        // panic only when a BGP session is set up.
+        // Move this to the manager/loading phase, somehow.
+        /*
+        Self::ROTO.with_borrow_mut(|roto| {
+            if roto.is_none() {
+                debug!("compiling roto");
+                roto.replace(
+                    self.roto_scripts.get(&self.unit_cfg.filter_name)
+                    .map(|filename| roto::read_files([filename.to_string_lossy()]).unwrap()
+                        .compile(rotonda_roto_runtime().unwrap(), usize::BITS / 8)
+                    )
+                    .unwrap().unwrap()
+                );
+            }
+        });
+        */
+        
+
 
         // XXX is this all OK cancel-safety-wise?
         loop {
@@ -299,77 +348,54 @@ impl Processor {
                 res = rx_sess.recv() => {
                     match res {
                         None => { break; }
-                        Some(Message::UpdateMessage(bgp_msg)) => {
+                        Some(Message::UpdateMessage(mut bgp_msg)) => {
                             // We can only receive UPDATE messages over an
                             // established session, so not having a
                             // NegotiatedConfig should never happen.
-                            if let Some(negotiated) = session.negotiated() {
-                                let provenance = Provenance::for_bgp(
-                                    session_ingress_id,
-                                    negotiated.remote_addr(),
-                                    negotiated.remote_asn(),
-                                );
-
-                                // pre-explosion roto filter
-                                // - get the right compiled script ('bgp-in.roto') from .. somewhere
-                                // - get_function('main') on it  
-                                // - call it
-                                // - based on the Verdict, either:
-                                //      - 
-                                //      - 
-                                // - check the OutputQueue:
-                                //      - drain and deal with any items there
-
-
-                                // then: explode reach/unreach
-                                // create update
-                                // self.gate.update_data(update).await; 
-
-
-
-                                /*
-                                if let Ok(ControlFlow::Continue(FilterOutput { south, east, received })) = Self::VM.with(|vm| {
-                                    self.roto_scripts.exec(vm,
-                                        &self.unit_cfg.filter_name,
-                                        msg.into(), // TypeVal
-                                        Utc::now(),
-                                        ctx.clone(), // XXX or Arc?
-                                    )
-                                }) {
-                                    if !south.is_empty() {
-                                        let update = Payload::from_output_stream_queue(south, ctx.clone(), None).into();
-                                        self.gate.update_data(update).await;
-                                    }
-                                    // XXX LH: I assume the _pdu here is
-                                    // exactly the same as the `msg` that is
-                                    // in the ctx already? 
-                                    if let TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(_pdu)) = east {
-                                        let ctx = match ctx {
-                                            RouteContext::Reprocess => {
-                                                panic!("unexpected Reprocess context");
-                                            }
-                                            RouteContext::Fresh(fresh) => fresh
-                                        };
-                                        let update = self.process_update(
-                                            received,
-                                            ctx,
-                                        ).await;
-                                        match update {
-                                            Ok(update) => { self.gate.update_data(update).await; },
-                                            Err(e) => { error!("unexpected state: {e}"); },
-                                        };
-                                    }
-                                    //LH: with removal of old roto /
-                                    //typevalue, we need to
-                                    // - get afisafis for reach/unreach from
-                                    // pdu
-                                    // - call process_update<N> for all those
-                                    // - call update_data(bulk_update) for all
-                                    // those invidivually
-                                }
-                                */
-                            } else {
+                            let Some(negotiated) = session.negotiated() else {
                                 error!("unexpected state: no NegotiatedConfig for session");
+                                break
+                            };
+                            let mut provenance = Provenance::for_bgp(
+                                session_ingress_id,
+                                negotiated.remote_addr(),
+                                negotiated.remote_asn(),
+                            );
+
+                            let mut output_stream = RotoOutputStream::new();
+                            let received = Utc::now();
+
+                            let verdict = self.roto_function.as_ref().map(
+                                |roto_function|
+                            {
+                                roto_function.call(
+                                    &mut output_stream,
+                                    &mut bgp_msg,
+                                    &mut provenance ,
+                                    )
+                            });
+                            match verdict {
+                                // Default action when no roto script is used
+                                // is Accept (i.e. None here).
+                                Some(roto::Verdict::Accept(_)) | None => {
+                                    let update = self.process_update(
+                                        received,
+                                        bgp_msg,
+                                        provenance,
+                                    ).await;
+                                    match update {
+                                        Ok(update) => {
+                                            self.gate.update_data(update).await;
+                                        },
+                                        Err(e) => {
+                                            error!("unexpected state: {e}");
+                                        },
+                                    };
+                                }
+                                Some(roto::Verdict::Reject(_)) => {
+                                    // increase metrics and continue
+                                    dbg!("bgp-in roto Reject");
+                                }
                             }
                         }
                         Some(Message::NotificationMessage(pdu)) => {
@@ -633,6 +659,8 @@ impl Processor {
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_connection(
     roto_scripts: RotoScripts,
+    roto_compiled: Option<Arc<CompiledRoto>>,
+    roto_function: Option<RotoFunc>,
     gate: Gate,
     unit_config: BgpTcpIn,
     tcp_stream: TcpStream,
@@ -696,8 +724,15 @@ pub async fn handle_connection(
     session.manual_start().await;
     session.connection_established().await;
 
+    let roto_compiled2 = roto_compiled.clone();
+    let roto_function: Option<RotoFunc> = roto_compiled2.map(|c| {
+        let mut c = c.lock().unwrap();
+        c.get_function("bgp-in").unwrap()
+    });
     let mut p = Processor::new(
         roto_scripts,
+        roto_compiled,
+        roto_function,
         gate,
         unit_config,
         cmds_tx,

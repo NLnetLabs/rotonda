@@ -4,7 +4,7 @@ use crate::common::file_io::{FileIo, TheFileIo};
 //use crate::common::roto::{
 //    FilterName, LoadErrorKind, RotoError, RotoScriptOrigin, RotoScripts,
 //};
-use crate::common::roto_new::{FilterName, RotoScripts};
+use crate::common::roto_new::{rotonda_roto_runtime, FilterName, RotoScripts};
 use crate::comms::{
     DirectLink, Gate, GateAgent, GraphStatus, Link, DEF_UPDATE_QUEUE_LEN,
 };
@@ -21,8 +21,9 @@ use non_empty_vec::NonEmpty;
 use reqwest::Client as HttpClient;
 use serde::Deserialize;
 use std::collections::HashSet;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::ops::Deref;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::{Duration, Instant};
 use std::{cell::RefCell, fmt::Display};
@@ -61,6 +62,8 @@ pub struct Component {
     /// A reference to the Roto script collection.
     roto_scripts: RotoScripts,
 
+    roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
+
     /// A reference to the Tracer
     tracer: Arc<Tracer>,
 
@@ -93,6 +96,7 @@ impl Component {
         metrics: metrics::Collection,
         http_resources: http::Resources,
         roto_scripts: RotoScripts,
+        roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
         tracer: Arc<Tracer>,
         ingresses: Arc<ingress::Register>,
     ) -> Self {
@@ -103,6 +107,7 @@ impl Component {
             metrics: Some(metrics),
             http_resources,
             roto_scripts,
+            roto_compiled,
             tracer,
             ingresses,
         }
@@ -129,6 +134,10 @@ impl Component {
 
     pub fn roto_scripts(&self) -> &RotoScripts {
         &self.roto_scripts
+    }
+
+    pub fn roto_compiled(&self) -> &Option<Arc<crate::common::roto_new::CompiledRoto>> {
+        &self.roto_compiled
     }
 
     pub fn tracer(&self) -> &Arc<Tracer> {
@@ -596,8 +605,12 @@ pub struct Manager {
     /// The HTTP resources collection maintained by this manager.
     http_resources: http::Resources,
 
+    //LH: switch to roto_compiled
     /// A reference to the Roto script collection.
     roto_scripts: RotoScripts,
+
+    //LH: this will replace roto_scripts for now
+    roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
 
     graph_svg_processor: Arc<dyn ProcessRequest>,
 
@@ -649,6 +662,7 @@ impl Manager {
             metrics: Default::default(),
             http_resources: Default::default(),
             roto_scripts: Default::default(),
+            roto_compiled: Default::default(),
             graph_svg_processor,
             graph_svg_data,
             file_io: TheFileIo::default(),
@@ -829,7 +843,7 @@ impl Manager {
 
         // Load any .roto script files that exist (and unload any that no
         // longer exist)
-        self.load_roto_scripts(&config.roto_scripts_path).or_else(|err| {
+        if let Err(err) = self.load_roto_scripts(&config.roto_scripts_path) {
             let msg = format!("Unable to load Roto scripts: {err}.");
             /*
             if matches!(err, RotoError::LoadError { .. })
@@ -843,9 +857,15 @@ impl Manager {
             }
             */
             //Ok::<(), Terminate>(())
-            error!("TODO get new roto infra in place");
-            Err(Terminate::error())
-        })?;
+            error!("{msg}");
+            Err(Terminate::error())?
+        }
+
+        if let Err(err) = self.compile_roto_script(&config.roto_script) {
+            let msg = format!("Unable to load main Roto script: {err}.");
+            error!("{msg}");
+            Err(Terminate::error())?
+        }
 
         // Drain the singleton static ROTO_FILTER_NAMES contents to a local
         // variable.
@@ -876,7 +896,7 @@ impl Manager {
             } else {
                 let scripts = loaded_roto_scripts
                     .iter()
-                    .map(|v| format!("'{v}'"))
+                    .map(|v| format!("'{}'", v.display()))
                     .collect::<Vec<_>>()
                     .join(", ");
                 format!("none of the loaded .roto scripts ({scripts}) contains them")
@@ -934,6 +954,28 @@ impl Manager {
         res
     }
 
+
+    //LH this will replace fn load_roto_scripts eventually
+    pub fn compile_roto_script(
+        &mut self,
+        roto_scripts_path: &Option<std::path::PathBuf>
+    ) -> Result<(), String> {
+        let path = if let Some(p) = roto_scripts_path {
+            p
+        } else {
+            debug!("no roto scripts path to load filters from");
+            return Ok(());
+        };
+
+        let i = roto::read_files([path.to_string_lossy()])
+            .map_err(|e| e.to_string())?;
+        let c = i.compile(rotonda_roto_runtime().unwrap(), usize::BITS / 8)
+            .map_err(|e| e.to_string())?;
+
+        self.roto_compiled = Some(Arc::new(Mutex::new(c)));
+        Ok(())
+    }
+
     // TODO: Use Marked for returned error so that the location in the config
     // file in question can be reported to the user. TODO: Don't load .roto
     // script files that are not referenced by any units or targets?
@@ -941,7 +983,41 @@ impl Manager {
         &mut self,
         roto_scripts_path: &Option<std::path::PathBuf>,
     ) -> Result<(), String> {
-        todo!()
+
+        let path = if let Some(p) = roto_scripts_path {
+            p
+        } else {
+            debug!("no roto scripts path to load filters from");
+            return Ok(());
+        };
+
+        let mut scripts = HashMap::<FilterName, PathBuf>::new();
+
+        let filenames = self
+            .file_io
+            .read_dir(path).map_err(|err| err.to_string())?;
+
+        for f in filenames {
+            let f = f.map_err(|e| e.to_string())?;
+            if let Some(ext) = f.path().extension() {
+                if ext == OsStr::new("roto") {
+                    let scriptname = f.path().file_stem().unwrap().to_owned().into_string().map_err(|e| "failed to convert {e}")?;
+                    scripts.insert(scriptname.into(), f.path());
+                }
+            }
+        }
+
+            
+        /*
+        let mut runtime = roto::Runtime::basic().unwrap();
+        let compiled = roto::read_files(filenames)
+            .map_err(|e| e.to_string())?
+            .compile(runtime, usize::BITS / 8)
+            .map_err(|e| e.to_string())?;
+        */
+
+        self.roto_scripts = RotoScripts::new(scripts);
+        Ok(())
         /*
         let mut new_origins = HashSet::<RotoScriptOrigin>::new();
 
@@ -952,7 +1028,7 @@ impl Manager {
                 })?;
             for entry in entries {
                 let entry = entry.map_err(|err| {
-                    LoadErrorKind::read_dir_entry_err(roto_scripts_path, err)
+                    LoadErrorKind::read_dir_oentry_err(roto_scripts_path, err)
                 })?;
 
                 if matches!(entry.path().extension(), Some(ext) if ext == OsStr::new("roto"))
@@ -1206,6 +1282,7 @@ impl Manager {
                 self.metrics.clone(),
                 self.http_resources.clone(),
                 self.roto_scripts.clone(),
+                self.roto_compiled.clone(),
                 self.tracer.clone(),
                 self.ingresses.clone(),
             );
@@ -1284,6 +1361,7 @@ impl Manager {
                 self.metrics.clone(),
                 self.http_resources.clone(),
                 self.roto_scripts.clone(),
+                self.roto_compiled.clone(),
                 self.tracer.clone(),
                 self.ingresses.clone(),
             );

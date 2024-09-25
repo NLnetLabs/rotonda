@@ -5,6 +5,7 @@ use chrono::{DateTime, Utc};
 //use roto::types::builtin::{RouteContext, ingress::IngressId};
 use rotonda_store::QueryResult;
 
+use routecore::bgp::nlri::afisafi::IsPrefix;
 use routecore::bgp::types::AfiSafiType;
 use routecore::bgp::workshop::route::RouteWorkshop;
 use smallvec::{smallvec, SmallVec};
@@ -111,14 +112,12 @@ impl RotondaRoute {
 
 impl fmt::Display for RotondaRoute {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", 
-            match self {
-                RotondaRoute::Ipv4Unicast(_) => "RR-Ipv4Unicast",
-                RotondaRoute::Ipv6Unicast(_) => "RR-Ipv6Unicast",
-                RotondaRoute::Ipv4Multicast(_) => "RR-Ipv4Multicast",
-                RotondaRoute::Ipv6Multicast(_) => "RR-Ipv6Multicast",
-            }
-        )
+        match self {
+            RotondaRoute::Ipv4Unicast(n) => write!(f, "RR-Ipv4Unicast {}", n.nlri().prefix()),
+            RotondaRoute::Ipv6Unicast(n) => write!(f, "RR-Ipv6Unicast {}", n.nlri().prefix()),
+            RotondaRoute::Ipv4Multicast(n) => write!(f, "RR-Ipv4Multicast {}", n.nlri().prefix()),
+            RotondaRoute::Ipv6Multicast(n) => write!(f, "RR-Ipv6Multicast {}", n.nlri().prefix()),
+        }
     }
 }
 

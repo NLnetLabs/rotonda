@@ -10,6 +10,7 @@ use routecore::bgp::message::{Message as BgpMsg, UpdateMessage as BgpUpdateMessa
 use crate::payload::RotondaRoute;
 
 use super::roto_new::{FreshRouteContext, InsertionInfo, Output, OutputStream, Provenance};
+use roto::roto_method;
 
 pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
     let mut rt = roto::Runtime::basic()?;
@@ -24,7 +25,18 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
     // --- BGP types / methods
     //rt.register_type_with_name::<BgpMsg<Bytes>>("BgpMsg")?;
     rt.register_type_with_name::<BgpUpdateMessage<Bytes>>("BgpMsg")?;
-    rt.register_method::<BgpUpdateMessage<Bytes>, _, _>("aspath_contains", bgp_aspath_contains)?;
+    //rt.register_method::<BgpUpdateMessage<Bytes>, _, _>("aspath_contains", bgp_aspath_contains)?;
+
+    #[roto_method(rt, BgpUpdateMessage<Bytes>, aspath_contains)]
+    fn bgp_aspath_contains(
+        msg: *const BgpUpdateMessage<Bytes>,
+        to_match: Asn,
+    ) -> bool {
+        let msg = unsafe { &*msg };
+
+        aspath_contains(msg, to_match)
+    }
+
     rt.register_method::<BgpUpdateMessage<Bytes>, _, _>("aspath_origin", bgp_aspath_origin)?;
     rt.register_method::<BgpUpdateMessage<Bytes>, _, _>("contains_community", bgp_contains_community)?;
 
@@ -32,14 +44,61 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
     rt.register_type_with_name::<BmpMsg<Bytes>>("BmpMsg")?;
     rt.register_type::<PerPeerHeader<Bytes>>()?;
 
-    rt.register_method::<BmpMsg<Bytes>, _, _>("is_ibgp", is_ibgp)?;
+    //rt.register_method::<BmpMsg<Bytes>, _, _>("is_ibgp", is_ibgp)?;
+
+    // Return true if asn matches the asn in the BmpMsg.
+    //
+    // returns false if no PPH is present.
+    #[roto_method(rt, BmpMsg<Bytes>)]
+    fn is_ibgp(msg: *const BmpMsg<Bytes>, asn: Asn) -> bool {
+        let msg = unsafe { &*msg };
+        let asn_in_msg = match msg {
+            BmpMsg::RouteMonitoring(m) => m.per_peer_header().asn(),
+            BmpMsg::StatisticsReport(m) => m.per_peer_header().asn(),
+            BmpMsg::PeerDownNotification(m) => m.per_peer_header().asn(),
+            BmpMsg::PeerUpNotification(m) => m.per_peer_header().asn(),
+            BmpMsg::InitiationMessage(_) => return false,
+            BmpMsg::TerminationMessage(_) => return false,
+            BmpMsg::RouteMirroring(m) => m.per_peer_header().asn(),
+        };
+        asn == asn_in_msg
+    }
+
     rt.register_method::<BmpMsg<Bytes>, _, _>("is_peer_down", is_peer_down)?;
-    rt.register_method::<BmpMsg<Bytes>, _, _>("aspath_contains", bmp_aspath_contains)?;
+    //rt.register_method::<BmpMsg<Bytes>, _, _>("aspath_contains", bmp_aspath_contains)?;
+    #[roto_method(rt, BmpMsg<Bytes>, aspath_contains)]
+    fn bmp_aspath_contains(
+        msg: *const BmpMsg<Bytes>,
+        to_match: Asn,
+    ) -> bool {
+        let msg = unsafe { &*msg };
+
+        let update = if let BmpMsg::RouteMonitoring(rm) = msg {
+            if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
+                upd
+            } else {
+                // log error
+                return false;
+            }
+        } else {
+            return false;
+        };
+
+        aspath_contains(&update, to_match)
+    }
+
     rt.register_method::<BmpMsg<Bytes>, _, _>("aspath_origin", bmp_aspath_origin)?;
     rt.register_method::<BmpMsg<Bytes>, _, _>("contains_community", bmp_contains_community)?;
 
     // --- Output / loggging / 'south'-wards artifacts methods
-    rt.register_method::<OutputStream<Output>, _, _>("log_matched_asn", log_asn)?;
+    #[roto_method(rt, OutputStream<Output>, log_matched_asn)]
+    fn log_asn(
+        stream: *mut OutputStream<Output>,
+        asn: Asn,
+    ) {
+        let stream = unsafe { &mut *stream };
+        stream.push(Output::Asn(asn));
+    }
     rt.register_method::<OutputStream<Output>, _, _>("log_matched_origin", log_origin)?;
     rt.register_method::<OutputStream<Output>, _, _>("log_matched_community", log_community)?;
     rt.register_method::<OutputStream<Output>, _, _>("log_peer_down", log_peer_down)?;
@@ -54,33 +113,6 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
 }
 
 
-// Return true if asn matches the asn in the BmpMsg.
-//
-// returns false if no PPH is present.
-//extern "C" fn is_ibgp(msg: *const BmpMsg<Bytes>, asn: *const Asn) -> bool {
-#[roto_function]
-fn is_ibgp(msg: *const BmpMsg<Bytes>, asn: Asn) -> bool {
-    let msg = unsafe { &*msg };
-    let asn_in_msg = match msg {
-        BmpMsg::RouteMonitoring(m) => m.per_peer_header().asn(),
-        BmpMsg::StatisticsReport(m) => m.per_peer_header().asn(),
-        BmpMsg::PeerDownNotification(m) => m.per_peer_header().asn(),
-        BmpMsg::PeerUpNotification(m) => m.per_peer_header().asn(),
-        BmpMsg::InitiationMessage(_) => return false,
-        BmpMsg::TerminationMessage(_) => return false,
-        BmpMsg::RouteMirroring(m) => m.per_peer_header().asn(),
-    };
-    asn == asn_in_msg
-}
-
-#[roto_function]
-fn log_asn(
-    stream: *mut OutputStream<Output>,
-    asn: Asn,
-) {
-    let stream = unsafe { &mut *stream };
-    stream.push(Output::Asn(asn));
-}
 
 #[roto_function]
 fn log_origin(
@@ -138,16 +170,6 @@ fn bgp_contains_community(
 }
 
 #[roto_function]
-fn bgp_aspath_contains(
-    msg: *const BgpUpdateMessage<Bytes>,
-    to_match: Asn,
-) -> bool {
-    let msg = unsafe { &*msg };
-
-    aspath_contains(msg, to_match)
-}
-
-#[roto_function]
 fn bgp_aspath_origin(
     msg: *const BgpUpdateMessage<Bytes>,
     to_match: Asn,
@@ -178,26 +200,6 @@ fn bmp_contains_community(
     contains_community(&update, to_match)
 }
 
-#[roto_function]
-fn bmp_aspath_contains(
-    msg: *const BmpMsg<Bytes>,
-    to_match: Asn,
-) -> bool {
-    let msg = unsafe { &*msg };
-
-    let update = if let BmpMsg::RouteMonitoring(rm) = msg {
-        if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
-            upd
-        } else {
-            // log error
-            return false;
-        }
-    } else {
-        return false;
-    };
-
-    aspath_contains(&update, to_match)
-}
 
 #[roto_function]
 fn bmp_aspath_origin(

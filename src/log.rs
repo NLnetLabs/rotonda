@@ -377,7 +377,8 @@ impl LogConfig {
                 .level_for("hyper", LevelFilter::Info)
                 .level_for("reqwest", LevelFilter::Info)
                 .level_for("h2", LevelFilter::Info)
-                .level_for("mio", LevelFilter::Info);
+                .level_for("mio", LevelFilter::Info)
+                .level_for("cranelift_codegen", LevelFilter::Info);
 
             // Conversely, when the main log level is at least debug, disable limitations on logging normally in place
             // for some modules.

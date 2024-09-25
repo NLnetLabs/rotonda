@@ -141,7 +141,7 @@ impl Rib {
             });
         }
 
-        debug!("creating pub rec with RibValue {:?}", val);
+        debug!("creating pub rec with RibValue {}", val);
 
         let pubrec = rotonda_store::PublicRecord::new(
             mui,
@@ -150,7 +150,6 @@ impl Rib {
             val.clone(), // RotondaRoute
         );
 
-        debug!("calling store.insert(..) for {:?}", &prefix);
         store.insert(
             prefix,
             pubrec,
@@ -224,7 +223,7 @@ impl Rib {
                 if let Err(e) = self.multicast.as_ref().unwrap()
                     .mark_mui_as_withdrawn(ingress_id)
                 {
-                        error!("failed to mark MUI as withdrawn in multicast rib: {}", e)
+                    error!("failed to mark MUI as withdrawn in multicast rib: {}", e)
                 }
 
 

@@ -44,6 +44,8 @@ pub struct Config {
     /// The location from which to load user defined Roto script files.
     pub roto_scripts_path: Option<PathBuf>,
 
+    pub roto_script: Option<PathBuf>,
+
     /// The set of configured units.
     pub units: UnitSet,
 

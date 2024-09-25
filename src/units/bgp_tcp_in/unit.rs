@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::net::IpAddr;
 use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
@@ -14,6 +15,7 @@ use non_empty_vec::NonEmpty;
 //use roto::types::{builtin::BuiltinTypeValue, typevalue::TypeValue};
 use routecore::bgp::fsm::session::{Command, DisconnectReason};
 use inetnum::asn::Asn;
+use routecore::bgp::message::UpdateMessage;
 use routecore::bgp::message::{
     SessionConfig,
     update_builder::UpdateBuilder,
@@ -28,7 +30,7 @@ use crate::common::net::{
     StandardTcpListenerFactory, StandardTcpStream, TcpListener,
     TcpListenerFactory, TcpStreamWrapper,
 };
-use crate::common::roto_new::{FilterName, RotoScripts};
+use crate::common::roto_new::{FilterName, Provenance, RotoOutputStream, RotoScripts};
 //use crate::common::roto::{FilterName, RotoScripts};
 use crate::common::status_reporter::{Chainable, UnitStatusReporter};
 use crate::ingress;
@@ -47,6 +49,19 @@ use super::status_reporter::BgpTcpInStatusReporter;
 use super::peer_config::{CombinedConfig, PeerConfigs};
 
 //----------- BgpTcpIn -------------------------------------------------------
+
+
+
+pub(super) type RotoFunc = roto::TypedFunc<
+    (
+        *mut RotoOutputStream,
+        *mut UpdateMessage<Bytes>,//*mut BgpMsg<Bytes>,
+        *mut Provenance,
+    ),
+    roto::Verdict<(),()>
+>;
+
+
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct BgpTcpIn {
@@ -109,6 +124,7 @@ impl BgpTcpIn {
         ));
 
         let roto_scripts = component.roto_scripts().clone();
+        let roto_compiled = component.roto_compiled().clone();
 
         // Wait for other components to be, and signal to other components
         // that we are, ready to start. All units and targets start together,
@@ -132,6 +148,7 @@ impl BgpTcpIn {
             metrics,
             status_reporter,
             roto_scripts,
+            roto_compiled,
             ingresses,
         )
         .run::<_, _, StandardTcpStream, BgpTcpInRunner>(
@@ -146,6 +163,8 @@ trait ConfigAcceptor {
     fn accept_config(
         child_name: String,
         roto_scripts: &RotoScripts,
+        roto_compiled: &Option<Arc<crate::common::roto_new::CompiledRoto>>,
+        roto_function: Option<RotoFunc>,
         gate: &Gate,
         bgp: &BgpTcpIn,
         tcp_stream: impl TcpStreamWrapper,
@@ -163,7 +182,7 @@ pub type LiveSessions = HashMap<
     (mpsc::Sender<Command>, mpsc::Sender<BgpMsg<Bytes>>)
 >;
 
-#[derive(Debug)]
+//#[derive(Debug)]
 struct BgpTcpInRunner {
     // The configuration from the .conf.
     bgp: Arc<ArcSwap<BgpTcpIn>>,
@@ -176,11 +195,22 @@ struct BgpTcpInRunner {
 
     roto_scripts: RotoScripts,
 
+    roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
+
     // To send commands to a Session based on peer IP + ASN.
     live_sessions: Arc<Mutex<LiveSessions>>,
 
     ingresses: Arc<ingress::Register>,
 }
+
+// As long as roto::Compiled has no Debug impl, we cook up something simple
+// ourselves here. We need it because AnyDirectUpdate requires Debug.
+impl fmt::Debug for BgpTcpInRunner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "BgpTcpInRunner: {{ bgp: {:?}  }}", self.bgp)
+    }
+}
+
 
 impl BgpTcpInRunner {
     fn new(
@@ -189,6 +219,7 @@ impl BgpTcpInRunner {
         metrics: Arc<BgpTcpInMetrics>,
         status_reporter: Arc<BgpTcpInStatusReporter>,
         roto_scripts: RotoScripts,
+        roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
         ingresses: Arc<ingress::Register>,
     ) -> Self {
         BgpTcpInRunner {
@@ -197,6 +228,7 @@ impl BgpTcpInRunner {
             metrics,
             status_reporter,
             roto_scripts,
+            roto_compiled,
             live_sessions: Arc::new(Mutex::new(HashMap::new())),
             ingresses,
         }
@@ -240,6 +272,11 @@ impl BgpTcpInRunner {
         for link in sources.iter_mut() {
             link.connect(arc_self.clone(), false).await.unwrap();
         }
+
+        let roto_function: Option<RotoFunc> = arc_self.roto_compiled.clone().map(|c| {
+            let mut c = c.lock().unwrap();
+            c.get_function("bgp-in").unwrap()
+        });
 
         loop {
             let listen_addr = arc_self.bgp.load().listen.clone();
@@ -303,6 +340,8 @@ impl BgpTcpInRunner {
                             F::accept_config(
                                 child_name,
                                 &arc_self.roto_scripts,
+                                &arc_self.roto_compiled,
+                                roto_function.clone(),
                                 &arc_self.gate,
                                 &arc_self.bgp.load().clone(),
                                 tcp_stream,
@@ -514,6 +553,8 @@ impl ConfigAcceptor for BgpTcpInRunner {
     fn accept_config(
         child_name: String,
         roto_scripts: &RotoScripts,
+        roto_compiled: &Option<Arc<crate::common::roto_new::CompiledRoto>>,
+        roto_function: Option<RotoFunc>,
         gate: &Gate,
         bgp: &BgpTcpIn,
         tcp_stream: impl TcpStreamWrapper,
@@ -531,6 +572,8 @@ impl ConfigAcceptor for BgpTcpInRunner {
             &child_name,
             handle_connection(
                 roto_scripts.clone(),
+                roto_compiled.clone(),
+                roto_function,
                 gate.clone(),
                 bgp.clone(),
                 tcp_stream,

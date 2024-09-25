@@ -1,6 +1,6 @@
 use crate::{
     common::{
-        frim::FrimMap, roto_new::{FilterName, RotoScripts, RouteContext}, status_reporter::{AnyStatusReporter, UnitStatusReporter}
+        frim::FrimMap, roto_new::{ensure_compiled, FilterName, FreshRouteContext, InsertionInfo, OutputStream, RotoOutputStream, RotoScripts, RouteContext}, status_reporter::{AnyStatusReporter, UnitStatusReporter}
     }, comms::{
         AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus, Link,
         Terminated, TriggerData,
@@ -56,6 +56,37 @@ const RECORD_MERGE_UPDATE_SPEED_EVERY_N_CALLS: u64 = 1000;
 thread_local!(
     static STATS_COUNTER: RefCell<u64> = RefCell::new(0);
 );
+
+
+
+type RotoFuncPre = roto::TypedFunc<
+    (
+        *mut RotoOutputStream,
+        *mut RotondaRoute,
+        *mut RouteContext,
+    ),
+    roto::Verdict<(),()>
+>;
+
+type RotoFuncPost = roto::TypedFunc<
+    (
+        *mut RotoOutputStream,
+        *mut RotondaRoute,
+        *mut InsertionInfo,
+    ),
+    roto::Verdict<(),()>
+>;
+
+
+impl From<UpsertReport> for InsertionInfo {
+    fn from(value: UpsertReport) -> Self {
+        Self {
+            prefix_new: value.prefix_new,
+            new_peer: value.mui_new,
+        }
+    }
+}
+
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct MoreSpecifics {
@@ -204,8 +235,12 @@ impl RibUnit {
     */
 }
 
+
 pub struct RibUnitRunner {
     roto_scripts: RotoScripts,
+    roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
+    roto_function_pre: Option<RotoFuncPre>,
+    roto_function_post: Option<RotoFuncPost>,
     gate: Arc<Gate>,
     #[allow(dead_code)]
     // A strong ref needs to be held to http_processor but not used otherwise the HTTP resource manager will discard its registration
@@ -255,6 +290,12 @@ impl RibUnitRunner {
     /*
     thread_local!(
         static VM: ThreadLocalVM = RefCell::new(None);
+    );
+    */
+
+    /*
+    thread_local!(
+        static ROTO: crate::common::roto_new::CompiledRoto = const { RefCell::new(None) };
     );
     */
 
@@ -326,10 +367,23 @@ impl RibUnitRunner {
         }
 
         let roto_scripts = component.roto_scripts().clone();
+        let roto_compiled = component.roto_compiled().clone();
+        let roto_function_pre: Option<RotoFuncPre> = roto_compiled.clone().map(|c|{
+            let mut c = c.lock().unwrap();
+            c.get_function("rib-in-pre").unwrap()
+        });
+        let roto_function_post: Option<RotoFuncPost> = roto_compiled.map(|c|{
+            let mut c = c.lock().unwrap();
+            c.get_function("rib-in-post").unwrap()
+        });
         let tracer = component.tracer().clone();
 
+        let roto_compiled = component.roto_compiled().clone();
         Self {
             roto_scripts,
+            roto_compiled,
+            roto_function_pre,
+            roto_function_post,
             gate,
             http_processor,
             query_limits,
@@ -783,9 +837,76 @@ impl RibUnitRunner {
             + 'static,
         */
     {
-        // TODO call new roto 
-        todo!()
+        let mut res = SmallVec::<[Payload; 8]>::new();
 
+        let mut outputstream = RotoOutputStream::new();
+
+        for mut p in payload {
+            if let Some(ref roto_function) = self.roto_function_pre {
+
+                match roto_function.call(
+                    &mut outputstream,
+                    &mut p.rx_value,
+                    &mut p.context,
+                )  {
+                    roto::Verdict::Accept(_) => {
+                        self.insert_payload(&p);
+                        res.push(p);
+                    }
+                    roto::Verdict::Reject(_) => {
+                        debug!("roto::Verdict Reject, dropping {p:#?}");
+                    }
+                }
+            } else {
+                // default action accept
+                self.insert_payload(&p);
+                res.push(p);
+            }
+        }
+        /*
+        Self::ROTO.with_borrow_mut(|maybe_compiled| {
+            let compiled = ensure_compiled(
+                maybe_compiled,
+                self.roto_scripts.get(&self.filter_name.load()).unwrap()
+            );
+
+            let main_func = compiled.get_function::<
+                (),
+                roto::Verdict<(), ()>
+            >("main").unwrap().as_func();
+
+            for p in payload {
+                // filter
+                // accept: insert and forward
+                // reject: drop, do not update gate
+                match main_func() {
+                    roto::Verdict::Accept(_) => {
+                        self.insert_payload(&p);
+                        res.push(p);
+                    }
+                    roto::Verdict::Reject(_) => {
+                        debug!("roto::Verdict Reject, dropping {p:#?}");
+                    }
+                }
+            }
+        });
+        */
+
+        match res.len() {
+            0 => { }, 
+            1 => {
+                self.gate.update_data(
+                    Update::Single(res.into_iter().next().unwrap())
+                ).await;
+            }
+            _ => {
+                self.gate.update_data(
+                    Update::Bulk(res)
+                ).await;
+            }
+        }
+
+        Ok(())
         /*
         let bound_tracer = self.tracer.bind(self.gate.id());
         if let Some(filtered_update) = Self::VM
@@ -824,6 +945,7 @@ impl RibUnitRunner {
     */
     }
 
+    /* // LH: we only use fn insert_payload (singular) now
     pub fn insert_payloads/*<F>*/(
         &self,
         mut payloads: SmallVec<[Payload; 8]>,
@@ -858,6 +980,7 @@ impl RibUnitRunner {
             _ => Some(Update::Bulk(payloads)),
         }
     }
+    */
 
     pub fn insert_payload/*<F>*/(&self, payload: &Payload/*, insert_fn: F*/)
         /*
@@ -936,9 +1059,9 @@ impl RibUnitRunner {
             };
 
             let ltime = 0_u64;
-            debug!("pre rib.insert for {}, status {}",
-                payload.rx_value, &route_context.status()
-            );
+            //debug!("pre rib.insert for {}, status {}",
+            //    payload.rx_value, &route_context.status()
+            //);
             match rib.insert(
                 &payload.rx_value, route_context.status(), route_context.provenance(), ltime
             ) {
@@ -965,6 +1088,17 @@ impl RibUnitRunner {
                         report.cas_count.try_into().unwrap_or(u32::MAX),
                         change,
                     );
+
+                    if let Some(ref roto_function) = self.roto_function_post {
+                        let mut insertion_info = report.into();
+                        let mut output_stream = RotoOutputStream::new();
+                        let _ = roto_function.call(
+                            &mut output_stream,
+                            &mut payload.rx_value.clone(),
+                            &mut insertion_info,
+                        );
+                        // TODO process outputstream
+                    }
                 }
                 Err(err) => {
                     self.status_reporter.insert_failed(&payload.rx_value, err);

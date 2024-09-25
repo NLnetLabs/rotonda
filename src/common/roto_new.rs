@@ -1,20 +1,42 @@
 use core::fmt;
-use std::{collections::HashSet, net::IpAddr};
+use std::{cell::RefCell, collections::{HashMap, HashSet}, ffi::OsString, net::IpAddr, path::PathBuf};
 
 use bytes::Bytes;
 use chrono::Utc;
 use inetnum::asn::Asn;
 use rotonda_store::prelude::multi::RouteStatus;
-use routecore::bgp::{message::UpdateMessage, nlri::afisafi::Nlri, workshop::route::RouteWorkshop};
+use routecore::{bgp::{message::UpdateMessage, nlri::afisafi::Nlri, workshop::route::RouteWorkshop}, bmp::message::PerPeerHeader};
+use serde::Deserialize;
 
-use crate::payload::RotondaRoute;
+use crate::{manager, payload::RotondaRoute};
 
-#[derive(Clone, Debug, Eq, PartialEq, Hash, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct FilterName(String);
 
 impl Default for FilterName {
     fn default() -> Self {
-        FilterName("".to_string())
+        FilterName("".into())
+    }
+}
+
+// XXX LH: not a fan of calling load_filter_name from here, quite a surprising
+// side effect of deserializing a config parameter.
+impl<'a, 'de: 'a> Deserialize<'de> for FilterName {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        // This has to be a String, even though we pass a &str to ShortString::from(), because of the way that newer
+        // versions of the toml crate work. See: https://github.com/toml-rs/toml/issues/597
+        let s: String = Deserialize::deserialize(deserializer)?;
+        let filter_name = FilterName(s);
+        Ok(manager::load_filter_name(filter_name))
+    }
+}
+
+impl From<String> for FilterName {
+    fn from(value: String) -> Self {
+        Self {0: value}
     }
 }
 
@@ -24,21 +46,106 @@ impl fmt::Display for FilterName {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct RotoScripts {
-    filenames: Vec<String>,
+    scripts: HashMap<FilterName, PathBuf>,
 }
 
 impl RotoScripts {
-    pub fn get_filter_names(&self) -> HashSet<FilterName> {
-        todo!()
+    pub fn new(scripts: HashMap<FilterName, PathBuf>) -> Self {
+        Self { scripts }
     }
 
-    pub fn get_script_origins(&self) -> HashSet<FilterName> {
-        todo!()
+    pub fn get(&self, name: &FilterName) -> Option<&PathBuf> {
+        self.scripts.get(name)
+    }
+
+    pub fn get_filter_names(&self) -> HashSet<FilterName> {
+        self.scripts.keys().cloned().collect::<HashSet<_>>()
+    }
+
+    pub fn get_script_origins(&self) -> HashSet<PathBuf> {
+        self.scripts.values().cloned().collect::<HashSet<_>>()
     }
 }
 
+
+//pub type CompiledRoto = RefCell<Option<roto::Compiled>>;
+pub type CompiledRoto = std::sync::Mutex<roto::Compiled>;
+
+pub fn ensure_compiled(
+    cr: &mut Option<roto::Compiled>,
+    filter: impl Into<PathBuf>,
+) -> &mut roto::Compiled {
+    if cr.is_none() {
+        cr.replace(
+            roto::read_files([filter.into().to_string_lossy()]).unwrap()
+            .compile(rotonda_roto_runtime().unwrap(), usize::BITS / 8)
+            .unwrap()
+        );
+    }
+    cr.as_mut().unwrap()
+}
+
+pub use super::roto_runtime::rotonda_roto_runtime;
+
+
+#[derive(Default)]
+pub struct OutputStream<M>{
+    msgs: Vec<M>,
+}
+
+pub type RotoOutputStream = OutputStream<Output>;
+
+impl<M> OutputStream<M> {
+    pub fn new() -> Self {
+        Self { msgs: vec![] }
+    }
+
+    pub fn push(&mut self, msg: M) {
+        self.msgs.push(msg);
+    }
+    pub fn drain(&mut self) -> std::vec::Drain<'_, M> {
+        self.msgs.drain(..)
+    }
+}
+
+impl<M> IntoIterator for OutputStream<M> {
+    type Item = M;
+
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.msgs.into_iter()
+    }
+
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum Output {
+    /// Community observed in Path Attributes.
+    Community(u32),
+
+    /// ASN observed in the AS_PATH Path Attribute. 
+    Asn(Asn),
+
+    /// ASN observed as right-most AS in the AS_PATH.
+    Origin(Asn),
+
+    /// A BMP PeerDownNotification was observed. 
+    PeerDown, // TODO stick the PeerIp in here from roto, if we can, otherwise
+              // get it from elsewhere in Rotonda
+
+    /// Variant to support user-defined log entries.
+    Custom(u32, u32),
+}
+
+pub struct InsertionInfo {
+    pub prefix_new: bool,
+    pub new_peer: bool,
+    //is_new_best: bool,
+    //replaced_route: RotondaRoute,
+}
 
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -343,6 +450,10 @@ impl<O> From<Nlri<O>> for RotondaRoute {
             Nlri::Ipv4UnicastAddpath(_) => todo!(),
             Nlri::Ipv4Multicast(_) => todo!(),
             Nlri::Ipv4MulticastAddpath(_) => todo!(),
+            Nlri::Ipv6Unicast(n) => RotondaRoute::Ipv6Unicast(RouteWorkshop::new(n)),
+            Nlri::Ipv6UnicastAddpath(_) => todo!(),
+            Nlri::Ipv6Multicast(_) => todo!(),
+            Nlri::Ipv6MulticastAddpath(_) => todo!(),
             _ => unimplemented!(),
         /*
             Nlri::Ipv4MplsUnicast(_) => todo!(),

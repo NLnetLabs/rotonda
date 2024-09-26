@@ -1,0 +1,16 @@
+[package]
+name = "mrtin"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+
+[lib]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+routecore = "0.5.0-rc0"
+octseq = { version = "0.4.0" }
+memmap2 = "0.6.1"
+inetnum = "0.1.0"

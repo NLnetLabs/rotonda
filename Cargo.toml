@@ -1,9 +1,9 @@
 [package]
 name = "rotonda"
-version = "0.1.1-dev"
-edition = "2021"
-rust-version = "1.80"
-authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+authors.workspace = true
 description = "composable, programmable BGP engine"
 repository = "https://github.com/NLnetLabs/rotonda/"
 homepage = "https://www.nlnetlabs.nl/projects/routing/rotonda/"
@@ -12,6 +12,17 @@ categories = ["network-programming"]
 license = "MPL-2.0"
 exclude = [ ".github" ]
 readme = "README.md"
+
+[workspace.package]
+version = "0.1.1-dev"
+edition = "2021"
+rust-version = "1.80"
+authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]
+
+
+[workspace]
+members = ["mrtin"]
+
 
 [dependencies]
 arc-swap           = "1.6"
@@ -55,6 +66,7 @@ html-escape        = { version = "0.2" }
 indoc              = "2.0"
 layout-rs          = { version = "0.1" }
 mqtt               = { version = "0.23.0", package = "rumqttc", default-features = false }
+mrtin              = { path = "mrtin" }
 non-empty-vec      = { version = "0.2", features = ["serde"]}
 percent-encoding   = "2.3"
 roto               = { git = "https://github.com/nlnetlabs/roto", branch = "main" }

@@ -2,7 +2,7 @@
 name = "rotonda"
 version = "0.1.1-dev"
 edition = "2021"
-rust-version = "1.71"
+rust-version = "1.80"
 authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]
 description = "composable, programmable BGP engine"
 repository = "https://github.com/NLnetLabs/rotonda/"

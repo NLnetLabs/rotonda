@@ -37,8 +37,26 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
         aspath_contains(msg, to_match)
     }
 
-    rt.register_method::<BgpUpdateMessage<Bytes>, _, _>("aspath_origin", bgp_aspath_origin)?;
-    rt.register_method::<BgpUpdateMessage<Bytes>, _, _>("contains_community", bgp_contains_community)?;
+    //rt.register_method::<BgpUpdateMessage<Bytes>, _, _>("aspath_origin", bgp_aspath_origin)?;
+    #[roto_method(rt, BgpUpdateMessage<Bytes>, aspath_origin)]
+    fn bgp_aspath_origin(
+        msg: *const BgpUpdateMessage<Bytes>,
+        to_match: Asn,
+    ) -> bool {
+        let msg = unsafe { &*msg };
+
+        aspath_origin(msg, to_match)
+    }
+    //rt.register_method::<BgpUpdateMessage<Bytes>, _, _>("contains_community", bgp_contains_community)?;
+    #[roto_method(rt, BgpUpdateMessage<Bytes>, contains_community)]
+    fn bgp_contains_community(
+        msg: *const BgpUpdateMessage<Bytes>,
+        to_match: u32,
+    ) -> bool {
+        let msg = unsafe { &*msg };
+
+        contains_community(msg, to_match)
+    }
 
     // --- BMP types / methods
     rt.register_type_with_name::<BmpMsg<Bytes>>("BmpMsg")?;
@@ -64,7 +82,13 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
         asn == asn_in_msg
     }
 
-    rt.register_method::<BmpMsg<Bytes>, _, _>("is_peer_down", is_peer_down)?;
+    //rt.register_method::<BmpMsg<Bytes>, _, _>("is_peer_down", is_peer_down)?;
+    #[roto_method(rt, BmpMsg<Bytes>)]
+    fn is_peer_down(msg: *const BmpMsg<Bytes>) -> bool {
+        let msg = unsafe { &*msg };
+        msg.msg_type() == BmpMsgType::PeerDownNotification
+    }
+
     //rt.register_method::<BmpMsg<Bytes>, _, _>("aspath_contains", bmp_aspath_contains)?;
     #[roto_method(rt, BmpMsg<Bytes>, aspath_contains)]
     fn bmp_aspath_contains(
@@ -87,8 +111,48 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
         aspath_contains(&update, to_match)
     }
 
-    rt.register_method::<BmpMsg<Bytes>, _, _>("aspath_origin", bmp_aspath_origin)?;
-    rt.register_method::<BmpMsg<Bytes>, _, _>("contains_community", bmp_contains_community)?;
+    //rt.register_method::<BmpMsg<Bytes>, _, _>("aspath_origin", bmp_aspath_origin)?;
+    #[roto_method(rt, BmpMsg<Bytes>, aspath_origin)]
+    fn bmp_aspath_origin(
+        msg: *const BmpMsg<Bytes>,
+        to_match: Asn,
+    ) -> bool {
+        let msg = unsafe { &*msg };
+
+        let update = if let BmpMsg::RouteMonitoring(rm) = msg {
+            if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
+                upd
+            } else {
+                // log error
+                return false;
+            }
+        } else {
+            return false;
+        };
+
+        aspath_origin(&update, to_match)
+    }
+    //rt.register_method::<BmpMsg<Bytes>, _, _>("contains_community", bmp_contains_community)?;
+    #[roto_method(rt, BmpMsg<Bytes>, contains_community)]
+    fn bmp_contains_community(
+        msg: *const BmpMsg<Bytes>,
+        to_match: u32,
+    ) -> bool {
+        let msg = unsafe { &*msg };
+
+        let update = if let BmpMsg::RouteMonitoring(rm) = msg {
+            if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
+                upd
+            } else {
+                // log error
+                return false;
+            }
+        } else {
+            return false;
+        };
+
+        contains_community(&update, to_match)
+    }
 
     // --- Output / loggging / 'south'-wards artifacts methods
     #[roto_method(rt, OutputStream<Output>, log_matched_asn)]
@@ -99,129 +163,64 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
         let stream = unsafe { &mut *stream };
         stream.push(Output::Asn(asn));
     }
-    rt.register_method::<OutputStream<Output>, _, _>("log_matched_origin", log_origin)?;
-    rt.register_method::<OutputStream<Output>, _, _>("log_matched_community", log_community)?;
-    rt.register_method::<OutputStream<Output>, _, _>("log_peer_down", log_peer_down)?;
-    rt.register_method::<OutputStream<Output>, _, _>("log_custom", log_custom)?;
+
+    //rt.register_method::<OutputStream<Output>, _, _>("log_matched_origin", log_origin)?;
+    #[roto_method(rt, OutputStream<Output>, log_matched_origin)]
+    fn log_origin(
+        stream: *mut OutputStream<Output>,
+        origin: Asn,
+    ) {
+        let stream = unsafe { &mut *stream };
+        stream.push(Output::Origin(origin));
+    }
+
+    //rt.register_method::<OutputStream<Output>, _, _>("log_matched_community", log_community)?;
+    #[roto_method(rt, OutputStream<Output>, log_matched_community)]
+    fn log_community(
+        stream: *mut OutputStream<Output>,
+        community: u32,
+    ) {
+        let stream = unsafe { &mut *stream };
+        stream.push(Output::Community(community));
+    }
+
+    //rt.register_method::<OutputStream<Output>, _, _>("log_peer_down", log_peer_down)?;
+    #[roto_method(rt, OutputStream<Output>)]
+    fn log_peer_down(
+        stream: *mut OutputStream<Output>,
+        //addr: *mut IpAddr,
+    ) {
+        let stream = unsafe { &mut *stream };
+        //let addr = unsafe { &mut *addr };
+        stream.push(Output::PeerDown);
+    }
+
+    //rt.register_method::<OutputStream<Output>, _, _>("log_custom", log_custom)?;
+    #[roto_method(rt, OutputStream<Output>)]
+    fn log_custom(
+        stream: *mut OutputStream<Output>,
+        id: u32,
+        local: u32,
+    ) {
+        let stream = unsafe { &mut *stream };
+        stream.push(Output::Custom(id, local));
+    }
+
 
     // --- InsertionInfo methods
-    rt.register_method::<InsertionInfo, _, _>("new_peer", new_peer)?;
-    rt.register_method::<InsertionInfo, _, _>("prefix_new", prefix_new)?;
+    #[roto_method(rt, InsertionInfo)]
+    fn new_peer(info: *const InsertionInfo) -> bool {
+        unsafe { &*info}.new_peer
+    }
+
+    #[roto_method(rt, InsertionInfo)]
+    fn prefix_new(info: *const InsertionInfo) -> bool {
+        unsafe { &*info}.prefix_new
+    }
 
 
     Ok(rt)
 }
-
-
-
-#[roto_function]
-fn log_origin(
-    stream: *mut OutputStream<Output>,
-    origin: Asn,
-) {
-    let stream = unsafe { &mut *stream };
-    stream.push(Output::Origin(origin));
-}
-
-#[roto_function]
-fn log_community(
-    stream: *mut OutputStream<Output>,
-    community: u32,
-) {
-    let stream = unsafe { &mut *stream };
-    stream.push(Output::Community(community));
-}
-
-#[roto_function]
-fn log_peer_down(
-    stream: *mut OutputStream<Output>,
-    //addr: *mut IpAddr,
-) {
-    let stream = unsafe { &mut *stream };
-    //let addr = unsafe { &mut *addr };
-    stream.push(Output::PeerDown);
-}
-
-#[roto_function]
-fn is_peer_down(msg: *const BmpMsg<Bytes>) -> bool {
-    let msg = unsafe { &*msg };
-    msg.msg_type() == BmpMsgType::PeerDownNotification
-}
-
-#[roto_function]
-fn log_custom(
-    stream: *mut OutputStream<Output>,
-    id: u32,
-    local: u32,
-) {
-    let stream = unsafe { &mut *stream };
-    stream.push(Output::Custom(id, local));
-}
-
-
-#[roto_function]
-fn bgp_contains_community(
-    msg: *const BgpUpdateMessage<Bytes>,
-    to_match: u32,
-) -> bool {
-    let msg = unsafe { &*msg };
-
-    contains_community(msg, to_match)
-}
-
-#[roto_function]
-fn bgp_aspath_origin(
-    msg: *const BgpUpdateMessage<Bytes>,
-    to_match: Asn,
-) -> bool {
-    let msg = unsafe { &*msg };
-
-    aspath_origin(msg, to_match)
-}
-
-#[roto_function]
-fn bmp_contains_community(
-    msg: *const BmpMsg<Bytes>,
-    to_match: u32,
-) -> bool {
-    let msg = unsafe { &*msg };
-
-    let update = if let BmpMsg::RouteMonitoring(rm) = msg {
-        if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
-            upd
-        } else {
-            // log error
-            return false;
-        }
-    } else {
-        return false;
-    };
-
-    contains_community(&update, to_match)
-}
-
-
-#[roto_function]
-fn bmp_aspath_origin(
-    msg: *const BmpMsg<Bytes>,
-    to_match: Asn,
-) -> bool {
-    let msg = unsafe { &*msg };
-
-    let update = if let BmpMsg::RouteMonitoring(rm) = msg {
-        if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
-            upd
-        } else {
-            // log error
-            return false;
-        }
-    } else {
-        return false;
-    };
-
-    aspath_origin(&update, to_match)
-}
-
 
 
 fn contains_community(
@@ -260,12 +259,3 @@ fn aspath_origin(
     }
 }
 
-#[roto_function]
-fn new_peer(info: *const InsertionInfo) -> bool {
-    unsafe { &*info}.new_peer
-}
-
-#[roto_function]
-fn prefix_new(info: *const InsertionInfo) -> bool {
-    unsafe { &*info}.prefix_new
-}

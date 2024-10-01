@@ -14,7 +14,7 @@ Roadmap
 - ✅ Move functionality from rotonda to rotonda-store
 - 🦀 Integrate changes from Routecore 0.5 & Roto 0.3
 - 💤 Simplify configuration format
-- 💤 Limited MRT import for testing
+- 🦀 Limited MRT import for testing
 
 ### UNRELEASED 0.3: Collector functionality
 

@@ -1,5 +1,8 @@
 #![allow(dead_code)]
-use octseq::{Octets, Parser};
+use octseq::{Octets, OctetsFrom, Parser};
+use routecore::bgp::message::PduParseInfo;
+use routecore::bgp::path_attributes::{PaMap, PathAttributes};
+use routecore::bgp::types::AfiSafiType;
 use routecore::{bgp::types::Afi, typeenum};
 use inetnum::{addr::Prefix, asn::Asn};
 
@@ -30,13 +33,13 @@ pub struct CommonHeader<'a, Octs> {
     message: Parser<'a, Octs>
 }
 impl<Octs: Octets> CommonHeader<'_, Octs> {
-    pub fn length(self) -> u32  {
+    pub fn length(&self) -> u32  {
         self.length
     }
-    pub fn msgtype(self) -> MessageType {
+    pub fn msgtype(&self) -> MessageType {
         self.msg_type
     }
-    pub fn subtype(self) -> MessageSubType {
+    pub fn subtype(&self) -> MessageSubType {
         self.msg_subtype
     }
 }
@@ -206,9 +209,9 @@ impl<'a, Octs: Octets> PeerIndexTable<'a, Octs> {
 
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq)]
 pub struct PeerEntry {
-    bgp_id: [u8; 4],
-    addr: IpAddr,
-    asn: Asn,
+    pub bgp_id: [u8; 4],
+    pub addr: IpAddr,
+    pub asn: Asn,
 }
 
 impl PeerEntry {
@@ -430,7 +433,7 @@ impl PeerIndex {
         self.peers.len() == 0
     }
 
-    pub fn get<Octs: Octets>(&self, rib_entry: RibEntry<Octs>)
+    pub fn get<Octs: Octets>(&self, rib_entry: &RibEntry<Octs>)
         -> Option<&PeerEntry>
     {
         self.peers.get(usize::from(rib_entry.peer_index()))
@@ -443,6 +446,142 @@ impl<I: SliceIndex<[PeerEntry]>> Index<I> for PeerIndex {
         &self.peers[i]
     }
 }
+
+//------------ Convenience stuff / public API ---------------------------------
+
+pub struct MrtFile<'a> {
+    raw: &'a [u8],
+}
+impl<'a> MrtFile<'a> {
+    pub fn new(raw: &'a [u8]) -> Self {
+        Self { raw }
+    }
+
+    pub fn rib_entries(&'a self) -> Result<RibEntryIterator<'a, &'a [u8]>, ParseError> {
+        let mut parser = Parser::from_ref(&self.raw);
+        let peer_index = Self::extract_peer_index_table(&mut parser)?;
+        Ok(
+            RibEntryIterator::new(
+                peer_index,
+                parser
+            )
+        )
+    }
+
+    fn extract_peer_index_table(parser: &mut Parser<'_, &[u8]>) -> Result<PeerIndex, ParseError> {
+        let mut m = CommonHeader::parse(parser)?;
+        let mut peer_index = PeerIndex::empty();
+
+        match m.subtype() {
+            MessageSubType::TableDumpv2SubType(tdv2) => {
+                match tdv2 {
+                    TableDumpv2SubType::PeerIndexTable => {
+                        assert!(peer_index.is_empty());
+                        let mut pit = PeerIndexTable::parse(&mut m.message)?;
+                        peer_index.reserve(pit.peer_count().into());
+                        let mut pes = pit.entries();
+                        while pes.remaining() > 0 {
+                            let pe = PeerEntry::parse(&mut pes).unwrap();
+                            //println!("peer entry {pe:?}");
+                            peer_index.push(pe);
+                        }
+                        assert_eq!(peer_index.len(), pit.peer_count().into());
+                        println!("peer table with {} entries", peer_index.len());
+                        Ok(peer_index)
+                    },
+                    _ => {
+                        Err(ParseError("expected PeerIndexTable"))
+                    }
+                }
+            }
+            _ => { Err(ParseError("expected TableDumpv2SubType")) }
+        }
+    }
+}
+
+pub struct RibEntryIterator<'a, Octs> {
+    peer_index: PeerIndex,
+    parser: Parser<'a, Octs>,
+    current_table: Option<RibEntryHeader<'a, Octs>>,
+    current_afisafi: Option<AfiSafiType>,
+}
+impl<'a, Octs> RibEntryIterator<'a, Octs> {
+    fn new(peer_index: PeerIndex, parser: Parser<'a, Octs>) -> Self {
+        Self {
+            peer_index,
+            parser, 
+            current_table: None,
+            current_afisafi: None,
+        }
+    }
+}
+
+
+impl<'a, Octs: Octets> Iterator for RibEntryIterator<'a, Octs>
+where
+    Vec<u8>: OctetsFrom<Octs::Range<'a>>
+{
+    type Item = (AfiSafiType, u16, PeerEntry, Prefix, PaMap);
+
+    fn next(&mut self) -> Option<Self::Item>
+    {
+        if self.current_table.is_none() {
+            if self.parser.remaining() == 0 {
+                return None;
+            }
+            let mut m = CommonHeader::parse(&mut self.parser).unwrap();
+            if let MessageSubType::TableDumpv2SubType(tdv2) = m.subtype() {
+                match tdv2 {
+                    TableDumpv2SubType::RibIpv4Unicast => {
+                        let reh = RibEntryHeader::parse(&mut m.message, Afi::Ipv4).unwrap();
+                        //dbg!("new v4unicast table at {}", self.parser.pos());
+                        self.current_table = Some(reh);
+                        self.current_afisafi = Some(AfiSafiType::Ipv4Unicast);
+                    }
+                    TableDumpv2SubType::RibIpv6Unicast => {
+                        let mut reh = RibEntryHeader::parse(&mut m.message, Afi::Ipv6).unwrap();
+                        //println!("{}", reh.prefix);
+                        //println!("{}", reh);
+                        self.current_table = Some(reh);
+                        self.current_afisafi = Some(AfiSafiType::Ipv6Unicast);
+                    }
+                    _ => todo!()
+                }
+            }
+        }
+
+        let mut table = self.current_table.take().unwrap();
+        let re = RibEntry::parse(&mut table.entries).unwrap();
+        let peer = self.peer_index.get(&re).unwrap();
+        // XXX here we probably need a PduParseInfo::mrt()
+        let prefix = table.prefix;
+        let pas = PathAttributes::new(re.attributes, PduParseInfo::modern());
+        let mut pa_map = PaMap::empty();
+        for pa in pas {
+            match pa {
+                Ok(pa) => {
+                    pa_map.attributes_mut().insert(
+                        pa.type_code(), pa.to_owned().unwrap()
+                    );
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    return None;
+                }
+            
+            }
+        }
+
+
+
+        if table.entries.remaining() != 0 {
+            self.current_table = Some(table);
+        } 
+
+        Some((*self.current_afisafi.as_ref().unwrap(), re.peer_idx, *peer, prefix, pa_map))
+    }
+}
+
 
 //----------- Errors ---------------------------------------------------------
 
@@ -461,6 +600,9 @@ impl From<octseq::ShortInput> for ParseError {
     }
 }
 
+
+//------------ Tests ----------------------------------------------------------
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -468,11 +610,11 @@ mod tests {
     use std::fs::File;
 
     //use routecore::bgp::message::update::{PathAttributeType, PathAttributes, SessionConfig};
-    use routecore::bgp::{aspath::AsPath, message::{PduParseInfo, SessionConfig}, path_attributes::{PathAttributeType, PathAttributes}};
+    use routecore::bgp::{aspath::AsPath, message::{PduParseInfo}, path_attributes::{PathAttributeType, PathAttributes}};
 
 
     fn get_fh() -> Mmap {
-        let filename = "latest-bview.mrt";
+        let filename = "../test-data/latest-bview.mrt";
         //let filename = "latest-update.mrt";
         //let filename = "rib.20230515.0800.mrt";
         //let filename = "route-collector.ams.pch.net-mrt-bgp-updates-2023-05-15-16-28";
@@ -483,15 +625,27 @@ mod tests {
     }
 
     #[test]
+    fn rib_entry_iterator() {
+        let fh = &get_fh()[..];
+        let mrt_file = MrtFile::new(fh);
+        let rib_entries = mrt_file.rib_entries().unwrap();
+        
+        println!();
+        for (idx, e) in rib_entries.enumerate() {
+            print!("{idx}\r");
+        }
+        println!();
+    }
+
+    #[test]
     fn it_works() {
         let fh = &get_fh()[..];
 
         let mut p = Parser::from_ref(&fh);
         let mut peer_index = PeerIndex::empty();
 
-        //let sc = SessionConfig::mrt();
-        // FIXME we need a special sessionconfig because in MRT the (I think)
-        // MP_REACH is slightly different than in actual BGP
+        // FIXME we need a special sessionconfig/pdu_parse_info because in MRT
+        // the (I think) MP_REACH is slightly different than in actual BGP
         //let sc = SessionConfig::modern();
 
         while let Ok(ref mut m) = CommonHeader::parse(&mut p) {
@@ -519,7 +673,7 @@ mod tests {
                             let mut entries = reh.entries();
                             while entries.remaining() > 0 {
                                 let mut re = RibEntry::parse(&mut entries).unwrap();
-                                let peer = peer_index.get(re);
+                                let peer = peer_index.get(&re);
                                 //println!("\t{} {:?}", re, peer);
 
                                 //println!("attr: {:?}", re.attributes);

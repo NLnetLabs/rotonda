@@ -1059,8 +1059,9 @@ impl RibUnitRunner {
             //pub 
             //match insert_fn(&prefix, payload.rx_value.clone(), &rib, payload.context.provenance()) {
 
-            let route_context = match &payload.context {
-                RouteContext::Fresh(ctx) => { ctx },
+            let (route_status, provenance) = match &payload.context {
+                RouteContext::Fresh(ctx) => { (ctx.status, ctx.provenance) },
+                RouteContext::Mrt(ctx) => { (ctx.status, ctx.provenance) },
                 RouteContext::Reprocess => {
                     error!("unexpected RouteContext::Reprocess in insert_payload");
                     self.status_reporter.insert_failed(&payload.rx_value, "unexpected RouteContext::Reprocess");

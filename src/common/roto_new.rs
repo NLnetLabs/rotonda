@@ -159,10 +159,22 @@ pub struct FreshRouteContext {
     // facilitating a query (and thus the bgp_msg itself likely is  None).
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct MrtContext {
+    pub status: RouteStatus,
+    pub provenance: Provenance,
+}
+impl MrtContext {
+    pub fn provenance(&self) -> Provenance {
+        self.provenance
+    }
+}
+
 // LH: attempt to capture both fresh and re-process contexts with an enum:
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RouteContext {
     Fresh(FreshRouteContext), // Fresh, Realtime,
+    Mrt(MrtContext),
     Reprocess // Data coming form a pRIB somewhere West. XXX could/should this
               // contain an IngressId/MUI ?
 }
@@ -176,6 +188,13 @@ impl From<FreshRouteContext> for RouteContext {
 impl RouteContext {
     pub fn for_reprocessing() -> Self {
         Self::Reprocess
+    }
+
+    pub fn for_mrt_dump(provenance: Provenance) -> Self {
+        Self::Mrt(MrtContext {
+            status: RouteStatus::Active,
+            provenance
+        })
     }
 
     pub fn new(
@@ -195,6 +214,7 @@ impl RouteContext {
     pub fn ingress_id(&self) -> u32 {
         match self {
             Self::Fresh(ctx) => ctx.provenance().ingress_id,
+            Self::Mrt(ctx) => ctx.provenance().ingress_id,
             Self::Reprocess => todo!()
         }
     }

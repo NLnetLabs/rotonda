@@ -67,6 +67,7 @@ indoc              = "2.0"
 layout-rs          = { version = "0.1" }
 mqtt               = { version = "0.23.0", package = "rumqttc", default-features = false }
 mrtin              = { path = "mrtin" }
+memmap2                 = "0.9"
 non-empty-vec      = { version = "0.2", features = ["serde"]}
 percent-encoding   = "2.3"
 roto               = { git = "https://github.com/nlnetlabs/roto", branch = "main" }

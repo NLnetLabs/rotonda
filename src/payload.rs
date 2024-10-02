@@ -6,6 +6,7 @@ use chrono::{DateTime, Utc};
 use rotonda_store::QueryResult;
 
 use routecore::bgp::nlri::afisafi::IsPrefix;
+use routecore::bgp::path_attributes::PaMap;
 use routecore::bgp::types::AfiSafiType;
 use routecore::bgp::workshop::route::RouteWorkshop;
 use smallvec::{smallvec, SmallVec};

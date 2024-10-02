@@ -53,7 +53,6 @@ impl MrtIn {
         let (tx, rx) = mpsc::channel(10);
 
         let _  = tx.send(self.filename.clone()).await;
-        let _  = tx.send(self.filename.clone()).await;
 
         MrtInRunner::new(
             self,

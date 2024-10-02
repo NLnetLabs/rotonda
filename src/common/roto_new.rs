@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::{HashMap, HashSet}, ffi::OsString, net::Ip
 
 use bytes::Bytes;
 use chrono::Utc;
-use inetnum::asn::Asn;
+use inetnum::{addr::Prefix, asn::Asn};
 use rotonda_store::prelude::multi::RouteStatus;
 use routecore::{bgp::{message::UpdateMessage, nlri::afisafi::Nlri, workshop::route::RouteWorkshop}, bmp::message::PerPeerHeader};
 use serde::Deserialize;
@@ -135,6 +135,8 @@ pub enum Output {
     /// A BMP PeerDownNotification was observed. 
     PeerDown, // TODO stick the PeerIp in here from roto, if we can, otherwise
               // get it from elsewhere in Rotonda
+    /// Prefix observed in the BGP or BMP message.
+    Prefix(Prefix),
 
     /// Variant to support user-defined log entries.
     Custom(u32, u32),

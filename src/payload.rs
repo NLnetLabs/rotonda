@@ -97,8 +97,8 @@ pub enum RotondaRoute {
      // TODO support all routecore AfiSafiTypes
 }
 
-/*
 impl RotondaRoute {
+    /*
     pub fn get_attr<A>(&self) -> Option<A> {
         match self {
             RotondaRoute::Ipv4Unicast(rws) => rws.get_attr::<A>(),
@@ -107,8 +107,16 @@ impl RotondaRoute {
             RotondaRoute::Ipv6Multicast(rws) => todo!(),
         }
     }
+    */
+    pub fn attributes(&self) -> &PaMap {
+        match self {
+            RotondaRoute::Ipv4Unicast(rws) => rws.attributes(),
+            RotondaRoute::Ipv6Unicast(rws) => rws.attributes(),
+            RotondaRoute::Ipv4Multicast(rws) => rws.attributes(),
+            RotondaRoute::Ipv6Multicast(rws) => rws.attributes(),
+        }
+    }
 }
-*/
 
 impl fmt::Display for RotondaRoute {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

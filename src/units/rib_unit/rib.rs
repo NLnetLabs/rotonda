@@ -141,8 +141,6 @@ impl Rib {
             });
         }
 
-        debug!("creating pub rec with RibValue {}", val);
-
         let pubrec = rotonda_store::PublicRecord::new(
             mui,
             ltime,

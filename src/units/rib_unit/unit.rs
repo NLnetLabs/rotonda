@@ -14,7 +14,7 @@ use async_trait::async_trait;
 
 use chrono::Utc;
 use hash_hasher::{HashBuildHasher, HashedSet};
-use log::{debug, error, log_enabled, trace, warn};
+use log::{debug, error, info, log_enabled, trace, warn};
 use non_empty_vec::NonEmpty;
 //use roto::types::{
 //    builtin::{BasicRouteToken, BuiltinTypeValue, NlriStatus, PrefixRoute, RouteContext},
@@ -863,6 +863,16 @@ impl RibUnitRunner {
                 res.push(p);
             }
         }
+        for entry in outputstream.drain() {
+            match entry {
+                crate::common::roto_new::Output::Prefix(p) => {
+                    info!("output stream, observed prefix {p}");
+                }
+                _ => {
+                info!("output stream entry {entry:?}");
+                }
+            }
+        }
         /*
         Self::ROTO.with_borrow_mut(|maybe_compiled| {
             let compiled = ensure_compiled(
@@ -1063,7 +1073,7 @@ impl RibUnitRunner {
             //    payload.rx_value, &route_context.status()
             //);
             match rib.insert(
-                &payload.rx_value, route_context.status(), route_context.provenance(), ltime
+                &payload.rx_value, route_status, provenance, ltime
             ) {
                 Ok(report) => {
                     let post_insert = Utc::now();
@@ -1081,7 +1091,7 @@ impl RibUnitRunner {
                     };
 
                     self.status_reporter.insert_ok(
-                        route_context.provenance().ingress_id,
+                        provenance.ingress_id,
                         store_op_delay,
                         propagation_delay,
                         //num_retries,

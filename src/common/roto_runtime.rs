@@ -1,8 +1,11 @@
 use bytes::Bytes;
+use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
 use roto::roto_function;
+use routecore::bgp::aspath::{Hop, HopPath};
 use routecore::bgp::communities::Community;
 use routecore::bgp::message::SessionConfig;
+use routecore::bgp::nlri::afisafi::IsPrefix;
 use routecore::bmp::message::PerPeerHeader;
 use routecore::bmp::message::{Message as BmpMsg, MessageType as BmpMsgType};
 use routecore::bgp::message::{Message as BgpMsg, UpdateMessage as BgpUpdateMessage};
@@ -27,6 +30,39 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
     rt.register_type_with_name::<BgpUpdateMessage<Bytes>>("BgpMsg")?;
     //rt.register_method::<BgpUpdateMessage<Bytes>, _, _>("aspath_contains", bgp_aspath_contains)?;
 
+
+    // --- RotondaRoute methods
+
+    #[roto_method(rt, RotondaRoute)]
+    fn prefix_matches(rr: *const RotondaRoute, to_match: *const Prefix) -> bool {
+        let rr = unsafe { &*rr };
+        let to_match = unsafe { &*to_match };
+        let rr_prefix = match rr {
+            RotondaRoute::Ipv4Unicast(n) => n.nlri().prefix(),
+            RotondaRoute::Ipv6Unicast(n) => n.nlri().prefix(),
+            RotondaRoute::Ipv4Multicast(n) => n.nlri().prefix(),
+            RotondaRoute::Ipv6Multicast(n) => n.nlri().prefix(),
+        };
+        rr_prefix == *to_match
+    }
+
+    #[roto_method(rt, RotondaRoute, aspath_origin)]
+    fn rr_aspath_origin(
+        rr: *const RotondaRoute,
+        to_match: Asn,
+    ) -> bool {
+        let rr = unsafe { &*rr };
+        if let Some(hoppath) = rr.attributes().get::<HopPath>(){
+            if let Some(Hop::Asn(asn)) = hoppath.origin() {
+                return *asn == to_match
+            }
+        }
+        false
+
+    }
+
+    // --- BGP message methods
+
     #[roto_method(rt, BgpUpdateMessage<Bytes>, aspath_contains)]
     fn bgp_aspath_contains(
         msg: *const BgpUpdateMessage<Bytes>,
@@ -37,7 +73,6 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
         aspath_contains(msg, to_match)
     }
 
-    //rt.register_method::<BgpUpdateMessage<Bytes>, _, _>("aspath_origin", bgp_aspath_origin)?;
     #[roto_method(rt, BgpUpdateMessage<Bytes>, aspath_origin)]
     fn bgp_aspath_origin(
         msg: *const BgpUpdateMessage<Bytes>,
@@ -154,7 +189,19 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
         contains_community(&update, to_match)
     }
 
-    // --- Output / loggging / 'south'-wards artifacts methods
+
+    // --- Output / logging / 'south'-wards artifacts methods
+    #[roto_method(rt, OutputStream<Output>)]
+    fn log_prefix(
+        stream: *mut OutputStream<Output>,
+        prefix: *const Prefix,
+    ) {
+        let stream = unsafe { &mut *stream };
+        let prefix = unsafe { &*prefix };
+        stream.push(Output::Prefix(*prefix));
+    }
+
+
     #[roto_method(rt, OutputStream<Output>, log_matched_asn)]
     fn log_asn(
         stream: *mut OutputStream<Output>,

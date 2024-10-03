@@ -539,7 +539,7 @@ where
                         self.current_afisafi = Some(AfiSafiType::Ipv4Unicast);
                     }
                     TableDumpv2SubType::RibIpv6Unicast => {
-                        let mut reh = RibEntryHeader::parse(&mut m.message, Afi::Ipv6).unwrap();
+                        let reh = RibEntryHeader::parse(&mut m.message, Afi::Ipv6).unwrap();
                         //println!("{}", reh.prefix);
                         //println!("{}", reh);
                         self.current_table = Some(reh);

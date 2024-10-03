@@ -14,3 +14,12 @@ routecore = "0.5.0-rc0"
 octseq = { version = "0.4.0" }
 memmap2 = "0.6.1"
 inetnum = "0.1.0"
+rotonda-store = { path = "../../rotonda-store" }
+
+[dev-dependencies]
+rotonda-store = { path = "../../rotonda-store" }
+
+[[bin]]
+name = "test_store"
+#path = "bin/test_store.rs"
+

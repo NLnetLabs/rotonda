@@ -5,17 +5,19 @@ use memmap2::Mmap;
 use mrtin::MrtFile;
 use rotonda_store::prelude::multi::{MultiThreadedStore, RouteStatus};
 use rotonda_store::PublicRecord;
+use routecore::bgp::path_attributes::PaMap;
 
 
 #[derive(Clone, Debug)]
-struct My32(u32);
-impl std::fmt::Display for My32 {
+struct MyPaMap(PaMap);
+impl std::fmt::Display for MyPaMap {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.0.fmt(f)
+        write!(f, "{:?}", self.0)
+        
     }
 }
 
-impl rotonda_store::Meta for My32 {
+impl rotonda_store::Meta for MyPaMap {
     type Orderable<'a> = u32;
 
     type TBI = u32;
@@ -35,7 +37,7 @@ fn main() {
 
         let mrtfile = args.get(1).unwrap();
 
-        let store = MultiThreadedStore::<My32>::new().unwrap();
+        let store = MultiThreadedStore::<MyPaMap>::new().unwrap();
 
         let file = File::open(mrtfile).unwrap();
         let mmap = unsafe { Mmap::map(&file).unwrap()  };
@@ -44,12 +46,12 @@ fn main() {
         let mrt_file = MrtFile::new(&mmap[..]);
         let rib_entries = mrt_file.rib_entries().unwrap();
         
-        for (_idx, e) in rib_entries.enumerate() {
-            let (_, peer_idx, _, prefix, _) = e;
+        for e in rib_entries {
+            let (_, peer_idx, _, prefix, pamap) = e;
             let mui = peer_idx.into();
             let ltime = 0;
             let route_status = RouteStatus::Active;
-            let val = My32(1234_u32);
+            let val = MyPaMap(pamap);
 
             let record = PublicRecord::new(
                 mui, ltime, route_status, val

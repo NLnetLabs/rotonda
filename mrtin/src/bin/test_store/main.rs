@@ -9,7 +9,8 @@ use routecore::bgp::path_attributes::PaMap;
 
 
 #[derive(Clone, Debug)]
-struct MyPaMap(PaMap);
+//struct MyPaMap(PaMap);
+struct MyPaMap(Vec<u8>);
 impl std::fmt::Display for MyPaMap {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.0)

@@ -23,6 +23,9 @@ authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]
 [workspace]
 members = ["mrtin"]
 
+[workspace.dependencies]
+routecore          = { git = "https://github.com/nlnetlabs/routecore", rev = "831e495", features = ["bgp", "bmp", "serde", "fsm"] }
+
 
 [dependencies]
 arc-swap           = "1.6"
@@ -39,9 +42,7 @@ pin-project-lite   = "0.2"
 rand               = "0.8"
 reqwest            = { version = "0.11", default-features = false }
 inetnum            = { version = "0.1.0", features = ["arbitrary", "serde"] }
-routecore           = { version = "0.5.0-rc1", features = ["bmp", "serde", "fsm"] }
-#routecore          = { git = "https://github.com/nlnetlabs/routecore", branch = "absorb-fsm", features = ["bgp", "bmp", "serde", "fsm"] }
-#routecore          = { path = "../routecore", features = ["bgp", "bmp", "serde", "fsm"] }
+routecore          = { workspace = true }
 sanitise-file-name = "1.0"
 serde              = { version = "1.0", features = ["derive", "rc"] }
 serde_json         = { version = "1.0", features = ["preserve_order"] }
@@ -76,7 +77,6 @@ serde_with         = "3"
 smallvec           = { version = "1.11", features = ["const_generics", "const_new", "union"] }
 tokio-metrics      = { version = "0.3", default-features = false }
 uuid               = { version = "1.4", features = ["v4", "fast-rng"] }
-octseq             = { version = "0.4", features = ["bytes"] }
 
 [target.'cfg(unix)'.dependencies]
 syslog             = "6.1"

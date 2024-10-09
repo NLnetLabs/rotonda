@@ -1448,15 +1448,6 @@ checksum = "78ca9ab1a0babb1e7d5695e3530886289c18cf2f87ec19a575a0abdce112e3a3"
 
 [[package]]
 name = "memmap2"
-version = "0.6.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d28bba84adfe6646737845bc5ebbfa2c08424eb1c37e94a1fd2a82adb56a872"
-dependencies = [
- "libc",
-]
-
-[[package]]
-name = "memmap2"
 version = "0.9.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd3f7eed9d3848f8b98834af67102b720745c4ec028fcd0aa0239277e7de374f"
@@ -1557,9 +1548,10 @@ name = "mrtin"
 version = "0.1.1-dev"
 dependencies = [
  "inetnum",
- "memmap2 0.6.2",
+ "memmap2",
  "octseq",
- "routecore",
+ "rotonda-store",
+ "routecore 0.5.0-rc2-dev",
 ]
 
 [[package]]
@@ -2084,7 +2076,7 @@ dependencies = [
  "layout-rs",
  "log",
  "log-reroute",
- "memmap2 0.9.5",
+ "memmap2",
  "mrtin",
  "non-empty-vec",
  "percent-encoding",
@@ -2094,7 +2086,7 @@ dependencies = [
  "reqwest",
  "roto",
  "rotonda-store",
- "routecore",
+ "routecore 0.5.0-rc2-dev",
  "rumqttc",
  "rumqttd",
  "sanitise-file-name",
@@ -2130,7 +2122,7 @@ dependencies = [
  "log",
  "roaring",
  "rotonda-macros",
- "routecore",
+ "routecore 0.5.0-rc1",
 ]
 
 [[package]]
@@ -2138,6 +2130,22 @@ name = "routecore"
 version = "0.5.0-rc1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1738fc42860de9ff5a0346fe4cce09cede0d44dd49055b6c7746a59510f43b78"
+dependencies = [
+ "bytes",
+ "chrono",
+ "const-str",
+ "inetnum",
+ "log",
+ "octseq",
+ "paste",
+ "serde",
+ "tokio",
+]
+
+[[package]]
+name = "routecore"
+version = "0.5.0-rc2-dev"
+source = "git+https://github.com/nlnetlabs/routecore?rev=831e495#831e495365b3f03d61af6157ce1db20274bdd8c7"
 dependencies = [
  "bytes",
  "chrono",

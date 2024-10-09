@@ -543,11 +543,9 @@ pub(crate) fn explode_announcements(
     bgp_update: &UpdateMessage<Bytes>
 ) -> Result<Vec<RotondaRoute>, routecore::bgp::ParseError> {
     let mut res = vec![];
-    let mut pas = bgp_update.path_attributes()?;
-    pas.parser.remaining();
-    let mut v = Vec::with_capacity(pas.parser.remaining());
-    pas.parser.parse_buf(&mut v[..])?;
-    let pamap = RotondaPaMap(bgp_update.pdu_parse_info(), v);
+
+    let pas = bgp_update.path_attributes()?;
+    let pamap = RotondaPaMap(pas.into());
 
     for a in bgp_update.announcements()? {
         let a = a?;
@@ -560,9 +558,17 @@ pub(crate) fn explode_withdrawals(
     bgp_update: &UpdateMessage<Bytes>
 ) -> Result<Vec<RotondaRoute>, routecore::bgp::ParseError> {
     let mut res = vec![];
+
+    let pamap = RotondaPaMap(
+        routecore::bgp::path_attributes::OwnedPathAttributes::new(
+            bgp_update.pdu_parse_info(),
+            vec![]
+        )
+    );
+
     for w in bgp_update.withdrawals()? {
         let w = w?;
-        res.push((w, RotondaPaMap(bgp_update.pdu_parse_info(), vec![])).into());
+        res.push((w, pamap.clone()).into());
     }
     Ok(res)
 }

@@ -52,7 +52,7 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
         to_match: Asn,
     ) -> bool {
         let rr = unsafe { &*rr };
-        if let Some(hoppath) = rr.attributes().get::<HopPath>(){
+        if let Some(hoppath) = rr.owned_map().get::<HopPath>(){
             if let Some(Hop::Asn(asn)) = hoppath.origin() {
                 return *asn == to_match
             }

@@ -101,43 +101,22 @@ pub enum RotondaRoute {
 }
 
 impl RotondaRoute {
-    pub fn rotonda_pamap(&self) -> RotondaPaMap {
+    pub fn owned_map(&self) -> &routecore::bgp::path_attributes::OwnedPathAttributes {
         match self {
-            RotondaRoute::Ipv4Unicast(_, p) => p.clone(),
-            RotondaRoute::Ipv6Unicast(_, p) => p.clone(),
-            RotondaRoute::Ipv4Multicast(_, p) => p.clone(),
-            RotondaRoute::Ipv6Multicast(_, p) => p.clone(),
+            RotondaRoute::Ipv4Unicast(_, p) => &p.0,
+            RotondaRoute::Ipv6Unicast(_, p) => &p.0,
+            RotondaRoute::Ipv4Multicast(_, p) => &p.0,
+            RotondaRoute::Ipv6Multicast(_, p) => &p.0,
         }
     }
 
-    pub fn attributes(&self) -> PaMap {
-        let mut pa_map = PaMap::empty();
-        let raw = match self {
-            RotondaRoute::Ipv4Unicast(_, raw) => raw,
-            RotondaRoute::Ipv6Unicast(_, raw) => raw,
-            RotondaRoute::Ipv4Multicast(_, raw) => raw,
-            RotondaRoute::Ipv6Multicast(_, raw) => raw,
-        };
-        let parser = octseq::Parser::from_ref(&raw.1);
-        let pas = routecore::bgp::path_attributes::PathAttributes::new(
-            parser,
-            routecore::bgp::message::PduParseInfo::modern()
-        );
-        for pa in pas {
-            match pa {
-                Ok(pa) => {
-                    pa_map.attributes_mut().insert(
-                        pa.type_code(), pa.to_owned().unwrap()
-                    );
-                }
-                Err(e) => {
-                    warn!("{e}");
-                    break;
-                }
-            
-            }
+    pub fn rotonda_pamap(&self) -> &RotondaPaMap {
+        match self {
+            RotondaRoute::Ipv4Unicast(_, p) => p,
+            RotondaRoute::Ipv6Unicast(_, p) => p,
+            RotondaRoute::Ipv4Multicast(_, p) => p,
+            RotondaRoute::Ipv6Multicast(_, p) => p,
         }
-        pa_map
     }
 }
 
@@ -163,39 +142,11 @@ impl rotonda_store::Meta for RotondaPaMap {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, serde::Serialize)]
-//pub struct RotondaPaMap(pub PaMap);
-pub struct RotondaPaMap(pub routecore::bgp::message::PduParseInfo, pub Vec<u8>);
+pub struct RotondaPaMap(pub routecore::bgp::path_attributes::OwnedPathAttributes);
 
 impl fmt::Display for RotondaPaMap {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self.0)
-    }
-}
-
-impl From<&RotondaPaMap> for PaMap {
-    fn from(value: &RotondaPaMap) -> Self {
-        let raw = &value.1;
-        dbg!(&raw);
-        let pas = routecore::bgp::path_attributes::PathAttributes::new(octseq::Parser::from_ref(&raw), value.0);
-        let mut pa_map = PaMap::empty();
-
-        for pa in pas {
-            match pa {
-                Ok(pa) => {
-                    pa_map.attributes_mut().insert(
-                        pa.type_code(), pa.to_owned().unwrap()
-                    );
-                }
-                Err(e) => {
-                    eprintln!("{e}");
-                    break;
-                    //return None;
-                }
-            
-            }
-        }
-        dbg!(&pa_map);
-        pa_map
     }
 }
 

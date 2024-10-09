@@ -93,14 +93,15 @@ impl MrtInRunner {
         //const BUFSIZE: usize = 256;
         //let mut buffer = Vec::with_capacity(BUFSIZE);
 
-        for (afisafi, peer_id, peer_entry, prefix, pa_map) in rib_entries {
+        for (afisafi, peer_id, peer_entry, prefix, raw_attr) in rib_entries {
             let rr = match afisafi {
                 AfiSafiType::Ipv4Unicast => {
                     // tmp test: skip v4
                     //continue;
-                    //let mut rws = RouteWorkshop::new(prefix.try_into().unwrap());
-                    //rws.set_attributes(pa_map);
-                    RotondaRoute::Ipv4Unicast(prefix.try_into().unwrap(), RotondaPaMap(PduParseInfo::modern(), pa_map))
+                    RotondaRoute::Ipv4Unicast(
+                        prefix.try_into().unwrap(),
+                        RotondaPaMap(routecore::bgp::path_attributes::OwnedPathAttributes::new(PduParseInfo::modern(), raw_attr))
+                    )
                 }
                 AfiSafiType::Ipv4Multicast => todo!(),
                 AfiSafiType::Ipv4MplsUnicast => todo!(),
@@ -110,10 +111,10 @@ impl MrtInRunner {
                 AfiSafiType::Ipv6Unicast => {
                     // tmp test: skip v6
                     //continue;
-                    //let mut rws = RouteWorkshop::new(prefix.try_into().unwrap());
-                    //rws.set_attributes(pa_map);
-                    //RotondaRoute::Ipv6Unicast(rws)
-                    RotondaRoute::Ipv6Unicast(prefix.try_into().unwrap(), RotondaPaMap(PduParseInfo::modern(), pa_map))
+                    RotondaRoute::Ipv6Unicast(
+                        prefix.try_into().unwrap(),
+                        RotondaPaMap(routecore::bgp::path_attributes::OwnedPathAttributes::new(PduParseInfo::modern(), raw_attr))
+                    )
                 }
                 AfiSafiType::Ipv6Multicast => todo!(),
                 AfiSafiType::Ipv6MplsUnicast => todo!(),

@@ -35,8 +35,6 @@ impl rotonda_store::Meta for RotondaRoute {
 }
 
 pub struct Rib {
-    //unicast: Option<MultiThreadedStore<RotondaRoute>>,
-    //multicast: Option<MultiThreadedStore<RotondaRoute>>,
     unicast: Option<MultiThreadedStore<RotondaPaMap>>,
     multicast: Option<MultiThreadedStore<RotondaPaMap>>,
     other_fams: HashMap<AfiSafiType, HashMap<(IngressId, Nlri<bytes::Bytes>), PaMap>>,
@@ -83,13 +81,6 @@ impl Rib {
         provenance: Provenance,
         ltime: u64
     ) -> Result<UpsertReport, String> {
-        
-        //let res = match val {
-        //    RotondaRoute::Ipv4Unicast(ref rws) => self.insert_prefix(&rws.nlri().prefix(), Multicast(false), val, route_status, provenance, ltime),
-        //    RotondaRoute::Ipv6Unicast(ref rws) => self.insert_prefix(&rws.nlri().prefix(), Multicast(false), val, route_status, provenance, ltime),
-        //    RotondaRoute::Ipv4Multicast(ref rws) => self.insert_prefix(&rws.nlri().prefix(), Multicast(true), val, route_status, provenance, ltime),
-        //    RotondaRoute::Ipv6Multicast(ref rws) => self.insert_prefix(&rws.nlri().prefix(), Multicast(true), val, route_status, provenance, ltime),
-        //};
 
         let res = match val {
             RotondaRoute::Ipv4Unicast(n, ..) => self.insert_prefix(&n.prefix(), Multicast(false), val, route_status, provenance, ltime),
@@ -146,20 +137,11 @@ impl Rib {
             });
         }
 
-        /*
         let pubrec = rotonda_store::PublicRecord::new(
             mui,
             ltime,
             route_status,
-            val.clone(), // RotondaRoute
-        );
-        */
-
-        let pubrec = rotonda_store::PublicRecord::new(
-            mui,
-            ltime,
-            route_status,
-            val.rotonda_pamap(),
+            val.rotonda_pamap().clone()
         );
 
 
@@ -293,7 +275,6 @@ impl Rib {
         prefix: &Prefix,
         match_options: &MatchOptions,
         guard: &Guard
-    //) -> Result<QueryResult<RotondaRoute>, String> {
     ) -> Result<QueryResult<RotondaPaMap>, String> {
         let store = self.unicast.as_ref()
             .ok_or(PrefixStoreError::StoreNotReadyError.to_string())?;

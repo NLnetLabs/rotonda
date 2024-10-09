@@ -521,7 +521,8 @@ impl<'a, Octs: Octets> Iterator for RibEntryIterator<'a, Octs>
 where
     Vec<u8>: OctetsFrom<Octs::Range<'a>>
 {
-    type Item = (AfiSafiType, u16, PeerEntry, Prefix, PaMap);
+    //type Item = (AfiSafiType, u16, PeerEntry, Prefix, PaMap);
+    type Item = (AfiSafiType, u16, PeerEntry, Prefix, Vec<u8>);
 
     fn next(&mut self) -> Option<Self::Item>
     {
@@ -555,22 +556,51 @@ where
         let peer = self.peer_index.get(&re).unwrap();
         // XXX here we probably need a PduParseInfo::mrt()
         let prefix = table.prefix;
+
+        let mut v = re.attributes;
+        let mut raw_attr = vec![0; v.remaining()];
+        let _ = v.parse_buf(&mut raw_attr[..]);
+
+        //let mut raw_attr = vec![];
+        //let mem_info = allocation_counter::measure(|| {
+        //    raw_attr = vec![0; v.remaining()];
+        //    let _ = v.parse_buf(&mut raw_attr[..]);
+        //});
+
+
+        /*
         let pas = PathAttributes::new(re.attributes, PduParseInfo::modern());
         let mut pa_map = PaMap::empty();
-        for pa in pas {
-            match pa {
-                Ok(pa) => {
-                    pa_map.attributes_mut().insert(
-                        pa.type_code(), pa.to_owned().unwrap()
-                    );
+
+        let mem_info = allocation_counter::measure(|| {
+            for pa in pas {
+                match pa {
+                    Ok(pa) => {
+                        pa_map.attributes_mut().insert(
+                            pa.type_code(), pa.to_owned().unwrap()
+                        );
+                    }
+                    Err(e) => {
+                        eprintln!("{e}");
+                        break;
+                        //return None;
+                    }
+                
                 }
-                Err(e) => {
-                    eprintln!("{e}");
-                    return None;
-                }
-            
             }
-        }
+        });
+
+        #[cfg(test)]
+        eprintln!(
+            "{} {} {:.1} {}",
+            re.attributes.remaining(),
+            mem_info.bytes_current,
+            mem_info.bytes_current as f64 / re.attributes.remaining() as f64,
+            mem_info.count_current,
+
+        ); //TODO allocation_mem_bytes);
+        */
+
 
 
 
@@ -578,7 +608,8 @@ where
             self.current_table = Some(table);
         } 
 
-        Some((*self.current_afisafi.as_ref().unwrap(), re.peer_idx, *peer, prefix, pa_map))
+        //Some((*self.current_afisafi.as_ref().unwrap(), re.peer_idx, *peer, prefix, pa_map))
+        Some((*self.current_afisafi.as_ref().unwrap(), re.peer_idx, *peer, prefix, raw_attr))
     }
 }
 
@@ -632,6 +663,8 @@ mod tests {
         
         println!();
         for (idx, e) in rib_entries.enumerate() {
+            let (_, _, _, _, pa_map) = e;
+            assert!(!pa_map.is_empty());
             print!("{idx}\r");
         }
         println!();

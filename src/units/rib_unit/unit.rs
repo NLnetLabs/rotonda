@@ -1,3 +1,4 @@
+use std::io::prelude::*;
 use crate::{
     common::{
         frim::FrimMap, roto_new::{ensure_compiled, FilterName, FreshRouteContext, InsertionInfo, OutputStream, RotoOutputStream, RotoScripts, RouteContext}, status_reporter::{AnyStatusReporter, UnitStatusReporter}
@@ -6,7 +7,7 @@ use crate::{
         Terminated, TriggerData,
     }, ingress, manager::{Component, WaitPoint}, payload::{
         //FilterError, Filterable,
-        Payload, RotondaRoute, RouterId, Update, UpstreamStatus
+        Payload, RotondaPaMap, RotondaRoute, RouterId, Update, UpstreamStatus
     }, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::Unit
 };
 use arc_swap::ArcSwap;
@@ -281,7 +282,8 @@ impl std::fmt::Debug for RibUnitRunner {
 impl AnyDirectUpdate for RibUnitRunner {}
 
 pub type QueryId = Uuid;
-pub type QueryOperationResult = Result<QueryResult<RotondaRoute>, String>;
+//pub type QueryOperationResult = Result<QueryResult<RotondaRoute>, String>;
+pub type QueryOperationResult = Result<QueryResult<RotondaPaMap>, String>;
 pub type QueryOperationResultSender = oneshot::Sender<QueryOperationResult>;
 pub type PendingVirtualRibQueryResults =
     FrimMap<QueryId, Arc<QueryOperationResultSender>>;
@@ -376,6 +378,7 @@ impl RibUnitRunner {
             let mut c = c.lock().unwrap();
             c.get_function("rib-in-post").unwrap()
         });
+
         let tracer = component.tracer().clone();
 
         let roto_compiled = component.roto_compiled().clone();
@@ -1224,9 +1227,10 @@ impl RibUnitRunner {
 
     async fn reprocess_query_results(
         &self,
-        res: QueryResult<RotondaRoute>,
-    ) -> QueryResult<RotondaRoute> {
-        let mut processed_res = QueryResult::<RotondaRoute> {
+        //res: QueryResult<RotondaRoute>,
+        res: QueryResult<RotondaPaMap>,
+    ) -> QueryResult<RotondaPaMap> {
+        let mut processed_res = QueryResult::<RotondaPaMap> {
             match_type: res.match_type,
             prefix: res.prefix,
             prefix_meta: vec![],
@@ -1253,7 +1257,8 @@ impl RibUnitRunner {
                 //maybe_keep.meta = meta;
                 processed_res.prefix_meta.push(
                     //maybe_keep
-                    rotonda_store::PublicRecord::<RotondaRoute>::new(mui, ltime, status, meta)
+                    //rotonda_store::PublicRecord::<RotondaRoute>::new(mui, ltime, status, meta)
+                    rotonda_store::PublicRecord::<RotondaPaMap>::new(mui, ltime, status, meta)
                 );
             }
         }
@@ -1302,8 +1307,9 @@ impl RibUnitRunner {
     /// RIB to the East made against a physical RIB to the West.
     async fn reprocess_rib_value(
         &self,
-        rib_value: RotondaRoute,
-    ) -> Option<RotondaRoute> {
+        //rib_value: RotondaRoute,
+        rib_value: RotondaPaMap,
+    ) -> Option<RotondaPaMap> {
         /*
         let mut new_values = HashedSet::with_capacity_and_hasher(
             1,
@@ -1330,11 +1336,20 @@ impl RibUnitRunner {
         //);
         let ctx = RouteContext::for_reprocessing();
 
+        todo!(); // figure out how to construct a Payload when we do not have
+                 // the RotondaRoute anymore, only the RotondaPamap.
+                 // This will depend on what type the roto function expects.
+                 // If it needs the RotondaRoute, we need to change the
+                 // signature of fn reprocess_rib_value and call it
+                 // differently from reprocess_record_set and
+                 // reprocess_query_results
+        /*
         let payload = Payload::new(
             rib_value,
             ctx.clone(),
             None
         );
+        */
 
         trace!("Re-processing route");
         todo!() // filter using new roto
@@ -1414,9 +1429,12 @@ impl RibUnitRunner {
 
     async fn reprocess_record_set(
         &self,
-        record_set: &RecordSet<RotondaRoute>,
-    ) -> Option<RecordSet<RotondaRoute>> {
-        let mut new_record_set = RecordSet::<RotondaRoute>::new();
+        //record_set: &RecordSet<RotondaRoute>,
+        record_set: &RecordSet<RotondaPaMap>,
+    //) -> Option<RecordSet<RotondaRoute>> {
+    ) -> Option<RecordSet<RotondaPaMap>> {
+        //let mut new_record_set = RecordSet::<RotondaRoute>::new();
+        let mut new_record_set = RecordSet::<RotondaPaMap>::new();
 
         for record in record_set.iter() {
             // XXX can we safely do this?

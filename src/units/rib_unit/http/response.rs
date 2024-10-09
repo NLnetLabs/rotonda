@@ -13,13 +13,13 @@ use inetnum::asn::Asn;
 use routecore::bgp::{
     aspath::{AsPath, Hop, HopPath}, communities::{
         Community as CommunityEnum, HumanReadableCommunity as Community
-    }, nlri::afisafi::{AfiSafiNlri, IsPrefix}, workshop::route::RouteWorkshop
+    }, nlri::afisafi::{AfiSafiNlri, IsPrefix}, path_attributes::FromAttribute, workshop::route::RouteWorkshop
 };
 
 use serde_json::{json, Value};
 
 use crate::{
-    common::json::EasilyExtendedJSONObject, ingress::{self, IngressId, IngressInfo}, payload::RotondaRoute,// units::rib_unit::rib::RibValue
+    common::json::EasilyExtendedJSONObject, ingress::{self, IngressId, IngressInfo}, payload::{RotondaPaMap, RotondaRoute},// units::rib_unit::rib::RibValue
 };
 
 use super::{
@@ -31,7 +31,8 @@ use super::{
 
 impl PrefixesApi {
     pub fn mk_json_response(
-        res: rotonda_store::QueryResult<RotondaRoute>,
+        //res: rotonda_store::QueryResult<RotondaRoute>,
+        res: rotonda_store::QueryResult<RotondaPaMap>,
         includes: Includes,
         details_cfg: Details,
         filters_cfg: Filters,
@@ -122,7 +123,8 @@ impl PrefixesApi {
     fn prefixes_as_json(
         query_prefix: &Prefix,
         //rib_value: &RibValue, // RibValue is basically PrefixRoute now
-        record: &PublicRecord<RotondaRoute>,
+        //record: &PublicRecord<RotondaRoute>,
+        record: &PublicRecord<RotondaPaMap>,
         details_cfg: &Details,
         filter_cfg: &Filters,
         sort_cfg: &SortKey,
@@ -236,10 +238,13 @@ impl PrefixesApi {
     }
 
     fn mk_result(
-        _query_prefix: &Prefix,
+        query_prefix: &Prefix, // XXX TODO when doing a query including
+                               // more/less specifics, is this the more/less
+                               // specific prefix or the actual query prefix?
         //route: &Arc<TypeValue>,
         //route: &PrefixRoute,
-        route: &RotondaRoute,
+        //route: &RotondaRoute,
+        route: &RotondaPaMap,
         ingress_id: IngressId,
         status: RouteStatus,
         _details_cfg: &Details,
@@ -251,6 +256,7 @@ impl PrefixesApi {
         // things are limited in terms of supported afisafis.
         // For now, we'll match on the RotondaRoute variant.
 
+        /*
         let (prefix, nh, attr) = match route {
             RotondaRoute::Ipv4Unicast(rws) => (rws.nlri().prefix(), rws.nexthop(), rws.attributes()),
             RotondaRoute::Ipv6Unicast(rws) => (rws.nlri().prefix(), rws.nexthop(), rws.attributes()),
@@ -259,14 +265,20 @@ impl PrefixesApi {
             // As soon as other cases are introduced, act accordingly.
             //_ => unimplemented!() // send out empty JSON object?
         };
+        */
         //serde_json::to_value((Id{ingress_id}, route)).unwrap()
+
+        //let (prefix, attr) = (query_prefix, route.1.clone());
+
+
         serde_json::to_value(json!({
             "ingress_id": ingress_id,
             "ingress_info": ingress_info,
-            "prefix": prefix,
+            "prefix": query_prefix,
             "status": status.to_string(),
-            "next_hop": nh,
-            "attributes": attr,
+        // "next_hop": nh,
+            //"attributes": attr,
+            "attributes": routecore::bgp::path_attributes::PaMap::from(route)
 
         })).unwrap()
     }
@@ -275,7 +287,8 @@ impl PrefixesApi {
         filter_cfg: &Filters,
         //item: &Arc<TypeValue>,
         //item: &PrefixRoute,
-        item: &RotondaRoute,
+        //item: &RotondaRoute,
+        item: &RotondaPaMap,
         ingress_info: &Option<IngressInfo>,
     ) -> bool {
         let no_selects = filter_cfg.selects().is_empty();
@@ -320,16 +333,25 @@ impl PrefixesApi {
     fn match_as_path(
         //item: &Arc<TypeValue>,
         //item: &PrefixRoute,
-        item: &RotondaRoute,
+        //item: &RotondaRoute,
+        item: &RotondaPaMap,
         filter_as_path: &[Asn],
     ) -> bool {
-            //let as_path = item.get_attr::<HopPath>();
-            let as_path = match item {
-                RotondaRoute::Ipv4Unicast(rws) => rws.get_attr::<HopPath>(),
-                RotondaRoute::Ipv6Unicast(rws) => rws.get_attr::<HopPath>(),
-                RotondaRoute::Ipv4Multicast(rws) => rws.get_attr::<HopPath>(),
-                RotondaRoute::Ipv6Multicast(rws) => rws.get_attr::<HopPath>(),
+            let parser = octseq::Parser::from_ref(&item.1) ;
+            let pas = routecore::bgp::path_attributes::PathAttributes::new(parser, item.0);
+            let as_path = if let Some(pa) = pas.get(routecore::bgp::path_attributes::PathAttributeType::AsPath) {
+                let aspath = pa.to_owned().unwrap();
+                HopPath::from_attribute(aspath)
+            } else {
+                None
             };
+            //let as_path = item.0.get::<HopPath>();
+            //let as_path = match item {
+            //    RotondaRoute::Ipv4Unicast(rws) => rws.get_attr::<HopPath>(),
+            //    RotondaRoute::Ipv6Unicast(rws) => rws.get_attr::<HopPath>(),
+            //    RotondaRoute::Ipv4Multicast(rws) => rws.get_attr::<HopPath>(),
+            //    RotondaRoute::Ipv6Multicast(rws) => rws.get_attr::<HopPath>(),
+            //};
             //let as_path = match &item.0 {
             //    roto::types::builtin::PrefixRouteWs::Ipv4Unicast(a) => a.get_attr::<HopPath>(),
             //    roto::types::builtin::PrefixRouteWs::Ipv4UnicastAddpath(a) => a.get_attr::<HopPath>(),
@@ -404,7 +426,8 @@ impl PrefixesApi {
     fn match_community(
         //item: &Arc<TypeValue>,
         //item: &PrefixRoute,
-        item: &RotondaRoute,
+        //item: &RotondaRoute,
+        item: &RotondaPaMap,
         community: &Community,
     ) -> bool {
 
@@ -413,12 +436,27 @@ impl PrefixesApi {
         debug!("in match_community, wanted_c {:?}", &wanted_c);
 
 
-        if let Some(communities)  = match item {
-            RotondaRoute::Ipv4Unicast(rws) => rws.get_attr::<Vec<CommunityEnum>>(),
-            RotondaRoute::Ipv6Unicast(rws) => rws.get_attr::<Vec<CommunityEnum>>(),
-            RotondaRoute::Ipv4Multicast(rws) => rws.get_attr::<Vec<CommunityEnum>>(),
-            RotondaRoute::Ipv6Multicast(rws) => rws.get_attr::<Vec<CommunityEnum>>(),
-        } {
+
+        let parser = octseq::Parser::from_ref(&item.1) ;
+        let pas = routecore::bgp::path_attributes::PathAttributes::new(parser, item.0);
+        let communities = if let Some(pa) = pas.get(routecore::bgp::path_attributes::PathAttributeType::StandardCommunities) {
+            let comms = pa.to_owned().unwrap();
+            Vec::<CommunityEnum>::from_attribute(comms)
+        } else {
+            None
+        };
+
+
+        if let Some(communities) = communities {
+
+
+        //if let Some(communities)  = match item {
+        //    RotondaRoute::Ipv4Unicast(rws) => rws.get_attr::<Vec<CommunityEnum>>(),
+        //    RotondaRoute::Ipv6Unicast(rws) => rws.get_attr::<Vec<CommunityEnum>>(),
+        //    RotondaRoute::Ipv4Multicast(rws) => rws.get_attr::<Vec<CommunityEnum>>(),
+        //    RotondaRoute::Ipv6Multicast(rws) => rws.get_attr::<Vec<CommunityEnum>>(),
+        //} {
+        //if let Some(communities) = item.0.get::<Vec<CommunityEnum>>() {
 
         //if let Some(communities) = match &item.get_Attr::<Vec<CommunityEnum>>() {
         //if let Some(communities) = match &item.0 {
@@ -479,7 +517,8 @@ impl PrefixesApi {
     //fn match_peer_as(item: &Arc<TypeValue>, peer_asn: Asn) -> bool {
     fn match_peer_as(
         //_item: &PrefixRoute,
-        _item: &RotondaRoute,
+        //_item: &RotondaRoute,
+        _item: &RotondaPaMap,
         peer_asn: Asn,
         ingress_info: &Option<IngressInfo>,
         ) -> bool {

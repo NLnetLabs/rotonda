@@ -1,4 +1,5 @@
 use chrono::{DateTime, Utc};
+use log::{error, warn};
 //use roto::types::collections::BytesRecord;
 //use roto::types::lazyrecord_types::BgpUpdateMessage;
 //use roto::{types::typevalue::TypeValue, vm::OutputStreamQueue};
@@ -91,44 +92,113 @@ impl Display for FilterError {
 // TODO macrofy
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub enum RotondaRoute {
-     Ipv4Unicast(RouteWorkshop<routecore::bgp::nlri::afisafi::Ipv4UnicastNlri>),
-     Ipv6Unicast(RouteWorkshop<routecore::bgp::nlri::afisafi::Ipv6UnicastNlri>),
-     Ipv4Multicast(RouteWorkshop<routecore::bgp::nlri::afisafi::Ipv4MulticastNlri>),
-     Ipv6Multicast(RouteWorkshop<routecore::bgp::nlri::afisafi::Ipv6MulticastNlri>),
+     Ipv4Unicast(routecore::bgp::nlri::afisafi::Ipv4UnicastNlri, RotondaPaMap),
+     Ipv6Unicast(routecore::bgp::nlri::afisafi::Ipv6UnicastNlri, RotondaPaMap),
+     Ipv4Multicast(routecore::bgp::nlri::afisafi::Ipv4MulticastNlri, RotondaPaMap),
+     Ipv6Multicast(routecore::bgp::nlri::afisafi::Ipv6MulticastNlri, RotondaPaMap),
+
      // TODO support all routecore AfiSafiTypes
 }
 
 impl RotondaRoute {
-    /*
-    pub fn get_attr<A>(&self) -> Option<A> {
+    pub fn rotonda_pamap(&self) -> RotondaPaMap {
         match self {
-            RotondaRoute::Ipv4Unicast(rws) => rws.get_attr::<A>(),
-            RotondaRoute::Ipv6Unicast(rws) => todo!(),
-            RotondaRoute::Ipv4Multicast(rws) => todo!(),
-            RotondaRoute::Ipv6Multicast(rws) => todo!(),
+            RotondaRoute::Ipv4Unicast(_, p) => p.clone(),
+            RotondaRoute::Ipv6Unicast(_, p) => p.clone(),
+            RotondaRoute::Ipv4Multicast(_, p) => p.clone(),
+            RotondaRoute::Ipv6Multicast(_, p) => p.clone(),
         }
     }
-    */
-    pub fn attributes(&self) -> &PaMap {
-        match self {
-            RotondaRoute::Ipv4Unicast(rws) => rws.attributes(),
-            RotondaRoute::Ipv6Unicast(rws) => rws.attributes(),
-            RotondaRoute::Ipv4Multicast(rws) => rws.attributes(),
-            RotondaRoute::Ipv6Multicast(rws) => rws.attributes(),
+
+    pub fn attributes(&self) -> PaMap {
+        let mut pa_map = PaMap::empty();
+        let raw = match self {
+            RotondaRoute::Ipv4Unicast(_, raw) => raw,
+            RotondaRoute::Ipv6Unicast(_, raw) => raw,
+            RotondaRoute::Ipv4Multicast(_, raw) => raw,
+            RotondaRoute::Ipv6Multicast(_, raw) => raw,
+        };
+        let parser = octseq::Parser::from_ref(&raw.1);
+        let pas = routecore::bgp::path_attributes::PathAttributes::new(
+            parser,
+            routecore::bgp::message::PduParseInfo::modern()
+        );
+        for pa in pas {
+            match pa {
+                Ok(pa) => {
+                    pa_map.attributes_mut().insert(
+                        pa.type_code(), pa.to_owned().unwrap()
+                    );
+                }
+                Err(e) => {
+                    warn!("{e}");
+                    break;
+                }
+            
+            }
         }
+        pa_map
     }
 }
 
 impl fmt::Display for RotondaRoute {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RotondaRoute::Ipv4Unicast(n) => write!(f, "RR-Ipv4Unicast {}", n.nlri().prefix()),
-            RotondaRoute::Ipv6Unicast(n) => write!(f, "RR-Ipv6Unicast {}", n.nlri().prefix()),
-            RotondaRoute::Ipv4Multicast(n) => write!(f, "RR-Ipv4Multicast {}", n.nlri().prefix()),
-            RotondaRoute::Ipv6Multicast(n) => write!(f, "RR-Ipv6Multicast {}", n.nlri().prefix()),
+            RotondaRoute::Ipv4Unicast(p, ..) => write!(f, "RR-Ipv4Unicast {}", p),
+            RotondaRoute::Ipv6Unicast(p, ..) => write!(f, "RR-Ipv6Unicast {}", p),
+            RotondaRoute::Ipv4Multicast(p, ..) => write!(f, "RR-Ipv4Multicast {}", p),
+            RotondaRoute::Ipv6Multicast(p, ..) => write!(f, "RR-Ipv6Multicast {}", p),
         }
     }
 }
+
+impl rotonda_store::Meta for RotondaPaMap {
+    type Orderable<'a> = routecore::bgp::path_selection::OrdRoute<'a, routecore::bgp::path_selection::Rfc4271>;
+
+    type TBI = rotonda_store::prelude::multi::TiebreakerInfo;
+
+    fn as_orderable(&self, _tbi: Self::TBI) -> Self::Orderable<'_> {
+        todo!()
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize)]
+//pub struct RotondaPaMap(pub PaMap);
+pub struct RotondaPaMap(pub routecore::bgp::message::PduParseInfo, pub Vec<u8>);
+
+impl fmt::Display for RotondaPaMap {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
+}
+
+impl From<&RotondaPaMap> for PaMap {
+    fn from(value: &RotondaPaMap) -> Self {
+        let raw = &value.1;
+        dbg!(&raw);
+        let pas = routecore::bgp::path_attributes::PathAttributes::new(octseq::Parser::from_ref(&raw), value.0);
+        let mut pa_map = PaMap::empty();
+
+        for pa in pas {
+            match pa {
+                Ok(pa) => {
+                    pa_map.attributes_mut().insert(
+                        pa.type_code(), pa.to_owned().unwrap()
+                    );
+                }
+                Err(e) => {
+                    eprintln!("{e}");
+                    break;
+                    //return None;
+                }
+            
+            }
+        }
+        dbg!(&pa_map);
+        pa_map
+    }
+}
+
 
 #[derive(Clone, Debug, Eq)]
 pub struct Payload {
@@ -314,7 +384,7 @@ pub enum Update {
     // connection goes down and everything for the monitored sessions has to
     // be marked Withdrawn.
     WithdrawBulk(SmallVec<[IngressId; 8]>),
-    QueryResult(Uuid, Result<QueryResult<RotondaRoute>, String>),
+    QueryResult(Uuid, Result<QueryResult<crate::payload::RotondaPaMap>, String>),
     UpstreamStatusChange(UpstreamStatus),
 
     OutputStream(SmallVec<[crate::common::roto_new::OutputStreamMessage; 8]>)

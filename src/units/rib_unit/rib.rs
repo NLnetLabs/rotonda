@@ -1,9 +1,5 @@
 use std::{
-    collections::{hash_set, HashMap},
-    hash::{BuildHasher, Hasher},
-    net::IpAddr,
-    ops::Deref,
-    sync::Arc,
+    collections::{hash_set, HashMap}, fmt, hash::{BuildHasher, Hasher}, net::IpAddr, ops::Deref, sync::Arc
 };
 
 use chrono::{Duration, Utc};
@@ -22,7 +18,7 @@ use inetnum::{addr::Prefix, asn::Asn};
 use routecore::bgp::{nlri::afisafi::{IsPrefix, Nlri}, path_attributes::PaMap, path_selection::{OrdRoute, Rfc4271, TiebreakerInfo}, types::AfiSafiType};
 use serde::Serialize;
 
-use crate::{common::roto_new::Provenance, ingress::IngressId, payload::{RotondaRoute, RouterId}};
+use crate::{common::roto_new::Provenance, ingress::IngressId, payload::{RotondaPaMap, RotondaRoute, RouterId}};
 
 // -------- PhysicalRib -----------------------------------------------------------------------------------------------
 
@@ -39,8 +35,10 @@ impl rotonda_store::Meta for RotondaRoute {
 }
 
 pub struct Rib {
-    unicast: Option<MultiThreadedStore<RotondaRoute>>,
-    multicast: Option<MultiThreadedStore<RotondaRoute>>,
+    //unicast: Option<MultiThreadedStore<RotondaRoute>>,
+    //multicast: Option<MultiThreadedStore<RotondaRoute>>,
+    unicast: Option<MultiThreadedStore<RotondaPaMap>>,
+    multicast: Option<MultiThreadedStore<RotondaPaMap>>,
     other_fams: HashMap<AfiSafiType, HashMap<(IngressId, Nlri<bytes::Bytes>), PaMap>>,
 }
 
@@ -86,11 +84,18 @@ impl Rib {
         ltime: u64
     ) -> Result<UpsertReport, String> {
         
+        //let res = match val {
+        //    RotondaRoute::Ipv4Unicast(ref rws) => self.insert_prefix(&rws.nlri().prefix(), Multicast(false), val, route_status, provenance, ltime),
+        //    RotondaRoute::Ipv6Unicast(ref rws) => self.insert_prefix(&rws.nlri().prefix(), Multicast(false), val, route_status, provenance, ltime),
+        //    RotondaRoute::Ipv4Multicast(ref rws) => self.insert_prefix(&rws.nlri().prefix(), Multicast(true), val, route_status, provenance, ltime),
+        //    RotondaRoute::Ipv6Multicast(ref rws) => self.insert_prefix(&rws.nlri().prefix(), Multicast(true), val, route_status, provenance, ltime),
+        //};
+
         let res = match val {
-            RotondaRoute::Ipv4Unicast(ref rws) => self.insert_prefix(&rws.nlri().prefix(), Multicast(false), val, route_status, provenance, ltime),
-            RotondaRoute::Ipv6Unicast(ref rws) => self.insert_prefix(&rws.nlri().prefix(), Multicast(false), val, route_status, provenance, ltime),
-            RotondaRoute::Ipv4Multicast(ref rws) => self.insert_prefix(&rws.nlri().prefix(), Multicast(true), val, route_status, provenance, ltime),
-            RotondaRoute::Ipv6Multicast(ref rws) => self.insert_prefix(&rws.nlri().prefix(), Multicast(true), val, route_status, provenance, ltime),
+            RotondaRoute::Ipv4Unicast(n, ..) => self.insert_prefix(&n.prefix(), Multicast(false), val, route_status, provenance, ltime),
+            RotondaRoute::Ipv6Unicast(n, ..) => self.insert_prefix(&n.prefix(), Multicast(false), val, route_status, provenance, ltime),
+            RotondaRoute::Ipv4Multicast(n, ..) => self.insert_prefix(&n.prefix(), Multicast(true), val, route_status, provenance, ltime),
+            RotondaRoute::Ipv6Multicast(n, ..) => self.insert_prefix(&n.prefix(), Multicast(true), val, route_status, provenance, ltime),
         };
         res.map_err(|e| e.to_string())
     }
@@ -141,12 +146,22 @@ impl Rib {
             });
         }
 
+        /*
         let pubrec = rotonda_store::PublicRecord::new(
             mui,
             ltime,
             route_status,
             val.clone(), // RotondaRoute
         );
+        */
+
+        let pubrec = rotonda_store::PublicRecord::new(
+            mui,
+            ltime,
+            route_status,
+            val.rotonda_pamap(),
+        );
+
 
         store.insert(
             prefix,
@@ -278,7 +293,8 @@ impl Rib {
         prefix: &Prefix,
         match_options: &MatchOptions,
         guard: &Guard
-    ) -> Result<QueryResult<RotondaRoute>, String> {
+    //) -> Result<QueryResult<RotondaRoute>, String> {
+    ) -> Result<QueryResult<RotondaPaMap>, String> {
         let store = self.unicast.as_ref()
             .ok_or(PrefixStoreError::StoreNotReadyError.to_string())?;
         Ok(store.match_prefix(prefix, match_options, guard))

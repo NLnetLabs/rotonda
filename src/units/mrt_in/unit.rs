@@ -4,12 +4,14 @@ use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::time::Instant;
 
+use routecore::bgp::message::PduParseInfo;
 use tokio::pin;
 use tokio::sync::mpsc;
 use futures::future::{select, Either};
 use futures::{pin_mut, FutureExt};
 use log::{debug, error, info, warn};
 use mrtin::MrtFile;
+use rand::seq::SliceRandom;
 use routecore::bgp::nlri::afisafi::{Ipv4UnicastNlri, Nlri};
 use routecore::bgp::types::AfiSafiType;
 use routecore::bgp::workshop::route::RouteWorkshop;
@@ -20,7 +22,7 @@ use crate::common::roto_new::{Provenance, RouteContext};
 use crate::common::unit::UnitActivity;
 use crate::comms::{GateStatus, Terminated};
 use crate::manager::{Component, WaitPoint};
-use crate::payload::{Payload, RotondaRoute, Update};
+use crate::payload::{Payload, RotondaPaMap, RotondaRoute, Update};
 use crate::units::{Gate, Unit};
 
 
@@ -88,12 +90,17 @@ impl MrtInRunner {
         let rib_entries = mrt_file.rib_entries().unwrap();
         let mut routes_sent = 0;
 
+        //const BUFSIZE: usize = 256;
+        //let mut buffer = Vec::with_capacity(BUFSIZE);
+
         for (afisafi, peer_id, peer_entry, prefix, pa_map) in rib_entries {
             let rr = match afisafi {
                 AfiSafiType::Ipv4Unicast => {
-                    let mut rws = RouteWorkshop::new(prefix.try_into().unwrap());
-                    rws.set_attributes(pa_map);
-                    RotondaRoute::Ipv4Unicast(rws)
+                    // tmp test: skip v4
+                    //continue;
+                    //let mut rws = RouteWorkshop::new(prefix.try_into().unwrap());
+                    //rws.set_attributes(pa_map);
+                    RotondaRoute::Ipv4Unicast(prefix.try_into().unwrap(), RotondaPaMap(PduParseInfo::modern(), pa_map))
                 }
                 AfiSafiType::Ipv4Multicast => todo!(),
                 AfiSafiType::Ipv4MplsUnicast => todo!(),
@@ -101,9 +108,12 @@ impl MrtInRunner {
                 AfiSafiType::Ipv4RouteTarget => todo!(),
                 AfiSafiType::Ipv4FlowSpec => todo!(),
                 AfiSafiType::Ipv6Unicast => {
-                    let mut rws = RouteWorkshop::new(prefix.try_into().unwrap());
-                    rws.set_attributes(pa_map);
-                    RotondaRoute::Ipv6Unicast(rws)
+                    // tmp test: skip v6
+                    //continue;
+                    //let mut rws = RouteWorkshop::new(prefix.try_into().unwrap());
+                    //rws.set_attributes(pa_map);
+                    //RotondaRoute::Ipv6Unicast(rws)
+                    RotondaRoute::Ipv6Unicast(prefix.try_into().unwrap(), RotondaPaMap(PduParseInfo::modern(), pa_map))
                 }
                 AfiSafiType::Ipv6Multicast => todo!(),
                 AfiSafiType::Ipv6MplsUnicast => todo!(),
@@ -120,10 +130,29 @@ impl MrtInRunner {
             );
             let ctx = RouteContext::for_mrt_dump(provenance);
             let update = Update::Single(Payload::new(rr, ctx, None));
+
             gate.update_data(update).await;
+
+            //buffer.push(update);
+            //if buffer.len() == BUFSIZE {
+            //    buffer.shuffle(&mut rand::thread_rng());
+            //    for u in buffer.drain(..) {
+            //        gate.update_data(u).await;
+            //        //
+            //        //if let Update::Single(ref p) = u {
+            //        //    eprintln!("{}", p.rx_value);
+            //        //    gate.update_data(u).await;
+            //        //}
+            //    }
+            //}
 
             routes_sent += 1;
         }
+
+        //for u in buffer.drain(..) {
+        //    gate.update_data(u).await;
+        //}
+
         info!(
             "mrt-in: done processing {}, emitted {} routes in {}s",
             filename.to_string_lossy(),
@@ -147,6 +176,29 @@ impl MrtInRunner {
                     match c {
                         Ok(ref filename) => {
                             self.processing = Some(filename.clone());
+                            let r = self.process_until(Self::process_file(
+                                    self.gate.clone(),
+                                    filename.clone()
+                            )).await;
+                            debug!("lvl2: got {r:?}");
+                            match r {
+                                ControlFlow::Continue(Ok(..)) => {
+                                    if let Some(filename) = self.processing.take() {
+                                        self.processed.push(filename)
+                                    }
+                                }
+                                ControlFlow::Continue(Err(e)) => {
+                                    error!("failed to process {}: {e}",
+                                        filename.to_string_lossy()
+                                    );
+                                    return Err(Terminated)
+                                }
+                                ControlFlow::Break(_terminated) => {
+                                    info!("got Termintaed in lvl2");
+                                    return Err(Terminated)
+                                }
+                            }
+                            /*
                             if let Err(e) = Self::process_file(
                                 self.gate.clone(), filename.clone()
                             ).await {
@@ -154,9 +206,7 @@ impl MrtInRunner {
                                     filename.to_string_lossy()
                                 );
                             }
-                            if let Some(filename) = self.processing.take() {
-                                self.processed.push(filename)
-                            }
+                            */
                         }
                         Err(e) => error!("{e}"),
                     }
@@ -203,6 +253,7 @@ impl MrtInRunner {
                     until_fut = next_fut;
                 },
                 Either::Left((Err(Terminated), _next_fut)) => {
+                    debug!("self.process_until Left Terminated");
                     return ControlFlow::Break(Terminated)
                 },
                 Either::Right((Ok(until_res), _next_fut)) => {

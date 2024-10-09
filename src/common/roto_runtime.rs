@@ -38,10 +38,10 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
         let rr = unsafe { &*rr };
         let to_match = unsafe { &*to_match };
         let rr_prefix = match rr {
-            RotondaRoute::Ipv4Unicast(n) => n.nlri().prefix(),
-            RotondaRoute::Ipv6Unicast(n) => n.nlri().prefix(),
-            RotondaRoute::Ipv4Multicast(n) => n.nlri().prefix(),
-            RotondaRoute::Ipv6Multicast(n) => n.nlri().prefix(),
+            RotondaRoute::Ipv4Unicast(n, ..) => n.prefix(),
+            RotondaRoute::Ipv6Unicast(n, ..) => n.prefix(),
+            RotondaRoute::Ipv4Multicast(n, ..) => n.prefix(),
+            RotondaRoute::Ipv6Multicast(n, ..) => n.prefix(),
         };
         rr_prefix == *to_match
     }

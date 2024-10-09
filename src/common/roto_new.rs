@@ -8,7 +8,7 @@ use rotonda_store::prelude::multi::RouteStatus;
 use routecore::{bgp::{message::UpdateMessage, nlri::afisafi::Nlri, workshop::route::RouteWorkshop}, bmp::message::PerPeerHeader};
 use serde::Deserialize;
 
-use crate::{manager, payload::RotondaRoute};
+use crate::{manager, payload::{RotondaPaMap, RotondaRoute}};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct FilterName(String);
@@ -465,6 +465,39 @@ impl OutputStreamMessage {
     }
 }
 
+impl<O> From<(Nlri<O>, RotondaPaMap)> for RotondaRoute {
+    fn from(value: (Nlri<O>, RotondaPaMap)) -> Self {
+        match value.0 {
+            Nlri::Ipv4Unicast(n) => RotondaRoute::Ipv4Unicast(n, value.1),
+            Nlri::Ipv4UnicastAddpath(_) => todo!(),
+            Nlri::Ipv4Multicast(_) => todo!(),
+            Nlri::Ipv4MulticastAddpath(_) => todo!(),
+            Nlri::Ipv4MplsUnicast(_) => todo!(),
+            Nlri::Ipv4MplsUnicastAddpath(_) => todo!(),
+            Nlri::Ipv4MplsVpnUnicast(_) => todo!(),
+            Nlri::Ipv4MplsVpnUnicastAddpath(_) => todo!(),
+            Nlri::Ipv4RouteTarget(_) => todo!(),
+            Nlri::Ipv4RouteTargetAddpath(_) => todo!(),
+            Nlri::Ipv4FlowSpec(_) => todo!(),
+            Nlri::Ipv4FlowSpecAddpath(_) => todo!(),
+            Nlri::Ipv6Unicast(n) => RotondaRoute::Ipv6Unicast(n, value.1),
+            Nlri::Ipv6UnicastAddpath(_) => todo!(),
+            Nlri::Ipv6Multicast(_) => todo!(),
+            Nlri::Ipv6MulticastAddpath(_) => todo!(),
+            Nlri::Ipv6MplsUnicast(_) => todo!(),
+            Nlri::Ipv6MplsUnicastAddpath(_) => todo!(),
+            Nlri::Ipv6MplsVpnUnicast(_) => todo!(),
+            Nlri::Ipv6MplsVpnUnicastAddpath(_) => todo!(),
+            Nlri::Ipv6FlowSpec(_) => todo!(),
+            Nlri::Ipv6FlowSpecAddpath(_) => todo!(),
+            Nlri::L2VpnVpls(_) => todo!(),
+            Nlri::L2VpnVplsAddpath(_) => todo!(),
+            Nlri::L2VpnEvpn(_) => todo!(),
+            Nlri::L2VpnEvpnAddpath(_) => todo!(),
+        }
+    }
+}
+/*
 impl<O> From<Nlri<O>> for RotondaRoute {
     fn from(nlri: Nlri<O>) -> Self {
         match nlri {
@@ -504,17 +537,21 @@ impl<O> From<Nlri<O>> for RotondaRoute {
         }
     }
 }
+*/
 
 pub(crate) fn explode_announcements(
     bgp_update: &UpdateMessage<Bytes>
 ) -> Result<Vec<RotondaRoute>, routecore::bgp::ParseError> {
     let mut res = vec![];
+    let mut pas = bgp_update.path_attributes()?;
+    pas.parser.remaining();
+    let mut v = Vec::with_capacity(pas.parser.remaining());
+    pas.parser.parse_buf(&mut v[..])?;
+    let pamap = RotondaPaMap(bgp_update.pdu_parse_info(), v);
+
     for a in bgp_update.announcements()? {
         let a = a?;
-        res.push(a.into());
-        // so the Into impl would have the big match for all the NlriTypes
-        // and this way we can hopefully get away with one Into for both
-        // announcements and withdrawals
+        res.push((a, pamap.clone()).into());
     }
     Ok(res)
 }
@@ -525,7 +562,7 @@ pub(crate) fn explode_withdrawals(
     let mut res = vec![];
     for w in bgp_update.withdrawals()? {
         let w = w?;
-        res.push(w.into());
+        res.push((w, RotondaPaMap(bgp_update.pdu_parse_info(), vec![])).into());
     }
     Ok(res)
 }

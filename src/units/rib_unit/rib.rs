@@ -35,8 +35,8 @@ impl rotonda_store::Meta for RotondaRoute {
 }
 
 pub struct Rib {
-    unicast: Option<MultiThreadedStore<RotondaPaMap>>,
-    multicast: Option<MultiThreadedStore<RotondaPaMap>>,
+    unicast: Arc<Option<MultiThreadedStore<RotondaPaMap>>>,
+    multicast: Arc<Option<MultiThreadedStore<RotondaPaMap>>>,
     other_fams: HashMap<AfiSafiType, HashMap<(IngressId, Nlri<bytes::Bytes>), PaMap>>,
 }
 
@@ -47,16 +47,16 @@ impl Rib {
     pub fn new_physical() -> Self {
         Rib {
             // FIXME are these always safe to unwrap?
-            unicast: Some(MultiThreadedStore::new().unwrap()),
-            multicast: Some(MultiThreadedStore::new().unwrap()),
+            unicast: Arc::new(Some(MultiThreadedStore::new().unwrap())),
+            multicast: Arc::new(Some(MultiThreadedStore::new().unwrap())),
             other_fams: HashMap::new(),
         }
     }
 
     pub fn new_virtual() -> Self {
         Rib {
-            unicast: None,
-            multicast: None,
+            unicast: Arc::new(None),
+            multicast: Arc::new(None),
             other_fams: HashMap::new(),
         }
     }
@@ -101,12 +101,14 @@ impl Rib {
         ltime: u64,
     ) -> Result<UpsertReport, PrefixStoreError> {
         // Check whether our self.rib is Some(..) or bail out.
-        let store = match multicast.0 {
-            true => &self.multicast,
-            false => &self.unicast
+        let arc_store = match multicast.0 {
+            true => self.multicast.clone(),
+            false => self.unicast.clone(),
         };
-        let store = store.as_ref()
-            .ok_or(PrefixStoreError::StoreNotReadyError)?;
+
+
+        let store = (*arc_store).as_ref();
+            //.ok_or(PrefixStoreError::StoreNotReadyError)?;
 
         let mui = provenance.ingress_id;
 
@@ -118,7 +120,7 @@ impl Rib {
             // mark_mui_as_withdrawn_for_prefix . This way, we preserve the
             // last seen attributes/nexthop for this {prefix,mui} combination,
             // while setting the status to Withdrawn.
-            store.mark_mui_as_withdrawn_for_prefix(prefix, mui)
+            store.as_ref().unwrap().mark_mui_as_withdrawn_for_prefix(prefix, mui)
                 .inspect_err(|e| {
                     error!(
                         "failed to mark {} for {} as withdrawn: {}",
@@ -145,11 +147,39 @@ impl Rib {
         );
 
 
-        store.insert(
+
+        let prefix = *prefix;
+        let arc2 = arc_store.clone();
+        let x = tokio::spawn(async move {
+            //eprintln!("{:?}", std::thread::current().id());
+            
+            (*arc2).as_ref().unwrap().insert(
+                &prefix,
+                pubrec,
+                None, // Option<TBI>
+            )
+                /*
+            let v =  &pubrec.meta;
+            let pa_num = v.0.iter().count();
+            if pa_num % 5 == 0 && pa_num % 3 == 0 {
+                eprintln!("{:?}", pubrec);
+            }
+                */
+        });
+
+            return Ok(UpsertReport{
+                cas_count: 0,
+                prefix_new: false,
+                mui_new: false, 
+                mui_count: 0,
+            });
+        /*
+        (*arc_store).as_ref().unwrap().insert(
             prefix,
             pubrec,
             None, // Option<TBI>
         )
+        */
     }
 
     pub fn withdraw_for_ingress(
@@ -209,13 +239,13 @@ impl Rib {
                 //    error!("failed to mark MUI as withdrawn for v6: {}", e)
                 //}
 
-                if let Err(e) = self.unicast.as_ref().unwrap()
+                if let Err(e) = (*self.unicast).as_ref().unwrap()
                     .mark_mui_as_withdrawn(ingress_id)
                 {
                     error!("failed to mark MUI as withdrawn in unicast rib: {}", e)
                 }
 
-                if let Err(e) = self.multicast.as_ref().unwrap()
+                if let Err(e) = (*self.multicast).as_ref().unwrap()
                     .mark_mui_as_withdrawn(ingress_id)
                 {
                     error!("failed to mark MUI as withdrawn in multicast rib: {}", e)
@@ -226,28 +256,28 @@ impl Rib {
 
             }
             Some(AfiSafiType::Ipv4Unicast) => {
-                if let Err(e) = self.unicast.as_ref().unwrap()
+                if let Err(e) = (*self.unicast).as_ref().unwrap()
                     .mark_mui_as_withdrawn_v4(ingress_id)
                 {
                     error!("failed to mark MUI as withdrawn for v4: {}", e)
                 }
             }
             Some(AfiSafiType::Ipv6Unicast) => {
-                if let Err(e) = self.unicast.as_ref().unwrap()
+                if let Err(e) = (*self.unicast).as_ref().unwrap()
                     .mark_mui_as_withdrawn_v6(ingress_id)
                 {
                     error!("failed to mark MUI as withdrawn for v6: {}", e)
                 }
             }
             Some(AfiSafiType::Ipv4Multicast) => {
-                if let Err(e) = self.multicast.as_ref().unwrap()
+                if let Err(e) = (*self.multicast).as_ref().unwrap()
                     .mark_mui_as_withdrawn_v4(ingress_id)
                 {
                     error!("failed to mark MUI as withdrawn for v4: {}", e)
                 }
             }
             Some(AfiSafiType::Ipv6Multicast) => {
-                if let Err(e) = self.multicast.as_ref().unwrap()
+                if let Err(e) = (*self.multicast).as_ref().unwrap()
                     .mark_mui_as_withdrawn_v6(ingress_id)
                 {
                     error!("failed to mark MUI as withdrawn for v6: {}", e)
@@ -276,7 +306,7 @@ impl Rib {
         match_options: &MatchOptions,
         guard: &Guard
     ) -> Result<QueryResult<RotondaPaMap>, String> {
-        let store = self.unicast.as_ref()
+        let store = (*self.unicast).as_ref()
             .ok_or(PrefixStoreError::StoreNotReadyError.to_string())?;
         Ok(store.match_prefix(prefix, match_options, guard))
     }

@@ -9,8 +9,10 @@ use std::{
 };
 
 use arc_swap::ArcSwap;
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::{future::select, pin_mut, Future};
+use routecore::bmp::message::Message as BmpMessage;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use tokio::{
@@ -24,7 +26,7 @@ use crate::{
         frim::FrimMap, net::{
             StandardTcpListenerFactory, StandardTcpStream, TcpListener,
             TcpListenerFactory, TcpStreamWrapper,
-        }, roto_new::{FilterName, RotoScripts}, status_reporter::Chainable, unit::UnitActivity
+        }, roto_new::{FilterName, Provenance, RotoOutputStream, RotoScripts}, status_reporter::Chainable, unit::UnitActivity
     }, comms::{Gate, GateStatus, Terminated}, ingress::{self, IngressId}, manager::{Component, WaitPoint}, tokio::TokioTaskMetrics, tracing::Tracer, units::Unit
 };
 
@@ -80,6 +82,17 @@ impl std::fmt::Display for TracingMode {
         }
     }
 }
+
+
+
+pub(super) type RotoFunc = roto::TypedFunc<
+    (
+        roto::Val<*mut RotoOutputStream>,
+        roto::Val<BmpMessage<Bytes>>,
+        roto::Val<Provenance>,
+    ),
+    roto::Verdict<(),()>
+>;
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
@@ -163,6 +176,7 @@ impl BmpTcpIn {
         };
 
         let roto_scripts = component.roto_scripts().clone();
+        let roto_compiled = component.roto_compiled().clone();
         let tracer = component.tracer().clone();
 
 
@@ -196,6 +210,7 @@ impl BmpTcpIn {
             state_machine_metrics,
             status_reporter,
             roto_scripts,
+            roto_compiled,
             router_id_template,
             filter_name,
             tracer,
@@ -255,6 +270,7 @@ struct BmpTcpInRunner {
     _state_machine_metrics: Arc<TokioTaskMetrics>,
     status_reporter: Arc<BmpTcpInStatusReporter>,
     roto_scripts: RotoScripts,
+    roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
     router_id_template: Arc<ArcSwap<String>>,
     filter_name: Arc<ArcSwap<FilterName>>,
     tracer: Arc<Tracer>,
@@ -280,6 +296,7 @@ impl BmpTcpInRunner {
         _state_machine_metrics: Arc<TokioTaskMetrics>,
         status_reporter: Arc<BmpTcpInStatusReporter>,
         roto_scripts: RotoScripts,
+        roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
         router_id_template: Arc<ArcSwap<String>>,
         filter_name: Arc<ArcSwap<FilterName>>,
         tracer: Arc<Tracer>,
@@ -298,6 +315,7 @@ impl BmpTcpInRunner {
             _state_machine_metrics,
             status_reporter,
             roto_scripts,
+            roto_compiled,
             router_id_template,
             filter_name,
             tracer,
@@ -347,6 +365,11 @@ impl BmpTcpInRunner {
         // Loop until terminated, accepting TCP connections from routers and
         // spawning tasks to handle them.
         let status_reporter = self.status_reporter.clone();
+
+        let roto_function: Option<RotoFunc> = self.roto_compiled.clone().map(|c| {
+            let mut c = c.lock().unwrap();
+            c.get_function("bmp-in").unwrap()
+        });
 
         loop {
             let listen_addr = self.listen.clone();
@@ -426,6 +449,7 @@ impl BmpTcpInRunner {
                         let router_handler = RouterHandler::new(
                             self.gate.clone(),
                             self.roto_scripts.clone(),
+                            roto_function.clone(),
                             self.router_id_template.clone(),
                             self.filter_name.clone(),
                             child_status_reporter,

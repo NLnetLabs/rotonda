@@ -10,6 +10,7 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use hash32::Hasher;
 use inetnum::asn::Asn;
+use log::info;
 //use roto::types::lazyrecord_types::BgpUpdateMessage;
 //use roto::types::{
 //    builtin::BuiltinTypeValue, collections::BytesRecord,
@@ -21,7 +22,7 @@ use routecore::bmp::message::Message;
 use tokio::sync::Mutex;
 use tokio::{io::AsyncRead, net::TcpStream};
 
-use crate::common::roto_new::{FilterName, PeerRibType, Provenance, RotoScripts, RouteContext};
+use crate::common::roto_new::{FilterName, PeerRibType, Provenance, RotoOutputStream, RotoScripts, RouteContext};
 //use crate::common::roto::{
 //    FilterName, FilterOutput, RotoScripts, ThreadLocalVM,
 //};
@@ -41,12 +42,13 @@ use crate::{
 
 use super::io::FatalError;
 use super::state_machine::{BmpState, BmpStateMachineMetrics, MessageType};
-use super::unit::TracingMode;
+use super::unit::{RotoFunc, TracingMode};
 use super::util::format_source_id;
 
 pub struct RouterHandler {
     gate: Gate,
     roto_scripts: RotoScripts,
+    roto_function: Option<RotoFunc>,
     router_id_template: Arc<ArcSwap<String>>,
     filter_name: Arc<ArcSwap<FilterName>>,
     status_reporter: Arc<BmpTcpInStatusReporter>,
@@ -68,6 +70,7 @@ impl RouterHandler {
     pub fn new(
         gate: Gate,
         roto_scripts: RotoScripts,
+        roto_function: Option<RotoFunc>,
         router_id_template: Arc<ArcSwap<String>>,
         filter_name: Arc<ArcSwap<FilterName>>,
         status_reporter: Arc<BmpTcpInStatusReporter>,
@@ -80,6 +83,7 @@ impl RouterHandler {
         Self {
             gate,
             roto_scripts,
+            roto_function,
             router_id_template,
             filter_name,
             status_reporter,
@@ -283,7 +287,7 @@ impl RouterHandler {
                                 ingress_id,
                                 bmp_msg,
                                 //None,
-                                Some(provenance),
+                                provenance,
                                 trace_id,
                             )
                             .await
@@ -323,7 +327,7 @@ impl RouterHandler {
         //source_id: SourceId,
         ingress_id: IngressId,
         msg: Message<Bytes>,
-        provenance: Option<Provenance>,
+        provenance: Provenance,
         trace_id: Option<u8>,
     ) -> Result<(), (Arc<RouterId>, String)> {
         let mut bmp_state_lock = self.state_machine.lock().await;
@@ -344,7 +348,95 @@ impl RouterHandler {
             msg.common_header().msg_type().into(),
         );
 
-        todo!();
+
+        let mut output_stream = RotoOutputStream::new();
+        let verdict = self.roto_function.as_ref().map(
+            |roto_function|
+            {
+                roto_function.call(
+                    roto::Val(&mut output_stream),
+                    roto::Val(msg.clone()),
+                    roto::Val(provenance),
+                )
+            });
+        for entry in output_stream.drain() {
+            match entry {
+                crate::common::roto_new::Output::Prefix(p) => {
+                    info!("output stream, observed prefix {p}");
+                }
+                _ => {
+                info!("output stream entry {entry:?}");
+                }
+            }
+        }
+        let next_state = match verdict {
+            // Default action when no roto script is used
+            // is Accept (i.e. None here).
+            Some(roto::Verdict::Accept(_)) | None => {
+                self.status_reporter
+                    .message_processed(bmp_state.router_id());
+
+                let mut res = bmp_state.process_msg(received, msg, trace_id);
+
+                match res.message_type {
+                    MessageType::InvalidMessage { .. } => {
+                        self.status_reporter.message_processing_failure(
+                            res.next_state.router_id(),
+                        );
+                    }
+
+                    MessageType::StateTransition => {
+                        // If we have transitioned to the Dumping state that means we
+                        // just processed an Initiation message and MUST have captured
+                        // a sysName Information TLV string. Use the captured value to
+                        // make the router ID more meaningful, instead of the
+                        // UNKNOWN_ROUTER_SYSNAME sysName value we used until now.
+                        self.check_update_router_id(
+                            addr,
+                            ingress_id, //&source_id,
+                            &mut res.next_state,
+                        );
+                    }
+
+                    MessageType::RoutingUpdate { update } => {
+                        // Pass the routing update on to downstream units and/or targets.
+                        // This is where we send an update down the pipeline.
+                        self.gate.update_data(update).await;
+                    }
+
+                    MessageType::Other => {
+                        // A BMP initiation message received after the initiation
+                        // phase will result in this type of message.
+                        self.check_update_router_id(
+                            addr,
+                            ingress_id, //&source_id,
+                            &mut res.next_state,
+                        );
+                    }
+
+                    MessageType::Aborted => {
+                        // Something went fatally wrong and we've lost the BMP
+                        // state machine. The issue should already have been
+                        // logged so there's nothing more we can do here
+                        // except stop processing this BMP stream.
+                        return Err((
+                                res.next_state.router_id(),
+                                "Aborted".to_string(),
+                        ));
+                    }
+                }
+                res.next_state
+            }
+            Some(roto::Verdict::Reject(_)) => {
+                // increase metrics and continue
+                dbg!("bgp-in roto Reject");
+                bmp_state
+            }
+        };
+
+        *bmp_state_lock = Some(next_state);
+        Ok(())
+
 
         //LH: we'll need roughly the same as in the BGP handler here:
         //- execute the BMP pre-explosion filter
@@ -477,6 +569,7 @@ impl RouterHandler {
         *bmp_state_lock = Some(next_state);
         Ok(())
         */
+
     }
 
     fn check_update_router_id(

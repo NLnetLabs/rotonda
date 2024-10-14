@@ -54,9 +54,9 @@ use super::peer_config::{CombinedConfig, PeerConfigs};
 
 pub(super) type RotoFunc = roto::TypedFunc<
     (
-        *mut RotoOutputStream,
-        *mut UpdateMessage<Bytes>,//*mut BgpMsg<Bytes>,
-        *mut Provenance,
+        roto::Val<*mut RotoOutputStream>,
+        roto::Val<UpdateMessage<Bytes>>,
+        roto::Val<Provenance>,
     ),
     roto::Verdict<(),()>
 >;

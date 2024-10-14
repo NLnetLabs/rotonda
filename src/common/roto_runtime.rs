@@ -1,7 +1,6 @@
 use bytes::Bytes;
 use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
-use roto::roto_function;
 use routecore::bgp::aspath::{Hop, HopPath};
 use routecore::bgp::communities::Community;
 use routecore::bgp::message::SessionConfig;
@@ -10,24 +9,29 @@ use routecore::bmp::message::PerPeerHeader;
 use routecore::bmp::message::{Message as BmpMsg, MessageType as BmpMsgType};
 use routecore::bgp::message::{Message as BgpMsg, UpdateMessage as BgpUpdateMessage};
 
+use crate::common::roto_new::{RotoOutputStream, RouteContext};
 use crate::payload::RotondaRoute;
 
 use super::roto_new::{FreshRouteContext, InsertionInfo, Output, OutputStream, Provenance};
 use roto::roto_method;
 
+
+
+pub(crate) type Log = *mut RotoOutputStream;
+
 pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
     let mut rt = roto::Runtime::basic()?;
 
     // --- General types
-    rt.register_type_with_name::<RotondaRoute>("Route")?;
-    rt.register_type_with_name::<FreshRouteContext>("RouteContext")?;
-    rt.register_type::<Provenance>()?;
-    rt.register_type_with_name::<OutputStream<Output>>("Log")?;
-    rt.register_type::<InsertionInfo>()?;
+    rt.register_clone_type_with_name::<RotondaRoute>("Route")?;
+    rt.register_clone_type_with_name::<RouteContext>("RouteContext")?;
+    rt.register_copy_type::<Provenance>()?;
+    rt.register_clone_type_with_name::<Log>("Log")?;
+    rt.register_copy_type::<InsertionInfo>()?;
 
     // --- BGP types / methods
     //rt.register_type_with_name::<BgpMsg<Bytes>>("BgpMsg")?;
-    rt.register_type_with_name::<BgpUpdateMessage<Bytes>>("BgpMsg")?;
+    rt.register_clone_type_with_name::<BgpUpdateMessage<Bytes>>("BgpMsg")?;
     //rt.register_method::<BgpUpdateMessage<Bytes>, _, _>("aspath_contains", bgp_aspath_contains)?;
 
 
@@ -94,8 +98,8 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
     }
 
     // --- BMP types / methods
-    rt.register_type_with_name::<BmpMsg<Bytes>>("BmpMsg")?;
-    rt.register_type::<PerPeerHeader<Bytes>>()?;
+    rt.register_clone_type_with_name::<BmpMsg<Bytes>>("BmpMsg")?;
+    rt.register_clone_type::<PerPeerHeader<Bytes>>()?;
 
     //rt.register_method::<BmpMsg<Bytes>, _, _>("is_ibgp", is_ibgp)?;
 
@@ -191,65 +195,64 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
 
 
     // --- Output / logging / 'south'-wards artifacts methods
-    #[roto_method(rt, OutputStream<Output>)]
+    #[roto_method(rt, Log)]
     fn log_prefix(
-        stream: *mut OutputStream<Output>,
+        stream: *mut Log,
         prefix: *const Prefix,
     ) {
-        let stream = unsafe { &mut *stream };
+        let stream = unsafe { &mut **stream };
         let prefix = unsafe { &*prefix };
         stream.push(Output::Prefix(*prefix));
     }
 
 
-    #[roto_method(rt, OutputStream<Output>, log_matched_asn)]
+    #[roto_method(rt, Log, log_matched_asn)]
     fn log_asn(
-        stream: *mut OutputStream<Output>,
+        stream: *mut Log,
         asn: Asn,
     ) {
-        let stream = unsafe { &mut *stream };
+        let stream = unsafe { &mut **stream };
         stream.push(Output::Asn(asn));
     }
 
-    //rt.register_method::<OutputStream<Output>, _, _>("log_matched_origin", log_origin)?;
-    #[roto_method(rt, OutputStream<Output>, log_matched_origin)]
+    #[roto_method(rt, Log, log_matched_origin)]
     fn log_origin(
-        stream: *mut OutputStream<Output>,
+        stream: *mut Log,
         origin: Asn,
     ) {
-        let stream = unsafe { &mut *stream };
+        let stream = unsafe { &mut **stream };
         stream.push(Output::Origin(origin));
     }
 
-    //rt.register_method::<OutputStream<Output>, _, _>("log_matched_community", log_community)?;
-    #[roto_method(rt, OutputStream<Output>, log_matched_community)]
+    //rt.register_method::<Log, _, _>("log_matched_community", log_community)?;
+    #[roto_method(rt, Log, log_matched_community)]
     fn log_community(
-        stream: *mut OutputStream<Output>,
+        stream: *mut Log,
         community: u32,
     ) {
-        let stream = unsafe { &mut *stream };
+        let stream = unsafe { &mut **stream };
         stream.push(Output::Community(community));
     }
 
-    //rt.register_method::<OutputStream<Output>, _, _>("log_peer_down", log_peer_down)?;
-    #[roto_method(rt, OutputStream<Output>)]
+    //rt.register_method::<Log, _, _>("log_peer_down", log_peer_down)?;
+    #[roto_method(rt, Log)]
     fn log_peer_down(
-        stream: *mut OutputStream<Output>,
+        stream: *mut Log,
         //addr: *mut IpAddr,
     ) {
-        let stream = unsafe { &mut *stream };
+        let stream = unsafe { &mut **stream };
         //let addr = unsafe { &mut *addr };
         stream.push(Output::PeerDown);
     }
 
-    //rt.register_method::<OutputStream<Output>, _, _>("log_custom", log_custom)?;
-    #[roto_method(rt, OutputStream<Output>)]
+    //rt.register_method::<Log, _, _>("log_custom", log_custom)?;
+    #[roto_method(rt, Log)]
     fn log_custom(
-        stream: *mut OutputStream<Output>,
+        stream: *mut Log,
         id: u32,
         local: u32,
     ) {
-        let stream = unsafe { &mut *stream };
+        let stream = unsafe { &mut **stream };
         stream.push(Output::Custom(id, local));
     }
 

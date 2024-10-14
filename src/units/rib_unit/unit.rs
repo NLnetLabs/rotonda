@@ -62,18 +62,18 @@ thread_local!(
 
 type RotoFuncPre = roto::TypedFunc<
     (
-        *mut RotoOutputStream,
-        *mut RotondaRoute,
-        *mut RouteContext,
+        roto::Val<crate::common::roto_runtime::Log>,
+        roto::Val<RotondaRoute>,
+        roto::Val<RouteContext>,
     ),
     roto::Verdict<(),()>
 >;
 
 type RotoFuncPost = roto::TypedFunc<
     (
-        *mut RotoOutputStream,
-        *mut RotondaRoute,
-        *mut InsertionInfo,
+        roto::Val<crate::common::roto_runtime::Log>,
+        roto::Val<RotondaRoute>,
+        roto::Val<InsertionInfo>,
     ),
     roto::Verdict<(),()>
 >;
@@ -374,6 +374,7 @@ impl RibUnitRunner {
             let mut c = c.lock().unwrap();
             c.get_function("rib-in-pre").unwrap()
         });
+
         let roto_function_post: Option<RotoFuncPost> = roto_compiled.map(|c|{
             let mut c = c.lock().unwrap();
             c.get_function("rib-in-post").unwrap()
@@ -848,9 +849,9 @@ impl RibUnitRunner {
             if let Some(ref roto_function) = self.roto_function_pre {
 
                 match roto_function.call(
-                    &mut outputstream,
-                    &mut p.rx_value,
-                    &mut p.context,
+                    roto::Val(&mut outputstream),
+                    roto::Val(p.rx_value.clone()),
+                    roto::Val(p.context.clone()),
                 )  {
                     roto::Verdict::Accept(_) => {
                         self.insert_payload(&p);
@@ -1107,9 +1108,9 @@ impl RibUnitRunner {
                         let mut insertion_info = report.into();
                         let mut output_stream = RotoOutputStream::new();
                         let _ = roto_function.call(
-                            &mut output_stream,
-                            &mut payload.rx_value.clone(),
-                            &mut insertion_info,
+                            roto::Val(&mut output_stream),
+                            roto::Val(payload.rx_value.clone()),
+                            roto::Val(insertion_info),
                         );
                         // TODO process outputstream
                     }

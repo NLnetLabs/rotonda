@@ -5,7 +5,7 @@ pub(crate) mod memory;
 pub(crate) mod net;
 //pub(crate) mod roto;
 pub(crate) mod roto_new;
-mod roto_runtime;
+pub(crate) mod roto_runtime;
 pub(crate) mod routecore_extra;
 pub(crate) mod status_reporter;
 pub(crate) mod unit;

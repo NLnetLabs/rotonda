@@ -89,7 +89,6 @@ pub fn ensure_compiled(
 
 pub use super::roto_runtime::rotonda_roto_runtime;
 
-
 #[derive(Default)]
 pub struct OutputStream<M>{
     msgs: Vec<M>,
@@ -142,6 +141,7 @@ pub enum Output {
     Custom(u32, u32),
 }
 
+#[derive(Copy, Clone, Debug)]
 pub struct InsertionInfo {
     pub prefix_new: bool,
     pub new_peer: bool,

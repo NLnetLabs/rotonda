@@ -369,9 +369,9 @@ impl Processor {
                                 |roto_function|
                             {
                                 roto_function.call(
-                                    &mut output_stream,
-                                    &mut bgp_msg,
-                                    &mut provenance ,
+                                    roto::Val(&mut output_stream),
+                                    roto::Val(bgp_msg.clone()),
+                                    roto::Val(provenance),
                                     )
                             });
                             match verdict {

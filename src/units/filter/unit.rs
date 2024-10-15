@@ -47,7 +47,7 @@ impl Filter {
 }
 
 struct RotoFilterRunner {
-    roto_scripts: RotoScripts,
+    //roto_scripts: RotoScripts,
     gate: Arc<Gate>,
     status_reporter: Arc<RotoFilterStatusReporter>,
     filter_name: Arc<ArcSwap<FilterName>>,
@@ -78,11 +78,11 @@ impl RotoFilterRunner {
             Arc::new(RotoFilterStatusReporter::new(&unit_name, metrics));
 
         let filter_name = Arc::new(ArcSwap::from_pointee(filter_name));
-        let roto_scripts = component.roto_scripts().clone();
+        //let roto_scripts = component.roto_scripts().clone();
         let tracer = component.tracer().clone();
 
         Self {
-            roto_scripts,
+            //roto_scripts,
             gate,
             status_reporter,
             filter_name,
@@ -97,6 +97,7 @@ impl RotoFilterRunner {
     ) -> (Self, crate::comms::GateAgent) {
         //use crate::common::roto::RotoScriptOrigin;
 
+        /*
         let roto_scripts = RotoScripts::default();
         roto_scripts
             .add_or_update_script(
@@ -104,6 +105,7 @@ impl RotoFilterRunner {
                 roto_script,
             )
             .unwrap();
+        */
         let (gate, gate_agent) = Gate::new(0);
         let gate = gate.into();
         let status_reporter = RotoFilterStatusReporter::default().into();
@@ -112,7 +114,7 @@ impl RotoFilterRunner {
         let tracer = Arc::new(Tracer::new());
 
         let runner = Self {
-            roto_scripts,
+            //roto_scripts,
             gate,
             status_reporter,
             filter_name,

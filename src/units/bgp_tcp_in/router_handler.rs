@@ -91,8 +91,6 @@ impl BgpSession<CombinedConfig> for Session<CombinedConfig> {
 
 
 struct Processor {
-    roto_scripts: RotoScripts,
-    roto_compiled: Option<Arc<CompiledRoto>>,
     roto_function: Option<RotoFunc>,
     gate: Gate,
     unit_cfg: BgpTcpIn,
@@ -108,19 +106,7 @@ struct Processor {
 }
 
 impl Processor {
-    //thread_local!(
-    //    static VM: ThreadLocalVM = RefCell::new(None);
-    //);
-
-    /*
-    thread_local!(
-        static ROTO: crate::common::roto_new::CompiledRoto = const { RefCell::new(None) };
-    );
-    */
-
     fn new(
-        roto_scripts: RotoScripts,
-        roto_compiled: Option<Arc<CompiledRoto>>,
         roto_function: Option<RotoFunc>,
         gate: Gate,
         unit_cfg: BgpTcpIn,
@@ -134,8 +120,6 @@ impl Processor {
 
 
         Processor {
-            roto_scripts,
-            roto_compiled,
             roto_function,
             gate,
             unit_cfg,
@@ -143,7 +127,6 @@ impl Processor {
             tx,
             pdu_out_tx,
             status_reporter,
-            //observed_nlri: BTreeSet::new(),
             ingresses,
             ingress_id,
         }
@@ -658,8 +641,6 @@ impl Processor {
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_connection(
-    roto_scripts: RotoScripts,
-    roto_compiled: Option<Arc<CompiledRoto>>,
     roto_function: Option<RotoFunc>,
     gate: Gate,
     unit_config: BgpTcpIn,
@@ -724,14 +705,7 @@ pub async fn handle_connection(
     session.manual_start().await;
     session.connection_established().await;
 
-    let roto_compiled2 = roto_compiled.clone();
-    let roto_function: Option<RotoFunc> = roto_compiled2.map(|c| {
-        let mut c = c.lock().unwrap();
-        c.get_function("bgp-in").unwrap()
-    });
     let mut p = Processor::new(
-        roto_scripts,
-        roto_compiled,
         roto_function,
         gate,
         unit_config,

@@ -238,8 +238,6 @@ impl RibUnit {
 
 
 pub struct RibUnitRunner {
-    roto_scripts: RotoScripts,
-    roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
     roto_function_pre: Option<RotoFuncPre>,
     roto_function_post: Option<RotoFuncPost>,
     gate: Arc<Gate>,
@@ -289,18 +287,6 @@ pub type PendingVirtualRibQueryResults =
     FrimMap<QueryId, Arc<QueryOperationResultSender>>;
 
 impl RibUnitRunner {
-    /*
-    thread_local!(
-        static VM: ThreadLocalVM = RefCell::new(None);
-    );
-    */
-
-    /*
-    thread_local!(
-        static ROTO: crate::common::roto_new::CompiledRoto = const { RefCell::new(None) };
-    );
-    */
-
     #[allow(clippy::too_many_arguments)]
     fn new(
         gate: Gate,
@@ -368,7 +354,6 @@ impl RibUnitRunner {
             );
         }
 
-        let roto_scripts = component.roto_scripts().clone();
         let roto_compiled = component.roto_compiled().clone();
         let roto_function_pre: Option<RotoFuncPre> = roto_compiled.clone().map(|c|{
             let mut c = c.lock().unwrap();
@@ -382,10 +367,7 @@ impl RibUnitRunner {
 
         let tracer = component.tracer().clone();
 
-        let roto_compiled = component.roto_compiled().clone();
         Self {
-            roto_scripts,
-            roto_compiled,
             roto_function_pre,
             roto_function_post,
             gate,

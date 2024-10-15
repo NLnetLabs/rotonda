@@ -41,9 +41,10 @@ const CFG_TARGETS: &str = "targets";
 /// referenced in the command line and, upon success, return the config.
 #[derive(Deserialize)]
 pub struct Config {
-    /// The location from which to load user defined Roto script files.
-    pub roto_scripts_path: Option<PathBuf>,
+    ///// The location from which to load user defined Roto script files.
+    //pub roto_scripts_path: Option<PathBuf>,
 
+    /// Location of the .roto script containing all user defined filters.
     pub roto_script: Option<PathBuf>,
 
     /// The set of configured units.

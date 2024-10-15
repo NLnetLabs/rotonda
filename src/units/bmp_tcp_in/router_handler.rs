@@ -47,7 +47,6 @@ use super::util::format_source_id;
 
 pub struct RouterHandler {
     gate: Gate,
-    roto_scripts: RotoScripts,
     roto_function: Option<RotoFunc>,
     router_id_template: Arc<ArcSwap<String>>,
     filter_name: Arc<ArcSwap<FilterName>>,
@@ -60,16 +59,9 @@ pub struct RouterHandler {
 }
 
 impl RouterHandler {
-    /*
-    thread_local!(
-        static VM: ThreadLocalVM = RefCell::new(None);
-    );
-    */
-
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         gate: Gate,
-        roto_scripts: RotoScripts,
         roto_function: Option<RotoFunc>,
         router_id_template: Arc<ArcSwap<String>>,
         filter_name: Arc<ArcSwap<FilterName>>,
@@ -82,7 +74,6 @@ impl RouterHandler {
     ) -> Self {
         Self {
             gate,
-            roto_scripts,
             roto_function,
             router_id_template,
             filter_name,

@@ -175,7 +175,6 @@ impl BmpTcpIn {
             (processor, router_info)
         };
 
-        let roto_scripts = component.roto_scripts().clone();
         let roto_compiled = component.roto_compiled().clone();
         let tracer = component.tracer().clone();
 
@@ -209,7 +208,6 @@ impl BmpTcpIn {
             bmp_in_metrics,
             state_machine_metrics,
             status_reporter,
-            roto_scripts,
             roto_compiled,
             router_id_template,
             filter_name,
@@ -269,7 +267,6 @@ struct BmpTcpInRunner {
     bmp_in_metrics: Arc<BmpTcpInMetrics>,
     _state_machine_metrics: Arc<TokioTaskMetrics>,
     status_reporter: Arc<BmpTcpInStatusReporter>,
-    roto_scripts: RotoScripts,
     roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
     router_id_template: Arc<ArcSwap<String>>,
     filter_name: Arc<ArcSwap<FilterName>>,
@@ -295,7 +292,6 @@ impl BmpTcpInRunner {
         bmp_in_metrics: Arc<BmpTcpInMetrics>,
         _state_machine_metrics: Arc<TokioTaskMetrics>,
         status_reporter: Arc<BmpTcpInStatusReporter>,
-        roto_scripts: RotoScripts,
         roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
         router_id_template: Arc<ArcSwap<String>>,
         filter_name: Arc<ArcSwap<FilterName>>,
@@ -314,7 +310,6 @@ impl BmpTcpInRunner {
             bmp_in_metrics,
             _state_machine_metrics,
             status_reporter,
-            roto_scripts,
             roto_compiled,
             router_id_template,
             filter_name,
@@ -448,7 +443,6 @@ impl BmpTcpInRunner {
 
                         let router_handler = RouterHandler::new(
                             self.gate.clone(),
-                            self.roto_scripts.clone(),
                             roto_function.clone(),
                             self.router_id_template.clone(),
                             self.filter_name.clone(),

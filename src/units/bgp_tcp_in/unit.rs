@@ -123,7 +123,6 @@ impl BgpTcpIn {
             metrics.clone(),
         ));
 
-        let roto_scripts = component.roto_scripts().clone();
         let roto_compiled = component.roto_compiled().clone();
 
         // Wait for other components to be, and signal to other components
@@ -147,7 +146,6 @@ impl BgpTcpIn {
             gate,
             metrics,
             status_reporter,
-            roto_scripts,
             roto_compiled,
             ingresses,
         )
@@ -162,8 +160,6 @@ trait ConfigAcceptor {
     #[allow(clippy::too_many_arguments)]
     fn accept_config(
         child_name: String,
-        roto_scripts: &RotoScripts,
-        roto_compiled: &Option<Arc<crate::common::roto_new::CompiledRoto>>,
         roto_function: Option<RotoFunc>,
         gate: &Gate,
         bgp: &BgpTcpIn,
@@ -193,8 +189,6 @@ struct BgpTcpInRunner {
 
     status_reporter: Arc<BgpTcpInStatusReporter>,
 
-    roto_scripts: RotoScripts,
-
     roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
 
     // To send commands to a Session based on peer IP + ASN.
@@ -218,7 +212,6 @@ impl BgpTcpInRunner {
         gate: Gate,
         metrics: Arc<BgpTcpInMetrics>,
         status_reporter: Arc<BgpTcpInStatusReporter>,
-        roto_scripts: RotoScripts,
         roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
         ingresses: Arc<ingress::Register>,
     ) -> Self {
@@ -227,7 +220,6 @@ impl BgpTcpInRunner {
             gate,
             metrics,
             status_reporter,
-            roto_scripts,
             roto_compiled,
             live_sessions: Arc::new(Mutex::new(HashMap::new())),
             ingresses,
@@ -243,7 +235,6 @@ impl BgpTcpInRunner {
             gate,
             metrics: Default::default(),
             status_reporter: Default::default(),
-            roto_scripts: Default::default(),
             live_sessions: Arc::new(Mutex::new(HashMap::new())),
             ingresses: Arc::new(ingress::Register::default()),
         };
@@ -339,8 +330,6 @@ impl BgpTcpInRunner {
                             );
                             F::accept_config(
                                 child_name,
-                                &arc_self.roto_scripts,
-                                &arc_self.roto_compiled,
                                 roto_function.clone(),
                                 &arc_self.gate,
                                 &arc_self.bgp.load().clone(),
@@ -552,8 +541,6 @@ impl AnyDirectUpdate for BgpTcpInRunner {}
 impl ConfigAcceptor for BgpTcpInRunner {
     fn accept_config(
         child_name: String,
-        roto_scripts: &RotoScripts,
-        roto_compiled: &Option<Arc<crate::common::roto_new::CompiledRoto>>,
         roto_function: Option<RotoFunc>,
         gate: &Gate,
         bgp: &BgpTcpIn,
@@ -571,8 +558,6 @@ impl ConfigAcceptor for BgpTcpInRunner {
         crate::tokio::spawn(
             &child_name,
             handle_connection(
-                roto_scripts.clone(),
-                roto_compiled.clone(),
                 roto_function,
                 gate.clone(),
                 bgp.clone(),
@@ -775,7 +760,7 @@ mod tests {
     impl ConfigAcceptor for NoOpConfigAcceptor {
         fn accept_config(
             _child_name: String,
-            _roto_scripts: &RotoScripts,
+            //_roto_scripts: &RotoScripts,
             _gate: &Gate,
             _bgp: &BgpTcpIn,
             _tcp_stream: impl TcpStreamWrapper,

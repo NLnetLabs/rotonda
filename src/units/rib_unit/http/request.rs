@@ -4,7 +4,7 @@ use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
 use hyper::{Body, Method, Request, Response};
 use log::{debug, trace};
-use rotonda_store::{epoch, MatchOptions};
+use rotonda_store::MatchOptions;
 use inetnum::{addr::Prefix, asn::Asn};
 use routecore::bgp::communities::HumanReadableCommunity as Community;
 use tokio::sync::oneshot;
@@ -165,10 +165,9 @@ impl PrefixesApi {
         // XXX res: QueryResult will be different 
         let res = match self.rib_type {
             RibType::Physical => {
-                let guard = &epoch::pin();
                 // XXX res: QueryResult will be different 
                 match self.rib.load().match_unicast_prefix(
-                    &prefix, &options, guard
+                    &prefix, &options,
                 ) {
                     Ok(res) => res,
                     Err(e) =>{

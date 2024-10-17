@@ -24,7 +24,6 @@ use non_empty_vec::NonEmpty;
 //};
 use rotonda_store::{
     custom_alloc::UpsertReport,
-    epoch,
     prelude::multi::PrefixStoreError,
     QueryResult,
     RecordSet,
@@ -662,7 +661,6 @@ impl RibUnitRunner {
                             ));
 
                             let res = {
-                                let guard = &epoch::pin();
                                 // XXX LH as long as the HTTP API (and
                                 // TriggerData) is limited to 'simple
                                 // prefixes', we default to unicast for now.
@@ -672,7 +670,6 @@ impl RibUnitRunner {
                                     .match_unicast_prefix(
                                         &prefix,
                                         &match_options,
-                                        guard
                                     )
                             };
 

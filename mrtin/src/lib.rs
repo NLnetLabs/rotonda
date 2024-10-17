@@ -11,6 +11,9 @@ use std::net::IpAddr;
 use std::ops::Index;
 use std::slice::SliceIndex;
 
+use rayon::iter::ParallelBridge;
+use rayon::iter::ParallelIterator;
+
 //
 //        0                   1                   2                   3
 //        0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -329,6 +332,7 @@ impl<'a, Octs: Octets> RibEntry<'a, Octs> {
         let orig_time = parser.parse_u32_be()?;
         let attribute_len = parser.parse_u16_be()?;
         let attributes = parser.parse_parser(attribute_len as usize)?;
+
         Ok( RibEntry {
             peer_idx, orig_time, attributes
         })
@@ -404,6 +408,7 @@ fn parse_prefix<R: Octets>(parser: &mut Parser<'_, R>, prefix_bits: u8, afi: Afi
 
 //----------- Peer Index Table -----------------------------------------------
 
+#[derive(Clone)]
 pub struct PeerIndex {
     peers: Vec<PeerEntry>
 }
@@ -468,6 +473,32 @@ impl<'a> MrtFile<'a> {
         )
     }
 
+    fn pi(&self) -> PeerIndex {
+        let mut parser = Parser::from_ref(&self.raw);
+        Self::extract_peer_index_table(&mut parser).unwrap()
+    }
+
+    pub fn rib_entries_mt<Octs: 'a + Octets>(&'a self)
+        -> impl ParallelIterator<Item = <SingleEntryIterator<'a, Octs> as Iterator>::Item> + 'a
+    where
+        Vec<u8>: OctetsFrom<Octs::Range<'a>>
+    {
+        let mut parser = Parser::from_ref(&self.raw);
+        let peer_index = Self::extract_peer_index_table(&mut parser).unwrap();
+
+        let tables = TableDumpIterator::new(peer_index, parser);
+        let iter = tables.par_bridge().map(|(_fam, reh)|{
+            SingleEntryIterator::new(reh)
+        }).flat_map_iter(|e| e.into_iter());
+        iter
+    }
+
+    pub fn tables(&'a self) -> Result<TableDumpIterator<'a, &'a [u8]>, ParseError> {
+        let mut parser = Parser::from_ref(&self.raw);
+        let peer_index = Self::extract_peer_index_table(&mut parser)?;
+        Ok(TableDumpIterator::new(peer_index, parser))
+    }
+
     fn extract_peer_index_table(parser: &mut Parser<'_, &[u8]>) -> Result<PeerIndex, ParseError> {
         let mut m = CommonHeader::parse(parser)?;
         let mut peer_index = PeerIndex::empty();
@@ -486,7 +517,7 @@ impl<'a> MrtFile<'a> {
                             peer_index.push(pe);
                         }
                         assert_eq!(peer_index.len(), pit.peer_count().into());
-                        println!("peer table with {} entries", peer_index.len());
+                        //println!("peer table with {} entries", peer_index.len());
                         Ok(peer_index)
                     },
                     _ => {
@@ -498,6 +529,95 @@ impl<'a> MrtFile<'a> {
         }
     }
 }
+
+//------------ TableDumpIterator ----------------------------------------------
+
+pub struct TableDumpIterator<'a, Octs> {
+    pub peer_index: PeerIndex,
+    parser: Parser<'a, Octs>,
+}
+
+impl<'a, Octs> TableDumpIterator<'a, Octs> {
+    pub fn new(peer_index: PeerIndex, parser: Parser<'a, Octs>) -> Self {
+        Self { peer_index, parser }
+    }
+}
+
+impl<'a, Octs: Octets> Iterator for TableDumpIterator<'a, Octs>
+where
+    Vec<u8>: OctetsFrom<Octs::Range<'a>>
+{
+    // u16 for the 'ingress_id', for now
+    type Item = (AfiSafiType, RibEntryHeader<'a, Octs>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        
+        if self.parser.remaining() == 0 {
+            return None;
+        }
+
+        let mut m = CommonHeader::parse(&mut self.parser).unwrap();
+        if let MessageSubType::TableDumpv2SubType(tdv2) = m.subtype() {
+            match tdv2 {
+                TableDumpv2SubType::RibIpv4Unicast => {
+                    let reh = RibEntryHeader::parse(&mut m.message, Afi::Ipv4).unwrap();
+                    Some((AfiSafiType::Ipv4Unicast, reh))
+                }
+                TableDumpv2SubType::RibIpv6Unicast => {
+                    let reh = RibEntryHeader::parse(&mut m.message, Afi::Ipv6).unwrap();
+                    Some((AfiSafiType::Ipv6Unicast, reh))
+                }
+                _ => todo!()
+            }
+        } else {
+            None
+        }
+    }
+}
+
+pub struct SingleEntryIterator<'a, Octs> {
+    //peer_index: &'a PeerIndex,
+    prefix: Prefix,
+    parser: Parser<'a, Octs>, // the RibEntryHeader.entries parser
+}
+
+// TODO IntoIterator on TableDumpv2SubType
+impl<'a, Octs> SingleEntryIterator<'a, Octs> {
+    //pub fn new(peer_index: &'a PeerIndex, reh: RibEntryHeader<'a, Octs>) -> Self {
+    pub fn new(reh: RibEntryHeader<'a, Octs>) -> Self {
+        Self {
+            //peer_index,
+            prefix: reh.prefix,
+            parser: reh.entries,
+        }
+    }
+}
+
+impl<'a, Octs: Octets> Iterator for SingleEntryIterator<'a, Octs>
+where
+    Vec<u8>: OctetsFrom<Octs::Range<'a>>
+{
+    //type Item = (Prefix, u16, PeerEntry, Vec<u8>);
+    type Item = (Prefix, u16, Vec<u8>);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.parser.remaining() == 0 {
+            return None;
+        }
+        let re = RibEntry::parse(&mut self.parser).unwrap();
+        //let peer = self.peer_index.get(&re).unwrap();
+        let mut v = re.attributes;
+        let mut raw_attr = vec![0; v.remaining()];
+        let _ = v.parse_buf(&mut raw_attr[..]);
+
+        //Some((self.prefix, re.peer_idx, *peer, raw_attr))
+        Some((self.prefix, re.peer_idx, raw_attr))
+    }
+}
+
+
+
+//------------ RibEntryIterator -----------------------------------------------
 
 pub struct RibEntryIterator<'a, Octs> {
     peer_index: PeerIndex,
@@ -530,19 +650,18 @@ where
             if self.parser.remaining() == 0 {
                 return None;
             }
+
             let mut m = CommonHeader::parse(&mut self.parser).unwrap();
+
             if let MessageSubType::TableDumpv2SubType(tdv2) = m.subtype() {
                 match tdv2 {
                     TableDumpv2SubType::RibIpv4Unicast => {
                         let reh = RibEntryHeader::parse(&mut m.message, Afi::Ipv4).unwrap();
-                        //dbg!("new v4unicast table at {}", self.parser.pos());
                         self.current_table = Some(reh);
                         self.current_afisafi = Some(AfiSafiType::Ipv4Unicast);
                     }
                     TableDumpv2SubType::RibIpv6Unicast => {
                         let reh = RibEntryHeader::parse(&mut m.message, Afi::Ipv6).unwrap();
-                        //println!("{}", reh.prefix);
-                        //println!("{}", reh);
                         self.current_table = Some(reh);
                         self.current_afisafi = Some(AfiSafiType::Ipv6Unicast);
                     }
@@ -639,9 +758,10 @@ mod tests {
     use super::*;
     use memmap2::Mmap;
     use std::fs::File;
+    use rayon::iter::ParallelBridge;
+    use rayon::iter::ParallelIterator;
 
-    //use routecore::bgp::message::update::{PathAttributeType, PathAttributes, SessionConfig};
-    use routecore::bgp::{aspath::AsPath, message::{PduParseInfo}, path_attributes::{PathAttributeType, PathAttributes}};
+    use routecore::bgp::{aspath::AsPath, path_attributes::{PathAttributeType, PathAttributes}};
 
 
     fn get_fh() -> Mmap {
@@ -655,19 +775,65 @@ mod tests {
         mmap
     }
 
+    // LH: so this is much slower than the original RibEntryIterator !
     #[test]
-    fn rib_entry_iterator() {
+    fn par_bridge() {
         let fh = &get_fh()[..];
         let mrt_file = MrtFile::new(fh);
         let rib_entries = mrt_file.rib_entries().unwrap();
         
         println!();
-        for (idx, e) in rib_entries.enumerate() {
+        rib_entries.par_bridge().for_each(|e| {
             let (_, _, _, _, pa_map) = e;
             assert!(!pa_map.is_empty());
-            print!("{idx}\r");
+        });
+    }
+
+    #[test]
+    fn tables_iterator() {
+        let fh = &get_fh()[..];
+        let mrt_file = MrtFile::new(fh);
+        let tables = mrt_file.tables().unwrap();
+        for (_fam, reh) in tables {
+            let iter = SingleEntryIterator::new(reh);
+            for (idx, (_prefix, _id, raw_attr)) in iter.enumerate() {
+                assert!(!raw_attr.is_empty());
+                print!("{idx}\r");
+            }
         }
-        println!();
+    }
+
+    #[test]
+    fn iter_mt() {
+        let fh = &get_fh()[..];
+        let mrt_file = MrtFile::new(fh);
+        eprintln!("{}", mrt_file.rib_entries_mt::<&[u8]>().count());
+    }
+    
+    #[test]
+    fn par_bridge_tables_iterator() {
+        let fh = &get_fh()[..];
+        let mrt_file = MrtFile::new(fh);
+        let tables = mrt_file.tables().unwrap();
+        let count = tables.par_bridge().map(|(_fam, reh)| {
+            SingleEntryIterator::new(reh)
+        }).fold(|| 0_usize, |sum, iter| sum + iter.count()).sum::<usize>();
+        eprintln!("count: {count}");
+    }
+
+    #[test]
+    fn iterators_count() {
+        let fh = &get_fh()[..];
+        let mrt_file = MrtFile::new(fh);
+        let rib_entries = mrt_file.rib_entries().unwrap();
+        let tables = mrt_file.tables().unwrap();
+        let single_entries_count = tables.map(|(_fam, reh)| {
+            let iter = SingleEntryIterator::new(reh);
+            iter
+        }).fold(0, |acc, iter| acc + iter.count());
+
+        eprintln!("{}", single_entries_count);
+        assert_eq!(rib_entries.count(), single_entries_count);
     }
 
     #[test]

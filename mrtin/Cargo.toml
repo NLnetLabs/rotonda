@@ -9,14 +9,18 @@ rust-version.workspace = true
 
 
 [dependencies]
-inetnum = "0.1.0"
+inetnum = { workspace = true }
 memmap2 = "0.9"
 octseq = { version = "0.4.0" }
 rotonda-store = { path = "../../rotonda-store" }
 routecore = { workspace = true }
+rayon = "1.10.0"
+rand = "0.8.5"
+clap = { version = "4.5.20", features = ["derive"], optional = true }
 
 [dev-dependencies]
 rotonda-store = { path = "../../rotonda-store" }
 
 [[bin]]
 name = "test_store"
+required-features = ["clap"]

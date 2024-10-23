@@ -115,7 +115,7 @@ fn main() {
             let mrt_file = MrtFile::new(&mmap[..]);
             let tables = mrt_file.tables().unwrap();
 
-            if !args.parse_only && (args.shuffle || args.prime) {
+            if !args.parse_only && (args.shuffle || args.prime || args.mt_prime) {
                 let mut prefixes = mrt_file.tables().unwrap().par_bridge().map(|(_fam, reh)| {
                     let iter = mrtin::SingleEntryIterator::new(reh);
                     iter.map(|(prefix, _, _)| prefix)
@@ -136,13 +136,17 @@ fn main() {
 
                 let t_prev = Instant::now();
 
-                if args.mt {
-                    prefixes.par_iter().for_each(|p|{
-                        let _ = insert(&store, p, 0, 0, RouteStatus::InActive, MyPaMap(vec![]));
-                    });
+                if args.mt_prime {
+                    if prefixes.par_iter().try_for_each(|p|{
+                        insert(&store, p, 0, 0, RouteStatus::InActive, MyPaMap(vec![])).map(|_| ())
+                    }).is_err() {
+                        return;
+                    }
                 } else {
                     for p in &prefixes {
-                        let _ = insert(&store, p, 0, 0, RouteStatus::InActive, MyPaMap(vec![]));
+                        if insert(&store, p, 0, 0, RouteStatus::InActive, MyPaMap(vec![])).is_err() {
+                            return;
+                        }
                     }
                 }
                 eprintln!(
@@ -157,6 +161,8 @@ fn main() {
 
             let mut num_routes = 0;
             if args.mt {
+                // TODO turn into a try_fold or something, allowing to return
+                // on the first error
                 num_routes = tables.par_bridge().map(|(_fam, reh)|  {
                     let iter = mrtin::SingleEntryIterator::new( reh);
                 

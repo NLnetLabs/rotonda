@@ -12,7 +12,8 @@ use log::{debug, error};
 //    typevalue::TypeValue,
 //}, vm::FieldIndex};
 use rotonda_store::{
-    custom_alloc::UpsertReport, prelude::multi::{PrefixStoreError, RouteStatus}, MatchOptions, MultiThreadedStore, QueryResult
+    custom_alloc::UpsertReport, prelude::multi::{PrefixStoreError, RouteStatus}, MatchOptions, MultiThreadedStore, QueryResult,
+    epoch
 };
 use inetnum::{addr::Prefix, asn::Asn};
 use routecore::bgp::{nlri::afisafi::{IsPrefix, Nlri}, path_attributes::PaMap, path_selection::{OrdRoute, Rfc4271, TiebreakerInfo}, types::AfiSafiType};
@@ -305,9 +306,10 @@ impl Rib {
         prefix: &Prefix,
         match_options: &MatchOptions,
     ) -> Result<QueryResult<RotondaPaMap>, String> {
+        let guard = &epoch::pin();
         let store = (*self.unicast).as_ref()
             .ok_or(PrefixStoreError::StoreNotReadyError.to_string())?;
-        Ok(store.match_prefix(prefix, match_options))
+        Ok(store.match_prefix(prefix, match_options, guard))
     }
 }
 

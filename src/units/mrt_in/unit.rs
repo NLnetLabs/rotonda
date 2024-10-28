@@ -2,6 +2,7 @@ use std::collections::VecDeque;
 use std::future::{Future, IntoFuture};
 use std::ops::ControlFlow;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 use routecore::bgp::message::PduParseInfo;
@@ -21,6 +22,7 @@ use smallvec::SmallVec;
 use crate::common::roto_new::{Provenance, RouteContext};
 use crate::common::unit::UnitActivity;
 use crate::comms::{GateStatus, Terminated};
+use crate::ingress::{self, IngressInfo};
 use crate::manager::{Component, WaitPoint};
 use crate::payload::{Payload, RotondaPaMap, RotondaRoute, Update};
 use crate::units::{Gate, Unit};
@@ -34,6 +36,7 @@ pub struct MrtIn {
 pub struct MrtInRunner {
     config: MrtIn,
     gate: Gate,
+    ingresses: Arc<ingress::Register>,
     // TODO register an HTTP endpoint using this sender to queue additional
     // files to process
     queue_tx: mpsc::Sender<PathBuf>,
@@ -54,11 +57,13 @@ impl MrtIn {
 
         let (tx, rx) = mpsc::channel(10);
 
+        let ingresses = component.ingresses().clone();
         let _  = tx.send(self.filename.clone()).await;
 
         MrtInRunner::new(
             self,
             gate,
+            ingresses,
             tx,
         ).run(rx).await
 
@@ -69,24 +74,50 @@ impl MrtInRunner {
     fn new(
         mrtin: MrtIn,
         gate: Gate,
+        ingresses: Arc<ingress::Register>,
         queue_tx: mpsc::Sender<PathBuf>
         //queue: mpsc::Receiver<PathBuf>
         )  -> Self {
         Self {
             gate,
             config: mrtin,
+            ingresses,
             queue_tx,
             processing: None,
             processed: vec![],
         }
     }
 
-    async fn process_file(gate: Gate, filename: PathBuf) -> std::io::Result<()> {
+    async fn process_file(
+        gate: Gate,
+        ingresses: Arc<ingress::Register>,
+        filename: PathBuf
+    ) -> std::io::Result<()> {
         info!("processing {}", filename.to_string_lossy());
         let t0 = Instant::now();
+        
         let file = std::fs::File::open(&filename)?;
         let mmap = unsafe { memmap2::Mmap::map(&file)?  };
         let mrt_file = MrtFile::new(&mmap[..]);
+
+        //let entire_file = std::fs::read(filename.clone()).unwrap();
+        //let mrt_file = MrtFile::new(&entire_file);
+
+
+        let peer_index_table = mrt_file.pi(); 
+        let mut ingress_map = Vec::with_capacity(peer_index_table.len());
+        for peer_entry in &peer_index_table[..] {
+            let id = ingresses.register();
+            ingresses.update_info(
+                id, 
+                IngressInfo::new()
+                    .with_remote_addr(peer_entry.addr)
+                    .with_remote_asn(peer_entry.asn)
+                    .with_filename(filename.clone())
+            );
+            ingress_map.push(id);
+        }
+
         let rib_entries = mrt_file.rib_entries().unwrap();
         let mut routes_sent = 0;
 
@@ -125,7 +156,7 @@ impl MrtInRunner {
                 AfiSafiType::Unsupported(_, _) => todo!(),
             };
             let provenance = Provenance::for_bgp(
-                peer_id.into(),
+                ingress_map[usize::from(peer_id)],
                 peer_entry.addr,
                 peer_entry.asn,
             );
@@ -177,8 +208,11 @@ impl MrtInRunner {
                     match c {
                         Ok(ref filename) => {
                             self.processing = Some(filename.clone());
+                            let gate = self.gate.clone();
+                            let ingresses = self.ingresses.clone();
                             let r = self.process_until(Self::process_file(
-                                    self.gate.clone(),
+                                    gate,
+                                    ingresses,
                                     filename.clone()
                             )).await;
                             debug!("lvl2: got {r:?}");

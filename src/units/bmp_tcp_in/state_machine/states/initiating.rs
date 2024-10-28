@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use routecore::bmp::message::Message as BmpMsg;
+use routecore::bmp::message::{InformationTlvType, Message as BmpMsg};
 
 use crate::{
     ingress, payload::RouterId, units::bmp_tcp_in::state_machine::machine::BmpStateIdx
@@ -71,6 +71,24 @@ impl BmpStateDetails<Initiating> {
         match bmp_msg {
             // already verified upstream
             BmpMsg::InitiationMessage(msg) => {
+                self.ingress_register.update_info(
+                    self.source_id,
+                    ingress::IngressInfo::new()
+                        .with_name(
+                            msg.information_tlvs().find(|t|
+                                t.typ() == InformationTlvType::SysName
+                            )
+                            .map(|t| String::from_utf8_lossy(t.value()).to_string())
+                            .unwrap_or("no-sysname".to_string())
+                        )
+                        .with_desc(
+                            msg.information_tlvs().find(|t|
+                                t.typ() == InformationTlvType::SysDesc
+                            )
+                            .map(|t| String::from_utf8_lossy(t.value()).to_string())
+                            .unwrap_or("no-sysdesc".to_string())
+                        )
+                );
                 let res = self.initiate(msg);
 
                 match res.message_type {

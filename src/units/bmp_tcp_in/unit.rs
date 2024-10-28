@@ -27,7 +27,7 @@ use crate::{
             StandardTcpListenerFactory, StandardTcpStream, TcpListener,
             TcpListenerFactory, TcpStreamWrapper,
         }, roto_new::{FilterName, Provenance, RotoOutputStream, RotoScripts}, status_reporter::Chainable, unit::UnitActivity
-    }, comms::{Gate, GateStatus, Terminated}, ingress::{self, IngressId}, manager::{Component, WaitPoint}, tokio::TokioTaskMetrics, tracing::Tracer, units::Unit
+    }, comms::{Gate, GateStatus, Terminated}, ingress::{self, IngressId, IngressInfo}, manager::{Component, WaitPoint}, tokio::TokioTaskMetrics, tracing::Tracer, units::Unit
 };
 
 use super::{
@@ -403,6 +403,10 @@ impl BmpTcpInRunner {
                         //let source_id = SourceId::from(client_addr);
 
                         let ingress_id = self.ingress_register.register();
+                        self.ingress_register.update_info(ingress_id,
+                            IngressInfo::new()
+                            .with_remote_addr(client_addr.ip())
+                        ); 
 
                         let state_machine = Arc::new(Mutex::new(Some(
                             self.router_connected(ingress_id),

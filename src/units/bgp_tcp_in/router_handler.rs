@@ -27,7 +27,7 @@ use rotonda_store::prelude::multi::RouteStatus;
 //use routecore::bgp::message::update_builder::ComposeError;
 // use routecore::bgp::message::UpdateMessage as UpdatePdu;
 use routecore::bgp::message::{Message as BgpMsg, UpdateMessage};
-use smallvec::SmallVec;
+use smallvec::{smallvec, SmallVec};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
@@ -43,7 +43,7 @@ use routecore::bgp::fsm::session::{
 
 //use roto::types::builtin::basic_route::SourceId;
 
-use crate::common::roto_new::{ensure_compiled, explode_announcements, explode_withdrawals, rotonda_roto_runtime, CompiledRoto, FreshRouteContext, Output, OutputStream, Provenance, RotoOutputStream, RotoScripts, RouteContext};
+use crate::common::roto_new::{explode_announcements, explode_withdrawals, rotonda_roto_runtime, CompiledRoto, FreshRouteContext, Output, OutputStream, OutputStreamMessage, Provenance, RotoOutputStream, RotoScripts, RouteContext};
 //use crate::bgp::encode::Announcements;
 //use crate::common::roto::{FilterOutput, RotoScripts, ThreadLocalVM};
 //use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
@@ -331,7 +331,7 @@ impl Processor {
                 res = rx_sess.recv() => {
                     match res {
                         None => { break; }
-                        Some(Message::UpdateMessage(mut bgp_msg)) => {
+                        Some(Message::UpdateMessage(bgp_msg)) => {
                             // We can only receive UPDATE messages over an
                             // established session, so not having a
                             // NegotiatedConfig should never happen.
@@ -339,7 +339,7 @@ impl Processor {
                                 error!("unexpected state: no NegotiatedConfig for session");
                                 break
                             };
-                            let mut provenance = Provenance::for_bgp(
+                            let provenance = Provenance::for_bgp(
                                 session_ingress_id,
                                 negotiated.remote_addr(),
                                 negotiated.remote_asn(),
@@ -357,6 +357,53 @@ impl Processor {
                                     roto::Val(provenance),
                                     )
                             });
+                            if !output_stream.is_empty() {
+                                let mut osms = smallvec![];
+                                use crate::common::roto_new::Output;
+                                for entry in output_stream.drain() {
+                                    debug!("output stream entry {entry:?}");
+                                    let osm = match entry {
+                                        Output::Prefix(_prefix) => {
+                                            OutputStreamMessage::prefix(
+                                                None,
+                                                Some(session_ingress_id),
+                                            )
+                                        }
+                                        Output::Community(_u32) => {
+                                            OutputStreamMessage::community(
+                                                None,
+                                                Some(session_ingress_id),
+                                            )
+                                        }
+                                        Output::Asn(_u32) => {
+                                            OutputStreamMessage::asn(
+                                                None,
+                                                Some(session_ingress_id),
+                                            )
+                                        }
+                                        Output::Origin(_u32) => {
+                                            OutputStreamMessage::origin(
+                                                None,
+                                                Some(session_ingress_id),
+                                            )
+                                        }
+                                        Output::PeerDown => {
+                                            debug!("Logged PeerDown from Rib unit, ignoring");
+                                            continue
+                                        }
+                                        Output::Custom((id, local)) => {
+                                            OutputStreamMessage::custom(
+                                                id, local,
+                                                Some(session_ingress_id),
+                                            )
+                                            
+                                        }
+                                    };
+                                    osms.push(osm);
+                                }
+                                self.gate.update_data(Update::OutputStream(osms)).await;
+                            }
+
                             match verdict {
                                 // Default action when no roto script is used
                                 // is Accept (i.e. None here).

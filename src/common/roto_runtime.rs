@@ -253,7 +253,7 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
         local: u32,
     ) {
         let stream = unsafe { &mut **stream };
-        stream.push(Output::Custom(id, local));
+        stream.push(Output::Custom((id, local)));
     }
 
 

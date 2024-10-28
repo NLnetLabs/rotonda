@@ -9,16 +9,13 @@ use super::{
 };
 
 use crate::{
-    common::{roto_new::OutputStreamMessage, status_reporter::{AnyStatusReporter, TargetStatusReporter}},
-    comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
-    manager::{Component, TargetCommand, WaitPoint},
-    payload::{Payload, Update, UpstreamStatus},
-    targets::Target,
+    common::{roto_new::OutputStreamMessage, status_reporter::{AnyStatusReporter, TargetStatusReporter}}, comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated}, ingress, manager::{Component, TargetCommand, WaitPoint}, payload::{Payload, Update, UpstreamStatus}, targets::Target
 };
 
 use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use log::{error, info};
 use mqtt::{MqttOptions, QoS};
 use non_empty_vec::NonEmpty;
 //use roto::types::{outputs::OutputStreamMessage, typevalue::TypeValue};
@@ -70,6 +67,7 @@ pub(super) struct MqttRunner<C> {
     client: Arc<ArcSwapOption<C>>,
     pub_q_tx: Option<mpsc::UnboundedSender<SenderMsg>>,
     status_reporter: Arc<MqttStatusReporter>,
+    ingresses: Arc<ingress::Register>,
 }
 
 impl<C: Client> MqttRunner<C>
@@ -85,12 +83,14 @@ where
         let status_reporter =
             Arc::new(MqttStatusReporter::new(component.name(), metrics));
 
+        let ingresses = component.ingresses().clone();
         Self {
             component,
             config,
             client: Default::default(),
             pub_q_tx: None,
             status_reporter,
+            ingresses,
         }
     }
 
@@ -388,7 +388,9 @@ where
         osm: OutputStreamMessage,
     ) -> Option<SenderMsg> {
         if *osm.get_name() == **self.component.name() {
-            match serde_json::to_string(osm.get_record()) {
+            let ingress_info = osm.get_ingress_id().and_then(|id| self.ingresses.get(id));
+
+            match serde_json::to_string(&(ingress_info, osm.get_record())) {
                 Ok(content) => {
                     let topic = self
                         .config
@@ -401,8 +403,9 @@ where
                         topic,
                     });
                 }
-                Err(_err) => {
+                Err(err) => {
                     // TODO
+                    error!("{err}");
                 }
             }
         }
@@ -460,10 +463,10 @@ where
                     if let Some(msg) =
                         self.output_stream_message_to_msg(osm)
                     {
-                        if let Err(_err) =
+                        if let Err(err) =
                             self.pub_q_tx.as_ref().unwrap().send(msg)
                         {
-                            // TODO
+                            error!("failed to send MQTT message: {err}");
                         }
                     }
 

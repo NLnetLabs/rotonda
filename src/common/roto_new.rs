@@ -8,7 +8,7 @@ use rotonda_store::prelude::multi::RouteStatus;
 use routecore::{bgp::{message::UpdateMessage, nlri::afisafi::Nlri, workshop::route::RouteWorkshop}, bmp::message::PerPeerHeader};
 use serde::Deserialize;
 
-use crate::{manager, payload::{RotondaPaMap, RotondaRoute}};
+use crate::{ingress::IngressId, manager, payload::{RotondaPaMap, RotondaRoute}};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct FilterName(String);
@@ -107,6 +107,9 @@ impl<M> OutputStream<M> {
     pub fn drain(&mut self) -> std::vec::Drain<'_, M> {
         self.msgs.drain(..)
     }
+    pub fn is_empty(&self) -> bool {
+        self.msgs.is_empty()
+    }
 }
 
 impl<M> IntoIterator for OutputStream<M> {
@@ -138,7 +141,7 @@ pub enum Output {
     Prefix(Prefix),
 
     /// Variant to support user-defined log entries.
-    Custom(u32, u32),
+    Custom((u32, u32)),
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -437,20 +440,112 @@ impl fmt::Display for PeerRibType {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(serde::Serialize)]
+#[serde(untagged)]
+pub enum OutputStreamMessageRecord {
+    Route(Option<RotondaRoute>),
+    Peerdown(IpAddr, Asn),
+    Custom(CustomLogEntry),
+}
+
+#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(serde::Serialize)]
+pub struct CustomLogEntry {
+    id: u32,
+    value: u32,
+}
+
+impl From<(u32, u32)> for CustomLogEntry {
+    fn from(t: (u32, u32)) -> Self {
+        Self { id: t.0, value: t.1 }
+    }
+}
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct OutputStreamMessage {
     name: String,
     topic: String,
-    record: RotondaRoute,
+    record: OutputStreamMessageRecord,
+    ingress_id: Option<IngressId>,
 }
 
+const MQTT_NAME: &str = "mqtt";
 impl OutputStreamMessage {
-    // pub fn new(name: ShortString, topic: String, record: TypeValue) -> Self {
-    //     Self {
-    //         name, topic, record
-    //     }
-    // }
+    pub fn prefix(
+        record: Option<RotondaRoute>,
+        ingress_id: Option<IngressId>,
+    ) -> Self {
+        Self {
+            name: MQTT_NAME.into(),
+            topic: "prefix".into(),
+            record: OutputStreamMessageRecord::Route(record),
+            ingress_id,
+        }
+    }
+
+    pub fn community(
+        record: Option<RotondaRoute>,
+        ingress_id: Option<IngressId>,
+    ) -> Self {
+        Self {
+            name: MQTT_NAME.into(),
+            topic: "community".into(),
+            record: OutputStreamMessageRecord::Route(record),
+            ingress_id,
+        }
+    }
+
+    pub fn asn(
+        record: Option<RotondaRoute>,
+        ingress_id: Option<IngressId>,
+    ) -> Self {
+        Self {
+            name: MQTT_NAME.into(),
+            topic: "asn".into(),
+            record: OutputStreamMessageRecord::Route(record),
+            ingress_id,
+        }
+    }
+
+    pub fn origin(
+        record: Option<RotondaRoute>,
+        ingress_id: Option<IngressId>,
+    ) -> Self {
+        Self {
+            name: MQTT_NAME.into(),
+            topic: "origin".into(),
+            record: OutputStreamMessageRecord::Route(record),
+            ingress_id,
+        }
+    }
+
+    pub fn peer_down(
+        name: String,
+        topic: String,
+        peer_ip: IpAddr,
+        peer_asn: Asn,
+        ingress_id: Option<IngressId>,
+    ) -> Self {
+        Self {
+            name,
+            topic,
+            record: OutputStreamMessageRecord::Peerdown(peer_ip, peer_asn),
+            ingress_id,
+        }
+    }
+    pub fn custom(
+        id: u32,
+        value: u32,
+        ingress_id: Option<IngressId>,
+    ) -> Self {
+        Self {
+            name: MQTT_NAME.into(),
+            topic: "custom".into(),
+            record: OutputStreamMessageRecord::Custom((id, value).into()),
+            ingress_id,
+        }
+    }
 
     pub fn get_name(&self) -> String {
         self.name.clone()
@@ -460,8 +555,12 @@ impl OutputStreamMessage {
         &self.topic
     }
 
-    pub fn get_record(&self) -> &RotondaRoute {
+    pub fn get_record(&self) -> &OutputStreamMessageRecord {
         &self.record
+    }
+
+    pub fn get_ingress_id(&self) -> Option<IngressId> {
+        self.ingress_id
     }
 }
 

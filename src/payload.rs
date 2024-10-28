@@ -90,14 +90,33 @@ impl Display for FilterError {
 */
 
 // TODO macrofy
-#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RotondaRoute {
-     Ipv4Unicast(routecore::bgp::nlri::afisafi::Ipv4UnicastNlri, RotondaPaMap),
-     Ipv6Unicast(routecore::bgp::nlri::afisafi::Ipv6UnicastNlri, RotondaPaMap),
-     Ipv4Multicast(routecore::bgp::nlri::afisafi::Ipv4MulticastNlri, RotondaPaMap),
-     Ipv6Multicast(routecore::bgp::nlri::afisafi::Ipv6MulticastNlri, RotondaPaMap),
+    Ipv4Unicast(routecore::bgp::nlri::afisafi::Ipv4UnicastNlri, RotondaPaMap),
+    Ipv6Unicast(routecore::bgp::nlri::afisafi::Ipv6UnicastNlri, RotondaPaMap),
+    Ipv4Multicast(routecore::bgp::nlri::afisafi::Ipv4MulticastNlri, RotondaPaMap),
+    Ipv6Multicast(routecore::bgp::nlri::afisafi::Ipv6MulticastNlri, RotondaPaMap),
 
      // TODO support all routecore AfiSafiTypes
+}
+
+
+impl Serialize for RotondaRoute {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut s = serializer.serialize_struct("Route", 2)?;
+        match self {
+            RotondaRoute::Ipv4Unicast(n, _) => s.serialize_field("prefix", n),
+            RotondaRoute::Ipv6Unicast(n, _) => s.serialize_field("prefix", n),
+            RotondaRoute::Ipv4Multicast(n, _) => s.serialize_field("prefix", n),
+            RotondaRoute::Ipv6Multicast(n, _) => s.serialize_field("prefix", n),
+        }?;
+
+        s.serialize_field("attributes", self.rotonda_pamap())?;
+        s.end()
+    }
 }
 
 impl RotondaRoute {
@@ -141,7 +160,7 @@ impl rotonda_store::Meta for RotondaPaMap {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, serde::Serialize)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct RotondaPaMap(pub routecore::bgp::path_attributes::OwnedPathAttributes);
 
 impl fmt::Display for RotondaPaMap {
@@ -149,6 +168,65 @@ impl fmt::Display for RotondaPaMap {
         write!(f, "{:?}", self.0)
     }
 }
+
+impl Serialize for RotondaPaMap {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut s = serializer.serialize_seq(None)?;
+        let mut communities: Vec<HumanReadableCommunity> = vec![];
+        for pa in self.0.iter().flatten() {
+            match pa.to_owned().unwrap() {
+                PathAttribute::StandardCommunities(list) => {
+                    for c in list.communities() {
+                        communities.push(HumanReadableCommunity(Community::from(*c)));
+                    }
+                }
+                PathAttribute::ExtendedCommunities(list) => {
+                    for c in list.communities() {
+                        communities.push(HumanReadableCommunity(Community::from(*c)));
+                    }
+                }
+                PathAttribute::LargeCommunities(list) => {
+                    for c in list.communities() {
+                        communities.push(HumanReadableCommunity(Community::from(*c)));
+                    }
+                }
+                PathAttribute::Ipv6ExtendedCommunities(list) => {
+                    for c in list.communities() {
+                        communities.push(HumanReadableCommunity(Community::from(*c)));
+                    }
+                }
+
+                pa => {
+                    if pa.type_code() == 14 || pa.type_code() == 15 {
+                        debug!("not including MP_REACH/MP_UNREACH path attributes in serialized output");
+                    } else {
+                        s.serialize_element(&pa)?;
+                    }
+                }
+            }
+        }
+
+        // We need to wrap our collected communities in a struct with a field
+        // named 'communities' to get the proper JSON output.
+        // For the other path attributes, as they are actually variants of the
+        // PathAttribute enum type, their name/type is included in the JSON
+        // already.
+        // See also https://serde.rs/json.html
+
+        if !communities.is_empty() {
+            #[derive(Serialize)]
+            struct Communities{communities: Vec<HumanReadableCommunity>}
+        
+            let c = Communities{communities};
+            s.serialize_element(&c)?;
+        }
+        s.end()
+    }
+}
+
 
 
 #[derive(Clone, Debug, Eq)]

@@ -10,7 +10,7 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use hash32::Hasher;
 use inetnum::asn::Asn;
-use log::info;
+use log::{debug, error, info};
 //use roto::types::lazyrecord_types::BgpUpdateMessage;
 //use roto::types::{
 //    builtin::BuiltinTypeValue, collections::BytesRecord,
@@ -19,10 +19,11 @@ use log::info;
 use routecore::bmp::message::Message;
 //use roto::types::builtin::{NlriStatus, PeerId, PeerRibType, Provenance, RouteContext, SourceId};
 
+use smallvec::smallvec;
 use tokio::sync::Mutex;
 use tokio::{io::AsyncRead, net::TcpStream};
 
-use crate::common::roto_new::{FilterName, PeerRibType, Provenance, RotoOutputStream, RotoScripts, RouteContext};
+use crate::common::roto_new::{FilterName, OutputStreamMessage, PeerRibType, Provenance, RotoOutputStream, RotoScripts, RouteContext};
 //use crate::common::roto::{
 //    FilterName, FilterOutput, RotoScripts, ThreadLocalVM,
 //};
@@ -350,15 +351,62 @@ impl RouterHandler {
                     roto::Val(provenance),
                 )
             });
-        for entry in output_stream.drain() {
-            match entry {
-                crate::common::roto_new::Output::Prefix(p) => {
-                    info!("output stream, observed prefix {p}");
-                }
-                _ => {
-                info!("output stream entry {entry:?}");
-                }
+        if !output_stream.is_empty() {
+            let mut osms = smallvec![];
+            use crate::common::roto_new::Output;
+            for entry in output_stream.drain() {
+                debug!("output stream entry {entry:?}");
+                let osm = match entry {
+                    Output::Prefix(_prefix) => {
+                        OutputStreamMessage::prefix(
+                            None,
+                            Some(ingress_id),
+                        )
+                    }
+                    Output::Community(_u32) => {
+                        OutputStreamMessage::community(
+                            None,
+                            Some(ingress_id),
+                        )
+                    }
+                    Output::Asn(_u32) => {
+                        OutputStreamMessage::asn(
+                            None,
+                            Some(ingress_id),
+                        )
+                    }
+                    Output::Origin(_u32) => {
+                        OutputStreamMessage::origin(
+                            None,
+                            Some(ingress_id),
+                        )
+                    }
+                    Output::PeerDown => {
+                        if let Message::PeerDownNotification(ref pdn) = msg {
+                            let pph = pdn.per_peer_header();
+                            OutputStreamMessage::peer_down(
+                                "mqtt".into(),
+                                "peerdown".into(),
+                                pph.address(),
+                                pph.asn(),
+                                Some(ingress_id),
+                            )
+                        } else {
+                            error!("log_peer_down on a non-peerdownnotification");
+                            continue
+                        }
+                    },
+                    Output::Custom((id, local)) => {
+                        OutputStreamMessage::custom(
+                            id, local,
+                            Some(ingress_id),
+                        )
+                        
+                    }
+                };
+                osms.push(osm);
             }
+            self.gate.update_data(Update::OutputStream(osms)).await;
         }
         let next_state = match verdict {
             // Default action when no roto script is used

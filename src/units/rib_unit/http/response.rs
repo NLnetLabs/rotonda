@@ -255,12 +255,7 @@ impl PrefixesApi {
             "ingress_info": ingress_info,
             "prefix": query_prefix,
             "status": status.to_string(),
-            // "next_hop": nh,
-            "attributes": route.0.iter()
-                .map(|a| a.ok())
-                .flatten()
-                .map(|a| a.to_owned().ok())
-                .collect::<Vec<_>>()
+            "attributes": route,
 
         })).unwrap()
     }

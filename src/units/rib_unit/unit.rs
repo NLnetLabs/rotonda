@@ -1,7 +1,7 @@
 use std::io::prelude::*;
 use crate::{
     common::{
-        frim::FrimMap, roto_new::{ensure_compiled, FilterName, FreshRouteContext, InsertionInfo, OutputStream, RotoOutputStream, RotoScripts, RouteContext}, status_reporter::{AnyStatusReporter, UnitStatusReporter}
+        frim::FrimMap, roto_new::{FilterName, FreshRouteContext, InsertionInfo, MrtContext, OutputStream, OutputStreamMessage, RotoOutputStream, RotoScripts, RouteContext}, status_reporter::{AnyStatusReporter, UnitStatusReporter}
     }, comms::{
         AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus, Link,
         Terminated, TriggerData,
@@ -32,7 +32,7 @@ use rotonda_store::{
 use inetnum::addr::Prefix;
 use routecore::bgp::types::AfiSafiType;
 use serde::Deserialize;
-use smallvec::SmallVec;
+use smallvec::{SmallVec, smallvec};
 use std::{
     cell::RefCell, ops::Deref, str::FromStr, string::ToString, sync::Arc,
 };
@@ -822,19 +822,24 @@ impl RibUnitRunner {
     {
         let mut res = SmallVec::<[Payload; 8]>::new();
 
-        let mut outputstream = RotoOutputStream::new();
+        let mut output_stream = RotoOutputStream::new();
 
-        for mut p in payload {
+        for p in payload {
+            let ingress_id = match &p.context {
+                RouteContext::Fresh(f) => Some(f.provenance().ingress_id),
+                RouteContext::Mrt(m) => Some(m.provenance().ingress_id),
+                _ => None
+            };
             if let Some(ref roto_function) = self.roto_function_pre {
 
                 match roto_function.call(
-                    roto::Val(&mut outputstream),
+                    roto::Val(&mut output_stream),
                     roto::Val(p.rx_value.clone()),
                     roto::Val(p.context.clone()),
                 )  {
                     roto::Verdict::Accept(_) => {
                         self.insert_payload(&p);
-                        res.push(p);
+                        res.push(p.clone());
                     }
                     roto::Verdict::Reject(_) => {
                         debug!("roto::Verdict Reject, dropping {p:#?}");
@@ -843,17 +848,54 @@ impl RibUnitRunner {
             } else {
                 // default action accept
                 self.insert_payload(&p);
-                res.push(p);
+                res.push(p.clone());
             }
-        }
-        for entry in outputstream.drain() {
-            match entry {
-                crate::common::roto_new::Output::Prefix(p) => {
-                    info!("output stream, observed prefix {p}");
+            if !output_stream.is_empty() {
+                let mut osms = smallvec![];
+                
+                use crate::common::roto_new::Output;
+                for entry in output_stream.drain() {
+                    debug!("output stream entry {entry:?}");
+                    let osm = match entry {
+                        Output::Prefix(_prefix) => {
+                            OutputStreamMessage::prefix(
+                                Some(p.rx_value.clone()),
+                                ingress_id,
+                            )
+                        }
+                        Output::Community(_u32) => {
+                            OutputStreamMessage::community(
+                                Some(p.rx_value.clone()),
+                                ingress_id,
+                            )
+                        }
+                        Output::Asn(_u32) => {
+                            OutputStreamMessage::asn(
+                                Some(p.rx_value.clone()),
+                                ingress_id,
+                            )
+                        }
+                        Output::Origin(_u32) => {
+                            OutputStreamMessage::origin(
+                                Some(p.rx_value.clone()),
+                                ingress_id,
+                            )
+                        }
+                        Output::PeerDown => {
+                            debug!("Logged PeerDown from Rib unit, ignoring");
+                            continue
+                        }
+                        Output::Custom((id, local)) => {
+                            OutputStreamMessage::custom(
+                                id, local,
+                                ingress_id,
+                            )
+                            
+                        }
+                    };
+                    osms.push(osm);
                 }
-                _ => {
-                info!("output stream entry {entry:?}");
-                }
+                self.gate.update_data(Update::OutputStream(osms)).await;
             }
         }
         /*
@@ -1083,16 +1125,17 @@ impl RibUnitRunner {
                         change,
                     );
 
-                    if let Some(ref roto_function) = self.roto_function_post {
-                        let mut insertion_info = report.into();
-                        let mut output_stream = RotoOutputStream::new();
-                        let _ = roto_function.call(
-                            roto::Val(&mut output_stream),
-                            roto::Val(payload.rx_value.clone()),
-                            roto::Val(insertion_info),
-                        );
-                        // TODO process outputstream
-                    }
+                    // XXX re-introduce sometime later
+                    //if let Some(ref roto_function) = self.roto_function_post {
+                    //    let mut insertion_info = report.into();
+                    //    let mut output_stream = RotoOutputStream::new();
+                    //    let _ = roto_function.call(
+                    //        roto::Val(&mut output_stream),
+                    //        roto::Val(payload.rx_value.clone()),
+                    //        roto::Val(insertion_info),
+                    //    );
+                    //    // TODO process outputstream
+                    //}
                 }
                 Err(err) => {
                     self.status_reporter.insert_failed(&payload.rx_value, err);

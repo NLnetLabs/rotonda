@@ -264,9 +264,9 @@ impl BgpTcpInRunner {
             link.connect(arc_self.clone(), false).await.unwrap();
         }
 
-        let roto_function: Option<RotoFunc> = arc_self.roto_compiled.clone().map(|c| {
+        let roto_function: Option<RotoFunc> = arc_self.roto_compiled.clone().and_then(|c| {
             let mut c = c.lock().unwrap();
-            c.get_function("bgp-in").unwrap()
+            c.get_function("bgp-in").ok()
         });
 
         loop {

@@ -8,6 +8,8 @@ use rotonda_store::prelude::multi::RouteStatus;
 use routecore::{bgp::{message::UpdateMessage, nlri::afisafi::Nlri, workshop::route::RouteWorkshop}, bmp::message::PerPeerHeader};
 use serde::Deserialize;
 
+pub use super::roto_runtime::rotonda_roto_runtime;
+
 use crate::{ingress::IngressId, manager, payload::{RotondaPaMap, RotondaRoute}};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
@@ -70,24 +72,7 @@ impl RotoScripts {
 }
 
 
-//pub type CompiledRoto = RefCell<Option<roto::Compiled>>;
 pub type CompiledRoto = std::sync::Mutex<roto::Compiled>;
-
-pub fn ensure_compiled(
-    cr: &mut Option<roto::Compiled>,
-    filter: impl Into<PathBuf>,
-) -> &mut roto::Compiled {
-    if cr.is_none() {
-        cr.replace(
-            roto::read_files([filter.into().to_string_lossy()]).unwrap()
-            .compile(rotonda_roto_runtime().unwrap(), usize::BITS / 8)
-            .unwrap()
-        );
-    }
-    cr.as_mut().unwrap()
-}
-
-pub use super::roto_runtime::rotonda_roto_runtime;
 
 #[derive(Default)]
 pub struct OutputStream<M>{

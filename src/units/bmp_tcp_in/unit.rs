@@ -361,9 +361,9 @@ impl BmpTcpInRunner {
         // spawning tasks to handle them.
         let status_reporter = self.status_reporter.clone();
 
-        let roto_function: Option<RotoFunc> = self.roto_compiled.clone().map(|c| {
+        let roto_function: Option<RotoFunc> = self.roto_compiled.clone().and_then(|c| {
             let mut c = c.lock().unwrap();
-            c.get_function("bmp-in").unwrap()
+            c.get_function("bmp-in").ok()
         });
 
         loop {

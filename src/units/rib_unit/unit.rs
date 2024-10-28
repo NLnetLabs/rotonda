@@ -354,14 +354,14 @@ impl RibUnitRunner {
         }
 
         let roto_compiled = component.roto_compiled().clone();
-        let roto_function_pre: Option<RotoFuncPre> = roto_compiled.clone().map(|c|{
+        let roto_function_pre: Option<RotoFuncPre> = roto_compiled.clone().and_then(|c|{
             let mut c = c.lock().unwrap();
-            c.get_function("rib-in-pre").unwrap()
+            c.get_function("rib-in-pre").ok()
         });
 
-        let roto_function_post: Option<RotoFuncPost> = roto_compiled.map(|c|{
+        let roto_function_post: Option<RotoFuncPost> = roto_compiled.and_then(|c|{
             let mut c = c.lock().unwrap();
-            c.get_function("rib-in-post").unwrap()
+            c.get_function("rib-in-post").ok()
         });
 
         let tracer = component.tracer().clone();

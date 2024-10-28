@@ -47,7 +47,7 @@ pub struct MrtInRunner {
 impl MrtIn {
     pub async fn run(
         self,
-        mut component: Component,
+        component: Component,
         gate: Gate,
         mut waitpoint: WaitPoint,
     ) -> Result<(), crate::comms::Terminated> {
@@ -100,10 +100,6 @@ impl MrtInRunner {
         let mmap = unsafe { memmap2::Mmap::map(&file)?  };
         let mrt_file = MrtFile::new(&mmap[..]);
 
-        //let entire_file = std::fs::read(filename.clone()).unwrap();
-        //let mrt_file = MrtFile::new(&entire_file);
-
-
         let peer_index_table = mrt_file.pi(); 
         let mut ingress_map = Vec::with_capacity(peer_index_table.len());
         for peer_entry in &peer_index_table[..] {
@@ -121,14 +117,9 @@ impl MrtInRunner {
         let rib_entries = mrt_file.rib_entries().unwrap();
         let mut routes_sent = 0;
 
-        //const BUFSIZE: usize = 256;
-        //let mut buffer = Vec::with_capacity(BUFSIZE);
-
         for (afisafi, peer_id, peer_entry, prefix, raw_attr) in rib_entries {
             let rr = match afisafi {
                 AfiSafiType::Ipv4Unicast => {
-                    // tmp test: skip v4
-                    //continue;
                     RotondaRoute::Ipv4Unicast(
                         prefix.try_into().unwrap(),
                         RotondaPaMap(routecore::bgp::path_attributes::OwnedPathAttributes::new(PduParseInfo::modern(), raw_attr))
@@ -140,8 +131,6 @@ impl MrtInRunner {
                 AfiSafiType::Ipv4RouteTarget => todo!(),
                 AfiSafiType::Ipv4FlowSpec => todo!(),
                 AfiSafiType::Ipv6Unicast => {
-                    // tmp test: skip v6
-                    //continue;
                     RotondaRoute::Ipv6Unicast(
                         prefix.try_into().unwrap(),
                         RotondaPaMap(routecore::bgp::path_attributes::OwnedPathAttributes::new(PduParseInfo::modern(), raw_attr))
@@ -164,26 +153,8 @@ impl MrtInRunner {
             let update = Update::Single(Payload::new(rr, ctx, None));
 
             gate.update_data(update).await;
-
-            //buffer.push(update);
-            //if buffer.len() == BUFSIZE {
-            //    buffer.shuffle(&mut rand::thread_rng());
-            //    for u in buffer.drain(..) {
-            //        gate.update_data(u).await;
-            //        //
-            //        //if let Update::Single(ref p) = u {
-            //        //    eprintln!("{}", p.rx_value);
-            //        //    gate.update_data(u).await;
-            //        //}
-            //    }
-            //}
-
             routes_sent += 1;
         }
-
-        //for u in buffer.drain(..) {
-        //    gate.update_data(u).await;
-        //}
 
         info!(
             "mrt-in: done processing {}, emitted {} routes in {}s",
@@ -233,15 +204,6 @@ impl MrtInRunner {
                                     return Err(Terminated)
                                 }
                             }
-                            /*
-                            if let Err(e) = Self::process_file(
-                                self.gate.clone(), filename.clone()
-                            ).await {
-                                error!("failed to process {}: {e}",
-                                    filename.to_string_lossy()
-                                );
-                            }
-                            */
                         }
                         Err(e) => error!("{e}"),
                     }

@@ -41,7 +41,7 @@ pub struct Rib {
     other_fams: HashMap<AfiSafiType, HashMap<(IngressId, Nlri<bytes::Bytes>), PaMap>>,
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 struct Multicast(bool);
 
 impl Rib {
@@ -301,7 +301,7 @@ impl Rib {
     pub fn get(&self) -> Option<()> { todo!() }
 
 
-    pub fn match_unicast_prefix(
+    pub fn match_prefix(
         &self,
         prefix: &Prefix,
         match_options: &MatchOptions,
@@ -309,7 +309,23 @@ impl Rib {
         let guard = &epoch::pin();
         let store = (*self.unicast).as_ref()
             .ok_or(PrefixStoreError::StoreNotReadyError.to_string())?;
-        Ok(store.match_prefix(prefix, match_options, guard))
+        let unicast_res = store.match_prefix(prefix, match_options, guard);
+        if unicast_res.prefix_meta.is_empty()
+            && unicast_res.less_specifics.is_none()
+            && unicast_res.more_specifics.is_none()
+        {
+            debug!("no result in unicast store, trying multicast");
+            let multicast_store = (*self.multicast).as_ref()
+                .ok_or(PrefixStoreError::StoreNotReadyError.to_string())?;
+            let multicast_res = 
+                multicast_store.match_prefix(prefix, match_options, guard);
+            if !(multicast_res.prefix_meta.is_empty()
+                && multicast_res.less_specifics.is_none()
+                && multicast_res.more_specifics.is_none()) {
+                return Ok(multicast_res);
+            }
+        }
+        Ok(unicast_res)
     }
 }
 

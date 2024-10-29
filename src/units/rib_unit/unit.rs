@@ -667,7 +667,7 @@ impl RibUnitRunner {
                                 // Eventually, this should facilitate all
                                 // afisafis.
                                 arc_self.rib.load()
-                                    .match_unicast_prefix(
+                                    .match_prefix(
                                         &prefix,
                                         &match_options,
                                     )

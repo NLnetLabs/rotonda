@@ -166,7 +166,7 @@ impl PrefixesApi {
         let res = match self.rib_type {
             RibType::Physical => {
                 // XXX res: QueryResult will be different 
-                match self.rib.load().match_unicast_prefix(
+                match self.rib.load().match_prefix(
                     &prefix, &options,
                 ) {
                     Ok(res) => res,

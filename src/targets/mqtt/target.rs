@@ -9,16 +9,13 @@ use super::{
 };
 
 use crate::{
-    common::{roto_new::OutputStreamMessage, status_reporter::{AnyStatusReporter, TargetStatusReporter}}, comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated}, ingress, manager::{Component, TargetCommand, WaitPoint}, payload::{Payload, Update, UpstreamStatus}, targets::Target
+    common::{roto_new::OutputStreamMessage, status_reporter::{AnyStatusReporter, TargetStatusReporter}}, comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated}, ingress, manager::{Component, TargetCommand, WaitPoint}, payload::{Update, UpstreamStatus}, targets::Target
 };
 
 use arc_swap::{ArcSwap, ArcSwapOption};
-use async_trait::async_trait;
 use chrono::{DateTime, Utc};
-use log::{error, info};
 use mqtt::{MqttOptions, QoS};
 use non_empty_vec::NonEmpty;
-//use roto::types::{outputs::OutputStreamMessage, typevalue::TypeValue};
 use serde::Deserialize;
 use tokio::{sync::mpsc, time::timeout};
 
@@ -65,7 +62,7 @@ pub(super) struct MqttRunner<C> {
     component: Component,
     config: Arc<ArcSwap<Config>>,
     client: Arc<ArcSwapOption<C>>,
-    pub_q_tx: Option<mpsc::UnboundedSender<SenderMsg>>,
+    pub_q_tx: Option<mpsc::Sender<SenderMsg>>,
     status_reporter: Arc<MqttStatusReporter>,
     ingresses: Arc<ingress::Register>,
 }
@@ -130,7 +127,7 @@ where
         let component = &mut self.component;
         let _unit_name = component.name().clone();
 
-        let (pub_q_tx, pub_q_rx) = mpsc::unbounded_channel();
+        let (pub_q_tx, pub_q_rx) = mpsc::channel(10);
         self.pub_q_tx = Some(pub_q_tx);
 
         let arc_self = Arc::new(self);
@@ -154,7 +151,7 @@ where
         self: &Arc<Self>,
         mut sources: Option<NonEmpty<DirectLink>>,
         mut cmd_rx: mpsc::Receiver<TargetCommand>,
-        mut pub_q_rx: mpsc::UnboundedReceiver<SenderMsg>,
+        mut pub_q_rx: mpsc::Receiver<SenderMsg>,
     ) -> Result<(), Terminated>
     where
         <F as ConnectionFactory>::EventLoopType: 'static,
@@ -183,7 +180,7 @@ where
         mut connection: Connection<C>,
         sources: &mut Option<NonEmpty<DirectLink>>,
         cmd_rx: &mut mpsc::Receiver<TargetCommand>,
-        pub_q_rx: &mut mpsc::UnboundedReceiver<SenderMsg>,
+        pub_q_rx: &mut mpsc::Receiver<SenderMsg>,
     ) -> Result<(), Terminated> {
         while connection.active() {
             tokio::select! {
@@ -464,7 +461,7 @@ where
                         self.output_stream_message_to_msg(osm)
                     {
                         if let Err(err) =
-                            self.pub_q_tx.as_ref().unwrap().send(msg)
+                            self.pub_q_tx.as_ref().unwrap().send(msg).await
                         {
                             error!("failed to send MQTT message: {err}");
                         }

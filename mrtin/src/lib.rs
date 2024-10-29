@@ -473,7 +473,7 @@ impl<'a> MrtFile<'a> {
         )
     }
 
-    fn pi(&self) -> PeerIndex {
+    pub fn pi(&self) -> PeerIndex {
         let mut parser = Parser::from_ref(&self.raw);
         Self::extract_peer_index_table(&mut parser).unwrap()
     }

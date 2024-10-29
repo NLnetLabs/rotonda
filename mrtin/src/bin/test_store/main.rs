@@ -87,7 +87,7 @@ fn insert<T: rotonda_store::Meta>(
         prefix,
         record,
         None
-    ).inspect_err(|e| eprintln!("{e}"))
+    ).inspect_err(|e| eprintln!("Error in test_store: {e}"))
 }
 
 fn main() {
@@ -198,9 +198,15 @@ fn main() {
 
             }
             if !args.parse_only {
+                let threading = if args.mt {
+                    " (multi-threaded)"
+                } else {
+                    " (single-threaded)"
+                };
                 eprintln!(
-                    "inserted {} routes, took {}ms, total for this file {}ms",
+                    "inserted {} routes{}, took {}ms, total for this file {}ms",
                     num_routes,
+                    threading,
                     t_prev.elapsed().as_millis(),
                     t_0.elapsed().as_millis(),
                 );

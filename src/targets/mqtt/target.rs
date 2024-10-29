@@ -13,7 +13,9 @@ use crate::{
 };
 
 use arc_swap::{ArcSwap, ArcSwapOption};
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use log::error;
 use mqtt::{MqttOptions, QoS};
 use non_empty_vec::NonEmpty;
 use serde::Deserialize;

@@ -258,13 +258,7 @@ pub struct RibUnitRunner {
 #[async_trait]
 impl DirectUpdate for RibUnitRunner {
     async fn direct_update(&self, update: Update) {
-        if let Err(err) = self
-            .process_update(update)
-            //.process_update(update, |pfx, meta, store, nlri_status, provenance, ltime| {
-            //    store.insert(pfx, meta, nlri_status, provenance, ltime)
-            //})
-            .await
-        {
+        if let Err(err) = self.process_update(update).await {
             error!("Error handling update: {err}");
         }
     }

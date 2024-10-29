@@ -108,8 +108,8 @@ impl Rib {
         };
 
 
-        let store = (*arc_store).as_ref();
-            //.ok_or(PrefixStoreError::StoreNotReadyError)?;
+        let store = (*arc_store).as_ref()
+            .ok_or(PrefixStoreError::StoreNotReadyError)?;
 
         let mui = provenance.ingress_id;
 
@@ -121,7 +121,7 @@ impl Rib {
             // mark_mui_as_withdrawn_for_prefix . This way, we preserve the
             // last seen attributes/nexthop for this {prefix,mui} combination,
             // while setting the status to Withdrawn.
-            store.as_ref().unwrap().mark_mui_as_withdrawn_for_prefix(prefix, mui)
+            store.mark_mui_as_withdrawn_for_prefix(prefix, mui)
                 .inspect_err(|e| {
                     error!(
                         "failed to mark {} for {} as withdrawn: {}",
@@ -147,40 +147,11 @@ impl Rib {
             val.rotonda_pamap().clone()
         );
 
-
-
-        let prefix = *prefix;
-        let arc2 = arc_store.clone();
-        let x = tokio::spawn(async move {
-            //eprintln!("{:?}", std::thread::current().id());
-            
-            (*arc2).as_ref().unwrap().insert(
-                &prefix,
-                pubrec,
-                None, // Option<TBI>
-            )
-                /*
-            let v =  &pubrec.meta;
-            let pa_num = v.0.iter().count();
-            if pa_num % 5 == 0 && pa_num % 3 == 0 {
-                eprintln!("{:?}", pubrec);
-            }
-                */
-        });
-
-            return Ok(UpsertReport{
-                cas_count: 0,
-                prefix_new: false,
-                mui_new: false, 
-                mui_count: 0,
-            });
-        /*
-        (*arc_store).as_ref().unwrap().insert(
+        store.insert(
             prefix,
             pubrec,
             None, // Option<TBI>
         )
-        */
     }
 
     pub fn withdraw_for_ingress(

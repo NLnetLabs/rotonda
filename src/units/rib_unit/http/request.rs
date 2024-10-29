@@ -79,8 +79,6 @@ impl ProcessRequest for PrefixesApi {
         // we are at it...
         let req_path = &request.uri().decoded_path();
 
-        // FIXME LH: this is hit twice for a single request, why?
-        
         debug!("RibUnit ProcessRequest {:?}", &req_path);
         // e.g. req_path = "/prefixes/2804:1398:100::/48"
         if request.method() == Method::GET

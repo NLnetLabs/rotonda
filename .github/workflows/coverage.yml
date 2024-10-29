@@ -2,9 +2,11 @@ name: coverage
 
 on:
   workflow_run:
-    workflows: ["ci"]
-    types:
-      - completed
+    workflow_dispatch:
+
+   #workflows: ["ci"]
+   #types:
+   #  - completed
 
   pull_request:
     types: [review_requested, ready_for_review]

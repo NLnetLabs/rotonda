@@ -24,7 +24,7 @@ authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]
 members = ["mrtin"]
 
 [workspace.dependencies]
-routecore          = { git = "https://github.com/nlnetlabs/routecore", rev = "831e495", features = ["bgp", "bmp", "serde", "fsm"] }
+routecore          = { git = "https://github.com/nlnetlabs/routecore", branch = "main", features = ["bgp", "bmp", "serde", "fsm"] }
 inetnum            = { version = "0.1.0", features = ["arbitrary", "serde"] }
 
 
@@ -72,8 +72,8 @@ mrtin              = { path = "mrtin" }
 memmap2            = "0.9.4"
 non-empty-vec      = { version = "0.2", features = ["serde"]}
 percent-encoding   = "2.3"
-roto               = { git = "https://github.com/nlnetlabs/roto", branch = "runtime-types-by-val" }
-rotonda-store      = { path = "../rotonda-store" }
+roto               = { git = "https://github.com/nlnetlabs/roto", branch = "main" }
+rotonda-store       = { version = "0.4.0-rc1", path = "../rotonda-store" }
 serde_with         = "3"
 smallvec           = { version = "1.11", features = ["const_generics", "const_new", "union"] }
 tokio-metrics      = { version = "0.3", default-features = false }

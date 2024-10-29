@@ -73,7 +73,7 @@ memmap2            = "0.9.4"
 non-empty-vec      = { version = "0.2", features = ["serde"]}
 percent-encoding   = "2.3"
 roto               = { git = "https://github.com/nlnetlabs/roto", branch = "main" }
-rotonda-store       = { version = "0.4.0-rc1", path = "../rotonda-store" }
+rotonda-store       = { version = "0.4.0-rc1" }
 serde_with         = "3"
 smallvec           = { version = "1.11", features = ["const_generics", "const_new", "union"] }
 tokio-metrics      = { version = "0.3", default-features = false }

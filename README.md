@@ -1,6 +1,6 @@
 # Rotonda
 
-<img align="right" src="manual/source/img/rotonda-illustrative-icon.png" height="150">
+<img align="right" src="doc/manual/source/img/rotonda-illustrative-icon.png" height="150">
 
 
 The composable, programmable BGP Engine
@@ -16,7 +16,8 @@ API.
 Future versions of Rotonda will support an on-disk database, using external
 datasets in filters, reading routes from Kafka streams, and more.
 
-Rotonda is and always will be free, open-source software.
+Read the [documentation](https://rotonda.docs.nlnetlabs.nl) to find out how to
+install and use Rotonda.
 
 > `Rotonda` is under active development and features are added regularly.
 > The APIs, the configuration and the `Roto` syntax may change between

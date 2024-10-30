@@ -7,7 +7,7 @@ use routecore::{bgp::types::Afi, typeenum};
 use inetnum::{addr::Prefix, asn::Asn};
 
 use std::fmt;
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::ops::Index;
 use std::slice::SliceIndex;
 
@@ -62,7 +62,10 @@ impl<'a, Octs: Octets> CommonHeader<'a, Octs> {
                     parser.parse_u16_be()?.into()
                 )
             }
-            n => todo!("TODO parse {n}")
+            _ => {
+                log::error!("no support for {msg_type}");
+                return Err(ParseError("unsupported MRT MessageType"));
+            }
         };
 
         let length = parser.parse_u32_be()?;
@@ -473,9 +476,9 @@ impl<'a> MrtFile<'a> {
         )
     }
 
-    pub fn pi(&self) -> PeerIndex {
+    pub fn pi(&self) -> Result<PeerIndex, ParseError> {
         let mut parser = Parser::from_ref(&self.raw);
-        Self::extract_peer_index_table(&mut parser).unwrap()
+        Self::extract_peer_index_table(&mut parser)
     }
 
     pub fn rib_entries_mt<Octs: 'a + Octets>(&'a self)
@@ -547,7 +550,6 @@ impl<'a, Octs: Octets> Iterator for TableDumpIterator<'a, Octs>
 where
     Vec<u8>: OctetsFrom<Octs::Range<'a>>
 {
-    // u16 for the 'ingress_id', for now
     type Item = (AfiSafiType, RibEntryHeader<'a, Octs>);
 
     fn next(&mut self) -> Option<Self::Item> {

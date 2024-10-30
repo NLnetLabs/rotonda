@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use futures::future::select;
 use futures::{pin_mut, Future};
-use log::{debug, warn};
+use log::{debug, error, warn};
 use non_empty_vec::NonEmpty;
 //use roto::types::{builtin::BuiltinTypeValue, typevalue::TypeValue};
 use routecore::bgp::fsm::session::{Command, DisconnectReason};
@@ -430,7 +430,8 @@ impl BgpTcpInRunner {
 #[async_trait]
 impl DirectUpdate for BgpTcpInRunner {
     async fn direct_update(&self, update: Update) {
-        todo!()
+        error!("Using a Bgp-in unit as target is currently not supported");
+        return;
             /*
         let process_update = |value: TypeValue| async {
             if let TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(pfr)) = value {

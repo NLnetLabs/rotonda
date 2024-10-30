@@ -9,7 +9,7 @@ use routecore::bgp::message::PduParseInfo;
 use tokio::pin;
 use tokio::sync::mpsc;
 use futures::future::{select, Either};
-use futures::{pin_mut, FutureExt};
+use futures::{pin_mut, FutureExt, TryFutureExt};
 use log::{debug, error, info, warn};
 use mrtin::MrtFile;
 use rand::seq::SliceRandom;
@@ -92,7 +92,7 @@ impl MrtInRunner {
         gate: Gate,
         ingresses: Arc<ingress::Register>,
         filename: PathBuf
-    ) -> std::io::Result<()> {
+    ) -> Result<(), MrtError> {
         info!("processing {}", filename.to_string_lossy());
         let t0 = Instant::now();
         
@@ -100,7 +100,7 @@ impl MrtInRunner {
         let mmap = unsafe { memmap2::Mmap::map(&file)?  };
         let mrt_file = MrtFile::new(&mmap[..]);
 
-        let peer_index_table = mrt_file.pi(); 
+        let peer_index_table = mrt_file.pi()?;
         let mut ingress_map = Vec::with_capacity(peer_index_table.len());
         for peer_entry in &peer_index_table[..] {
             let id = ingresses.register();
@@ -114,35 +114,39 @@ impl MrtInRunner {
             ingress_map.push(id);
         }
 
-        let rib_entries = mrt_file.rib_entries().unwrap();
+        let rib_entries = mrt_file.rib_entries()?;
+
         let mut routes_sent = 0;
 
         for (afisafi, peer_id, peer_entry, prefix, raw_attr) in rib_entries {
             let rr = match afisafi {
                 AfiSafiType::Ipv4Unicast => {
                     RotondaRoute::Ipv4Unicast(
-                        prefix.try_into().unwrap(),
+                        prefix.try_into().map_err(MrtError::other)?,
                         RotondaPaMap(routecore::bgp::path_attributes::OwnedPathAttributes::new(PduParseInfo::modern(), raw_attr))
                     )
                 }
-                AfiSafiType::Ipv4Multicast => todo!(),
-                AfiSafiType::Ipv4MplsUnicast => todo!(),
-                AfiSafiType::Ipv4MplsVpnUnicast => todo!(),
-                AfiSafiType::Ipv4RouteTarget => todo!(),
-                AfiSafiType::Ipv4FlowSpec => todo!(),
                 AfiSafiType::Ipv6Unicast => {
                     RotondaRoute::Ipv6Unicast(
-                        prefix.try_into().unwrap(),
+                        prefix.try_into().map_err(MrtError::other)?,
                         RotondaPaMap(routecore::bgp::path_attributes::OwnedPathAttributes::new(PduParseInfo::modern(), raw_attr))
                     )
                 }
-                AfiSafiType::Ipv6Multicast => todo!(),
-                AfiSafiType::Ipv6MplsUnicast => todo!(),
-                AfiSafiType::Ipv6MplsVpnUnicast => todo!(),
-                AfiSafiType::Ipv6FlowSpec => todo!(),
-                AfiSafiType::L2VpnVpls => todo!(),
-                AfiSafiType::L2VpnEvpn => todo!(),
-                AfiSafiType::Unsupported(_, _) => todo!(),
+                AfiSafiType::Ipv4Multicast |
+                AfiSafiType::Ipv4MplsUnicast |
+                AfiSafiType::Ipv4MplsVpnUnicast |
+                AfiSafiType::Ipv4RouteTarget |
+                AfiSafiType::Ipv4FlowSpec |
+                AfiSafiType::Ipv6Multicast |
+                AfiSafiType::Ipv6MplsUnicast |
+                AfiSafiType::Ipv6MplsVpnUnicast |
+                AfiSafiType::Ipv6FlowSpec |
+                AfiSafiType::L2VpnVpls |
+                AfiSafiType::L2VpnEvpn |
+                AfiSafiType::Unsupported(_, _)  => {
+                    debug!("unsupported AFI/SAFI {}, skipping", afisafi);
+                    continue
+                }
             };
             let provenance = Provenance::for_bgp(
                 ingress_map[usize::from(peer_id)],
@@ -185,8 +189,7 @@ impl MrtInRunner {
                                     gate,
                                     ingresses,
                                     filename.clone()
-                            )).await;
-                            debug!("lvl2: got {r:?}");
+                            ).map_err(Into::into)).await;
                             match r {
                                 ControlFlow::Continue(Ok(..)) => {
                                     if let Some(filename) = self.processing.take() {
@@ -263,3 +266,47 @@ impl MrtInRunner {
         }
     }
 }
+
+#[derive(Debug)]
+enum MrtErrorType {
+    Io(std::io::Error),
+    Parse(mrtin::ParseError),
+    Other(&'static str),
+}
+#[derive(Debug)]
+pub struct MrtError(MrtErrorType);
+
+impl MrtError {
+    fn other(s: &'static str) -> Self {
+        Self(MrtErrorType::Other(s))
+    }
+}
+
+impl std::error::Error for MrtError { }
+impl std::fmt::Display for MrtError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match &self.0 {
+            MrtErrorType::Io(e) => write!(f, "io error: {}", e),
+            MrtErrorType::Parse(e) => write!(f, "parse error: {}", e),
+            MrtErrorType::Other(e) => write!(f, "error: {}", e),
+        }
+    }
+}
+
+impl From<mrtin::ParseError> for MrtError {
+    fn from(e: mrtin::ParseError) -> Self {
+        Self(MrtErrorType::Parse(e))
+    }
+}
+
+impl From<std::io::Error> for MrtError {
+    fn from(e: std::io::Error) -> Self {
+        Self(MrtErrorType::Io(e))
+    }
+}
+impl From<MrtError> for std::io::Error {
+    fn from(e: MrtError) -> Self {
+        std::io::Error::other(e.to_string())
+    }
+}
+

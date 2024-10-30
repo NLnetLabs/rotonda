@@ -4,7 +4,7 @@ use std::{collections::{HashMap, HashSet}, net::IpAddr, path::PathBuf};
 use bytes::Bytes;
 use chrono::Utc;
 use inetnum::{addr::Prefix, asn::Asn};
-use log::debug;
+use log::{debug, warn};
 use rotonda_store::prelude::multi::RouteStatus;
 use routecore::bgp::{message::UpdateMessage, nlri::afisafi::Nlri};
 use serde::Deserialize;
@@ -558,29 +558,35 @@ impl<O> TryFrom<(Nlri<O>, RotondaPaMap)> for RotondaRoute {
             Nlri::Ipv4Multicast(n) => RotondaRoute::Ipv4Multicast(n, value.1),
             Nlri::Ipv6Unicast(n) => RotondaRoute::Ipv6Unicast(n, value.1),
             Nlri::Ipv6Multicast(n) => RotondaRoute::Ipv6Multicast(n, value.1),
-            _ => { return Err(()); }
-            //Nlri::Ipv4UnicastAddpath(ipv4_unicast_addpath_nlri) => todo!(),
-            //Nlri::Ipv4MulticastAddpath(ipv4_multicast_addpath_nlri) => todo!(),
-            //Nlri::Ipv4MplsUnicast(ipv4_mpls_unicast_nlri) => todo!(),
-            //Nlri::Ipv4MplsUnicastAddpath(ipv4_mpls_unicast_addpath_nlri) => todo!(),
-            //Nlri::Ipv4MplsVpnUnicast(ipv4_mpls_vpn_unicast_nlri) => todo!(),
-            //Nlri::Ipv4MplsVpnUnicastAddpath(ipv4_mpls_vpn_unicast_addpath_nlri) => todo!(),
-            //Nlri::Ipv4RouteTarget(ipv4_route_target_nlri) => todo!(),
-            //Nlri::Ipv4RouteTargetAddpath(ipv4_route_target_addpath_nlri) => todo!(),
-            //Nlri::Ipv4FlowSpec(ipv4_flow_spec_nlri) => todo!(),
-            //Nlri::Ipv4FlowSpecAddpath(ipv4_flow_spec_addpath_nlri) => todo!(),
-            //Nlri::Ipv6UnicastAddpath(ipv6_unicast_addpath_nlri) => todo!(),
-            //Nlri::Ipv6MulticastAddpath(ipv6_multicast_addpath_nlri) => todo!(),
-            //Nlri::Ipv6MplsUnicast(ipv6_mpls_unicast_nlri) => todo!(),
-            //Nlri::Ipv6MplsUnicastAddpath(ipv6_mpls_unicast_addpath_nlri) => todo!(),
-            //Nlri::Ipv6MplsVpnUnicast(ipv6_mpls_vpn_unicast_nlri) => todo!(),
-            //Nlri::Ipv6MplsVpnUnicastAddpath(ipv6_mpls_vpn_unicast_addpath_nlri) => todo!(),
-            //Nlri::Ipv6FlowSpec(ipv6_flow_spec_nlri) => todo!(),
-            //Nlri::Ipv6FlowSpecAddpath(ipv6_flow_spec_addpath_nlri) => todo!(),
-            //Nlri::L2VpnVpls(l2_vpn_vpls_nlri) => todo!(),
-            //Nlri::L2VpnVplsAddpath(l2_vpn_vpls_addpath_nlri) => todo!(),
-            //Nlri::L2VpnEvpn(l2_vpn_evpn_nlri) => todo!(),
-            //Nlri::L2VpnEvpnAddpath(l2_vpn_evpn_addpath_nlri) => todo!(),
+
+            Nlri::Ipv4UnicastAddpath(..) |
+            Nlri::Ipv4MulticastAddpath(..) |
+            Nlri::Ipv4MplsUnicast(..) |
+            Nlri::Ipv4MplsUnicastAddpath(..) |
+            Nlri::Ipv4MplsVpnUnicast(..) |
+            Nlri::Ipv4MplsVpnUnicastAddpath(..) |
+            Nlri::Ipv4RouteTarget(..) |
+            Nlri::Ipv4RouteTargetAddpath(..) |
+            Nlri::Ipv4FlowSpec(..) |
+            Nlri::Ipv4FlowSpecAddpath(..) |
+            Nlri::Ipv6UnicastAddpath(..) |
+            Nlri::Ipv6MulticastAddpath(..) |
+            Nlri::Ipv6MplsUnicast(..) |
+            Nlri::Ipv6MplsUnicastAddpath(..) |
+            Nlri::Ipv6MplsVpnUnicast(..) |
+            Nlri::Ipv6MplsVpnUnicastAddpath(..) |
+            Nlri::Ipv6FlowSpec(..) |
+            Nlri::Ipv6FlowSpecAddpath(..) |
+            Nlri::L2VpnVpls(..) |
+            Nlri::L2VpnVplsAddpath(..) |
+            Nlri::L2VpnEvpn(..) |
+            Nlri::L2VpnEvpnAddpath(..) => {
+                warn!(
+                    "AFI/SAFI {} not yet supported in RotondaRoute",
+                    value.0
+                );
+                return Err(())
+            }
         };
 
         Ok(res)

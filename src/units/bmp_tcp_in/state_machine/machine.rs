@@ -520,7 +520,6 @@ where
         // packet captures so it seems that it is indeed sent.
         let pph = msg.per_peer_header();
 
-        debug!("machine.peer_down()");
         // We have to grab these before we remove the peer.
         //let withdrawals = self.mk_withdrawals_for_peers_routes(&pph);
         //let withdrawals = vec![];

@@ -355,7 +355,6 @@ impl RouterHandler {
             let mut osms = smallvec![];
             use crate::common::roto_new::Output;
             for entry in output_stream.drain() {
-                debug!("output stream entry {entry:?}");
                 let osm = match entry {
                     Output::Prefix(_prefix) => {
                         OutputStreamMessage::prefix(

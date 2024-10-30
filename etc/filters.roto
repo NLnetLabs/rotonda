@@ -1,0 +1,134 @@
+// The bgp-in filter works on incoming BGP UPDATE messages.
+//
+// One such message can contain multiple NLRI, thus multiple announcements or
+// withdrawals). To act on individual announcements or withdrawals, use the
+// 'rib-in' filter-map below.
+filter-map bgp-in(
+    output: Log,
+    bgp: BgpMsg,
+    prov: Provenance,
+) {
+
+    define {
+        origin_to_log = AS65536;
+        community_to_log = 0xffff029a;
+    }
+
+    apply {
+        if bgp.aspath_origin(origin_to_log) {
+            output.log_matched_origin(origin_to_log);
+        }
+        if bgp.contains_community(community_to_log) {
+            output.log_matched_community(community_to_log)
+        }
+
+        accept
+    }
+}
+
+// The bmp-in filter works on incoming BMP messages.
+//
+// While most BMP message will be of type RouteMonitoring (transporting route
+// information via an encapsulated BGP UPDATE message), this filter-map can act
+// on different types as well. Helper methods are provided, e.g.
+// 'is_peer_down()' returns true if the message is a BMP PeerDownNotification.
+filter-map bmp-in(
+    output: Log,
+    bmp: BmpMsg,
+    prov: Provenance,
+) {
+    define {
+        my_asn = AS12345;
+        asn_to_log = AS65536;
+        community_to_log = 0xffff029a;
+    }
+
+    apply {
+        if bmp.is_peer_down() {
+            output.log_peer_down()
+        }
+        if bmp.is_ibgp(my_asn) {
+            reject
+        } else {
+            if bmp.aspath_contains(asn_to_log) {
+                output.log_matched_asn(asn_to_log);
+            }
+            if bmp.contains_community(community_to_log) {
+                output.log_matched_community(community_to_log)
+            }
+            accept
+        }
+    }
+}
+
+// The rib-in-pre filter processes individual routes prior to insertion into the
+// main RIB.
+//
+// Different from the BGP UPDATE message in the bgp-in filter-map, and the BMP
+// RouteMonitoring message in the bmp-in filter-map, the rib-in filter works on
+// individual announcements and withdrawals, typed Route.
+//
+// Use the rib-in-pre filter to process routes based on their NLRI (often the
+// announced prefix itself), as most other things are simply more efficient to
+// do in the bgp-in/bmp-in stage.
+// Use the rib-in-post filter below to act on inserted Routes.
+filter-map rib-in-pre(
+    output: Log,
+    route: Route,
+    context: RouteContext,
+) {
+
+    define {
+        attribute_to_log = 35; // OTC
+        my_prefix = 100.40.0.0/17;
+        //my_prefix = 2001:db8:1::/48;
+    }
+
+    apply {
+        //if route.has_attribute(attribute_to_log) {
+        //    accept
+        //} else {
+        //    reject
+        //}
+        if route.prefix_matches(my_prefix)  {
+            output.log_custom(10, 20);
+            output.log_prefix(my_prefix);
+        }
+
+        accept
+    }
+}
+
+// The rib-in-post filter processes Routes that have been accepted by the
+// rib-in-pre filter-map, and thus have been inserted in the RIB.
+// This filter-map is useful for logging/alerting purposes.
+
+//filter rib-in-post(
+//    output: Log,
+//    route: Route,
+//    insertion_info: InsertionInfo,
+//) {
+//
+//    define {
+//        some_interesting_prefix = 100.40.0.0/17;
+//    }
+//
+//    apply {
+//        //if route.announces(my_prefix) && insertion_info.is_new_best_path() {
+//        //    output.log_best_path()
+//        //}
+//        //if insertion_info.path_replaced(my_prefix) {
+//        //    output.log_best_path()
+//        //}
+//
+//        //if insertion_info.new_peer() {
+//        //    output.log_custom(1,1);
+//        //}
+//        //if insertion_info.prefix_new() {
+//        //    output.log_custom(2,1);
+//        //}
+//
+//        accept // no-op, but required
+//    }
+//}
+

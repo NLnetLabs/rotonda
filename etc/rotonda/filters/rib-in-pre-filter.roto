@@ -1,9 +1,0 @@
-filter rib-in-pre-filter {
-    define {
-        rx route: Route;
-    }
-
-    apply {
-         accept;
-    }
-}

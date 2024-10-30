@@ -78,8 +78,8 @@ pub struct BgpTcpIn {
     #[serde(default)]
     pub filter_name: FilterName,
 
-    /// Outgoing BGP UPDATEs can come from these sources.
-    pub sources: Vec<DirectLink>
+    ///// Outgoing BGP UPDATEs can come from these sources.
+    //pub sources: Vec<DirectLink>
 }
 
 impl PartialEq for BgpTcpIn {
@@ -99,7 +99,7 @@ impl BgpTcpIn {
             my_bgp_id: Default::default(),
             peer_configs: Default::default(),
             filter_name: Default::default(),
-            sources: Vec::new(),
+            //sources: Vec::new(),
         }
     }
 
@@ -140,7 +140,7 @@ impl BgpTcpIn {
         // XXX refactor BgpTcpInRunner so it does not take the mut BgpTcpIn
         // so that we can pass self.sources into .run below
         // That way this unit is a bit more consistent with the RibUnit.
-        let sources = self.sources.clone();
+        //let sources = self.sources.clone();
         BgpTcpInRunner::new(
             self,
             gate,
@@ -150,7 +150,8 @@ impl BgpTcpIn {
             ingresses,
         )
         .run::<_, _, StandardTcpStream, BgpTcpInRunner>(
-            sources,
+            //sources,
+            Vec::new(),
             Arc::new(StandardTcpListenerFactory,)
         ).await
     }

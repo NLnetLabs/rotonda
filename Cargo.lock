@@ -2106,6 +2106,8 @@ dependencies = [
 [[package]]
 name = "rotonda-macros"
 version = "0.4.0-rc1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb43b66c79248229e670e1159838c926d6a4d440e4bd1731b4963448d6fd7dc9"
 dependencies = [
  "quote",
  "syn 2.0.82",
@@ -2114,6 +2116,8 @@ dependencies = [
 [[package]]
 name = "rotonda-store"
 version = "0.4.0-rc1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f9ff3d52cdaa52abeecb2ed21401af73bed98484b71759eef54c21c9b0984d65"
 dependencies = [
  "crossbeam-epoch",
  "crossbeam-utils",

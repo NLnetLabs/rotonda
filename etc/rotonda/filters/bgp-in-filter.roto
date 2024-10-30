@@ -1,9 +1,0 @@
-filter bgp-in-filter {
-    define {
-        rx bgp_msg: BgpUpdateMessage;
-    }
-
-    apply {
-        accept;
-    }
-}

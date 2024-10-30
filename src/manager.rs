@@ -826,9 +826,16 @@ impl Manager {
         config: &Config,
         file: &ConfigFile,
     ) -> Result<(), Terminate> {
-        let mut res = Ok(());
 
-        if let Err(err) = self.compile_roto_script(&config.roto_script) {
+        let roto_script = config.roto_script.as_ref()
+            .and_then(|roto_script|
+                file.path()
+                    .and_then(|p| p.parent())
+                    .map(|d| d.to_path_buf())
+                    .map(|mut dir|{ dir.push(roto_script); dir})
+        );
+
+        if let Err(err) = self.compile_roto_script(&roto_script) {
             let msg = format!("Unable to load main Roto script: {err}.");
             error!("{msg}");
             Err(Terminate::error())?
@@ -873,7 +880,7 @@ impl Manager {
         // started Units and Targets. The caller should invoke spawn() to run
         // each Unit and Target and assign Gates to Units by name.
 
-        res
+        Ok(())
     }
 
 

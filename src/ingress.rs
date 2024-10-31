@@ -69,8 +69,18 @@ impl Register {
         }
     }
 
-    pub(crate) fn get(&self, id: IngressId) -> Option<IngressInfo> {
+    pub fn get(&self, id: IngressId) -> Option<IngressInfo> {
         self.info.read().unwrap().get(&id).cloned()
+    }
+
+    pub fn ids_for_parent(&self, parent: IngressId) -> Vec<IngressId> {
+        let mut res = Vec::new();
+        for (id, info) in self.info.read().unwrap().iter() {
+            if info.parent_ingress == Some(parent) {
+                res.push(*id);
+            }
+        }
+        res
     }
 }
 
@@ -83,6 +93,7 @@ pub struct IngressInfo {
     // though.
     //remote_addr: Option<SocketAddr>,
 
+    pub parent_ingress: Option<IngressId>,
     pub remote_addr: Option<IpAddr>,
     pub remote_asn: Option<Asn>,
     pub filename: Option<PathBuf>,
@@ -94,6 +105,10 @@ pub struct IngressInfo {
 impl IngressInfo {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_parent(self, parent: IngressId) -> Self {
+        Self { parent_ingress: Some(parent), ..self }
     }
 
     pub fn with_remote_addr(self, addr: IpAddr) -> Self {

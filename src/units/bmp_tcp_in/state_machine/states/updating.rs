@@ -212,13 +212,15 @@ impl PeerAware for Updating {
         session_config: SessionConfig,
         eor_capable: bool,
         ingress_register: Arc<ingress::Register>,
+        bmp_ingress_id: ingress::IngressId,
     ) -> bool {
         self.peer_states
             .add_peer_config(
                 pph,
                 session_config,
                 eor_capable,
-                ingress_register
+                ingress_register,
+                bmp_ingress_id,
             )
     }
 

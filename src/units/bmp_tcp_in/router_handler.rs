@@ -301,10 +301,20 @@ impl RouterHandler {
             &bmp_state_lock.as_ref().unwrap().router_id(),
         );
 
-        // Signal withdrawal of all address families for this ingress_id
+        // Signal withdrawal of all bgp sessions monitored via this BMP
+        // session:
+        let session_ids = ingress_register.ids_for_parent(ingress_id);
         self.gate
-            .update_data(Update::Withdraw(ingress_id, None))
+            .update_data(Update::WithdrawBulk(session_ids.into()))
             .await;
+
+        // Signal withdrawal of all address families for this ingress_id.
+        // XXX if ingress ids are assigned properly, i.e. on the BGP level
+        // within this BMP stream, there should be no RIB entries for the
+        // ingress id of the BMP connector.
+        //self.gate
+        //    .update_data(Update::Withdraw(ingress_id, None))
+        //    .await;
 
         // Notify downstream units that the data stream for this
         // particular monitored router has ended.

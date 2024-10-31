@@ -398,6 +398,7 @@ pub trait PeerAware {
         config: SessionConfig,
         eor_capable: bool,
         ingress_register: Arc<ingress::Register>,
+        bmp_ingress_id: ingress::IngressId,
     ) -> bool;
 
     fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState>;
@@ -485,7 +486,13 @@ where
             .capabilities()
             .any(|cap| cap.typ() == CapabilityType::GracefulRestart);
 
-        if !self.details.add_peer_config(pph, config, eor_capable, self.ingress_register.clone()) {
+        if !self.details.add_peer_config(
+            pph,
+            config,
+            eor_capable,
+            self.ingress_register.clone(),
+            self.ingress_id,
+        ) {
             // This is unexpected. How can we already have an entry in
             // the map for a peer which is currently up (i.e. we have
             // already seen a PeerUpNotification for the peer but have
@@ -1198,6 +1205,7 @@ impl PeerAware for PeerStates {
         session_config: SessionConfig,
         eor_capable: bool,
         ingress_register: Arc<ingress::Register>,
+        bmp_ingress_id: ingress::IngressId,
     ) -> bool {
         let mut added = false;
         
@@ -1206,6 +1214,7 @@ impl PeerAware for PeerStates {
         ingress_register.update_info(
             peer_ingress_id,
             ingress::IngressInfo::new()
+            .with_parent(bmp_ingress_id)
             .with_remote_addr(pph.address())
             .with_remote_asn(pph.asn())
         );

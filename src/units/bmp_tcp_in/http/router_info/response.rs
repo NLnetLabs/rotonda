@@ -169,7 +169,7 @@ impl RouterInfoApi {
                     <th>Timestamp</th>
                     <th>IP Address</th>
                     <th>ASN</th>
-                    <th># Prefixes</th>
+                    <th>Prefixes</th>
                     <th>Flags</th>
                 </tr>
                 "#
@@ -179,17 +179,17 @@ impl RouterInfoApi {
 
             for pph in peer_states.get_peers() {
                 let peer_key = format!("{}", pph);
-                let num_prefixes = peer_states
-                    .get_announced_prefixes(pph)
-                    .map_or(0, |iter| iter.count());
-                let prefixes_link = if num_prefixes > 0 {
-                    format!(
-                        "<a href=\"{}/prefixes/{}\">{}</a>",
-                        &base_http_path, pph, num_prefixes
-                    )
-                } else {
-                    "0".to_string()
-                };
+                let prefixes_link = peer_states.get_peer_ingress_id(pph)
+                    .map(|ingress_id| 
+                        format!(
+                            "<a href=\"/prefixes/{}\">prefixes</a>",
+                            ingress_id
+                        )
+                    ).unwrap_or("".to_string());
+
+                // As soon as the per-mui iterators in the store work, remove
+                // this line and actually show the hyperlinks.
+                let prefixes_link = "".to_string();
                 writeln!(peer_report, "<tr><td>{}</td><td>{}</td><td>{}</td><td>{}</td><td>{:08b} [<a href=\"{}/flags/{}\">more</a>]</td></tr>",
                     pph.timestamp(),
                     pph.address(),

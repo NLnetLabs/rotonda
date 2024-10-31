@@ -84,7 +84,11 @@ impl ProcessRequest for PrefixesApi {
         if request.method() == Method::GET
             && req_path.starts_with(self.http_api_path.deref())
         {
-            match self.handle_prefix_query(req_path, request).await {
+            let res = match request.uri().path().split("/").count() {
+                3 => self.handle_ingress_id_query(req_path, request).await,
+                _ => self.handle_prefix_query(req_path, request).await,
+            };
+            match res {
                 Ok(res) => Some(res),
                 Err(err) => Some(
                     Response::builder()
@@ -281,6 +285,45 @@ impl PrefixesApi {
         };
 
         Ok(res)
+    }
+
+    async fn handle_ingress_id_query(
+        &self,
+        req_path: &str,
+        _request: &Request<Body>,
+    ) -> Result<Response<Body>, String> {
+        debug!("in handle_ingress_id_query");
+
+        let ingress_id = req_path
+            .strip_prefix(self.http_api_path.as_str()).unwrap()
+            .parse::<ingress::IngressId>()
+            .map_err(|e| e.to_string())?;
+
+        if self.rib_type != RibType::Physical {
+            return Err("unsupported on virtual rib".to_string());
+        }
+
+        let store = self.rib.load();
+        let mut res = String::new();
+        let records = store.match_ingress_id(ingress_id).map_err(|e| e.to_string())?;
+
+        for pubrec in records {
+            res += &pubrec.prefix.to_string();
+            res.push('\n');
+            for m in pubrec.meta {
+                res.push('\t');
+                res += &serde_json::to_string(&m.meta).unwrap();
+                res.push('\n');
+            }
+        }
+        
+        Ok(
+            Response::builder()
+                .header("Content-Type", "text/plain")
+                .body(res.into())
+                .unwrap()
+        )
+            
     }
 
     fn parse_include_param(

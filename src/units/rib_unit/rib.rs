@@ -12,8 +12,7 @@ use log::{debug, error};
 //    typevalue::TypeValue,
 //}, vm::FieldIndex};
 use rotonda_store::{
-    custom_alloc::UpsertReport, prelude::multi::{PrefixStoreError, RouteStatus}, MatchOptions, MultiThreadedStore, QueryResult,
-    epoch
+    custom_alloc::UpsertReport, epoch, prelude::{multi::{PrefixStoreError, RouteStatus}, PrefixRecord}, MatchOptions, MultiThreadedStore, QueryResult
 };
 use inetnum::{addr::Prefix, asn::Asn};
 use routecore::bgp::{nlri::afisafi::{IsPrefix, Nlri}, path_attributes::PaMap, path_selection::{OrdRoute, Rfc4271, TiebreakerInfo}, types::AfiSafiType};
@@ -297,6 +296,33 @@ impl Rib {
             }
         }
         Ok(unicast_res)
+    }
+
+    pub fn match_ingress_id(
+        &self,
+        ingress_id: IngressId,
+        //match_options: &MatchOptions,
+    ) -> Result<Vec<PrefixRecord<RotondaPaMap>>, String> {
+        let guard = &epoch::pin();
+        let store = (*self.unicast).as_ref()
+            .ok_or(PrefixStoreError::StoreNotReadyError.to_string())?;
+        let include_withdrawals = false;
+        let mut res = store
+            .iter_records_for_mui_v4(ingress_id, include_withdrawals, guard)
+            .collect::<Vec<_>>();
+        res.append(&mut store
+            .iter_records_for_mui_v6(ingress_id, include_withdrawals, guard)
+            .collect::<Vec<_>>()
+        );
+
+        //tmp: while the per mui methods do not work yet, we can use
+        //.prefixes_iter() to test the output.
+        //let res = store.prefixes_iter().collect::<Vec<_>>();
+        debug!(
+            "rib::match_ingress_id for {ingress_id}: {} results",
+            res.len()
+        );
+        Ok(res)
     }
 }
 

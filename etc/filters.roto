@@ -68,10 +68,12 @@ filter-map bmp-in(
 // RouteMonitoring message in the bmp-in filter-map, the rib-in filter works on
 // individual announcements and withdrawals, typed Route.
 //
-// Use the rib-in-pre filter to process routes based on their NLRI (often the
-// announced prefix itself), as most other things are simply more efficient to
-// do in the bgp-in/bmp-in stage.
-// Use the rib-in-post filter below to act on inserted Routes.
+// This enanbles for fine-grained, per announcement filtering and logging, and
+// allows comparing of and acting on the actual NLRI (most often, the prefix).
+//
+// Filtering purely based on values of attributes (regardless of the individual
+// NLRI) can and should be done in the bmp-in/bgp-in filter-maps, as making such
+// a decision early on is more efficient.
 filter-map rib-in-pre(
     output: Log,
     route: Route,
@@ -98,37 +100,3 @@ filter-map rib-in-pre(
         accept
     }
 }
-
-// The rib-in-post filter processes Routes that have been accepted by the
-// rib-in-pre filter-map, and thus have been inserted in the RIB.
-// This filter-map is useful for logging/alerting purposes.
-
-//filter rib-in-post(
-//    output: Log,
-//    route: Route,
-//    insertion_info: InsertionInfo,
-//) {
-//
-//    define {
-//        some_interesting_prefix = 100.40.0.0/17;
-//    }
-//
-//    apply {
-//        //if route.announces(my_prefix) && insertion_info.is_new_best_path() {
-//        //    output.log_best_path()
-//        //}
-//        //if insertion_info.path_replaced(my_prefix) {
-//        //    output.log_best_path()
-//        //}
-//
-//        //if insertion_info.new_peer() {
-//        //    output.log_custom(1,1);
-//        //}
-//        //if insertion_info.prefix_new() {
-//        //    output.log_custom(2,1);
-//        //}
-//
-//        accept // no-op, but required
-//    }
-//}
-

@@ -249,7 +249,7 @@ impl RouterInfoApi {
         let response_body = formatdoc!(
             r#"
             Router:
-                Ingress       : {ingress_id}
+                Ingress      : {ingress_id}
                 State:       : {state} [Initiating -> Dumping -> Updating -> Terminated, or Aborted]
                 SysName      : {sys_name}
                 SysDesc      : {sys_desc}

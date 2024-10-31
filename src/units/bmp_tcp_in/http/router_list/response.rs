@@ -23,8 +23,12 @@ impl RouterListApi {
     ) -> Response<Body> {
         let mut response_body = self.build_response_header(&keys);
 
-        self.build_response_body(&keys, http_api_path, &mut response_body)
-            .await;
+        self.build_response_body(
+            &keys,
+            http_api_path,
+            &mut response_body,
+            self.ingresses.clone(),
+        ).await;
 
         self.build_response_footer(&mut response_body);
 
@@ -55,6 +59,7 @@ impl RouterListApi {
                 <pre>Showing {num_routers} monitored routers:
                 <table>
                     <tr>
+                        <th>Ingress ID</th>
                         <th>Router Address</th>
                         <th>sysName</th>
                         <th>sysDesc</th>
@@ -79,9 +84,13 @@ impl RouterListApi {
         keys: &[ingress::IngressId],
         http_api_path: std::borrow::Cow<'_, str>,
         response_body: &mut String,
+        ingresses: Arc<ingress::Register>,
     ) {
-        for addr in keys.iter() {
-            if let Some(state_machine) = self.router_states.get(addr) {
+
+        for ingress_id in keys.iter() {
+            let ingress_info = ingresses.get(*ingress_id);
+            let addr = ingress_info.and_then(|i| i.remote_addr).unwrap_or([0,0,0,0].into());
+            if let Some(state_machine) = self.router_states.get(ingress_id) {
                 let locked = state_machine.lock().await;
                 let (sys_name, sys_desc) = if let Some(sm) = locked.as_ref() {
                     match sm {
@@ -128,7 +137,7 @@ impl RouterListApi {
                         let router_id = Arc::new(format_source_id(
                             &self.router_id_template.load(),
                             sys_name,
-                            *addr,
+                            *ingress_id,
                         ));
                         let metrics = self
                             .bmp_metrics
@@ -170,18 +179,16 @@ impl RouterListApi {
                                             <tr>
                                                 <td><a href="{}{}">{}</a></td>
                                                 <td><a href="{}{}">{}</a></td>
+                                                <td><a href="{}{}">{}</a></td>
                                                 <td>{}</td>
                                                 <td>{}</td>
                                                 <td>{}/{} ({}%)/{} ({}%)</td>
                                                 <td>{} ({}/{})</td>
                                             </tr>
                                         "#,
-                            http_api_path,
-                            addr,
-                            addr,
-                            http_api_path,
-                            sys_name,
-                            sys_name,
+                            http_api_path, ingress_id, ingress_id,
+                            http_api_path, addr, addr,
+                            http_api_path, sys_name, sys_name,
                             sys_desc,
                             state,
                             num_peers_up,
@@ -205,9 +212,10 @@ impl RouterListApi {
                                                 <td>-</td>
                                                 <td>-</td>
                                                 <td>-</td>
+                                                <td>-</td>
                                             </tr>
                                         "#,
-                            http_api_path, addr, addr
+                            http_api_path, ingress_id, ingress_id
                         }
                     }
                 };

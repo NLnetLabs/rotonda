@@ -29,6 +29,7 @@ pub struct RouterListApi {
     pub router_id_template: Arc<ArcSwap<String>>,
     pub router_states:
         Arc<FrimMap<ingress::IngressId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>,
+    pub ingresses: Arc<ingress::Register>,
 }
 
 #[async_trait]
@@ -80,6 +81,7 @@ impl RouterListApi {
         router_states: Arc<
             FrimMap<ingress::IngressId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
         >,
+        ingresses: Arc<ingress::Register>,
     ) -> Self {
         Self {
             http_resources,
@@ -89,6 +91,7 @@ impl RouterListApi {
             bmp_metrics,
             router_id_template,
             router_states,
+            ingresses,
         }
     }
 

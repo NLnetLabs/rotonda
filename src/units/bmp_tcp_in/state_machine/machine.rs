@@ -885,14 +885,15 @@ where
 
         payloads.extend(
             //rws.into_iter().map(|rws| mk_payload(rws, received, context.clone()))
-            rr_reach.into_iter().map(|rr|
+            rr_reach.into_iter().map(|rr|{
+                update_report_msg.inc_valid_announcements();
                 Payload::with_received(
                     rr,
                     context.clone().into(),
                     None,
                     received
                 )
-            )
+            })
         );
 
         /*
@@ -920,15 +921,16 @@ where
         );
         */
 
-        payloads.extend(rr_unreach.into_iter().map(|rr|
+        payloads.extend(rr_unreach.into_iter().map(|rr|{
             //mk_payload(wds, received, context.clone())
+            update_report_msg.inc_valid_withdrawals();
             Payload::with_received(
                 rr,
                 context.clone().into(),
                 None,
                 received
             )
-        ));
+        }));
         
 
 

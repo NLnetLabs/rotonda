@@ -301,12 +301,15 @@ impl RouterHandler {
             &bmp_state_lock.as_ref().unwrap().router_id(),
         );
 
+        // Signal withdrawal of all address families for this ingress_id
+        self.gate
+            .update_data(Update::Withdraw(ingress_id, None))
+            .await;
+
         // Notify downstream units that the data stream for this
         // particular monitored router has ended.
-        let new_status = UpstreamStatus::EndOfStream {
-            //source_id: router_addr.into(),
-            ingress_id
-        };
+        let new_status = UpstreamStatus::EndOfStream { ingress_id };
+
         self.gate
             .update_data(Update::UpstreamStatusChange(new_status))
             .await;

@@ -165,6 +165,7 @@ impl BmpTcpIn {
                 bmp_metrics.clone(),
                 router_id_template.clone(),
                 router_states.clone(),
+                component.ingresses().clone(),
             ));
 
             component.register_http_resource(
@@ -627,6 +628,7 @@ impl BmpTcpInRunner {
                     this_router_info.connected_at,
                     last_msg_at.clone(),
                     state_machine,
+                    self.ingress_register.clone(),
                 );
 
                 let processor = Arc::new(processor);

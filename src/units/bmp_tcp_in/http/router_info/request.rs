@@ -28,6 +28,7 @@ pub struct RouterInfoApi {
     connected_at: DateTime<Utc>,
     last_message_at: Arc<RwLock<DateTime<Utc>>>,
     state_machine: Weak<Mutex<Option<BmpState>>>,
+    ingresses: Arc<ingress::Register>,
 }
 
 impl RouterInfoApi {
@@ -42,6 +43,7 @@ impl RouterInfoApi {
         connected_at: DateTime<Utc>,
         last_message_at: Arc<RwLock<DateTime<Utc>>>,
         state_machine: Weak<Mutex<Option<BmpState>>>,
+        ingresses: Arc<ingress::Register>,
     ) -> Self {
         Self {
             http_resources,
@@ -53,6 +55,7 @@ impl RouterInfoApi {
             connected_at,
             last_message_at,
             state_machine,
+            ingresses,
         }
     }
 }
@@ -118,10 +121,14 @@ impl ProcessRequest for RouterInfoApi {
                             }
                         };
 
+                    let ingress_info = self.ingresses.get(self.ingress_id);
+                    let addr = ingress_info.and_then(|i| i.remote_addr)
+                        .map(|a| a.to_string()).unwrap_or("".to_string());
                     //if router == self.source_id.to_string()
                     if router == self.ingress_id.to_string()
                         || router == router_id.as_str()
                         || router == sys_name
+                        || router == addr
                     {
                         return Some(Self::build_response(
                             self.http_resources.clone(),

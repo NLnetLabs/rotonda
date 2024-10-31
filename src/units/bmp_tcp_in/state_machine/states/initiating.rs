@@ -48,13 +48,13 @@ pub struct Initiating {
 
 impl BmpStateDetails<Initiating> {
     pub fn new(
-        source_id: ingress::IngressId,
+        ingress_id: ingress::IngressId,
         router_id: Arc<RouterId>,
         status_reporter: Arc<BmpStateMachineStatusReporter>,
         ingress_register: Arc<ingress::Register>,
     ) -> Self {
         BmpStateDetails {
-            source_id,
+            ingress_id,
             router_id,
             status_reporter,
             ingress_register,
@@ -72,7 +72,7 @@ impl BmpStateDetails<Initiating> {
             // already verified upstream
             BmpMsg::InitiationMessage(msg) => {
                 self.ingress_register.update_info(
-                    self.source_id,
+                    self.ingress_id,
                     ingress::IngressInfo::new()
                         .with_name(
                             msg.information_tlvs().find(|t|

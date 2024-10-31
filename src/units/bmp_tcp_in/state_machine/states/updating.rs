@@ -179,7 +179,7 @@ impl From<BmpStateDetails<Dumping>> for BmpStateDetails<Updating> {
     fn from(v: BmpStateDetails<Dumping>) -> Self {
         let details: Updating = v.details.into();
         Self {
-            source_id: v.source_id,
+            ingress_id: v.ingress_id,
             router_id: v.router_id,
             status_reporter: v.status_reporter,
             ingress_register: v.ingress_register,

@@ -204,7 +204,7 @@ pub struct BmpStateDetails<T>
 where
     BmpState: From<BmpStateDetails<T>>,
 {
-    pub source_id: ingress::IngressId,
+    pub ingress_id: ingress::IngressId,
     pub router_id: Arc<String>,
     pub status_reporter: Arc<BmpStateMachineStatusReporter>,
     pub ingress_register: Arc<ingress::Register>,
@@ -212,13 +212,13 @@ where
 }
 
 impl BmpState {
-    pub fn _source_id(&self) -> ingress::IngressId {
+    pub fn _ingress_id(&self) -> ingress::IngressId {
         match self {
-            BmpState::Initiating(v) => v.source_id.clone(),
-            BmpState::Dumping(v) => v.source_id.clone(),
-            BmpState::Updating(v) => v.source_id.clone(),
-            BmpState::Terminated(v) => v.source_id.clone(),
-            BmpState::_Aborted(source_id, _) => source_id.clone(),
+            BmpState::Initiating(v) => v.ingress_id.clone(),
+            BmpState::Dumping(v) => v.ingress_id.clone(),
+            BmpState::Updating(v) => v.ingress_id.clone(),
+            BmpState::Terminated(v) => v.ingress_id.clone(),
+            BmpState::_Aborted(ingress_id, _) => ingress_id.clone(),
         }
     }
 
@@ -258,7 +258,7 @@ impl BmpState {
 impl<T> std::hash::Hash for BmpStateDetails<T> where
     BmpState: From<BmpStateDetails<T>> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.source_id.hash(state);
+        self.ingress_id.hash(state);
     }
 }
 

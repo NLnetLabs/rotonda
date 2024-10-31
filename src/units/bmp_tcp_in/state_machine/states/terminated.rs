@@ -26,7 +26,7 @@ pub struct Terminated;
 impl From<BmpStateDetails<Initiating>> for BmpStateDetails<Terminated> {
     fn from(v: BmpStateDetails<Initiating>) -> Self {
         Self {
-            source_id: v.source_id,
+            ingress_id: v.ingress_id,
             router_id: v.router_id,
             status_reporter: v.status_reporter,
             ingress_register: v.ingress_register,
@@ -38,7 +38,7 @@ impl From<BmpStateDetails<Initiating>> for BmpStateDetails<Terminated> {
 impl From<BmpStateDetails<Dumping>> for BmpStateDetails<Terminated> {
     fn from(v: BmpStateDetails<Dumping>) -> Self {
         Self {
-            source_id: v.source_id,
+            ingress_id: v.ingress_id,
             router_id: v.router_id,
             status_reporter: v.status_reporter,
             ingress_register: v.ingress_register,
@@ -50,7 +50,7 @@ impl From<BmpStateDetails<Dumping>> for BmpStateDetails<Terminated> {
 impl From<BmpStateDetails<Updating>> for BmpStateDetails<Terminated> {
     fn from(v: BmpStateDetails<Updating>) -> Self {
         Self {
-            source_id: v.source_id,
+            ingress_id: v.ingress_id,
             router_id: v.router_id,
             status_reporter: v.status_reporter,
             ingress_register: v.ingress_register,

@@ -330,7 +330,7 @@ impl From<BmpStateDetails<Initiating>> for BmpStateDetails<Dumping> {
     fn from(v: BmpStateDetails<Initiating>) -> Self {
         let details: Dumping = v.details.into();
         Self {
-            source_id: v.source_id,
+            ingress_id: v.ingress_id,
             router_id: v.router_id,
             status_reporter: v.status_reporter,
             ingress_register: v.ingress_register,

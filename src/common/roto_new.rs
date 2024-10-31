@@ -581,9 +581,9 @@ impl<O> TryFrom<(Nlri<O>, RotondaPaMap)> for RotondaRoute {
             Nlri::L2VpnVplsAddpath(..) |
             Nlri::L2VpnEvpn(..) |
             Nlri::L2VpnEvpnAddpath(..) => {
-                warn!(
+                debug!(
                     "AFI/SAFI {} not yet supported in RotondaRoute",
-                    value.0
+                    value.0.to_string()
                 );
                 return Err(())
             }

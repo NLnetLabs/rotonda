@@ -819,9 +819,8 @@ where
         // XXX do we still need to track the prefixes here, now that
         // withdrawals are handled by the store itself?
         //let mut nlri_set = BTreeSet::new();
-        let rr_reach = explode_announcements(&bgp_msg)?;
-        let rr_unreach = explode_withdrawals(&bgp_msg)?;
-
+        let rr_reach = explode_announcements(bgp_msg)?;
+        let rr_unreach = explode_withdrawals(bgp_msg)?;
 
         let ingress_id = if let Some(ingress_id) = self.details.get_peer_ingress_id(&pph) {
             ingress_id

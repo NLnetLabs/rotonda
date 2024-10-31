@@ -143,7 +143,7 @@ impl MrtInRunner {
                 AfiSafiType::Ipv6FlowSpec |
                 AfiSafiType::L2VpnVpls |
                 AfiSafiType::L2VpnEvpn |
-                AfiSafiType::Unsupported(_, _)  => {
+                AfiSafiType::Unsupported(_, _) => {
                     debug!("unsupported AFI/SAFI {}, skipping", afisafi);
                     continue
                 }

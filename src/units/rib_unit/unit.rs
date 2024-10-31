@@ -734,7 +734,8 @@ impl RibUnitRunner {
             Update::UpstreamStatusChange(UpstreamStatus::EndOfStream {
                 ..
             }) => {
-                // Nothing to do, pass it on
+                // We expect withdrawals to come in via Update::Withdraw
+                // messages. Nothing else to do, pass it on.
                 self.gate.update_data(update).await;
             }
 

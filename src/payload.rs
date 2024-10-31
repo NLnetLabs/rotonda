@@ -419,7 +419,7 @@ pub enum Update {
     QueryResult(Uuid, Result<QueryResult<crate::payload::RotondaPaMap>, String>),
     UpstreamStatusChange(UpstreamStatus),
 
-    OutputStream(SmallVec<[crate::common::roto_new::OutputStreamMessage; 8]>)
+    OutputStream(SmallVec<[crate::common::roto_new::OutputStreamMessage; 2]>)
 }
 
 impl Update {

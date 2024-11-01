@@ -14,7 +14,7 @@ exclude = [ ".github" ]
 readme = "README.md"
 
 [workspace.package]
-version = "0.2.0-3dev"
+version = "0.2.0-4dev"
 edition = "2021"
 rust-version = "1.80"
 authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]

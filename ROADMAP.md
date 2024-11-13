@@ -107,7 +107,7 @@ Roadmap
 
 ### UNRELEASED 0.5
 
-- 💤 On-disk storage integration
+- 🦀 On-disk storage integration
 - 🦀 Optimizations: better hashing, cache padding, etc.
 
 ## `Rotoro`

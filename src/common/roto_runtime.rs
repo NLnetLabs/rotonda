@@ -85,7 +85,7 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
         let rr = unsafe { &*rr };
         rr.owned_map()
             .iter()
-            .any(|pa| pa.ok().map(|pa| pa.type_code() == to_match).is_some())
+            .any(|pa| pa.ok().is_some_and(|pa| pa.type_code() == to_match))
     }
 
     // --- BGP message methods
@@ -332,12 +332,14 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
     Ok(rt)
 }
 
+
+
 fn has_attribute(
     bgp_update: &BgpUpdateMessage<Bytes>,
     to_match: u8,
 ) -> bool {
     if let Ok(mut pas) = bgp_update.path_attributes() {
-        pas.any(|p| p.ok().map(|p| p.type_code() == to_match).is_some())
+        pas.any(|p| p.ok().is_some_and(|p| p.type_code() == to_match))
     } else {
         false
     }

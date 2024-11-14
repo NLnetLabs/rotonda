@@ -23,16 +23,30 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
     let mut rt = roto::Runtime::basic()?;
 
     // --- General types
-    rt.register_clone_type_with_name::<RotondaRoute>("Route")?;
-    rt.register_clone_type_with_name::<RouteContext>("RouteContext")?;
-    rt.register_copy_type::<Provenance>()?;
-    rt.register_clone_type_with_name::<Log>("Log")?;
-    rt.register_copy_type::<InsertionInfo>()?;
+    rt.register_clone_type_with_name::<RotondaRoute>(
+        "Route",
+        "A single announced or withdrawn path",
+    )?;
+    rt.register_clone_type_with_name::<RouteContext>(
+        "RouteContext",
+        "Contextual information pertaining to the Route"
+    )?;
+    rt.register_copy_type::<Provenance>(
+        "Session/state information"
+    )?;
+    rt.register_clone_type_with_name::<Log>(
+        "Log",
+        "Machinery to create output entries"
+    )?;
+    rt.register_copy_type::<InsertionInfo>(
+        "Information from the RIB on an inserted route"
+    )?;
 
     // --- BGP types / methods
-    //rt.register_type_with_name::<BgpMsg<Bytes>>("BgpMsg")?;
-    rt.register_clone_type_with_name::<BgpUpdateMessage<Bytes>>("BgpMsg")?;
-    //rt.register_method::<BgpUpdateMessage<Bytes>, _, _>("aspath_contains", bgp_aspath_contains)?;
+    rt.register_clone_type_with_name::<BgpUpdateMessage<Bytes>>(
+        "BgpMsg",
+        "BGP UPDATE message"
+    )?;
 
 
     // --- RotondaRoute methods
@@ -98,8 +112,13 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
     }
 
     // --- BMP types / methods
-    rt.register_clone_type_with_name::<BmpMsg<Bytes>>("BmpMsg")?;
-    rt.register_clone_type::<PerPeerHeader<Bytes>>()?;
+    rt.register_clone_type_with_name::<BmpMsg<Bytes>>(
+        "BmpMsg",
+        "BMP Message"
+    )?;
+    rt.register_clone_type::<PerPeerHeader<Bytes>>(
+        "BMP Per Peer Header"
+    )?;
 
     //rt.register_method::<BmpMsg<Bytes>, _, _>("is_ibgp", is_ibgp)?;
 

@@ -1,8 +1,8 @@
-// The bgp-in filter works on incoming BGP UPDATE messages.
-//
-// One such message can contain multiple NLRI, thus multiple announcements or
-// withdrawals). To act on individual announcements or withdrawals, use the
-// 'rib-in' filter-map below.
+# The bgp-in filter works on incoming BGP UPDATE messages.
+#
+# One such message can contain multiple NLRI, thus multiple announcements or
+# withdrawals). To act on individual announcements or withdrawals, use the
+# 'rib-in' filter-map below.
 filter-map bgp-in(
     output: Log,
     bgp: BgpMsg,
@@ -26,12 +26,12 @@ filter-map bgp-in(
     }
 }
 
-// The bmp-in filter works on incoming BMP messages.
-//
-// While most BMP message will be of type RouteMonitoring (transporting route
-// information via an encapsulated BGP UPDATE message), this filter-map can act
-// on different types as well. Helper methods are provided, e.g.
-// 'is_peer_down()' returns true if the message is a BMP PeerDownNotification.
+# The bmp-in filter works on incoming BMP messages.
+#
+# While most BMP message will be of type RouteMonitoring (transporting route
+# information via an encapsulated BGP UPDATE message), this filter-map can act
+# on different types as well. Helper methods are provided, e.g.
+# 'is_peer_down()' returns true if the message is a BMP PeerDownNotification.
 filter-map bmp-in(
     output: Log,
     bmp: BmpMsg,
@@ -61,19 +61,19 @@ filter-map bmp-in(
     }
 }
 
-// The rib-in-pre filter processes individual routes prior to insertion into the
-// main RIB.
-//
-// Different from the BGP UPDATE message in the bgp-in filter-map, and the BMP
-// RouteMonitoring message in the bmp-in filter-map, the rib-in filter works on
-// individual announcements and withdrawals, typed Route.
-//
-// This enanbles for fine-grained, per announcement filtering and logging, and
-// allows comparing of and acting on the actual NLRI (most often, the prefix).
-//
-// Filtering purely based on values of attributes (regardless of the individual
-// NLRI) can and should be done in the bmp-in/bgp-in filter-maps, as making such
-// a decision early on is more efficient.
+# The rib-in-pre filter processes individual routes prior to insertion into the
+# main RIB.
+#
+# Different from the BGP UPDATE message in the bgp-in filter-map, and the BMP
+# RouteMonitoring message in the bmp-in filter-map, the rib-in filter works on
+# individual announcements and withdrawals, typed Route.
+#
+# This enanbles for fine-grained, per announcement filtering and logging, and
+# allows comparing of and acting on the actual NLRI (most often, the prefix).
+#
+# Filtering purely based on values of attributes (regardless of the individual
+# NLRI) can and should be done in the bmp-in/bgp-in filter-maps, as making such
+# a decision early on is more efficient.
 filter-map rib-in-pre(
     output: Log,
     route: Route,
@@ -81,17 +81,17 @@ filter-map rib-in-pre(
 ) {
 
     define {
-        attribute_to_log = 35; // OTC
+        attribute_to_log = 35; # OTC
         my_prefix = 100.40.0.0/17;
-        //my_prefix = 2001:db8:1::/48;
+        #my_prefix = 2001:db8:1::/48;
     }
 
     apply {
-        //if route.has_attribute(attribute_to_log) {
-        //    accept
-        //} else {
-        //    reject
-        //}
+        #if route.has_attribute(attribute_to_log) {
+        #    accept
+        #} else {
+        #    reject
+        #}
         if route.prefix_matches(my_prefix)  {
             output.log_custom(10, 20);
             output.log_prefix(my_prefix);

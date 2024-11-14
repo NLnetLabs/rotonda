@@ -490,7 +490,7 @@ impl LogFilter {
 
 impl Default for LogFilter {
     fn default() -> Self {
-        LogFilter(log::LevelFilter::Warn)
+        LogFilter(log::LevelFilter::Info)
     }
 }
 

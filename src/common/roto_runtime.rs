@@ -79,6 +79,15 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
 
     }
 
+
+    #[roto_method(rt, RotondaRoute, has_attribute)]
+    fn rr_has_attribute(rr: *const RotondaRoute, to_match: u8) -> bool {
+        let rr = unsafe { &*rr };
+        rr.owned_map()
+            .iter()
+            .any(|pa| pa.ok().map(|pa| pa.type_code() == to_match).is_some())
+    }
+
     // --- BGP message methods
 
     #[roto_method(rt, BgpUpdateMessage<Bytes>, aspath_contains)]
@@ -100,7 +109,7 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
 
         aspath_origin(msg, to_match)
     }
-    //rt.register_method::<BgpUpdateMessage<Bytes>, _, _>("contains_community", bgp_contains_community)?;
+
     #[roto_method(rt, BgpUpdateMessage<Bytes>, contains_community)]
     fn bgp_contains_community(
         msg: *const BgpUpdateMessage<Bytes>,
@@ -111,6 +120,18 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
         contains_community(msg, to_match)
     }
 
+    #[roto_method(rt, BgpUpdateMessage<Bytes>, has_attribute)]
+    fn bgp_has_attribute(
+        msg: *const BgpUpdateMessage<Bytes>,
+        to_match: u8,
+    ) -> bool {
+        let msg = unsafe { &*msg };
+
+        has_attribute(msg, to_match)
+    }
+
+
+
     // --- BMP types / methods
     rt.register_clone_type_with_name::<BmpMsg<Bytes>>(
         "BmpMsg",
@@ -120,7 +141,6 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
         "BMP Per Peer Header"
     )?;
 
-    //rt.register_method::<BmpMsg<Bytes>, _, _>("is_ibgp", is_ibgp)?;
 
     // Return true if asn matches the asn in the BmpMsg.
     //
@@ -169,7 +189,7 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
         aspath_contains(&update, to_match)
     }
 
-    //rt.register_method::<BmpMsg<Bytes>, _, _>("aspath_origin", bmp_aspath_origin)?;
+
     #[roto_method(rt, BmpMsg<Bytes>, aspath_origin)]
     fn bmp_aspath_origin(
         msg: *const BmpMsg<Bytes>,
@@ -190,7 +210,7 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
 
         aspath_origin(&update, to_match)
     }
-    //rt.register_method::<BmpMsg<Bytes>, _, _>("contains_community", bmp_contains_community)?;
+
     #[roto_method(rt, BmpMsg<Bytes>, contains_community)]
     fn bmp_contains_community(
         msg: *const BmpMsg<Bytes>,
@@ -210,6 +230,27 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
         };
 
         contains_community(&update, to_match)
+    }
+
+    #[roto_method(rt, BmpMsg<Bytes>, has_attribute)]
+    fn bmp_has_attribute(
+        msg: *const BmpMsg<Bytes>,
+        to_match: u8,
+    ) -> bool {
+        let msg = unsafe { &*msg };
+
+        let update = if let BmpMsg::RouteMonitoring(rm) = msg {
+            if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
+                upd
+            } else {
+                // log error
+                return false;
+            }
+        } else {
+            return false;
+        };
+
+        has_attribute(&update, to_match)
     }
 
 
@@ -291,6 +332,16 @@ pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
     Ok(rt)
 }
 
+fn has_attribute(
+    bgp_update: &BgpUpdateMessage<Bytes>,
+    to_match: u8,
+) -> bool {
+    if let Ok(mut pas) = bgp_update.path_attributes() {
+        pas.any(|p| p.ok().map(|p| p.type_code() == to_match).is_some())
+    } else {
+        false
+    }
+}
 
 fn contains_community(
     bgp_update: &BgpUpdateMessage<Bytes>,

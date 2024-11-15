@@ -13,6 +13,10 @@ license = "MPL-2.0"
 exclude = [ ".github" ]
 readme = "README.md"
 
+[[bin]]
+name = "print_rotonda_std_doc"
+path = "doc/bin/print_rotonda_std_doc.rs"
+
 [workspace.package]
 version = "0.2.0-4dev"
 edition = "2021"

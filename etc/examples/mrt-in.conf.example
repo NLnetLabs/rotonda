@@ -1,0 +1,23 @@
+roto_script = "filters.roto.example"
+log_level = "info"
+log_target = "stderr"
+
+http_listen = ["127.0.0.1:8080"]
+
+[units.mrt-in-1]
+type = "mrt-in"
+filename = "../bview/latest-bview-rrc26"
+
+[units.mrt-in-2]
+type = "mrt-in"
+filename = "../bview/latest-bview-rrc3"
+
+[units.rib]
+type = "rib"
+sources = ["mrt-in-1","mrt-in-2"]
+rib_type = "Physical"
+
+[targets.null]
+type = "null-out"
+sources = "rib"
+

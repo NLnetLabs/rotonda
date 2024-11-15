@@ -32,7 +32,7 @@ filter bgp-in(
 # information via an encapsulated BGP UPDATE message), this filter-map can act
 # on different types as well. Helper methods are provided, e.g.
 # 'is_peer_down()' returns true if the message is a BMP PeerDownNotification.
-filter-map bmp-in(
+filter bmp-in(
     output: Log,
     bmp: BmpMsg,
     prov: Provenance,
@@ -74,7 +74,7 @@ filter-map bmp-in(
 # Filtering purely based on values of attributes (regardless of the individual
 # NLRI) can and should be done in the bmp-in/bgp-in filter-maps, as making such
 # a decision early on is more efficient.
-filter-map rib-in-pre(
+filter rib-in-pre(
     output: Log,
     route: Route,
     context: RouteContext,

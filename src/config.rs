@@ -38,6 +38,7 @@ const ARG_CONFIG: &str = "config";
 /// [`from_arg_matches`](Self::from_arg_matches) will then load the file
 /// referenced in the command line and, upon success, return the config.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     /// Location of the .roto script containing all user defined filters.
     pub roto_script: Option<PathBuf>,

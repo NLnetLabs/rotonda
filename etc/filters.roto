@@ -3,7 +3,7 @@
 # One such message can contain multiple NLRI, thus multiple announcements or
 # withdrawals). To act on individual announcements or withdrawals, use the
 # 'rib-in' filter-map below.
-filter-map bgp-in(
+filter bgp-in(
     output: Log,
     bgp: BgpMsg,
     prov: Provenance,
@@ -82,21 +82,22 @@ filter-map rib-in-pre(
 
     define {
         attribute_to_log = 35; # OTC
-        my_prefix = 100.40.0.0/17;
-        #my_prefix = 2001:db8:1::/48;
+        my_prefix_v4 = 209.127.80.0/20;
+        my_prefix_v6 = 2001:db8:1::/48;
     }
 
     apply {
-        #if route.has_attribute(attribute_to_log) {
-        #    accept
+        if route.prefix_matches(my_prefix_v4) {
+            output.log_prefix(my_prefix_v4);
+            #accept
         #} else {
-        #    reject
-        #}
-        if route.prefix_matches(my_prefix)  {
-            output.log_custom(10, 20);
-            output.log_prefix(my_prefix);
+        #    reject            
         }
 
-        accept
+        if route.has_attribute(attribute_to_log) {
+          accept
+        } else {
+          reject
+        }
     }
 }

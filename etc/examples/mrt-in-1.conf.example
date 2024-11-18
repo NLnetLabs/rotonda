@@ -13,7 +13,6 @@ filename = "../bview/latest-bview-rrc26"
 [units.rib]
 type = "rib"
 sources = ["mrt-in"]
-rib_type = "Physical"
 
 [targets.null]
 type = "null-out"

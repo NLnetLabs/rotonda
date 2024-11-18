@@ -867,6 +867,7 @@ impl Manager {
                             ))
                         );
                     }
+                    return Err(Terminate::error());
                 } else {
                     self.pending_gates
                         .insert(name.clone(), (gate, load.agent));

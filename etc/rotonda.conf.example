@@ -14,9 +14,6 @@ log_target = "stderr"        # "stderr", "file" or "syslog"
 # log_facility = "daemon"    # used if log_target is "syslog"
 # log_file = "./rotonda.log" # used if log_target is "file"
 
-# the path to the file that holds all Roto filters. When specified as a
-# relative path, this is relative to the working directory of the Rotonda
-# application binary.
 # roto_script = "filters.roto"
 
 http_listen = ["0.0.0.0:8080"]
@@ -59,6 +56,7 @@ http_api_path = "/bmp-routers/"
 
 [units.rib]
 type = "rib"
+rib_type = "Physical"
 sources = ["bmp-in"]
 http_api_path = "/rib/"
 

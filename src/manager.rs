@@ -1,10 +1,10 @@
 //! Controlling the entire operation.
 
-use crate::common::file_io::{FileIo, TheFileIo};
+use crate::common::file_io::TheFileIo;
 //use crate::common::roto::{
 //    FilterName, LoadErrorKind, RotoError, RotoScriptOrigin, RotoScripts,
 //};
-use crate::common::roto_new::{rotonda_roto_runtime, FilterName, RotoScripts};
+use crate::common::roto_new::{rotonda_roto_runtime, FilterName};
 use crate::comms::{
     DirectLink, Gate, GateAgent, GraphStatus, Link, DEF_UPDATE_QUEUE_LEN,
 };
@@ -21,9 +21,7 @@ use non_empty_vec::NonEmpty;
 use reqwest::Client as HttpClient;
 use serde::Deserialize;
 use std::collections::HashSet;
-use std::ffi::{OsStr, OsString};
 use std::ops::Deref;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::{Duration, Instant};
 use std::{cell::RefCell, fmt::Display};
@@ -78,7 +76,7 @@ impl Default for Component {
             http_client: Default::default(),
             metrics: Default::default(),
             http_resources: Default::default(),
-            roto_scripts: Default::default(),
+            roto_compiled: Default::default(),
             tracer: Default::default(),
             ingresses: Default::default(),
         }
@@ -808,7 +806,7 @@ impl Manager {
                 None => error!("{}", err),
             }
             Terminate::error()
-        })
+        })    
     }
 
     /// Prepare for spawning.
@@ -884,8 +882,6 @@ impl Manager {
         Ok(())
     }
 
-
-    //LH this will replace fn load_roto_scripts eventually
     pub fn compile_roto_script(
         &mut self,
         roto_scripts_path: &Option<std::path::PathBuf>
@@ -893,7 +889,7 @@ impl Manager {
         let path = if let Some(p) = roto_scripts_path {
             p
         } else {
-            debug!("no roto scripts path to load filters from");
+            info!("no roto scripts path to load filters from");
             return Ok(());
         };
 
@@ -2961,7 +2957,6 @@ mod tests {
         ConfigFile::new(
             toml.as_bytes().to_vec(),
             Source::default(),
-            Default::default(),
         ).unwrap()
     }
 

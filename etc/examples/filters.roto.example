@@ -4,8 +4,8 @@
 # withdrawals). To act on individual announcements or withdrawals, use the
 # 'rib-in' filter-map below.
 filter bgp-in(
+    bgp_msg: BgpMsg,
     output: Log,
-    bgp: BgpMsg,
     prov: Provenance,
 ) {
 
@@ -15,10 +15,10 @@ filter bgp-in(
     }
 
     apply {
-        if bgp.aspath_origin(origin_to_log) {
+        if bgp_msg.aspath_origin(origin_to_log) {
             output.log_matched_origin(origin_to_log);
         }
-        if bgp.contains_community(community_to_log) {
+        if bgp_msg.contains_community(community_to_log) {
             output.log_matched_community(community_to_log)
         }
 
@@ -32,9 +32,9 @@ filter bgp-in(
 # information via an encapsulated BGP UPDATE message), this filter-map can act
 # on different types as well. Helper methods are provided, e.g.
 # 'is_peer_down()' returns true if the message is a BMP PeerDownNotification.
-filter-map bmp-in(
+filter bmp-in(
+    bmp_msg: BmpMsg,
     output: Log,
-    bmp: BmpMsg,
     prov: Provenance,
 ) {
     define {
@@ -44,16 +44,16 @@ filter-map bmp-in(
     }
 
     apply {
-        if bmp.is_peer_down() {
+        if bmp_msg.is_peer_down() {
             output.log_peer_down()
         }
-        if bmp.is_ibgp(my_asn) {
+        if bmp_msg.is_ibgp(my_asn) {
             reject
         } else {
-            if bmp.aspath_contains(asn_to_log) {
+            if bmp_msg.aspath_contains(asn_to_log) {
                 output.log_matched_asn(asn_to_log);
             }
-            if bmp.contains_community(community_to_log) {
+            if bmp_msg.contains_community(community_to_log) {
                 output.log_matched_community(community_to_log)
             }
             accept
@@ -74,9 +74,9 @@ filter-map bmp-in(
 # Filtering purely based on values of attributes (regardless of the individual
 # NLRI) can and should be done in the bmp-in/bgp-in filter-maps, as making such
 # a decision early on is more efficient.
-filter-map rib-in-pre(
-    output: Log,
+filter rib-in-pre(
     route: Route,
+    output: Log,
     context: RouteContext,
 ) {
 

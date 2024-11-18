@@ -9,7 +9,6 @@ pub mod http;
 pub mod log;
 pub mod manager;
 pub mod metrics;
-pub mod mvp;
 pub mod payload;
 pub mod targets;
 #[cfg(test)]

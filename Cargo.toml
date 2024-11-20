@@ -12,6 +12,7 @@ categories = ["network-programming"]
 license = "MPL-2.0"
 exclude = [ ".github" ]
 readme = "README.md"
+default-run = "rotonda"
 
 [[bin]]
 name = "print_rotonda_std_doc"
@@ -25,7 +26,7 @@ authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]
 
 
 [workspace]
-members = ["mrtin"]
+#members = []
 
 [workspace.dependencies]
 routecore          = { git = "https://github.com/nlnetlabs/routecore", branch = "main", features = ["bgp", "bmp", "serde", "fsm"] }

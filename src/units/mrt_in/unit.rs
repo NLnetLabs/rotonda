@@ -6,12 +6,13 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use routecore::bgp::message::PduParseInfo;
+use routecore::bgp::ParseError;
 use tokio::pin;
 use tokio::sync::mpsc;
 use futures::future::{select, Either};
 use futures::{pin_mut, FutureExt, TryFutureExt};
 use log::{debug, error, info, warn};
-use mrtin::MrtFile;
+use routecore::mrt::MrtFile;
 use rand::seq::SliceRandom;
 use routecore::bgp::nlri::afisafi::{Ipv4UnicastNlri, Nlri};
 use routecore::bgp::types::AfiSafiType;
@@ -270,7 +271,7 @@ impl MrtInRunner {
 #[derive(Debug)]
 enum MrtErrorType {
     Io(std::io::Error),
-    Parse(mrtin::ParseError),
+    Parse(ParseError),
     Other(&'static str),
 }
 #[derive(Debug)]
@@ -293,8 +294,8 @@ impl std::fmt::Display for MrtError {
     }
 }
 
-impl From<mrtin::ParseError> for MrtError {
-    fn from(e: mrtin::ParseError) -> Self {
+impl From<ParseError> for MrtError {
+    fn from(e: ParseError) -> Self {
         Self(MrtErrorType::Parse(e))
     }
 }

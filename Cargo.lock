@@ -305,9 +305,9 @@ checksum = "79296716171880943b8470b5f8d03aa55eb2e645a4874bdbb28adb49162e012c"
 
 [[package]]
 name = "bytemuck"
-version = "1.19.0"
+version = "1.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8334215b81e418a0a7bdb8ef0849474f40bb10c8b71f1c4ed315cff49f32494d"
+checksum = "8b37c88a63ffd85d15b406896cc343916d7cf57838a847b3a6f2ca5d39a5695a"
 
 [[package]]
 name = "byteorder"
@@ -1411,9 +1411,9 @@ dependencies = [
 
 [[package]]
 name = "itoa"
-version = "1.0.11"
+version = "1.0.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49f1f14873335454500d59611f1cf4a4b0f786f9ac11f4312a78e4cf2566695b"
+checksum = "7a73e9fe3c49d7afb2ace819fa181a287ce54a0983eda4e0eb05c22f82ffe534"
 
 [[package]]
 name = "js-sys"
@@ -1449,9 +1449,9 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "libc"
-version = "0.2.163"
+version = "0.2.164"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fdaeca4cf44ed4ac623e86ef41f056e848dbeab7ec043ecb7326ba300b36fd0"
+checksum = "433bfe06b8c75da9b2e3fbea6e5329ff87748f0b144ef75306e674c3f6f7c13f"
 
 [[package]]
 name = "linked-hash-map"
@@ -2217,7 +2217,7 @@ dependencies = [
  "reqwest",
  "roto",
  "rotonda-store",
- "routecore 0.5.0-rc2-dev",
+ "routecore",
  "rumqttc",
  "rumqttd",
  "sanitise-file-name",
@@ -2257,30 +2257,14 @@ dependencies = [
  "parking_lot_core",
  "roaring",
  "rotonda-macros",
- "routecore 0.5.0-rc1",
+ "routecore",
 ]
 
 [[package]]
 name = "routecore"
-version = "0.5.0-rc1"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1738fc42860de9ff5a0346fe4cce09cede0d44dd49055b6c7746a59510f43b78"
-dependencies = [
- "bytes",
- "chrono",
- "const-str",
- "inetnum",
- "log",
- "octseq",
- "paste",
- "serde",
- "tokio",
-]
-
-[[package]]
-name = "routecore"
-version = "0.5.0-rc2-dev"
-source = "git+https://github.com/nlnetlabs/routecore?branch=main#a9be11c247a381c65949eed06113105378505b5f"
+checksum = "97543f131ad8c4adb7b92665cab99dee86601c09b83c551297281e5c1a89552c"
 dependencies = [
  "bytes",
  "chrono",
@@ -2400,9 +2384,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.132"
+version = "1.0.133"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d726bfaff4b320266d395898905d0eba0345aae23b54aee3a737e260fd46db03"
+checksum = "c7fceb2473b9166b2294ef05efcb65a3db80803f0b03ef86a5fc88a2b85ee377"
 dependencies = [
  "indexmap 2.6.0",
  "itoa",
@@ -2964,9 +2948,9 @@ checksum = "2896d95c02a80c6d6a5d6e953d479f5ddf2dfdb6a244441010e373ac0fb88971"
 
 [[package]]
 name = "unicode-ident"
-version = "1.0.13"
+version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e91b56cd4cadaeb79bbf1a5645f6b4f8dc5bde8834ad5894a8db35fda9efa1fe"
+checksum = "adb9e6ca4f869e1180728b7950e35922a7fc6397f7b641499e8f3ef06e50dc83"
 
 [[package]]
 name = "unicode-segmentation"

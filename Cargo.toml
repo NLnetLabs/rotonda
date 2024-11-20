@@ -29,7 +29,7 @@ authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]
 #members = []
 
 [workspace.dependencies]
-routecore          = { git = "https://github.com/nlnetlabs/routecore", branch = "main", features = ["bgp", "bmp", "serde", "fsm", "mrt"] }
+routecore          = { version = "0.5.0", features = ["bgp", "bmp", "serde", "fsm", "mrt"] }
 inetnum            = { version = "0.1.1", features = ["arbitrary", "serde"] }
 rotonda-store      = { version = "0.4.0-rc1" }
 log                = "0.4"

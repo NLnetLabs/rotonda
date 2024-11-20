@@ -1369,9 +1369,9 @@ checksum = "b248f5224d1d606005e02c97f5aa4e88eeb230488bcc03bc9ca4d7991399f2b5"
 
 [[package]]
 name = "inetnum"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70b6704f8f98fd5984e1983d49989a6edbeb9e0ac04406d516c105f8d6e5fd09"
+checksum = "03940df8ac11c9903291f4e50567a070902e77b1be42305280b91b23d3ccac19"
 dependencies = [
  "arbitrary",
  "serde",
@@ -1665,21 +1665,6 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "mrtin"
-version = "0.2.0-4dev"
-dependencies = [
- "clap",
- "inetnum",
- "log",
- "memmap2",
- "octseq",
- "rand",
- "rayon",
- "rotonda-store",
- "routecore 0.5.0-rc2-dev",
 ]
 
 [[package]]
@@ -2224,7 +2209,6 @@ dependencies = [
  "log",
  "log-reroute",
  "memmap2",
- "mrtin",
  "non-empty-vec",
  "percent-encoding",
  "pin-project-lite",
@@ -2296,7 +2280,7 @@ dependencies = [
 [[package]]
 name = "routecore"
 version = "0.5.0-rc2-dev"
-source = "git+https://github.com/nlnetlabs/routecore?branch=main#e9cf9c7c7a77c0c7e8f8cd01e851261f23e3e6af"
+source = "git+https://github.com/nlnetlabs/routecore?branch=main#a9be11c247a381c65949eed06113105378505b5f"
 dependencies = [
  "bytes",
  "chrono",
@@ -2305,6 +2289,7 @@ dependencies = [
  "log",
  "octseq",
  "paste",
+ "rayon",
  "serde",
  "tokio",
 ]

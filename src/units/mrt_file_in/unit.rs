@@ -30,12 +30,12 @@ use crate::units::{Gate, Unit};
 
 
 #[derive(Clone, Debug, Deserialize)]
-pub struct MrtIn {
+pub struct MrtFileIn {
     pub filename: PathBuf,
 }
 
 pub struct MrtInRunner {
-    config: MrtIn,
+    config: MrtFileIn,
     gate: Gate,
     ingresses: Arc<ingress::Register>,
     // TODO register an HTTP endpoint using this sender to queue additional
@@ -45,7 +45,7 @@ pub struct MrtInRunner {
     processed: Vec<PathBuf>,
 }
 
-impl MrtIn {
+impl MrtFileIn {
     pub async fn run(
         self,
         component: Component,
@@ -73,7 +73,7 @@ impl MrtIn {
 
 impl MrtInRunner {
     fn new(
-        mrtin: MrtIn,
+        mrtin: MrtFileIn,
         gate: Gate,
         ingresses: Arc<ingress::Register>,
         queue_tx: mpsc::Sender<PathBuf>
@@ -240,8 +240,22 @@ impl MrtInRunner {
                 Either::Left((Ok(gate_status), next_fut)) => {
                     match gate_status {
                         GateStatus::Active | GateStatus::Dormant => { },
-                        GateStatus::Reconfiguring { .. } => {
-                            warn!("TODO implement hot-reload support for this unit")
+                        GateStatus::Reconfiguring { new_config: Unit::MrtFileIn(MrtFileIn { filename: new_filename, .. }) } => {
+                            if new_filename != self.config.filename {
+                                info!("Reloading mrt-in, processing new file {}", &new_filename.to_string_lossy());
+                                if let Err(e) = self.queue_tx.send(new_filename.clone()).await {
+                                    error!(
+                                        "Failed to process {}: {}",
+                                        new_filename.to_string_lossy(),
+                                        e
+                                    );
+                                }
+                                //self.config.file
+                            }
+
+                        }
+                        GateStatus::Reconfiguring { .. }  => {
+                            // reconfiguring for other unit types, ignore
                         }
                         GateStatus::ReportLinks { report } => {
                             report.declare_source();

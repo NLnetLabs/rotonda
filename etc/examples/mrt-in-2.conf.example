@@ -8,11 +8,11 @@ http_listen = ["127.0.0.1:8080"]
 # It's perfectly fine to have mulitple mrt-in connectors
 
 [units.mrt-in-1]
-type = "mrt-in"
+type = "mrt-file-in"
 filename = "../bview/latest-bview-rrc26"
 
 [units.mrt-in-2]
-type = "mrt-in"
+type = "mrt-file-in"
 filename = "../bview/latest-bview-rrc3"
 
 # Both mrt-in connectors are connected to this RIB

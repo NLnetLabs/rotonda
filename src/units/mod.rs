@@ -24,7 +24,7 @@ pub(crate) mod bgp_tcp_in;
 mod bmp_tcp_in;
 mod filter;
 mod rib_unit;
-mod mrt_in;
+mod mrt_file_in;
 pub use bmp_tcp_in::unit::TracingMode;
 pub use rib_unit::{
     unit::{RibType, RibUnit},
@@ -53,8 +53,8 @@ pub enum Unit {
     #[serde(rename = "rib")]
     RibUnit(rib_unit::unit::RibUnit),
 
-    #[serde(rename = "mrt-in")]
-    MrtIn(mrt_in::unit::MrtIn)
+    #[serde(rename = "mrt-file-in")]
+    MrtFileIn(mrt_file_in::unit::MrtFileIn)
 }
 
 impl Unit {
@@ -73,7 +73,7 @@ impl Unit {
             }
             Unit::Filter(unit) => unit.run(component, gate, waitpoint).await,
             Unit::RibUnit(unit) => unit.run(component, gate, waitpoint).await,
-            Unit::MrtIn(unit) => unit.run(component, gate, waitpoint).await,
+            Unit::MrtFileIn(unit) => unit.run(component, gate, waitpoint).await,
         };
     }
 
@@ -83,7 +83,7 @@ impl Unit {
             Unit::BmpTcpIn(_) => "bmp-tcp-in",
             Unit::Filter(_) => "filter",
             Unit::RibUnit(_) => "rib",
-            Unit::MrtIn(_) => "mrt-in",
+            Unit::MrtFileIn(_) => "mrt-file-in",
         }
     }
 }

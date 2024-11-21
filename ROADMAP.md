@@ -70,40 +70,25 @@ Roadmap
 - 💤 implement more passive external data sources
 - 💤 create user-configurable graph DSL for units
 - 💤 create user-configurable query DSL
-- 💤 create dev documentation
-
-
-## `Rotonda-fsm`
-
-RELEASE 0.1
-
-- ✅ BMP state machine
-- ✅ BGP state machine
-- ✅ BGP passive speaker (session management)
-
-UNRELEASED 0.2
-
-- 🦀 BGP active speaker
 
 
 ## `Routecore`
 
-RELEASE 0.4
+### NEXT RELEASE 0.5
 
-- ✅ prefix types
-- ✅ route record example types
+- ✅ Prefix types in `inetnum`
+- ✅ Route record example types
 - ✅ BGP/BMP types for parsing
 - ✅ Create BGP packet editor & route workshop
 - ✅ Partial FlowSpec parser
 - ✅ Best path selection
 - ✅ Revamped AFI/SAFI with AddPath support
 
-UNRELEASED 0.5
+### UNRELEASED 0.6
 
-- 🦀 create BGP packet builder
-- 💤 partial FlowSpec parser
+- 💤 Optimizations
 
-NEXT RELEASES
+### LATER RELEASES
 
 - 💤 BGPsec parser
 - 💤 More AFI/SAFI types
@@ -122,12 +107,12 @@ NEXT RELEASES
 
 ### UNRELEASED 0.5
 
-- 💤 On-disk storage integration
+- 🦀 On-disk storage integration
 - 🦀 Optimizations: better hashing, cache padding, etc.
 
 ## `Rotoro`
 
-MVP
+### MVP
 
 - 🦀 Design wire protocol and select a layout (AVRO?)
 - 💤 Create experimental de/serialization

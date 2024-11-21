@@ -39,7 +39,8 @@ impl FatalError for std::io::Error {
             std::io::ErrorKind::Unsupported => true,
             std::io::ErrorKind::UnexpectedEof => true,
             std::io::ErrorKind::OutOfMemory => true,
-            std::io::ErrorKind::Other => true,
+
+            std::io::ErrorKind::Other => false,
 
             _ => true,
         }

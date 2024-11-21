@@ -4,11 +4,13 @@
 
 Released 2024-11-21
 
-This release contains mostly refactored components, aiming at better performance
-and reduced resource requirements.
+Breaking changes
 
-Most notably, our filter language Roto is now compiled to machine code and
-offers user friendly error messages. 
+This release contains mostly refactored components, aiming at better
+performance and reduced resource requirements.
+
+Most notably, our filter language `Roto` is now compiled to machine code and
+offers user friendly error messages.
 
 
 ## 0.1.0  ‘For the sake of Whiskey, color Televisions and Pianos’

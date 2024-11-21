@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased version
+
+Breaking changes
+
+
+New
+
+
+Other changes
+
+
+Known limitations/issues
+
+
+
 ## 0.2.0 'Happy Fuzzballs'
 
 Released 2024-11-21

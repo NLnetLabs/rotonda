@@ -1,43 +1,38 @@
+use std::io::prelude::*;
 use crate::{
     common::{
-        frim::FrimMap,
-        roto::{FilterName, RotoScripts, ThreadLocalVM},
-        status_reporter::{AnyStatusReporter, UnitStatusReporter},
-    },
-    comms::{
+        frim::FrimMap, roto_new::{FilterName, FreshRouteContext, InsertionInfo, MrtContext, OutputStream, OutputStreamMessage, RotoOutputStream, RotoScripts, RouteContext}, status_reporter::{AnyStatusReporter, UnitStatusReporter}
+    }, comms::{
         AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus, Link,
         Terminated, TriggerData,
-    },
-    manager::{Component, WaitPoint},
-    payload::{
-        FilterError, Filterable, Payload, RouterId, Update, UpstreamStatus,
-    },
-    tokio::TokioTaskMetrics,
-    tracing::{BoundTracer, Tracer},
-    units::Unit,
+    }, ingress, manager::{Component, WaitPoint}, payload::{
+        //FilterError, Filterable,
+        Payload, RotondaPaMap, RotondaRoute, RouterId, Update, UpstreamStatus
+    }, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::Unit
 };
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 
 use chrono::Utc;
 use hash_hasher::{HashBuildHasher, HashedSet};
-use log::{error, log_enabled, trace, warn};
+use log::{debug, error, info, log_enabled, trace, warn};
 use non_empty_vec::NonEmpty;
-use roto::types::{
-    builtin::{BuiltinTypeValue, RouteToken},
-    collections::ElementTypeValue,
-    typevalue::TypeValue,
-};
+//use roto::types::{
+//    builtin::{BasicRouteToken, BuiltinTypeValue, NlriStatus, PrefixRoute, RouteContext},
+//    collections::ElementTypeValue,
+//    typevalue::TypeValue,
+//};
 use rotonda_store::{
-    custom_alloc::Upsert,
-    epoch,
-    prelude::{multi::PrefixStoreError, MergeUpdate},
-    QueryResult, RecordSet,
+    custom_alloc::UpsertReport,
+    prelude::multi::PrefixStoreError,
+    QueryResult,
+    RecordSet,
 };
 
-use routecore::addr::Prefix;
+use inetnum::addr::Prefix;
+use routecore::bgp::types::AfiSafiType;
 use serde::Deserialize;
-use smallvec::SmallVec;
+use smallvec::{SmallVec, smallvec};
 use std::{
     cell::RefCell, ops::Deref, str::FromStr, string::ToString, sync::Arc,
 };
@@ -48,8 +43,7 @@ use super::{
     http::PrefixesApi,
     metrics::RibUnitMetrics,
     rib::{
-        HashedRib, PreHashedTypeValue, RibValue, RouteExtra,
-        StoreEvictionPolicy, StoreInsertionEffect, StoreMergeUpdateSettings,
+        /*HashedRib, PreHashedTypeValue, RibValue,*/ Rib, RouteExtra, StoreInsertionEffect /*StoreMergeUpdateUserData,*/
     },
     status_reporter::RibUnitStatusReporter,
 };
@@ -62,6 +56,37 @@ const RECORD_MERGE_UPDATE_SPEED_EVERY_N_CALLS: u64 = 1000;
 thread_local!(
     static STATS_COUNTER: RefCell<u64> = RefCell::new(0);
 );
+
+
+
+type RotoFuncPre = roto::TypedFunc<
+    (
+        roto::Val<crate::common::roto_runtime::Log>,
+        roto::Val<RotondaRoute>,
+        roto::Val<RouteContext>,
+    ),
+    roto::Verdict<(),()>
+>;
+
+type RotoFuncPost = roto::TypedFunc<
+    (
+        roto::Val<crate::common::roto_runtime::Log>,
+        roto::Val<RotondaRoute>,
+        roto::Val<InsertionInfo>,
+    ),
+    roto::Verdict<(),()>
+>;
+
+
+impl From<UpsertReport> for InsertionInfo {
+    fn from(value: UpsertReport) -> Self {
+        Self {
+            prefix_new: value.prefix_new,
+            new_peer: value.mui_new,
+        }
+    }
+}
+
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct MoreSpecifics {
@@ -160,9 +185,9 @@ pub struct RibUnit {
     #[serde(default)]
     pub rib_type: RibType,
 
-    /// Which fields are the key for RIB metadata items?
-    #[serde(default = "RibUnit::default_rib_keys")]
-    pub rib_keys: NonEmpty<RouteToken>,
+    ///// Which fields are the key for RIB metadata items?
+    //#[serde(default = "RibUnit::default_rib_keys")]
+    //pub rib_keys: NonEmpty<BasicRouteToken>,
 
     /// Virtual RIB upstream physical RIB. Only used when rib_type is Virtual.
     #[serde(default)]
@@ -183,7 +208,7 @@ impl RibUnit {
             self.query_limits,
             self.filter_name.unwrap_or_default(),
             self.rib_type,
-            &self.rib_keys,
+            //&self.rib_keys,
             self.vrib_upstream,
         )
         .run(self.sources, waitpoint)
@@ -198,24 +223,29 @@ impl RibUnit {
         QueryLimits::default()
     }
 
-    fn default_rib_keys() -> NonEmpty<RouteToken> {
+    /*
+    fn default_rib_keys() -> NonEmpty<BasicRouteToken> {
         NonEmpty::try_from(vec![
-            RouteToken::PeerIp,
-            RouteToken::PeerAsn,
-            RouteToken::AsPath,
+            //BasicRouteToken::PeerId,
+            //BasicRouteToken::PeerAsn,
+            BasicRouteToken::AsPath,
         ])
         .unwrap()
     }
+    */
 }
 
+
 pub struct RibUnitRunner {
-    roto_scripts: RotoScripts,
+    roto_function_pre: Option<RotoFuncPre>,
+    roto_function_post: Option<RotoFuncPost>,
     gate: Arc<Gate>,
     #[allow(dead_code)]
     // A strong ref needs to be held to http_processor but not used otherwise the HTTP resource manager will discard its registration
     http_processor: Arc<PrefixesApi>,
     query_limits: Arc<ArcSwap<QueryLimits>>,
-    rib: Arc<ArcSwap<HashedRib>>,
+    //rib: Arc<ArcSwap<HashedRib>>, // XXX LH: why the ArcSwap here?
+    rib: Arc<ArcSwap<Rib>>, // XXX LH: why the ArcSwap here?
     rib_type: RibType,
     filter_name: Arc<ArcSwap<FilterName>>,
     pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
@@ -228,12 +258,7 @@ pub struct RibUnitRunner {
 #[async_trait]
 impl DirectUpdate for RibUnitRunner {
     async fn direct_update(&self, update: Update) {
-        if let Err(err) = self
-            .process_update(update, |pfx, meta, store| {
-                store.insert(pfx, meta)
-            })
-            .await
-        {
+        if let Err(err) = self.process_update(update).await {
             error!("Error handling update: {err}");
         }
     }
@@ -248,16 +273,13 @@ impl std::fmt::Debug for RibUnitRunner {
 impl AnyDirectUpdate for RibUnitRunner {}
 
 pub type QueryId = Uuid;
-pub type QueryOperationResult = Result<QueryResult<RibValue>, String>;
+//pub type QueryOperationResult = Result<QueryResult<RotondaRoute>, String>;
+pub type QueryOperationResult = Result<QueryResult<RotondaPaMap>, String>;
 pub type QueryOperationResultSender = oneshot::Sender<QueryOperationResult>;
 pub type PendingVirtualRibQueryResults =
     FrimMap<QueryId, Arc<QueryOperationResultSender>>;
 
 impl RibUnitRunner {
-    thread_local!(
-        static VM: ThreadLocalVM = RefCell::new(None);
-    );
-
     #[allow(clippy::too_many_arguments)]
     fn new(
         gate: Gate,
@@ -266,16 +288,17 @@ impl RibUnitRunner {
         query_limits: QueryLimits,
         filter_name: FilterName,
         rib_type: RibType,
-        rib_keys: &[RouteToken],
+        //rib_keys: &[BasicRouteToken],
         vrib_upstream: Option<Link>,
     ) -> Self {
         let unit_name = component.name().clone();
         let gate = Arc::new(gate);
-        let rib = Self::mk_rib(
-            rib_type,
-            rib_keys,
-            StoreEvictionPolicy::UpdateStatusOnWithdraw.into(),
-        );
+        let rib = Arc::new(ArcSwap::from_pointee(Rib::new_physical()));
+        //let rib = Self::mk_rib(
+        //    rib_type,
+        //    //rib_keys,
+        //    //StoreEvictionPolicy::UpdateStatusOnWithdraw.into(),
+        //);
         let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> =
             Default::default();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
@@ -309,6 +332,7 @@ impl RibUnitRunner {
             rib_type,
             vrib_upstream,
             pending_vrib_query_results.clone(),
+            component.ingresses(),
         );
         let http_processor = Arc::new(http_processor);
         if is_sub_resource {
@@ -323,11 +347,22 @@ impl RibUnitRunner {
             );
         }
 
-        let roto_scripts = component.roto_scripts().clone();
+        let roto_compiled = component.roto_compiled().clone();
+        let roto_function_pre: Option<RotoFuncPre> = roto_compiled.clone().and_then(|c|{
+            let mut c = c.lock().unwrap();
+            c.get_function("rib-in-pre").ok()
+        });
+
+        let roto_function_post: Option<RotoFuncPost> = roto_compiled.and_then(|c|{
+            let mut c = c.lock().unwrap();
+            c.get_function("rib-in-post").ok()
+        });
+
         let tracer = component.tracer().clone();
 
         Self {
-            roto_scripts,
+            roto_function_pre,
+            roto_function_post,
             gate,
             http_processor,
             query_limits,
@@ -346,9 +381,10 @@ impl RibUnitRunner {
     pub(crate) fn mock(
         roto_script: &str,
         rib_type: RibType,
-        settings: StoreMergeUpdateSettings,
     ) -> (Self, crate::comms::GateAgent) {
-        use crate::common::roto::RotoScriptOrigin;
+        //use crate::common::roto::RotoScriptOrigin;
+
+        use crate::common::roto_new::RotoScripts;
 
         let roto_scripts = RotoScripts::default();
         if !roto_script.is_empty() {
@@ -363,8 +399,9 @@ impl RibUnitRunner {
         let gate = gate.into();
         let query_limits =
             Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
-        let rib_keys = RibUnit::default_rib_keys();
-        let rib = Self::mk_rib(rib_type, &rib_keys, settings);
+        //let rib_keys = RibUnit::default_rib_keys();
+        //let rib = Self::mk_rib(rib_type, &rib_keys); //, settings);
+        let rib = Rib::new();
         let status_reporter = RibUnitStatusReporter::default().into();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
         let filter_name =
@@ -379,6 +416,7 @@ impl RibUnitRunner {
             rib_type,
             None,
             pending_vrib_query_results.clone(),
+            Arc::default(), // ingress::Register
         ));
         let tracer = Arc::new(Tracer::new());
 
@@ -416,10 +454,11 @@ impl RibUnitRunner {
         (http_api_path, is_sub_resource)
     }
 
+    /*
     fn mk_rib(
         rib_type: RibType,
-        rib_keys: &[RouteToken],
-        settings: StoreMergeUpdateSettings,
+        rib_keys: &[BasicRouteToken],
+        //settings: StoreMergeUpdateUserData,
     ) -> Arc<ArcSwap<HashedRib>> {
         //
         // --- TODO: Create the Rib based on the Roto script Rib 'contains' type
@@ -433,9 +472,10 @@ impl RibUnitRunner {
         // --- End: Create the Rib based on the Roto script Rib 'contains' type
         //
         let physical = matches!(rib_type, RibType::Physical);
-        let rib = HashedRib::new(rib_keys, physical, settings);
+        let rib = HashedRib::new(rib_keys, physical, /*settings*/);
         Arc::new(ArcSwap::from_pointee(rib))
     }
+*/
 
     #[cfg(test)]
     pub(super) fn status_reporter(&self) -> Arc<RibUnitStatusReporter> {
@@ -450,6 +490,16 @@ impl RibUnitRunner {
     #[cfg(test)]
     pub(super) fn rib(&self) -> Arc<HashedRib> {
         self.rib.load().clone()
+    }
+
+
+    fn signal_withdraw(
+        &self,
+        ingress_id: ingress::IngressId,
+        specific_afisafi: Option<AfiSafiType>,
+    ) {
+
+        self.rib.load().withdraw_for_ingress(ingress_id, specific_afisafi);
     }
 
     pub async fn run(
@@ -485,7 +535,7 @@ impl RibUnitRunner {
                                     query_limits: new_query_limits,
                                     filter_name: new_filter_name,
                                     http_api_path: new_http_api_path,
-                                    rib_keys: new_rib_keys,
+                                    //rib_keys: new_rib_keys,
                                     rib_type: new_rib_type,
                                     vrib_upstream: new_vrib_upstream,
                                 }),
@@ -507,6 +557,7 @@ impl RibUnitRunner {
                                 );
                             }
 
+                            /*
                             let old_rib_keys =
                                 arc_self.rib.load().key_fields();
                             if new_rib_keys.as_slice() != old_rib_keys {
@@ -515,6 +566,7 @@ impl RibUnitRunner {
                                     old_rib_keys, new_rib_keys
                                 );
                             }
+                            */
 
                             if new_rib_type != arc_self.rib_type {
                                 warn!(
@@ -601,6 +653,21 @@ impl RibUnitRunner {
                                 arc_self.rib_type,
                                 RibType::Physical
                             ));
+
+                            let res = {
+                                // XXX LH as long as the HTTP API (and
+                                // TriggerData) is limited to 'simple
+                                // prefixes', we default to unicast for now.
+                                // Eventually, this should facilitate all
+                                // afisafis.
+                                arc_self.rib.load()
+                                    .match_prefix(
+                                        &prefix,
+                                        &match_options,
+                                    )
+                            };
+
+                            /*
                             let res = {
                                 if let Ok(store) = arc_self.rib.load().store()
                                 {
@@ -618,6 +685,7 @@ impl RibUnitRunner {
                                         .to_string())
                                 }
                             };
+                            */
                             trace!("Sending query {uuid} results downstream");
                             arc_self
                                 .gate
@@ -637,38 +705,60 @@ impl RibUnitRunner {
         }
     }
 
-    pub(super) async fn process_update<F>(
+    pub(super) async fn process_update/*<F>*/(
         &self,
         update: Update,
-        insert_fn: F,
-    ) -> Result<(), FilterError>
+        /*insert_fn: F,*/
+    //) -> Result<(), FilterError>
+    ) -> Result<(), String>
     where
+        /*
         F: Fn(
                 &Prefix,
-                TypeValue,
+                PrefixRoute,
                 &HashedRib,
+                NlriStatus,
+                roto::types::builtin::Provenance,
+                u64, // ltime
             ) -> Result<
-                (Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                //(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                UpsertReport,
                 PrefixStoreError,
             > + Copy
             + Clone
             + Send
             + 'static,
+        */
     {
         match update {
             Update::UpstreamStatusChange(UpstreamStatus::EndOfStream {
                 ..
             }) => {
-                // Nothing to do, pass it on
+                // We expect withdrawals to come in via Update::Withdraw
+                // messages. Nothing else to do, pass it on.
                 self.gate.update_data(update).await;
             }
 
             Update::Bulk(payloads) => {
-                self.filter_payload(payloads, insert_fn).await?
+                self.filter_payload(payloads,/* insert_fn*/).await?
             }
 
             Update::Single(payload) => {
-                self.filter_payload(payload, insert_fn).await?
+                self.filter_payload([payload],/* insert_fn*/).await?
+            }
+
+            Update::WithdrawBulk(ingress_ids) => {
+                ingress_ids.iter()
+                    .for_each(|&id| self.signal_withdraw(id, None));
+            }
+            
+            Update::Withdraw(ingress_id, maybe_afisafi) => {
+                self.signal_withdraw(ingress_id, maybe_afisafi)
+            }
+
+            Update::OutputStream(..) => {
+                // Nothing to do, pass it on
+                self.gate.update_data(update).await;
             }
 
             Update::QueryResult(uuid, upstream_query_result) => {
@@ -699,30 +789,160 @@ impl RibUnitRunner {
         Ok(())
     }
 
-    async fn filter_payload<T, F>(
+    async fn filter_payload/*<T, F>*/(
         &self,
-        payload: T,
-        insert_fn: F,
-    ) -> Result<(), FilterError>
+        payload: impl IntoIterator<Item = Payload>,
+        /*insert_fn: F,*/
+    ) -> Result<(), String /*FilterError*/>
+    /*
     where
         T: Filterable,
         F: Fn(
                 &Prefix,
-                TypeValue,
+                //TypeValue,
+                PrefixRoute,
                 &HashedRib,
+                NlriStatus,
+                roto::types::builtin::Provenance,
+                u64, // ltime
             ) -> Result<
-                (Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                //(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                UpsertReport,
                 PrefixStoreError,
             > + Copy
             + Clone
             + Send
             + 'static,
+        */
     {
+        let mut res = SmallVec::<[Payload; 8]>::new();
+
+        let mut output_stream = RotoOutputStream::new();
+
+        for p in payload {
+            let ingress_id = match &p.context {
+                RouteContext::Fresh(f) => Some(f.provenance().ingress_id),
+                RouteContext::Mrt(m) => Some(m.provenance().ingress_id),
+                _ => None
+            };
+            if let Some(ref roto_function) = self.roto_function_pre {
+
+                match roto_function.call(
+                    roto::Val(&mut output_stream),
+                    roto::Val(p.rx_value.clone()),
+                    roto::Val(p.context.clone()),
+                )  {
+                    roto::Verdict::Accept(_) => {
+                        self.insert_payload(&p);
+                        res.push(p.clone());
+                    }
+                    roto::Verdict::Reject(_) => {
+                        debug!("roto::Verdict Reject, dropping {p:#?}");
+                    }
+                }
+            } else {
+                // default action accept
+                self.insert_payload(&p);
+                res.push(p.clone());
+            }
+            if !output_stream.is_empty() {
+                let mut osms = smallvec![];
+                
+                use crate::common::roto_new::Output;
+                for entry in output_stream.drain() {
+                    debug!("output stream entry {entry:?}");
+                    let osm = match entry {
+                        Output::Prefix(_prefix) => {
+                            OutputStreamMessage::prefix(
+                                Some(p.rx_value.clone()),
+                                ingress_id,
+                            )
+                        }
+                        Output::Community(_u32) => {
+                            OutputStreamMessage::community(
+                                Some(p.rx_value.clone()),
+                                ingress_id,
+                            )
+                        }
+                        Output::Asn(_u32) => {
+                            OutputStreamMessage::asn(
+                                Some(p.rx_value.clone()),
+                                ingress_id,
+                            )
+                        }
+                        Output::Origin(_u32) => {
+                            OutputStreamMessage::origin(
+                                Some(p.rx_value.clone()),
+                                ingress_id,
+                            )
+                        }
+                        Output::PeerDown => {
+                            debug!("Logged PeerDown from Rib unit, ignoring");
+                            continue
+                        }
+                        Output::Custom((id, local)) => {
+                            OutputStreamMessage::custom(
+                                id, local,
+                                ingress_id,
+                            )
+                            
+                        }
+                    };
+                    osms.push(osm);
+                }
+                self.gate.update_data(Update::OutputStream(osms)).await;
+            }
+        }
+        /*
+        Self::ROTO.with_borrow_mut(|maybe_compiled| {
+            let compiled = ensure_compiled(
+                maybe_compiled,
+                self.roto_scripts.get(&self.filter_name.load()).unwrap()
+            );
+
+            let main_func = compiled.get_function::<
+                (),
+                roto::Verdict<(), ()>
+            >("main").unwrap().as_func();
+
+            for p in payload {
+                // filter
+                // accept: insert and forward
+                // reject: drop, do not update gate
+                match main_func() {
+                    roto::Verdict::Accept(_) => {
+                        self.insert_payload(&p);
+                        res.push(p);
+                    }
+                    roto::Verdict::Reject(_) => {
+                        debug!("roto::Verdict Reject, dropping {p:#?}");
+                    }
+                }
+            }
+        });
+        */
+
+        match res.len() {
+            0 => { }, 
+            1 => {
+                self.gate.update_data(
+                    Update::Single(res.into_iter().next().unwrap())
+                ).await;
+            }
+            _ => {
+                self.gate.update_data(
+                    Update::Bulk(res)
+                ).await;
+            }
+        }
+
+        Ok(())
+        /*
         let bound_tracer = self.tracer.bind(self.gate.id());
         if let Some(filtered_update) = Self::VM
             .with(|vm| {
                 payload
-                    .filter(|value, received, trace_id| {
+                    .filter(|value, received, trace_id, context| {
                         self.roto_scripts.exec_with_tracer(
                             vm,
                             &self.filter_name.load(),
@@ -730,11 +950,12 @@ impl RibUnitRunner {
                             received,
                             bound_tracer.clone(),
                             trace_id,
+                            context
                         )
                     },
                     |_source_id| { /* TODO: self.status_reporter.message_filtered(source_id) */ })
                     .map(|filtered_payloads| {
-                        self.insert_payloads(filtered_payloads, insert_fn)
+                        self.insert_payloads(filtered_payloads,/* insert_fn*/)
                     })
             })
             .map_err(|err| {
@@ -751,27 +972,36 @@ impl RibUnitRunner {
         }
 
         Ok(())
+    */
     }
 
-    pub fn insert_payloads<F>(
+    /* // LH: we only use fn insert_payload (singular) now
+    pub fn insert_payloads/*<F>*/(
         &self,
         mut payloads: SmallVec<[Payload; 8]>,
-        insert_fn: F,
+        /*insert_fn: F,*/
     ) -> Option<Update>
     where
+        /*
         F: Fn(
                 &Prefix,
-                TypeValue,
+                //TypeValue,
+                PrefixRoute,
                 &HashedRib,
+                NlriStatus,
+                roto::types::builtin::Provenance,
+                u64, // ltime
             ) -> Result<
-                (Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                //(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                UpsertReport,
                 PrefixStoreError,
             > + Copy
             + Send
             + 'static,
+        */
     {
         for payload in &payloads {
-            self.insert_payload(payload, insert_fn);
+            self.insert_payload(payload/*, insert_fn*/);
         }
 
         match payloads.len() {
@@ -780,128 +1010,275 @@ impl RibUnitRunner {
             _ => Some(Update::Bulk(payloads)),
         }
     }
+    */
 
-    pub fn insert_payload<F>(&self, payload: &Payload, insert_fn: F)
+    pub fn insert_payload/*<F>*/(&self, payload: &Payload/*, insert_fn: F*/)
+        /*
     where
         F: Fn(
                 &Prefix,
                 TypeValue,
                 &HashedRib,
+                roto::types::builtin::Provenance,
             ) -> Result<
-                (Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                //(Upsert<<RibValue as MergeUpdate>::UserDataOut>, u32),
+                UpsertReport,
                 PrefixStoreError,
             > + Send
             + 'static,
+        */
     {
         let rib = self.rib.load();
-        if rib.is_physical() {
-            let prefix: Option<Prefix> = match &payload.value {
-                TypeValue::Builtin(BuiltinTypeValue::Route(route)) => {
-                    Some(route.prefix)
+        if !rib.is_physical() {
+            return
+        }
+
+
+        /*
+         * HashedRib only has PrefixRoute for its RibValues now.
+         * Perhaps we can store Record.prefix things in a separate
+         * RIB/HashMap like we'll do with more exotic AFI/SAFI NLRIs.
+         *
+         TypeValue::Record(record) => match record
+         .get_value_for_field("prefix")
+         {
+         Some(ElementTypeValue::Primitive(
+         TypeValue::Builtin(BuiltinTypeValue::Prefix(prefix)),
+         )) => Some(*prefix),
+         _ => None,
+         },
+         */
+
+        //if let TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(prefix_route)) = &payload.rx_value {
+        //match payload.rx_value {payload.rx
+        //    RotondaRoute::Ipv4Unicast(rr) => { let bool = rr.nlri(); todo!() }
+        //    RotondaRoute::Ipv6Unicast(rr) => todo!(),
+        //}
+           // let prefix = prefix_route.prefix();
+
+            
+            
+            //let is_announcement = payload.context.nlri_status() != NlriStatus::Withdrawn;
+            //let is_announcement = !payload.rx_value.is_withdrawn();
+            //let router_id =
+            //    payload.rx_value.router_id().unwrap_or_else(|| {
+            //        Arc::new(RouterId::from_str("unknown").unwrap())
+            //    });
+
+            //let ingress_id = payload.context.provenance().ingrespayload.rxs_id;
+
+            let pre_insert = Utc::now();
+
+            // XXX this is where we need to adapt to the new store
+            // this basically translates to
+            // rib.insert(prefix, rx_value, prov)
+            // returning a Result<(Upsert<StoreInsertionReport, u32)>
+            //
+            // this has to become
+            //
+            //pub 
+            //match insert_fn(&prefix, payload.rx_value.clone(), &rib, payload.context.provenance()) {
+
+            let (route_status, provenance) = match &payload.context {
+                RouteContext::Fresh(ctx) => { (ctx.status, ctx.provenance) },
+                RouteContext::Mrt(ctx) => { (ctx.status, ctx.provenance) },
+                RouteContext::Reprocess => {
+                    error!("unexpected RouteContext::Reprocess in insert_payload");
+                    self.status_reporter.insert_failed(&payload.rx_value, "unexpected RouteContext::Reprocess");
+                    return;
                 }
-
-                TypeValue::Record(record) => match record
-                    .get_value_for_field("prefix")
-                {
-                    Some(ElementTypeValue::Primitive(
-                        TypeValue::Builtin(BuiltinTypeValue::Prefix(prefix)),
-                    )) => Some(*prefix),
-                    _ => None,
-                },
-
-                _ => None,
             };
 
-            if let Some(prefix) = prefix {
-                let is_announcement = !payload.value.is_withdrawn();
-                let router_id =
-                    payload.value.router_id().unwrap_or_else(|| {
-                        Arc::new(RouterId::from_str("unknown").unwrap())
-                    });
+            let ltime = 0_u64;
+            //debug!("pre rib.insert for {}, status {}",
+            //    payload.rx_value, &route_context.status()
+            //);
+            match rib.insert(
+                &payload.rx_value, route_status, provenance, ltime
+            ) {
+                Ok(report) => {
+                    let post_insert = Utc::now();
+                    let store_op_delay =
+                        (post_insert - pre_insert).to_std().unwrap();
+                    let propagation_delay = (post_insert
+                        - payload.received)
+                        .to_std()
+                        .unwrap();
 
-                let pre_insert = Utc::now();
-                match insert_fn(&prefix, payload.value.clone(), &rib) {
-                    Ok((upsert, num_retries)) => {
-                        let post_insert = Utc::now();
-                        let store_op_delay =
-                            (post_insert - pre_insert).to_std().unwrap();
-                        let propagation_delay = (post_insert
-                            - payload.received)
-                            .to_std()
-                            .unwrap();
+                    let change = if report.prefix_new {
+                        StoreInsertionEffect::RouteAdded
+                    } else {
+                        StoreInsertionEffect::RouteUpdated
+                    };
 
-                        match upsert {
-                            Upsert::Insert => {
-                                let change = if is_announcement {
-                                    StoreInsertionEffect::RouteAdded
-                                } else {
-                                    // WTF - a withdrawal should NOT result in 'Insert' as that means
-                                    // that the prefix didn't yet have any routes associated with it
-                                    // so what was there to withdraw?
-                                    StoreInsertionEffect::RoutesWithdrawn(0)
-                                };
-                                self.status_reporter.insert_ok(
-                                    router_id,
-                                    store_op_delay,
-                                    propagation_delay,
-                                    num_retries,
-                                    change,
-                                );
-                            }
-                            Upsert::Update(StoreInsertionReport {
-                                change,
-                                item_count,
-                                op_duration,
-                            }) => {
-                                STATS_COUNTER.with(|counter| {
-                                    *counter.borrow_mut() += 1;
-                                    let res = *counter.borrow();
-                                    if res % RECORD_MERGE_UPDATE_SPEED_EVERY_N_CALLS == 0 {
-                                        self.rib_merge_update_stats.add(
-                                            op_duration.num_microseconds().unwrap_or(i64::MAX)
-                                                as u64,
-                                            item_count,
-                                            is_announcement,
-                                        );
-                                    }
-                                });
+                    self.status_reporter.insert_ok(
+                        provenance.ingress_id,
+                        store_op_delay,
+                        propagation_delay,
+                        //num_retries,
+                        report.cas_count.try_into().unwrap_or(u32::MAX),
+                        change,
+                    );
 
-                                self.status_reporter.update_ok(
-                                    router_id,
-                                    store_op_delay,
-                                    propagation_delay,
-                                    num_retries,
-                                    change,
-                                );
-                            }
-                        }
-                    }
-
-                    Err(err) => {
-                        self.status_reporter.insert_failed(prefix, err);
-                    }
+                    // XXX re-introduce sometime later
+                    //if let Some(ref roto_function) = self.roto_function_post {
+                    //    let mut insertion_info = report.into();
+                    //    let mut output_stream = RotoOutputStream::new();
+                    //    let _ = roto_function.call(
+                    //        roto::Val(&mut output_stream),
+                    //        roto::Val(payload.rx_value.clone()),
+                    //        roto::Val(insertion_info),
+                    //    );
+                    //    // TODO process outputstream
+                    //}
+                }
+                Err(err) => {
+                    self.status_reporter.insert_failed(&payload.rx_value, err);
                 }
             }
-        }
+
+            /*
+
+            match rib.insert(&prefix, prefix_route.clone(), route_context.nlri_status(), route_context.provenance(), ltime) {
+                Ok(report) => {
+                    let post_insert = Utc::now();
+                    let store_op_delay =
+                        (post_insert - pre_insert).to_std().unwrap();
+                    let propagation_delay = (post_insert
+                        - payload.received)
+                        .to_std()
+                        .unwrap();
+
+                    let change = if report.prefix_new {
+                        StoreInsertionEffect::RouteAdded
+                    } else {
+                        StoreInsertionEffect::RouteUpdated
+                    };
+
+                    self.status_reporter.insert_ok(
+                        route_context.provenance().ingress_id,
+                        store_op_delay,
+                        propagation_delay,
+                        //num_retries,
+                        report.cas_count.try_into().unwrap_or(u32::MAX),
+                        change,
+                    );
+                }
+                Err(err) => {
+                    self.status_reporter.insert_failed(prefix, err);
+                }
+
+                /*
+
+                   Ok((upsert, num_retries)) => {
+                   let post_insert = Utc::now();
+                   let store_op_delay =
+                   (post_insert - pre_insert).to_std().unwrap();
+                   let propagation_delay = (post_insert
+                   - payload.received)
+                   .to_std()
+                   .unwrap();
+
+                // are we still going to get a Upsert:: back from the
+                // new rotonda_store methods? If so, what will be the
+                // T in Upsert::Update<T> ?
+                // would be nice to have the change/effect, the
+                // op_duraiton we can do ourselves here, and the
+                // item_count... not sure how interesting that is, and
+                // moreover, what would it entail: the number of Metas
+                // for the Prefix? Or something for the Prefix+UniqId?
+                match upsert {
+                Upsert::Insert => {
+                let change = if is_announcement {
+                StoreInsertionEffect::RouteAdded
+                } else {
+                // WTF - a withdrawal should NOT result in 'Insert' as that means
+                // that the prefix didn't yet have any routes associated with it
+                // so what was there to withdraw?
+                StoreInsertionEffect::RoutesWithdrawn(0)
+                };
+                self.status_reporter.insert_ok(
+                //router_id,
+                ingress_id,
+                store_op_delay,
+                propagation_delay,
+                num_retries,
+                change,
+                );
+                }
+                Upsert::Update(StoreInsertionReport { change,
+                item_count,
+                op_duration,
+                }) => {
+                STATS_COUNTER.with(|counter| {
+                 *counter.borrow_mut() += 1;
+                 let res = *counter.borrow();
+                 if res % RECORD_MERGE_UPDATE_SPEED_EVERY_N_CALLS == 0 {
+                 self.rib_merge_update_stats.add(
+                 op_duration.num_microseconds().unwrap_or(i64::MAX)
+                 as u64,
+                 item_count,
+                 is_announcement,
+                 );
+                 }
+                 });
+
+                 self.status_reporter.update_ok(
+                //router_id,
+                ingress_id,
+                store_op_delay,
+                propagation_delay,
+                num_retries,
+                change,
+                );
+                }
+                }
+                }
+
+                Err(err) => {
+                self.status_reporter.insert_failed(prefix, err);
+                } */
+            }
+    */
+        //}
     }
 
     async fn reprocess_query_results(
         &self,
-        res: QueryResult<RibValue>,
-    ) -> QueryResult<RibValue> {
-        let mut processed_res = QueryResult::<RibValue> {
+        //res: QueryResult<RotondaRoute>,
+        res: QueryResult<RotondaPaMap>,
+    ) -> QueryResult<RotondaPaMap> {
+        let mut processed_res = QueryResult::<RotondaPaMap> {
             match_type: res.match_type,
             prefix: res.prefix,
-            prefix_meta: None,
+            prefix_meta: vec![],
             less_specifics: None,
             more_specifics: None,
         };
 
-        let is_in_prefix_meta_set = res.prefix_meta.is_some();
+        let is_in_prefix_meta_set = !res.prefix_meta.is_empty();
 
-        if let Some(rib_value) = res.prefix_meta {
-            processed_res.prefix_meta =
-                self.reprocess_rib_value(rib_value).await;
+        //if let Some(rib_value) = res.prefix_meta {
+        //    processed_res.prefix_meta =
+        //        self.reprocess_rib_value(rib_value).await;
+        //}
+        for record in res.prefix_meta {
+            let (mui, ltime, status) = (record.multi_uniq_id, record.ltime, record.status);
+            
+            // XXX how can we do without the clone here?
+            // we can not keep track of the other fields and create a new
+            // PublicRecord only if reprocess_rib_value returns Some(..),
+            // because PublicRecord is not public.
+            //
+            //let mut maybe_keep = record.clone();
+            if let Some(meta)  = self.reprocess_rib_value(record.meta).await {
+                //maybe_keep.meta = meta;
+                processed_res.prefix_meta.push(
+                    //maybe_keep
+                    //rotonda_store::PublicRecord::<RotondaRoute>::new(mui, ltime, status, meta)
+                    rotonda_store::PublicRecord::<RotondaPaMap>::new(mui, ltime, status, meta)
+                );
+            }
         }
 
         if let Some(record_set) = &res.less_specifics {
@@ -915,7 +1292,7 @@ impl RibUnitRunner {
         }
 
         if log_enabled!(log::Level::Trace) {
-            let is_out_prefix_meta_set = processed_res.prefix_meta.is_some();
+            let is_out_prefix_meta_set = !processed_res.prefix_meta.is_empty();
             let exact_match_diff = (is_in_prefix_meta_set as u8)
                 - (is_out_prefix_meta_set as u8);
             let less_specifics_diff =
@@ -948,23 +1325,69 @@ impl RibUnitRunner {
     /// RIB to the East made against a physical RIB to the West.
     async fn reprocess_rib_value(
         &self,
-        rib_value: RibValue,
-    ) -> Option<RibValue> {
+        //rib_value: RotondaRoute,
+        rib_value: RotondaPaMap,
+    ) -> Option<RotondaPaMap> {
+        /*
         let mut new_values = HashedSet::with_capacity_and_hasher(
             1,
             HashBuildHasher::default(),
         );
+        */
 
         let tracer = BoundTracer::new(self.tracer.clone(), self.gate.id());
 
-        for route in rib_value.iter() {
-            let in_type_value: &TypeValue = route.deref();
-            let payload = Payload::from(in_type_value.clone()); // TODO: Do we really want to clone here? Or pass the Arc on?
 
-            trace!("Re-processing route");
+        // XXX where is our ingress_id ?
+        //let prov = self.ingresses.get(
 
-            if let Ok(filtered_payloads) = Self::VM.with(|vm| {
-                payload.filter(|value, received, trace_id| {
+        // XXX What is the RouteContext for a re-processed RibValue?
+        // We can add a bool to RouteContext signalling we are
+        // re-processing a value and the bgp_pdu is (likely) not available
+        // in this context. Then, Roto filters can act upon that bool.
+        // This might cause discrepancies between 'normal' processing and
+        // re-processing, though.
+        
+        //let ctx = RouteContext::for_reprocessing(
+        //    NlriStatus::UpToDate, // XXX is this
+        //    provenance,
+        //);
+        let ctx = RouteContext::for_reprocessing();
+
+        todo!(); // figure out how to construct a Payload when we do not have
+                 // the RotondaRoute anymore, only the RotondaPamap.
+                 // This will depend on what type the roto function expects.
+                 // If it needs the RotondaRoute, we need to change the
+                 // signature of fn reprocess_rib_value and call it
+                 // differently from reprocess_record_set and
+                 // reprocess_query_results
+        /*
+        let payload = Payload::new(
+            rib_value,
+            ctx.clone(),
+            None
+        );
+        */
+
+        trace!("Re-processing route");
+        todo!() // filter using new roto
+
+        // LH:
+        // Let's see if I get this straight. It seems that payload.filter(..)
+        // comes from trait Filterable which always returns a
+        // SmallVec<Payload> even if the input is a single Payload.
+        // However, we work on a single RibValue here, so whatever comes out
+        // of the filter is a SmallVec of either 0 or 1 items.
+        // or perhaps not: can a single Payload going in result in both the 
+        // input Payload (PrefixRoute) _AND_ a OutputStreamMessage (is that
+        // something going out South?)
+
+        //let res: Option<RibValue>;
+
+        /*
+        if let Ok(filtered_payloads) = Self::VM.with(|vm| {
+            payload.filter(
+                |value, received, trace_id, context| {
                     self.roto_scripts.exec_with_tracer(
                         vm,
                         &self.filter_name.load(),
@@ -972,49 +1395,73 @@ impl RibUnitRunner {
                         received,
                         tracer.clone(),
                         trace_id,
+                        context
                     )
-                }, |_source_id| { /* TODO: self.status_reporter.message_filtered(source_id) */ })
-            }) {
-                new_values.extend(
-                    filtered_payloads
-                        .into_iter()
-                        .filter(|payload| {
-                            !matches!(
-                                payload.value,
-                                TypeValue::OutputStreamMessage(_)
-                            )
-                        })
-                        .map(|payload| {
-                            // Add this processed query result route into the new query result
-                            let hash = self
-                                .rib
-                                .load()
-                                .precompute_hash_code(&payload.value);
-                            PreHashedTypeValue::new(payload.value, hash)
-                                .into()
-                        }),
-                );
-            }
-        }
-
-        if new_values.is_empty() {
-            None
+                },
+                |_source_id| {
+                    /* TODO:
+                     * self.status_reporter.message_filtered(source_id) */
+                }
+            )
+        }) {
+            // LH: so, filtered_payloads is a mixed SmallVec where a Payload
+            // can be either a Output Stream Message ('south') and/or a
+            // Payload to be passed on east-wards.
+            filtered_payloads
+                .into_iter()
+                //.filter(|payload| {
+                .find(|payload| {
+                    !matches!(
+                        payload.rx_value,
+                        TypeValue::OutputStreamMessage(_)
+                    )
+                })
+            .map(|payload| {
+                // Add this processed query result route into the new query result
+                //let hash = self
+                //    .rib
+                //    .load()
+                //    .precompute_hash_code(&payload.rx_value);
+                /*
+                   PreHashedTypeValue::new(
+                   payload.rx_value,
+                   route.provenance(),
+                /*hash*/)
+                .into()
+                    */
+                    payload.rx_value.try_into().unwrap()
+            })
         } else {
-            Some(new_values.into())
-        }
+            None
+        }//;
+
+        //res
+
+        //if new_values.is_empty() {
+        //    None
+        //} else {
+        //    Some(new_values.into())
+        //}
+    */
     }
 
     async fn reprocess_record_set(
         &self,
-        record_set: &RecordSet<RibValue>,
-    ) -> Option<RecordSet<RibValue>> {
-        let mut new_record_set = RecordSet::<RibValue>::new();
+        //record_set: &RecordSet<RotondaRoute>,
+        record_set: &RecordSet<RotondaPaMap>,
+    //) -> Option<RecordSet<RotondaRoute>> {
+    ) -> Option<RecordSet<RotondaPaMap>> {
+        //let mut new_record_set = RecordSet::<RotondaRoute>::new();
+        let mut new_record_set = RecordSet::<RotondaPaMap>::new();
 
         for record in record_set.iter() {
-            let rib_value = record.meta;
-            if let Some(rib_value) = self.reprocess_rib_value(rib_value).await
-            {
-                new_record_set.push(record.prefix, rib_value);
+            // XXX can we safely do this?
+            for mut pub_rec in record.meta {
+                if let Some(rib_value) = self.reprocess_rib_value(pub_rec.meta).await
+                {
+                    pub_rec.meta = rib_value;
+                    new_record_set.push(record.prefix, vec![pub_rec]);
+                }
             }
         }
 
@@ -1075,8 +1522,10 @@ impl RibUnitRunner {
 mod tests {
     use super::*;
 
+    #[ignore = "prefix-store now handles all keying"]
     #[test]
     fn default_rib_keys_are_as_expected() {
+        /*
         let toml = r#"
         sources = ["some source"]
         "#;
@@ -1085,12 +1534,15 @@ mod tests {
 
         assert_eq!(
             config.rib_keys.as_slice(),
-            &[RouteToken::PeerIp, RouteToken::PeerAsn, RouteToken::AsPath]
+            &[BasicRouteToken::PeerIp, BasicRouteToken::PeerAsn, BasicRouteToken::AsPath]
         );
+        */
     }
 
+    #[ignore = "prefix-store now handles all keying"]
     #[test]
     fn specified_rib_keys_are_received() {
+        /*
         let toml = r#"
         sources = ["some source"]
         rib_keys = ["PeerIp", "NextHop"]
@@ -1100,8 +1552,9 @@ mod tests {
 
         assert_eq!(
             config.rib_keys.as_slice(),
-            &[RouteToken::PeerIp, RouteToken::NextHop]
+            &[BasicRouteToken::PeerIp, BasicRouteToken::NextHop]
         );
+        */
     }
 
     #[test]

@@ -3,47 +3,46 @@ use std::{ops::Deref, str::FromStr, sync::Arc};
 use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
 use hyper::{Body, Method, Request, Response};
-use log::trace;
-use rotonda_store::{epoch, prelude::Prefix, MatchOptions};
-use routecore::{asn::Asn, bgp::communities::HumanReadableCommunity as Community};
+use log::{debug, trace};
+use rotonda_store::MatchOptions;
+use inetnum::{addr::Prefix, asn::Asn};
+use routecore::bgp::communities::HumanReadableCommunity as Community;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use crate::{
-    comms::{Link, TriggerData},
-    http::{
+    comms::{Link, TriggerData}, http::{
         extract_params, get_all_params, get_param, MatchedParam,
         PercentDecodedPath, ProcessRequest, QueryParams,
-    },
-    units::{
+    }, ingress, units::{
         rib_unit::{
-            http::types::{FilterKind, FilterOp},
-            rib::HashedRib,
-            unit::{PendingVirtualRibQueryResults, QueryLimits},
+            http::types::{FilterKind, FilterOp}, rib::Rib, unit::{PendingVirtualRibQueryResults, QueryLimits}
         },
         RibType,
-    },
+    }
 };
 
 use super::types::{Details, Filter, FilterMode, Filters, Includes, SortKey};
 
 pub struct PrefixesApi {
-    rib: Arc<ArcSwap<HashedRib>>,
+    rib: Arc<ArcSwap<Rib>>,
     http_api_path: Arc<String>,
     query_limits: Arc<ArcSwap<QueryLimits>>,
     rib_type: RibType,
     vrib_upstream: Arc<ArcSwapOption<Link>>,
     pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
+    ingress_register: Arc<ingress::Register>,
 }
 
 impl PrefixesApi {
     pub fn new(
-        rib: Arc<ArcSwap<HashedRib>>,
+        rib: Arc<ArcSwap<Rib>>,
         http_api_path: Arc<String>,
         query_limits: Arc<ArcSwap<QueryLimits>>,
         rib_type: RibType,
         vrib_upstream: Option<Link>,
         pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
+        ingress_register: Arc<ingress::Register>,
     ) -> Self {
         Self {
             rib,
@@ -54,6 +53,7 @@ impl PrefixesApi {
                 vrib_upstream,
             )),
             pending_vrib_query_results,
+            ingress_register,
         }
     }
 
@@ -79,11 +79,16 @@ impl ProcessRequest for PrefixesApi {
         // we are at it...
         let req_path = &request.uri().decoded_path();
 
+        debug!("RibUnit ProcessRequest {:?}", &req_path);
         // e.g. req_path = "/prefixes/2804:1398:100::/48"
         if request.method() == Method::GET
             && req_path.starts_with(self.http_api_path.deref())
         {
-            match self.handle_prefix_query(req_path, request).await {
+            let res = match request.uri().path().split("/").count() {
+                3 => self.handle_ingress_id_query(req_path, request).await,
+                _ => self.handle_prefix_query(req_path, request).await,
+            };
+            match res {
                 Ok(res) => Some(res),
                 Err(err) => Some(
                     Response::builder()
@@ -106,6 +111,8 @@ impl PrefixesApi {
         req_path: &str,
         request: &Request<Body>,
     ) -> Result<Response<Body>, String> {
+        debug!("in handle_prefix_query");
+
         let prefix = Prefix::from_str(
             req_path.strip_prefix(self.http_api_path.as_str()).unwrap(),
         ) // SAFETY: unwrap() safe due to starts_with() check above
@@ -153,12 +160,32 @@ impl PrefixesApi {
             match_type: rotonda_store::MatchType::ExactMatch,
             include_less_specifics: includes.less_specifics,
             include_more_specifics: includes.more_specifics,
-            include_all_records: true,
+            include_withdrawn: true,
+            mui: None,
         };
 
+        // XXX res: QueryResult will be different 
         let res = match self.rib_type {
             RibType::Physical => {
-                let guard = &epoch::pin();
+                // XXX res: QueryResult will be different 
+                match self.rib.load().match_prefix(
+                    &prefix, &options,
+                ) {
+                    Ok(res) => res,
+                    Err(e) =>{
+                        let res = Response::builder()
+                            .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
+                            .header("Content-Type", "text/plain")
+                            .body(
+                                "Cannot query non-existent RIB store"
+                                .to_string()
+                                .into(),
+                            )
+                            .unwrap();
+                        return Ok(res);
+                    }
+                }
+                /*
                 if let Ok(store) = self.rib.load().store() {
                     store.match_prefix(&prefix, &options, guard)
                 } else {
@@ -173,11 +200,14 @@ impl PrefixesApi {
                         .unwrap();
                     return Ok(res);
                 }
+                */
             }
             RibType::GeneratedVirtual(_) | RibType::Virtual => {
                 trace!("Handling virtual RIB query");
                 // Generate a unique query ID to tie the request and later response together.
                 let uuid = Uuid::new_v4();
+                // XXX LH: eventually, this should be broadened to carry NLRI
+                // other than simple prefixes.
                 let data = TriggerData::MatchPrefix(uuid, prefix, options);
 
                 // Create a oneshot channel and store the sender to it by the query ID we generated.
@@ -233,7 +263,7 @@ impl PrefixesApi {
         let res = match format {
             None => {
                 // default format
-                Self::mk_json_response(res, includes, details, filters, sort)
+                Self::mk_json_response(res, includes, details, filters, sort, &self.ingress_register)
             }
 
             Some(format) if format.value() == "dump" => {
@@ -255,6 +285,45 @@ impl PrefixesApi {
         };
 
         Ok(res)
+    }
+
+    async fn handle_ingress_id_query(
+        &self,
+        req_path: &str,
+        _request: &Request<Body>,
+    ) -> Result<Response<Body>, String> {
+        debug!("in handle_ingress_id_query");
+
+        let ingress_id = req_path
+            .strip_prefix(self.http_api_path.as_str()).unwrap()
+            .parse::<ingress::IngressId>()
+            .map_err(|e| e.to_string())?;
+
+        if self.rib_type != RibType::Physical {
+            return Err("unsupported on virtual rib".to_string());
+        }
+
+        let store = self.rib.load();
+        let mut res = String::new();
+        let records = store.match_ingress_id(ingress_id).map_err(|e| e.to_string())?;
+
+        for pubrec in records {
+            res += &pubrec.prefix.to_string();
+            res.push('\n');
+            for m in pubrec.meta {
+                res.push('\t');
+                res += &serde_json::to_string(&m.meta).unwrap();
+                res.push('\n');
+            }
+        }
+        
+        Ok(
+            Response::builder()
+                .header("Content-Type", "text/plain")
+                .body(res.into())
+                .unwrap()
+        )
+            
     }
 
     fn parse_include_param(

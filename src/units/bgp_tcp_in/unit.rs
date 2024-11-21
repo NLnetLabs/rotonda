@@ -1,14 +1,27 @@
 use std::collections::HashMap;
+use std::fmt;
 use std::net::IpAddr;
 use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use arc_swap::ArcSwap;
+use async_trait::async_trait;
+use bytes::{Bytes, BytesMut};
 use futures::future::select;
 use futures::{pin_mut, Future};
-use log::debug;
-use rotonda_fsm::bgp::session::Command;
-use routecore::asn::Asn;
+use log::{debug, error, warn};
+use non_empty_vec::NonEmpty;
+//use roto::types::{builtin::BuiltinTypeValue, typevalue::TypeValue};
+use routecore::bgp::fsm::session::{Command, DisconnectReason};
+use inetnum::asn::Asn;
+use routecore::bgp::message::UpdateMessage;
+use routecore::bgp::message::{
+    SessionConfig,
+    update_builder::UpdateBuilder,
+    Message as BgpMsg,
+};
+
 use serde::Deserialize;
 use tokio::sync::mpsc;
 use tokio::time::sleep;
@@ -17,10 +30,15 @@ use crate::common::net::{
     StandardTcpListenerFactory, StandardTcpStream, TcpListener,
     TcpListenerFactory, TcpStreamWrapper,
 };
-use crate::common::roto::{FilterName, RotoScripts};
+use crate::common::roto_new::{FilterName, Provenance, RotoOutputStream, RotoScripts};
+//use crate::common::roto::{FilterName, RotoScripts};
 use crate::common::status_reporter::{Chainable, UnitStatusReporter};
+use crate::ingress;
+use crate::payload::Update;
 use crate::common::unit::UnitActivity;
-use crate::comms::{GateStatus, Terminated};
+use crate::comms::{
+    AnyDirectUpdate, DirectUpdate, DirectLink, GateStatus, Terminated
+};
 use crate::manager::{Component, WaitPoint};
 use crate::units::{Gate, Unit};
 
@@ -31,6 +49,19 @@ use super::status_reporter::BgpTcpInStatusReporter;
 use super::peer_config::{CombinedConfig, PeerConfigs};
 
 //----------- BgpTcpIn -------------------------------------------------------
+
+
+
+pub(super) type RotoFunc = roto::TypedFunc<
+    (
+        roto::Val<*mut RotoOutputStream>,
+        roto::Val<UpdateMessage<Bytes>>,
+        roto::Val<Provenance>,
+    ),
+    roto::Verdict<(),()>
+>;
+
+
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct BgpTcpIn {
@@ -46,6 +77,9 @@ pub struct BgpTcpIn {
 
     #[serde(default)]
     pub filter_name: FilterName,
+
+    ///// Outgoing BGP UPDATEs can come from these sources.
+    //pub sources: Vec<DirectLink>
 }
 
 impl PartialEq for BgpTcpIn {
@@ -65,6 +99,7 @@ impl BgpTcpIn {
             my_bgp_id: Default::default(),
             peer_configs: Default::default(),
             filter_name: Default::default(),
+            //sources: Vec::new(),
         }
     }
 
@@ -80,13 +115,15 @@ impl BgpTcpIn {
         let metrics = Arc::new(BgpTcpInMetrics::new(&gate));
         component.register_metrics(metrics.clone());
 
+        let ingresses = component.ingresses();
+
         // Setup status reporting
         let status_reporter = Arc::new(BgpTcpInStatusReporter::new(
             &unit_name,
             metrics.clone(),
         ));
 
-        let roto_scripts = component.roto_scripts().clone();
+        let roto_compiled = component.roto_compiled().clone();
 
         // Wait for other components to be, and signal to other components
         // that we are, ready to start. All units and targets start together,
@@ -100,17 +137,23 @@ impl BgpTcpIn {
         // them.
         waitpoint.running().await;
 
+        // XXX refactor BgpTcpInRunner so it does not take the mut BgpTcpIn
+        // so that we can pass self.sources into .run below
+        // That way this unit is a bit more consistent with the RibUnit.
+        //let sources = self.sources.clone();
         BgpTcpInRunner::new(
             self,
             gate,
             metrics,
             status_reporter,
-            roto_scripts,
+            roto_compiled,
+            ingresses,
         )
-        .run::<_, _, StandardTcpStream, BgpTcpInRunner>(Arc::new(
-            StandardTcpListenerFactory,
-        ))
-        .await
+        .run::<_, _, StandardTcpStream, BgpTcpInRunner>(
+            //sources,
+            Vec::new(),
+            Arc::new(StandardTcpListenerFactory,)
+        ).await
     }
 }
 
@@ -118,7 +161,7 @@ trait ConfigAcceptor {
     #[allow(clippy::too_many_arguments)]
     fn accept_config(
         child_name: String,
-        roto_scripts: &RotoScripts,
+        roto_function: Option<RotoFunc>,
         gate: &Gate,
         bgp: &BgpTcpIn,
         tcp_stream: impl TcpStreamWrapper,
@@ -126,14 +169,20 @@ trait ConfigAcceptor {
         remote_net: super::peer_config::PrefixOrExact,
         child_status_reporter: Arc<BgpTcpInStatusReporter>,
         live_sessions: Arc<Mutex<LiveSessions>>,
+        ingresses: Arc<ingress::Register>,
+        connector_ingress_id: ingress::IngressId,
     );
 }
 
-pub type LiveSessions = HashMap<(IpAddr, Asn), mpsc::Sender<Command>>;
+pub type LiveSessions = HashMap<
+    (IpAddr, Asn),
+    (mpsc::Sender<Command>, mpsc::Sender<BgpMsg<Bytes>>)
+>;
 
+//#[derive(Debug)]
 struct BgpTcpInRunner {
     // The configuration from the .conf.
-    bgp: BgpTcpIn,
+    bgp: Arc<ArcSwap<BgpTcpIn>>,
 
     gate: Gate,
 
@@ -141,11 +190,22 @@ struct BgpTcpInRunner {
 
     status_reporter: Arc<BgpTcpInStatusReporter>,
 
-    roto_scripts: RotoScripts,
+    roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
 
     // To send commands to a Session based on peer IP + ASN.
     live_sessions: Arc<Mutex<LiveSessions>>,
+
+    ingresses: Arc<ingress::Register>,
 }
+
+// As long as roto::Compiled has no Debug impl, we cook up something simple
+// ourselves here. We need it because AnyDirectUpdate requires Debug.
+impl fmt::Debug for BgpTcpInRunner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "BgpTcpInRunner: {{ bgp: {:?}  }}", self.bgp)
+    }
+}
+
 
 impl BgpTcpInRunner {
     fn new(
@@ -153,15 +213,17 @@ impl BgpTcpInRunner {
         gate: Gate,
         metrics: Arc<BgpTcpInMetrics>,
         status_reporter: Arc<BgpTcpInStatusReporter>,
-        roto_scripts: RotoScripts,
+        roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
+        ingresses: Arc<ingress::Register>,
     ) -> Self {
         BgpTcpInRunner {
-            bgp,
+            bgp: Arc::new(ArcSwap::from_pointee(bgp)),
             gate,
             metrics,
             status_reporter,
-            roto_scripts,
+            roto_compiled,
             live_sessions: Arc::new(Mutex::new(HashMap::new())),
+            ingresses,
         }
     }
 
@@ -170,19 +232,20 @@ impl BgpTcpInRunner {
         let (gate, gate_agent) = Gate::new(0);
 
         let runner = BgpTcpInRunner {
-            bgp,
+            bgp: Arc::new(ArcSwap::from_pointee(bgp)),
             gate,
             metrics: Default::default(),
             status_reporter: Default::default(),
-            roto_scripts: Default::default(),
             live_sessions: Arc::new(Mutex::new(HashMap::new())),
+            ingresses: Arc::new(ingress::Register::default()),
         };
 
         (runner, gate_agent)
     }
 
     async fn run<T, U, V, F>(
-        mut self,
+        self,
+        mut sources: Vec<DirectLink>,
         listener_factory: Arc<T>,
     ) -> Result<(), Terminated>
     where
@@ -195,8 +258,20 @@ impl BgpTcpInRunner {
         // spawning tasks to handle them.
         let status_reporter = self.status_reporter.clone();
 
+
+        let arc_self = Arc::new(self);
+        // Register as a direct update receiver with the linked gates.
+        for link in sources.iter_mut() {
+            link.connect(arc_self.clone(), false).await.unwrap();
+        }
+
+        let roto_function: Option<RotoFunc> = arc_self.roto_compiled.clone().and_then(|c| {
+            let mut c = c.lock().unwrap();
+            c.get_function("bgp-in").ok()
+        });
+
         loop {
-            let listen_addr = self.bgp.listen.clone();
+            let listen_addr = arc_self.bgp.load().listen.clone();
 
             let bind_with_backoff = || async {
                 let mut wait = 1;
@@ -215,7 +290,7 @@ impl BgpTcpInRunner {
                 }
             };
 
-            let listener = match self.process_until(bind_with_backoff()).await
+            let listener = match arc_self.process_until(bind_with_backoff()).await
             {
                 ControlFlow::Continue(Ok(res)) => res,
                 ControlFlow::Continue(Err(_err)) => continue,
@@ -225,7 +300,7 @@ impl BgpTcpInRunner {
             status_reporter.listener_listening(&listen_addr);
 
             'inner: loop {
-                match self.process_until(listener.accept()).await {
+                match arc_self.process_until(listener.accept()).await {
                     ControlFlow::Continue(Ok((tcp_stream, peer_addr))) => {
                         status_reporter
                             .listener_connection_accepted(peer_addr);
@@ -239,7 +314,7 @@ impl BgpTcpInRunner {
                         // are exchanged and we know the remote ASN.
 
                         if let Some((remote_net, cfg)) =
-                            self.bgp.peer_configs.get(peer_addr.ip())
+                            arc_self.bgp.load().peer_configs.get(peer_addr.ip())
                         {
                             let child_name = format!(
                                 "bgp[{}:{}]",
@@ -256,14 +331,16 @@ impl BgpTcpInRunner {
                             );
                             F::accept_config(
                                 child_name,
-                                &self.roto_scripts,
-                                &self.gate,
-                                &self.bgp,
+                                roto_function.clone(),
+                                &arc_self.gate,
+                                &arc_self.bgp.load().clone(),
                                 tcp_stream,
                                 cfg,
                                 remote_net,
                                 child_status_reporter,
-                                self.live_sessions.clone(),
+                                arc_self.live_sessions.clone(),
+                                arc_self.ingresses.clone(),
+                                arc_self.ingresses.register(),
                             );
                         } else {
                             debug!("No config to accept {}", peer_addr.ip());
@@ -277,7 +354,7 @@ impl BgpTcpInRunner {
     }
 
     async fn process_until<T, U>(
-        &mut self,
+        &self,
         until_fut: T,
     ) -> ControlFlow<Terminated, std::io::Result<U>>
     where
@@ -309,9 +386,9 @@ impl BgpTcpInRunner {
                             // router_handler() tasks will receive their
                             // own copy of this Reconfiguring status
                             // update and can react to it accordingly.
-                            let rebind = self.bgp.listen != new_unit.listen;
+                            let rebind = self.bgp.load().listen != new_unit.listen;
 
-                            self.bgp = new_unit;
+                            self.bgp.store(new_unit.into());
 
                             if rebind {
                                 // Trigger re-binding to the new listen port.
@@ -351,10 +428,122 @@ impl BgpTcpInRunner {
     }
 }
 
+#[async_trait]
+impl DirectUpdate for BgpTcpInRunner {
+    async fn direct_update(&self, update: Update) {
+        error!("Using a Bgp-in unit as target is currently not supported");
+        return;
+            /*
+        let process_update = |value: TypeValue| async {
+            if let TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(pfr)) = value {
+                //debug!("got {} for prefix {} from {:?}@{:?}",
+                //    rrwd.status(),
+                //    rrwd.prefix,
+                //    rrwd.peer_asn(),
+                //    rrwd.peer_ip(),
+                //);
+                use roto::types::builtin::PrefixRouteWs;
+                let pdus: Vec<_> = match pfr.0 {
+                    PrefixRouteWs::Ipv4Unicast(rws)=> {
+                        let b = UpdateBuilder::<BytesMut, _>::from_workshop(rws);
+                        b.into_pdu_iter(&SessionConfig::modern()).collect()
+                        }
+                    PrefixRouteWs::Ipv4UnicastAddpath(rws)=> {
+                        let b = UpdateBuilder::<BytesMut, _>::from_workshop(rws);
+                        b.into_pdu_iter(&SessionConfig::modern()).collect()
+                    }
+                    PrefixRouteWs::Ipv6Unicast(rws) => {
+                        let b = UpdateBuilder::<BytesMut, _>::from_workshop(rws);
+                        b.into_pdu_iter(&SessionConfig::modern()).collect()
+                    }
+                    PrefixRouteWs::Ipv6UnicastAddpath(_) => todo!(),
+                    PrefixRouteWs::Ipv4Multicast(_) => todo!(),
+                    PrefixRouteWs::Ipv4MulticastAddpath(_) => todo!(),
+                    PrefixRouteWs::Ipv6Multicast(_) => todo!(),
+                    PrefixRouteWs::Ipv6MulticastAddpath(_) => todo!(),
+                };
+
+                /*
+                let mut builder = match UpdateBuilder::from_update_message(
+                    &rrwd.raw_message.raw_message().0,
+                    &SessionConfig::modern(), // currenlty unused
+                    buffer
+                ) {
+                    Ok(builder) => builder,
+                    Err(_e) => {
+                        warn!("got invalid PDU from RIB");
+                        return;
+                    }
+                };
+                match rrwd.afi_safi {
+                    AfiSafi::Ipv4Unicast | AfiSafi::Ipv6Unicast => {
+                        if let Err(e) = builder.add_announcement(
+                            &Nlri::<&[u8]>::Unicast(BasicNlri::from(rrwd.prefix))
+                        ) {
+                            warn!("failed to add announcement for {}: {}",
+                                rrwd.prefix,
+                                e
+                            );
+                        }
+                    }
+                    _ => { warn!("got non unicast PDU from RIB"); return }
+                }
+                if let Ok(Some(nh)) = rrwd.raw_message.raw_message().0.mp_next_hop() {
+                    if let Err(e) = builder.set_mp_nexthop(nh) {
+                        warn!("invalid MP nexthop {:?} in PDU leaving RIB: {}", nh, e);
+                    }
+                }
+                let pdu_out = builder.into_message().unwrap();
+                */
+                let chans = {
+                    self.live_sessions.lock().unwrap().clone().into_values()
+                };
+                for (cmd_tx, pdu_out_tx) in chans {
+                    //debug!(
+                    //    "emitting Command::RawUpdate, chan cap {}",
+                    //    chan.capacity()
+                    //);
+                    for pdu_out in &pdus {
+                        let pdu_out = match pdu_out {
+                            Ok(p) => p,
+                            Err(e) => {
+                                warn!("Failed to construct PDU: {e}");
+                                continue;
+                            }
+                        };
+                        if let Err(e) = pdu_out_tx.send(
+                            //Command::RawUpdate(pdu_out.clone())
+                            BgpMsg::Update(pdu_out.clone())
+                        ).await {
+                            warn!("failed to send to pdu_out_tx: {e}");
+                            let _ = cmd_tx.send(Command::Disconnect(DisconnectReason::Other)).await;
+                        }
+                    }
+                }
+            }
+        };
+
+        match update {
+            Update::Single(update) => {
+                process_update(update.rx_value).await;
+            },
+            Update::Bulk(bulk) => {
+                for u in bulk {
+                    process_update(u.rx_value).await;
+                }
+            },
+            _ => todo!(),
+        }
+        */
+    }
+}
+
+impl AnyDirectUpdate for BgpTcpInRunner {}
+
 impl ConfigAcceptor for BgpTcpInRunner {
     fn accept_config(
         child_name: String,
-        roto_scripts: &RotoScripts,
+        roto_function: Option<RotoFunc>,
         gate: &Gate,
         bgp: &BgpTcpIn,
         tcp_stream: impl TcpStreamWrapper,
@@ -362,13 +551,16 @@ impl ConfigAcceptor for BgpTcpInRunner {
         remote_net: super::peer_config::PrefixOrExact,
         child_status_reporter: Arc<BgpTcpInStatusReporter>,
         live_sessions: Arc<Mutex<LiveSessions>>,
+        ingresses: Arc<ingress::Register>,
+        connector_ingress_id: ingress::IngressId,
     ) {
-        let (cmds_tx, cmds_rx) = mpsc::channel(16);
+        let (cmds_tx, cmds_rx) = mpsc::channel(10*10); //XXX this is limiting and
+                                                    //causes loss
         let tcp_stream = tcp_stream.into_inner().unwrap(); // SAFETY: StandardTcpStream::into_inner() always returns Ok(...)
         crate::tokio::spawn(
             &child_name,
             handle_connection(
-                roto_scripts.clone(),
+                roto_function,
                 gate.clone(),
                 bgp.clone(),
                 tcp_stream,
@@ -377,6 +569,8 @@ impl ConfigAcceptor for BgpTcpInRunner {
                 cmds_rx,
                 child_status_reporter,
                 live_sessions,
+                ingresses,
+                connector_ingress_id
             ),
         );
     }
@@ -393,25 +587,22 @@ mod tests {
     };
 
     use futures::Future;
-    use routecore::asn::Asn;
+    use inetnum::asn::Asn;
 
     use crate::{
         common::{
             net::TcpStreamWrapper, roto::RotoScripts,
             status_reporter::AnyStatusReporter,
-        },
-        comms::{Gate, GateAgent, Terminated},
-        tests::util::{
+        }, comms::{Gate, GateAgent, Terminated}, ingress, tests::util::{
             internal::get_testable_metrics_snapshot,
             net::{
                 MockTcpListener, MockTcpListenerFactory, MockTcpStreamWrapper,
             },
-        },
-        units::bgp_tcp_in::{
+        }, units::bgp_tcp_in::{
             peer_config::{PeerConfig, PrefixOrExact},
             status_reporter::BgpTcpInStatusReporter,
             unit::{BgpTcpIn, BgpTcpInRunner, ConfigAcceptor, LiveSessions},
-        },
+        }
     };
 
     #[tokio::test(flavor = "multi_thread")]
@@ -559,7 +750,7 @@ mod tests {
         let status_reporter = runner.status_reporter.clone();
 
         let runner_fut = runner
-            .run::<_, _, _, NoOpConfigAcceptor>(mock_listener_factory.into());
+            .run::<_, _, _, NoOpConfigAcceptor>(vec![], mock_listener_factory.into());
 
         (runner_fut, gate_agent, status_reporter)
     }
@@ -571,7 +762,7 @@ mod tests {
     impl ConfigAcceptor for NoOpConfigAcceptor {
         fn accept_config(
             _child_name: String,
-            _roto_scripts: &RotoScripts,
+            //_roto_scripts: &RotoScripts,
             _gate: &Gate,
             _bgp: &BgpTcpIn,
             _tcp_stream: impl TcpStreamWrapper,
@@ -579,6 +770,8 @@ mod tests {
             _remote_net: PrefixOrExact,
             _child_status_reporter: Arc<BgpTcpInStatusReporter>,
             _live_sessions: Arc<std::sync::Mutex<LiveSessions>>,
+            _ingressess: Arc<ingress::Register>,
+            _connector_ingress_id: ingress::IngressId,
         ) {
         }
     }

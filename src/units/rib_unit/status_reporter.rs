@@ -8,12 +8,11 @@ use log::{error, info, warn};
 
 use crate::{
     common::{
-        roto::FilterName,
-        status_reporter::{
+        //roto::FilterName,
+        roto_new::FilterName, status_reporter::{
             sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter,
-        },
-    },
-    payload::RouterId,
+        }
+    }, ingress::IngressId, payload::RouterId
 };
 
 use super::{metrics::RibUnitMetrics, rib::StoreInsertionEffect};
@@ -54,7 +53,8 @@ impl RibUnitStatusReporter {
 
     pub fn insert_ok(
         &self,
-        router_id: Arc<RouterId>,
+        //router_id: Arc<RouterId>,
+        ingress_id: IngressId,
         insert_delay: Duration,
         propagation_delay: Duration,
         num_retries: u32,
@@ -66,7 +66,8 @@ impl RibUnitStatusReporter {
         );
 
         self.insert_or_update(
-            router_id,
+            //router_id,
+            ingress_id,
             propagation_delay,
             num_retries,
             change,
@@ -75,7 +76,8 @@ impl RibUnitStatusReporter {
 
     pub fn update_ok(
         &self,
-        router_id: Arc<RouterId>,
+        //router_id: Arc<RouterId>,
+        ingress_id: IngressId,
         update_delay: Duration,
         propagation_delay: Duration,
         num_retries: u32,
@@ -87,7 +89,8 @@ impl RibUnitStatusReporter {
         );
 
         self.insert_or_update(
-            router_id,
+            //router_id,
+            ingress_id,
             propagation_delay,
             num_retries,
             change,
@@ -96,12 +99,13 @@ impl RibUnitStatusReporter {
 
     fn insert_or_update(
         &self,
-        router_id: Arc<String>,
+        //router_id: Arc<String>,
+        ingress_id: IngressId,
         propagation_delay: Duration,
         num_retries: u32,
         change: StoreInsertionEffect,
     ) {
-        let router_specific_metrics = self.metrics.router_metrics(router_id);
+        let router_specific_metrics = self.metrics.router_metrics(ingress_id);
         router_specific_metrics.last_e2e_delay_millis.store(
             u64::try_from(propagation_delay.as_millis()).unwrap_or(u64::MAX),
             SeqCst,

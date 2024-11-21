@@ -15,7 +15,7 @@ use mqtt::{
 };
 use roto::{
     types::{
-        collections::Record, outputs::OutputStreamMessage, typedef::TypeDef,
+        builtin::RouteContext, collections::Record, outputs::OutputStreamMessage, typedef::TypeDef
     },
     vm::OutputStreamQueue,
 };
@@ -182,7 +182,10 @@ async fn publish_msg() {
     let mut output_stream_queue = OutputStreamQueue::new();
     output_stream_queue.push(test_output_stream_message.clone());
     let payload =
-        Payload::from_output_stream_queue(output_stream_queue, None);
+        Payload::from_output_stream_queue(
+            output_stream_queue,
+            RouteContext::for_reprocessing(),
+            None);
     runner.direct_update(payload.into()).await;
 
     assert_metric(
@@ -633,7 +636,7 @@ fn mk_roto_output_stream_payload() -> OutputStreamMessage {
         ("name", "MOCK".into()),
         ("topic", "my-topic".into()),
         ("some-str", "some-value".into()),
-        ("some-asn", routecore::asn::Asn::from_u32(1818).into()),
+        ("some-asn", inetnum::asn::Asn::from_u32(1818).into()),
     ];
     let record = Record::create_instance_with_sort(&typedef, fields).unwrap();
     OutputStreamMessage::from(record)

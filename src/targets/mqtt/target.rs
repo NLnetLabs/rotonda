@@ -9,19 +9,15 @@ use super::{
 };
 
 use crate::{
-    common::status_reporter::{AnyStatusReporter, TargetStatusReporter},
-    comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
-    manager::{Component, TargetCommand, WaitPoint},
-    payload::{Payload, Update, UpstreamStatus},
-    targets::Target,
+    common::{roto_new::OutputStreamMessage, status_reporter::{AnyStatusReporter, TargetStatusReporter}}, comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated}, ingress, manager::{Component, TargetCommand, WaitPoint}, payload::{Update, UpstreamStatus}, targets::Target
 };
 
 use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+use log::error;
 use mqtt::{MqttOptions, QoS};
 use non_empty_vec::NonEmpty;
-use roto::types::{outputs::OutputStreamMessage, typevalue::TypeValue};
 use serde::Deserialize;
 use tokio::{sync::mpsc, time::timeout};
 
@@ -68,8 +64,9 @@ pub(super) struct MqttRunner<C> {
     component: Component,
     config: Arc<ArcSwap<Config>>,
     client: Arc<ArcSwapOption<C>>,
-    pub_q_tx: Option<mpsc::UnboundedSender<SenderMsg>>,
+    pub_q_tx: Option<mpsc::Sender<SenderMsg>>,
     status_reporter: Arc<MqttStatusReporter>,
+    ingresses: Arc<ingress::Register>,
 }
 
 impl<C: Client> MqttRunner<C>
@@ -85,12 +82,14 @@ where
         let status_reporter =
             Arc::new(MqttStatusReporter::new(component.name(), metrics));
 
+        let ingresses = component.ingresses().clone();
         Self {
             component,
             config,
             client: Default::default(),
             pub_q_tx: None,
             status_reporter,
+            ingresses,
         }
     }
 
@@ -130,7 +129,7 @@ where
         let component = &mut self.component;
         let _unit_name = component.name().clone();
 
-        let (pub_q_tx, pub_q_rx) = mpsc::unbounded_channel();
+        let (pub_q_tx, pub_q_rx) = mpsc::channel(10);
         self.pub_q_tx = Some(pub_q_tx);
 
         let arc_self = Arc::new(self);
@@ -154,7 +153,7 @@ where
         self: &Arc<Self>,
         mut sources: Option<NonEmpty<DirectLink>>,
         mut cmd_rx: mpsc::Receiver<TargetCommand>,
-        mut pub_q_rx: mpsc::UnboundedReceiver<SenderMsg>,
+        mut pub_q_rx: mpsc::Receiver<SenderMsg>,
     ) -> Result<(), Terminated>
     where
         <F as ConnectionFactory>::EventLoopType: 'static,
@@ -183,7 +182,7 @@ where
         mut connection: Connection<C>,
         sources: &mut Option<NonEmpty<DirectLink>>,
         cmd_rx: &mut mpsc::Receiver<TargetCommand>,
-        pub_q_rx: &mut mpsc::UnboundedReceiver<SenderMsg>,
+        pub_q_rx: &mut mpsc::Receiver<SenderMsg>,
     ) -> Result<(), Terminated> {
         while connection.active() {
             tokio::select! {
@@ -384,10 +383,13 @@ where
 
     pub fn output_stream_message_to_msg(
         &self,
-        osm: Arc<OutputStreamMessage>,
+        //osm: Arc<OutputStreamMessage>,
+        osm: OutputStreamMessage,
     ) -> Option<SenderMsg> {
-        if osm.get_name() == self.component.name() {
-            match serde_json::to_string(osm.get_record()) {
+        if *osm.get_name() == **self.component.name() {
+            let ingress_info = osm.get_ingress_id().and_then(|id| self.ingresses.get(id));
+
+            match serde_json::to_string(&(ingress_info, osm.get_record())) {
                 Ok(content) => {
                     let topic = self
                         .config
@@ -400,8 +402,9 @@ where
                         topic,
                     });
                 }
-                Err(_err) => {
+                Err(err) => {
                     // TODO
+                    error!("{err}");
                 }
             }
         }
@@ -454,8 +457,24 @@ where
                 // Nothing to do
             }
 
+            Update::OutputStream(msgs) => {
+                for osm in msgs {
+                    if let Some(msg) =
+                        self.output_stream_message_to_msg(osm)
+                    {
+                        if let Err(err) =
+                            self.pub_q_tx.as_ref().unwrap().send(msg).await
+                        {
+                            error!("failed to send MQTT message: {err}");
+                        }
+                    }
+
+                }
+            }
+
+            /*
             Update::Single(Payload {
-                value: TypeValue::OutputStreamMessage(osm),
+                rx_value: TypeValue::OutputStreamMessage(osm),
                 ..
             }) => {
                 if let Some(msg) = self.output_stream_message_to_msg(osm) {
@@ -470,7 +489,7 @@ where
             Update::Bulk(payloads) => {
                 for payload in payloads {
                     if let Payload {
-                        value: TypeValue::OutputStreamMessage(osm),
+                        rx_value: TypeValue::OutputStreamMessage(osm),
                         ..
                     } = payload
                     {
@@ -486,6 +505,7 @@ where
                     }
                 }
             }
+            */
 
             _ => { /* We may have received the output from another unit, but we are not interested in it */
             }

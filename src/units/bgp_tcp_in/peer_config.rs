@@ -15,10 +15,10 @@
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 
-use rotonda_fsm::bgp::session::BgpConfig;
-use routecore::addr::Prefix;
-use routecore::asn::Asn;
-use routecore::bgp::types::AfiSafi;
+use routecore::bgp::fsm::session::BgpConfig;
+use inetnum::addr::Prefix;
+use inetnum::asn::Asn;
+use routecore::bgp::types::AfiSafiType;
 use serde::Deserialize;
 
 /// Enum carrying either a exact IP address, or a `Prefix`.
@@ -112,9 +112,9 @@ pub struct PeerConfig {
     remote_asn: OneOrManyAsns,
     hold_time: Option<u16>,
     #[serde(default)]
-    protocols: Vec<AfiSafi>,
+    protocols: Vec<AfiSafiType>,
     #[serde(default)]
-    addpath: Vec<AfiSafi>,
+    addpath: Vec<AfiSafiType>,
 }
 
 impl PeerConfig {
@@ -211,11 +211,11 @@ impl BgpConfig for CombinedConfig {
             && self.peer_config.single_asn()
     }
 
-    fn protocols(&self) -> Vec<AfiSafi> {
+    fn protocols(&self) -> Vec<AfiSafiType> {
         self.peer_config.protocols.clone()
     }
 
-    fn addpath(&self) -> Vec<AfiSafi> {
+    fn addpath(&self) -> Vec<AfiSafiType> {
         self.peer_config.addpath.clone()
     }
 }
@@ -315,11 +315,11 @@ addpath = ["Ipv4Unicast", "Ipv6Unicast"]
         assert!(cfg4.1.name == "Explicit-protocols");
         assert_eq!(
             cfg4.1.protocols,
-            vec![AfiSafi::Ipv4Unicast, AfiSafi::L2VpnEvpn]
+            vec![AfiSafiType::Ipv4Unicast, AfiSafiType::L2VpnEvpn]
         );
         assert_eq!(
             cfg4.1.addpath,
-            vec![AfiSafi::Ipv4Unicast, AfiSafi::Ipv6Unicast]
+            vec![AfiSafiType::Ipv4Unicast, AfiSafiType::Ipv6Unicast]
         );
 
 

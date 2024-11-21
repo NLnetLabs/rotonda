@@ -1,31 +1,37 @@
 use std::cell::RefCell;
+use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeSet;
+use std::hash::Hash;
 use std::net::SocketAddr;
 use std::ops::ControlFlow;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use log::{debug, error};
-use roto::types::builtin::{
-    BgpUpdateMessage, /*IpAddress,*/
-    RotondaId, RouteStatus, UpdateMessage,
-};
-use roto::types::builtin::{
-    /*Asn as RotoAsn,*/
-    BuiltinTypeValue, RawRouteWithDeltas,
-};
-use roto::types::typevalue::TypeValue;
-use routecore::addr::Prefix;
-use routecore::asn::Asn;
-use routecore::bgp::message::UpdateMessage as UpdatePdu;
-use routecore::bgp::message::nlri::PathId;
-use routecore::bgp::types::AfiSafi;
-use smallvec::SmallVec;
+use log::{debug, error, warn};
+// use roto::types::builtin::{
+//     BgpUpdateMessage, /*IpAddress,*/
+//     RotondaId, RouteStatus, UpdateMessage,
+// };
+//use roto::types::builtin::{
+//    /*Asn as RotoAsn,*/
+//    explode_announcements, explode_withdrawals, BuiltinTypeValue, Nlri, NlriStatus, Provenance, FreshRouteContext, RouteContext
+//};
+//use roto::types::collections::BytesRecord;
+//use roto::types::lazyrecord_types::BgpUpdateMessage;
+// use roto::types::lazyrecord_types::BgpUpdateMessage;
+//use roto::types::typevalue::TypeValue;
+//use inetnum::addr::Prefix;
+use inetnum::asn::Asn;
+use rotonda_store::prelude::multi::RouteStatus;
+//use routecore::bgp::message::update_builder::ComposeError;
+// use routecore::bgp::message::UpdateMessage as UpdatePdu;
+use routecore::bgp::message::{Message as BgpMsg, UpdateMessage};
+use smallvec::{smallvec, SmallVec};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
-use rotonda_fsm::bgp::session::{
+use routecore::bgp::fsm::session::{
     self,
     BgpConfig, // trait
     Command,
@@ -35,15 +41,21 @@ use rotonda_fsm::bgp::session::{
     Session,
 };
 
-use crate::common::roto::{FilterOutput, RotoScripts, ThreadLocalVM};
-use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
+//use roto::types::builtin::basic_route::SourceId;
+
+use crate::common::roto_new::{explode_announcements, explode_withdrawals, rotonda_roto_runtime, CompiledRoto, FreshRouteContext, Output, OutputStream, OutputStreamMessage, Provenance, RotoOutputStream, RotoScripts, RouteContext};
+//use crate::bgp::encode::Announcements;
+//use crate::common::roto::{FilterOutput, RotoScripts, ThreadLocalVM};
+//use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
 use crate::comms::{Gate, GateStatus, Terminated};
-use crate::payload::{Payload, SourceId, Update};
+use crate::ingress;
+use crate::payload::{Payload, RotondaRoute, Update};
 use crate::units::bgp_tcp_in::status_reporter::BgpTcpInStatusReporter;
 use crate::units::Unit;
 
 use super::peer_config::{CombinedConfig, ConfigExt};
 use super::unit::BgpTcpIn;
+use super::unit::RotoFunc;
 
 #[async_trait::async_trait]
 trait BgpSession<C: BgpConfig + ConfigExt> {
@@ -77,37 +89,46 @@ impl BgpSession<CombinedConfig> for Session<CombinedConfig> {
     }
 }
 
+
 struct Processor {
-    roto_scripts: RotoScripts,
+    roto_function: Option<RotoFunc>,
     gate: Gate,
     unit_cfg: BgpTcpIn,
-    bgp_ltime: u64, // XXX or should this be on Unit level?
+    //bgp_ltime: u64, // XXX or should this be on Unit level?
     tx: mpsc::Sender<Command>,
+    pdu_out_tx: mpsc::Sender<BgpMsg<Bytes>>,
     status_reporter: Arc<BgpTcpInStatusReporter>,
-    observed_prefixes: BTreeSet<Prefix>,
+    //observed_nlri: BTreeSet<Nlri>, // XXX this should go in favour of ingress_id
+    ingresses: Arc<ingress::Register>,
+
+    /// The 'overall' IngressId for the BGP-IN unit.
+    ingress_id: ingress::IngressId,
 }
 
 impl Processor {
-    thread_local!(
-        static VM: ThreadLocalVM = RefCell::new(None);
-    );
-
     fn new(
-        roto_scripts: RotoScripts,
+        roto_function: Option<RotoFunc>,
         gate: Gate,
         unit_cfg: BgpTcpIn,
         //rx: mpsc::Receiver<Message>,
         tx: mpsc::Sender<Command>,
+        pdu_out_tx: mpsc::Sender<BgpMsg<Bytes>>,
         status_reporter: Arc<BgpTcpInStatusReporter>,
+        ingresses: Arc<ingress::Register>,
+        ingress_id: ingress::IngressId,
     ) -> Self {
+
+
         Processor {
-            roto_scripts,
+            roto_function,
             gate,
             unit_cfg,
-            bgp_ltime: 0,
+            //bgp_ltime: 0,
             tx,
+            pdu_out_tx,
             status_reporter,
-            observed_prefixes: BTreeSet::new(),
+            ingresses,
+            ingress_id,
         }
     }
 
@@ -116,29 +137,97 @@ impl Processor {
         let (gate, gate_agent) = Gate::new(0);
 
         let (cmds_tx, _) = mpsc::channel(16);
+        let (pdu_out_tx, _) = mpsc::channel(16);
 
         let processor = Self {
             roto_scripts: Default::default(),
             gate,
             unit_cfg,
-            bgp_ltime: 0,
+            //bgp_ltime: 0,
             tx: cmds_tx,
+            pdu_out_tx,
             status_reporter: Default::default(),
-            observed_prefixes: BTreeSet::new(),
+            //observed_nlri: BTreeSet::new(),
+            ingresses: Arc::new(ingress::Register::default()),
+            ingress_id: 0,
         };
 
         (processor, gate_agent)
     }
 
-    async fn process<C: BgpConfig + ConfigExt, T: BgpSession<C>>(
-        &mut self,
+    async fn process<'a, C: BgpConfig + ConfigExt, T: BgpSession<C>>(
+        &'a mut self,
         mut session: T,
         mut rx_sess: mpsc::Receiver<Message>,
+        //mut pdu_out_rx: mpsc::Receiver<BgpMsg<Bytes>>,
         live_sessions: Arc<Mutex<super::unit::LiveSessions>>,
     ) -> (T, mpsc::Receiver<Message>) {
         let peer_addr_cfg = session.config().remote_prefix_or_exact();
 
         let mut rejected = false;
+        let mut connection_id = DefaultHasher::new();
+        session.connected_addr().hash(&mut connection_id);
+
+        let session_ingress_id = self.ingress_id;
+
+        /*
+        thread_local!(
+            static ROTO_MAIN_FUNC: RefCell<Option<
+                roto::TypedFunc<'a,
+                    (*mut OutputStream<Output>, *mut UpdateMessage<Bytes>, *mut Provenance),
+                    roto::Verdict<(), ()>
+                >
+                >>
+             = const { RefCell::new(None) };
+        );
+        */
+        //let mut provenance = Provenance::empty(ingress_id.into());
+        /*
+        provenance.peer_ip = Some(self.connection.
+        provenance.peer_asn = Some(
+            bmp_router_ip:
+
+            peer_distuingisher: [0,0,0,0,0,0,0,0],
+            peer_rib_type: PeerRibType::OutPost,
+        };
+
+        if let Some(negotiated) = session.negotiated() {
+            let mut connection_id = DefaultHasher::new();
+            session.connected_addr().hash(&mut connection_id);
+
+            provenance = Provenance {
+                timestamp: Utc::now(),
+                // router_id: 0,
+                connection_id: session.connected_addr().unwrap(),
+                peer_id: PeerId { addr: negotiated.remote_addr(), asn: negotiated.remote_asn() },
+                peer_bgp_id: session.config().bgp_id().into(),
+                peer_distuingisher: [0,0,0,0,0,0,0,0],
+                peer_rib_type: PeerRibType::OutPost,
+            };
+        }
+        */
+
+
+        
+        // XXX this should happen earlier, now any roto error will cause a
+        // panic only when a BGP session is set up.
+        // Move this to the manager/loading phase, somehow.
+        /*
+        Self::ROTO.with_borrow_mut(|roto| {
+            if roto.is_none() {
+                debug!("compiling roto");
+                roto.replace(
+                    self.roto_scripts.get(&self.unit_cfg.filter_name)
+                    .map(|filename| roto::read_files([filename.to_string_lossy()]).unwrap()
+                        .compile(rotonda_roto_runtime().unwrap(), usize::BITS / 8)
+                    )
+                    .unwrap().unwrap()
+                );
+            }
+        });
+        */
+        
+
 
         // XXX is this all OK cancel-safety-wise?
         loop {
@@ -242,40 +331,101 @@ impl Processor {
                 res = rx_sess.recv() => {
                     match res {
                         None => { break; }
-                        Some(Message::UpdateMessage(pdu)) => {
+                        Some(Message::UpdateMessage(bgp_msg)) => {
                             // We can only receive UPDATE messages over an
                             // established session, so not having a
                             // NegotiatedConfig should never happen.
-                            if let Some(_negotiated) = session.negotiated() {
-                                if let Ok(ControlFlow::Continue(FilterOutput { south, east, received })) = Self::VM.with(|vm| {
-                                    let delta_id = (RotondaId(0), 0); // TODO
-                                    let roto_update_msg = roto::types::builtin::UpdateMessage(pdu);
-                                    let msg = BgpUpdateMessage::new(delta_id, roto_update_msg);
-                                    // let msg = Arc::new(msg);
-                                    let value: TypeValue = TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(msg));
-                                    self.roto_scripts.exec(vm, &self.unit_cfg.filter_name, value, Utc::now())
-                                }) {
-                                    if !south.is_empty() {
-                                        let update = Payload::from_output_stream_queue(south, None).into();
-                                        self.gate.update_data(update).await;
-                                    }
-                                    if let TypeValue::Builtin(BuiltinTypeValue::BgpUpdateMessage(pdu)) = east {
-                                        // let pdu = Arc::into_inner(pdu).unwrap(); // This should succeed
-                                        let pdu = pdu.raw_message().0.clone(); // Bytes is cheap to clone
-                                        let update = self.process_update(
-                                            received,
-                                            pdu,
-                                            //negotiated.remote_addr(),
-                                            //negotiated.remote_asn()
-                                        ).await;
-                                        match update {
-                                            Ok(update) => { self.gate.update_data(update).await; },
-                                            Err(e) => { error!("unexpected state: {e}"); },
-                                        };
-                                    }
-                                }
-                            } else {
+                            let Some(negotiated) = session.negotiated() else {
                                 error!("unexpected state: no NegotiatedConfig for session");
+                                break
+                            };
+                            let provenance = Provenance::for_bgp(
+                                session_ingress_id,
+                                negotiated.remote_addr(),
+                                negotiated.remote_asn(),
+                            );
+
+                            let mut output_stream = RotoOutputStream::new();
+                            let received = Utc::now();
+
+                            let verdict = self.roto_function.as_ref().map(
+                                |roto_function|
+                            {
+                                roto_function.call(
+                                    roto::Val(&mut output_stream),
+                                    roto::Val(bgp_msg.clone()),
+                                    roto::Val(provenance),
+                                    )
+                            });
+                            if !output_stream.is_empty() {
+                                let mut osms = smallvec![];
+                                use crate::common::roto_new::Output;
+                                for entry in output_stream.drain() {
+                                    debug!("output stream entry {entry:?}");
+                                    let osm = match entry {
+                                        Output::Prefix(_prefix) => {
+                                            OutputStreamMessage::prefix(
+                                                None,
+                                                Some(session_ingress_id),
+                                            )
+                                        }
+                                        Output::Community(_u32) => {
+                                            OutputStreamMessage::community(
+                                                None,
+                                                Some(session_ingress_id),
+                                            )
+                                        }
+                                        Output::Asn(_u32) => {
+                                            OutputStreamMessage::asn(
+                                                None,
+                                                Some(session_ingress_id),
+                                            )
+                                        }
+                                        Output::Origin(_u32) => {
+                                            OutputStreamMessage::origin(
+                                                None,
+                                                Some(session_ingress_id),
+                                            )
+                                        }
+                                        Output::PeerDown => {
+                                            debug!("Logged PeerDown from Rib unit, ignoring");
+                                            continue
+                                        }
+                                        Output::Custom((id, local)) => {
+                                            OutputStreamMessage::custom(
+                                                id, local,
+                                                Some(session_ingress_id),
+                                            )
+                                            
+                                        }
+                                    };
+                                    osms.push(osm);
+                                }
+                                self.gate.update_data(Update::OutputStream(osms)).await;
+                            }
+
+                            match verdict {
+                                // Default action when no roto script is used
+                                // is Accept (i.e. None here).
+                                Some(roto::Verdict::Accept(_)) | None => {
+                                    let update = self.process_update(
+                                        received,
+                                        bgp_msg,
+                                        provenance,
+                                    ).await;
+                                    match update {
+                                        Ok(update) => {
+                                            self.gate.update_data(update).await;
+                                        },
+                                        Err(e) => {
+                                            error!("unexpected state: {e}");
+                                        },
+                                    };
+                                }
+                                Some(roto::Verdict::Reject(_)) => {
+                                    // increase metrics and continue
+                                    dbg!("bgp-in roto Reject");
+                                }
                             }
                         }
                         Some(Message::NotificationMessage(pdu)) => {
@@ -288,13 +438,22 @@ impl Processor {
                             //TODO clean up RIB etc?
                             self.status_reporter
                                 .peer_connection_lost(socket);
-                            debug!(
-                                "Connection lost: {}@{}",
-                                session.negotiated()
-                                    .map(|n| n.remote_asn())
-                                    .unwrap_or(Asn::MIN),
-                                socket
-                                );
+                            if let Some(socket) = socket {
+                                debug!(
+                                    "Connection lost: {}@{}",
+                                    session.negotiated()
+                                        .map(|n| n.remote_asn())
+                                        .unwrap_or(Asn::MIN),
+                                    socket
+                                    );
+                                } else {
+                                    debug!(
+                                        "Connection lost: {}@UNKOWN",
+                                        session.negotiated()
+                                            .map(|n| n.remote_asn())
+                                            .unwrap_or(Asn::MIN),
+                                        );
+                                }
                             break;
                         }
                         Some(Message::SessionNegotiated(negotiated)) => {
@@ -311,13 +470,32 @@ impl Processor {
                             let mut live_sessions = live_sessions.lock().unwrap();
                             live_sessions.insert(
                                 (negotiated.remote_addr(), negotiated.remote_asn()),
-                                self.tx.clone()
+                                (self.tx.clone(), self.pdu_out_tx.clone())
                             );
                             debug!(
                                 "inserted into live_sessions (current count: {})",
                                 live_sessions.len()
                             );
                             }
+                            // register ingress
+                            //session_ingress_id = self.ingresses.register();
+                            
+                            debug!(
+                                "got assigned {} for this session",
+                                session_ingress_id 
+                            );
+                            debug!("get: {:?}", self.ingresses.get(session_ingress_id));
+                            self.ingresses.update_info(
+                                session_ingress_id,
+                                ingress::IngressInfo::new()
+                                    .with_name("some-bgp-session".to_string())
+                                    .with_remote_addr(negotiated.remote_addr())
+                                    .with_remote_asn(negotiated.remote_asn())
+                                );
+                            debug!("get 2: {:?}", self.ingresses.get(session_ingress_id));
+                                
+
+
                         }
                         Some(Message::Attributes(_)) => unimplemented!(),
                     }
@@ -325,9 +503,11 @@ impl Processor {
             }
         }
 
+        /*
         if rejected {
-            assert!(self.observed_prefixes.is_empty());
+            assert!(self.observed_nlri.is_empty());
         }
+        */
 
         // Done, for whatever reason. Remove ourselves form the live sessions.
         // But only if this was not an 'early reject' case, because we would
@@ -347,23 +527,30 @@ impl Processor {
                     live_sessions.lock().unwrap().len()
                 );
 
-                let prefixes = self.observed_prefixes.iter();
-                let router_id = Arc::new("TODO".into());
-                let source_id: SourceId = "TODO".into();
-                let peer_address = negotiated.remote_addr();
-                let peer_asn = negotiated.remote_asn();
+                //let prefixes = self.observed_nlri.iter();
+                // let router_id = Arc::new("TODO".into());
+                //let source_id: SourceId = "TODO".into();f
+                //let peer_address = negotiated.remote_addr();
+                //let peer_asn = negotiated.remote_asn();
 
-                let payloads = mk_withdrawals_for_peers_announced_prefixes(
-                    prefixes,
-                    router_id,
-                    peer_address,
-                    peer_asn,
-                    source_id,
+                //let ipv4_unicast_nlri = prefixes.filter_map(|n| if let Nlri::Ipv4Unicast(p) = n { Some(p) } else { None });
+
+                // XXX mk_withdrawals_ is a todo!() now, so this will panic
+                /*
+                let payloads = mk_withdrawals_for_peers_announced_prefixes::<'_, Ipv4UnicastNlri, _>(
+                    ipv4_unicast_nlri,
+                    provenance,
+                    SessionConfig::modern()
                 );
 
                 if let Ok(payloads) = payloads {
                     self.gate.update_data(Update::Bulk(payloads)).await;
                 }
+                */
+
+                self.gate.update_data(
+                    Update::Withdraw(session_ingress_id, None)
+                ).await;
             }
         }
 
@@ -384,29 +571,37 @@ impl Processor {
     async fn process_update(
         &mut self,
         received: DateTime<Utc>,
-        pdu: UpdatePdu<Bytes>,
+        bgp_msg: UpdateMessage<bytes::Bytes>,
+        provenance: Provenance,
+        //context: FreshRouteContext,
         //peer_ip: IpAddr,
         //peer_asn: Asn
     ) -> Result<Update, session::Error> {
         fn mk_payload(
+            rr: RotondaRoute,
             received: DateTime<Utc>,
-            prefix: Prefix,
-            msg: &Arc<BgpUpdateMessage>,
-            source_id: &SourceId,
-            afi_safi: AfiSafi,
-            path_id: Option<PathId>,
-            route_status: RouteStatus,
+            //provenance: Option<Provenance>,
+            //context: RouteContext,
+            context: FreshRouteContext,
         ) -> Payload {
-            let rrwd = RawRouteWithDeltas::new_with_message_ref(
-                msg.message_id(),
-                prefix,
-                msg,
-                afi_safi,
-                path_id,
-                route_status,
-            );
-            let typval = TypeValue::Builtin(BuiltinTypeValue::Route(rrwd));
-            Payload::with_received(source_id.clone(), typval, None, received)
+            
+
+            // let tv;
+            // if let Ok(route) = route.try_into() {
+            //     tv = TypeValue::Builtin(
+            //         BuiltinTypeValue::Route(route)
+            //     );
+            // } else {
+            //     return Err(session::Error::for_str("Cannot parse route"));
+            // }
+            
+            Payload::with_received(
+                rr,
+                context.into(),
+                None,
+                received
+            )
+            
         }
 
         // When sending both v4 and v6 nlri using exabgp, exa sends a v4
@@ -438,53 +633,54 @@ impl Processor {
         // needs to go out. Also, check whether 7606 comes into play here.
         let mut payloads = SmallVec::new();
 
-        let source_id: SourceId = "unknown".into(); // TODO
-        let rot_id = RotondaId(0_usize);
-        let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
-        let msg = Arc::new(BgpUpdateMessage::new(
-            (rot_id, ltime),
-            UpdateMessage(pdu.clone()),
+        // let source_id: SourceId = "unknown".into(); // TODO
+        // // let rot_id = RotondaId(0_usize);
+        // let ltime = self.bgp_ltime.checked_add(1).expect(">u64 ltime?");
+        // let target = bytes::BytesMut::new();
+
+        //let bgp_msg = context.message().clone().unwrap().into_inner();
+        //let bgp_msg = context.message();
+        
+        //explode_announcements(&bgp_msg).
+
+    
+        //let rws = explode_announcements(&bgp_msg, &mut self.observed_nlri)?;
+        
+        //  RotondaRoute announcements:
+        let rr_reach = explode_announcements(&bgp_msg)?;
+        let rr_unreach = explode_withdrawals(&bgp_msg)?;
+        let context = FreshRouteContext::new(
+            bgp_msg.clone(),
+            RouteStatus::Active,
+            provenance
+        );
+
+        payloads.extend(
+            //rws.into_iter().map(|rws| mk_payload(rws, received, context.clone()))
+            rr_reach.into_iter().map(|rr|
+                Payload::with_received(
+                    rr,
+                    context.clone().into(),
+                    None,
+                    received
+                )
+            )
+        );
+
+        let context = FreshRouteContext{
+            status: RouteStatus::Withdrawn,
+            ..context
+        };
+
+        payloads.extend(rr_unreach.into_iter().map(|rr|
+            //mk_payload(wds, received, context.clone())
+            Payload::with_received(
+                rr,
+                context.clone().into(),
+                None,
+                received
+            )
         ));
-
-        payloads.extend(
-            pdu.unicast_announcements_vec()?.iter()
-                .inspect(|nlri| {
-                    self.observed_prefixes.insert(nlri.prefix);
-                })
-                .map(|nlri| {
-                    let afi_safi = if nlri.prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
-
-                    mk_payload(
-                        received,
-                        nlri.prefix,
-                        &msg,
-                        &source_id,
-                        afi_safi,
-                        nlri.path_id(),
-                        RouteStatus::InConvergence,
-                    )
-                })
-        );
-
-        payloads.extend(
-            pdu.unicast_withdrawals_vec()?.iter()
-                .inspect(|nlri| {
-                    self.observed_prefixes.remove(&nlri.prefix);
-                })
-                .map(|nlri| {
-                    let afi_safi = if nlri.prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
-
-                    mk_payload(
-                        received,
-                        nlri.prefix,
-                        &msg,
-                        &source_id,
-                        afi_safi,
-                        nlri.path_id(),
-                        RouteStatus::Withdrawn,
-                    )
-                })
-        );
 
         Ok(payloads.into())
     }
@@ -492,7 +688,7 @@ impl Processor {
 
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_connection(
-    roto_scripts: RotoScripts,
+    roto_function: Option<RotoFunc>,
     gate: Gate,
     unit_config: BgpTcpIn,
     tcp_stream: TcpStream,
@@ -501,6 +697,8 @@ pub async fn handle_connection(
     cmds_rx: mpsc::Receiver<Command>,
     status_reporter: Arc<BgpTcpInStatusReporter>,
     live_sessions: Arc<Mutex<super::unit::LiveSessions>>,
+    ingresses: Arc<ingress::Register>,
+    connector_ingress_id: ingress::IngressId,
 ) {
     // NB: when testing with an FRR instance configured with
     //  "neighbor 1.2.3.4 timers delayopen 15"
@@ -517,7 +715,10 @@ pub async fn handle_connection(
     // we do:
     let _ = tcp_stream.writable().await;
 
+    let (tcp_in, tcp_out) = tcp_stream.into_split();
     let (sess_tx, sess_rx) = mpsc::channel::<Message>(100);
+
+    let (pdu_out_tx, mut pdu_out_rx) = mpsc::channel(10);
 
     /*
     //  - depending on candidate_config, with or without DelayOpen
@@ -532,8 +733,18 @@ pub async fn handle_connection(
         delay_open
     );
 
+    let cmds_tx2 = cmds_tx.clone();
+    let sess_tx2 = sess_tx.clone();
+
+
     let mut session =
-        Session::new(candidate_config, tcp_stream, sess_tx, cmds_rx);
+        Session::new(
+            candidate_config,
+            tcp_in,
+            sess_tx,
+            cmds_rx,
+            pdu_out_tx.clone(),
+        );
 
     if delay_open {
         session.enable_delay_open();
@@ -542,12 +753,53 @@ pub async fn handle_connection(
     session.connection_established().await;
 
     let mut p = Processor::new(
-        roto_scripts,
+        roto_function,
         gate,
         unit_config,
         cmds_tx,
+        pdu_out_tx,
         status_reporter,
+        ingresses,
+        connector_ingress_id,
     );
+
+    tokio::spawn(async move {
+        while let Some(pdu) = pdu_out_rx.recv().await {
+            /*
+            if let Err(e) = tcp_out.writable().await.and({
+                tcp_out.try_write(pdu.as_ref())
+            }) {
+                warn!("error sending pdu ({:?}): {}", tcp_out.peer_addr(), e);
+            }
+            */
+            if let Err(e) = tcp_out.writable().await {
+                warn!("error while awaiting tcp_out.writable(): {}", e);
+            }
+            //if let Err(e) = tcp_out.try_write(pdu.as_ref()) {
+            //    warn!("error sending pdu ({:?}): {}", tcp_out.peer_addr(), e);
+            //}
+            match tcp_out.try_write(pdu.as_ref()) {
+                Ok(_) => { },
+                Err(ref e) if e.kind() == tokio::io::ErrorKind::WouldBlock => {
+                    debug!("WouldBlock after writable().await");
+                }
+                Err(e) => {
+                    warn!(
+                        "error sending pdu ({:?}): {}",
+                        tcp_out.peer_addr(), e
+                    );
+                    break;
+                }
+            }
+        }
+        // Make sure we get rid of the other half of the TcpStream:
+        let _ = cmds_tx2.send(Command::Disconnect(DisconnectReason::Other)).await;
+        let _ = sess_tx2.send(Message::ConnectionLost(None)).await;
+        debug!("pre tcp_out.forget()");
+        tcp_out.forget();
+        debug!("post tcp_out.forget()");
+    });
+
     p.process(session, sess_rx, live_sessions).await;
 }
 
@@ -559,8 +811,8 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
-    use rotonda_fsm::bgp::session::{self, Message, NegotiatedConfig};
-    use routecore::asn::Asn;
+    use routecore::bgp::fsm::session::{self, Message, NegotiatedConfig};
+    use inetnum::asn::Asn;
     use tokio::{sync::mpsc, task::JoinHandle};
 
     use crate::{
@@ -609,7 +861,7 @@ mod tests {
 
         // Emulate the real session behaviour of sending a ConnectionLost
         // message.
-        let msg = Message::ConnectionLost("10.0.0.2:12345".parse().unwrap());
+        let msg = Message::ConnectionLost(Some("10.0.0.2:12345".parse().unwrap()));
         let _ = sess_tx.send(msg).await;
 
         // Now it's safe to wait for the processor to abort.
@@ -633,7 +885,7 @@ mod tests {
         let (join_handle, status_reporter, _gate_agent, sess_tx) =
             setup_test();
 
-        let msg = Message::ConnectionLost("10.0.0.2:12345".parse().unwrap());
+        let msg = Message::ConnectionLost("10.0.0.2:12345".parse().ok());
         let _ = sess_tx.send(msg).await;
 
         join_handle.await.unwrap();

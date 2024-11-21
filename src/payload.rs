@@ -1,98 +1,36 @@
 use chrono::{DateTime, Utc};
-use roto::{types::typevalue::TypeValue, vm::OutputStreamQueue};
+use log::{debug, error, warn};
+//use roto::types::collections::BytesRecord;
+//use roto::types::lazyrecord_types::BgpUpdateMessage;
+//use roto::{types::typevalue::TypeValue, vm::OutputStreamQueue};
+//use roto::types::builtin::{RouteContext, ingress::IngressId};
 use rotonda_store::QueryResult;
 
+use routecore::bgp::communities::{Community, HumanReadableCommunity, StandardCommunity};
+use routecore::bgp::message::update_builder::StandardCommunitiesList;
+use routecore::bgp::nlri::afisafi::IsPrefix;
+use routecore::bgp::path_attributes::{PaMap, PathAttribute};
+use routecore::bgp::types::AfiSafiType;
+use serde::ser::{SerializeSeq, SerializeStruct, SerializeTuple};
+use serde::{Serialize, Serializer};
 use smallvec::{smallvec, SmallVec};
+use std::fmt;
 use std::{
     fmt::Display,
-    net::{IpAddr, SocketAddr},
     ops::ControlFlow,
-    sync::Arc,
 };
 use uuid::Uuid;
 
+use crate::common::roto_new::RouteContext;
+use crate::ingress::{self, IngressId};
 use crate::{
-    common::roto::{FilterOutput, FilterResult, RotoError},
-    units::RibValue,
+    //common::roto::{FilterOutput, FilterResult, RotoError},
+    //units::RibValue,
 };
 
 // TODO: make this a reference
 pub type RouterId = String;
 
-//------------ SourceId ------------------------------------------------------
-
-/// The source of received updates.
-///
-/// Not all incoming data has to come from a TCP/IP connection. This enum
-/// exists to represent both the TCP/IP type of incoming connection that we
-/// receive data from today as well as other connection types in future, and
-/// can also be used to represent alternate sources of incoming data such as
-/// replay from file or test data created on the fly.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum SourceId {
-    SocketAddr(SocketAddr),
-    Named(Arc<String>),
-}
-
-impl Default for SourceId {
-    fn default() -> Self {
-        "unknown".into()
-    }
-}
-
-impl SourceId {
-    pub fn generated() -> Self {
-        Self::from("generated")
-    }
-
-    pub fn socket_addr(&self) -> Option<&SocketAddr> {
-        match self {
-            SourceId::SocketAddr(addr) => Some(addr),
-            SourceId::Named(_) => None,
-        }
-    }
-
-    pub fn ip(&self) -> Option<IpAddr> {
-        match self {
-            SourceId::SocketAddr(addr) => Some(addr.ip()),
-            SourceId::Named(_) => None,
-        }
-    }
-
-    pub fn name(&self) -> Option<&str> {
-        match self {
-            SourceId::SocketAddr(_) => None,
-            SourceId::Named(name) => Some(name),
-        }
-    }
-}
-
-impl Display for SourceId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SourceId::SocketAddr(addr) => addr.fmt(f),
-            SourceId::Named(name) => name.fmt(f),
-        }
-    }
-}
-
-impl From<SocketAddr> for SourceId {
-    fn from(addr: SocketAddr) -> Self {
-        SourceId::SocketAddr(addr)
-    }
-}
-
-impl From<String> for SourceId {
-    fn from(name: String) -> Self {
-        SourceId::Named(name.into())
-    }
-}
-
-impl From<&str> for SourceId {
-    fn from(name: &str) -> Self {
-        SourceId::Named(name.to_string().into())
-    }
-}
 
 //------------ UpstreamStatus ------------------------------------------------
 
@@ -105,11 +43,12 @@ pub enum UpstreamStatus {
     /// related. E.g. it could be that the last message in a replay file has
     /// been loaded and replayed, or the last message in a test set has been
     /// pushed into the pipeline, etc.
-    EndOfStream { source_id: SourceId },
+    EndOfStream { ingress_id: ingress::IngressId },
 }
 
 //------------ Payload -------------------------------------------------------
 
+/*
 pub trait Filterable {
     fn filter<E, T, U>(
         self,
@@ -117,12 +56,15 @@ pub trait Filterable {
         filtered_fn: U,
     ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
-        T: Fn(TypeValue, DateTime<Utc>, Option<u8>) -> FilterResult<E>
+        T: Fn(TypeValue, DateTime<Utc>, Option<u8>, RouteContext) -> FilterResult<E>
             + Clone,
-        U: Fn(SourceId) + Clone,
+        //U: Fn(ingress::IngressId) + Clone,
+        U: Fn(IngressId) + Clone,
         FilterError: From<E>;
 }
+*/
 
+/*
 #[derive(Debug)]
 pub enum FilterError {
     RotoScriptError(RotoError),
@@ -148,11 +90,152 @@ impl Display for FilterError {
         }
     }
 }
+*/
+
+// TODO macrofy
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RotondaRoute {
+    Ipv4Unicast(routecore::bgp::nlri::afisafi::Ipv4UnicastNlri, RotondaPaMap),
+    Ipv6Unicast(routecore::bgp::nlri::afisafi::Ipv6UnicastNlri, RotondaPaMap),
+    Ipv4Multicast(routecore::bgp::nlri::afisafi::Ipv4MulticastNlri, RotondaPaMap),
+    Ipv6Multicast(routecore::bgp::nlri::afisafi::Ipv6MulticastNlri, RotondaPaMap),
+
+     // TODO support all routecore AfiSafiTypes
+}
+
+
+impl Serialize for RotondaRoute {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut s = serializer.serialize_struct("Route", 2)?;
+        match self {
+            RotondaRoute::Ipv4Unicast(n, _) => s.serialize_field("prefix", n),
+            RotondaRoute::Ipv6Unicast(n, _) => s.serialize_field("prefix", n),
+            RotondaRoute::Ipv4Multicast(n, _) => s.serialize_field("prefix", n),
+            RotondaRoute::Ipv6Multicast(n, _) => s.serialize_field("prefix", n),
+        }?;
+
+        s.serialize_field("attributes", self.rotonda_pamap())?;
+        s.end()
+    }
+}
+
+impl RotondaRoute {
+    pub fn owned_map(&self) -> &routecore::bgp::path_attributes::OwnedPathAttributes {
+        match self {
+            RotondaRoute::Ipv4Unicast(_, p) => &p.0,
+            RotondaRoute::Ipv6Unicast(_, p) => &p.0,
+            RotondaRoute::Ipv4Multicast(_, p) => &p.0,
+            RotondaRoute::Ipv6Multicast(_, p) => &p.0,
+        }
+    }
+
+    pub fn rotonda_pamap(&self) -> &RotondaPaMap {
+        match self {
+            RotondaRoute::Ipv4Unicast(_, p) => p,
+            RotondaRoute::Ipv6Unicast(_, p) => p,
+            RotondaRoute::Ipv4Multicast(_, p) => p,
+            RotondaRoute::Ipv6Multicast(_, p) => p,
+        }
+    }
+}
+
+impl fmt::Display for RotondaRoute {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            RotondaRoute::Ipv4Unicast(p, ..) => write!(f, "RR-Ipv4Unicast {}", p),
+            RotondaRoute::Ipv6Unicast(p, ..) => write!(f, "RR-Ipv6Unicast {}", p),
+            RotondaRoute::Ipv4Multicast(p, ..) => write!(f, "RR-Ipv4Multicast {}", p),
+            RotondaRoute::Ipv6Multicast(p, ..) => write!(f, "RR-Ipv6Multicast {}", p),
+        }
+    }
+}
+
+impl rotonda_store::Meta for RotondaPaMap {
+    type Orderable<'a> = routecore::bgp::path_selection::OrdRoute<'a, routecore::bgp::path_selection::Rfc4271>;
+
+    type TBI = rotonda_store::prelude::multi::TiebreakerInfo;
+
+    fn as_orderable(&self, _tbi: Self::TBI) -> Self::Orderable<'_> {
+        todo!()
+    }
+}
+
+#[derive(Debug, Clone, Eq, PartialEq)]
+pub struct RotondaPaMap(pub routecore::bgp::path_attributes::OwnedPathAttributes);
+
+impl fmt::Display for RotondaPaMap {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self.0)
+    }
+}
+
+impl Serialize for RotondaPaMap {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut s = serializer.serialize_seq(None)?;
+        let mut communities: Vec<HumanReadableCommunity> = vec![];
+        for pa in self.0.iter().flatten() {
+            match pa.to_owned().unwrap() {
+                PathAttribute::StandardCommunities(list) => {
+                    for c in list.communities() {
+                        communities.push(HumanReadableCommunity(Community::from(*c)));
+                    }
+                }
+                PathAttribute::ExtendedCommunities(list) => {
+                    for c in list.communities() {
+                        communities.push(HumanReadableCommunity(Community::from(*c)));
+                    }
+                }
+                PathAttribute::LargeCommunities(list) => {
+                    for c in list.communities() {
+                        communities.push(HumanReadableCommunity(Community::from(*c)));
+                    }
+                }
+                PathAttribute::Ipv6ExtendedCommunities(list) => {
+                    for c in list.communities() {
+                        communities.push(HumanReadableCommunity(Community::from(*c)));
+                    }
+                }
+
+                pa => {
+                    if pa.type_code() == 14 || pa.type_code() == 15 {
+                        debug!("not including MP_REACH/MP_UNREACH path attributes in serialized output");
+                    } else {
+                        s.serialize_element(&pa)?;
+                    }
+                }
+            }
+        }
+
+        // We need to wrap our collected communities in a struct with a field
+        // named 'communities' to get the proper JSON output.
+        // For the other path attributes, as they are actually variants of the
+        // PathAttribute enum type, their name/type is included in the JSON
+        // already.
+        // See also https://serde.rs/json.html
+
+        if !communities.is_empty() {
+            #[derive(Serialize)]
+            struct Communities{communities: Vec<HumanReadableCommunity>}
+        
+            let c = Communities{communities};
+            s.serialize_element(&c)?;
+        }
+        s.end()
+    }
+}
+
+
 
 #[derive(Clone, Debug, Eq)]
 pub struct Payload {
-    pub source_id: SourceId,
-    pub value: TypeValue,
+    pub rx_value: RotondaRoute,//RouteWorkshop<N>, //was: TypeValue,
+    pub context: RouteContext,
     pub trace_id: Option<u8>,
     pub received: DateTime<Utc>,
 }
@@ -160,46 +243,40 @@ pub struct Payload {
 impl PartialEq for Payload {
     fn eq(&self, other: &Self) -> bool {
         // Don't compare the received timestamp
-        self.source_id == other.source_id
-            && self.value == other.value
-            && self.trace_id == other.trace_id // && self.received == other.received
+        // self.source_id == other.source_id &&
+        self.rx_value == other.rx_value && 
+            self.trace_id == other.trace_id
     }
 }
 
 impl Payload {
-    pub fn new<S, T>(source_id: S, value: T, trace_id: Option<u8>) -> Self
-    where
-        S: Into<SourceId>,
-        T: Into<TypeValue>,
+    pub fn new(
+        rx_value: RotondaRoute,
+        context: RouteContext,
+        trace_id: Option<u8>) -> Self
     {
         Self {
-            source_id: source_id.into(),
-            value: value.into(),
+            // source_id: source_id.into(),
+            rx_value,
+            context,
+            // bgp_msg,
             trace_id,
             received: Utc::now(),
         }
     }
 
-    pub fn with_received<S, T>(
-        source_id: S,
-        value: T,
+    pub fn with_received(
+        rx_value: RotondaRoute,
+        context: RouteContext,
         trace_id: Option<u8>,
         received: DateTime<Utc>,
-    ) -> Self
-    where
-        S: Into<SourceId>,
-        T: Into<TypeValue>,
-    {
+    ) -> Self {
         Self {
-            source_id: source_id.into(),
-            value: value.into(),
+            rx_value,
+            context,
             trace_id,
             received,
         }
-    }
-
-    pub fn source_id(&self) -> &SourceId {
-        &self.source_id
     }
 
     pub fn trace_id(&self) -> Option<u8> {
@@ -207,6 +284,7 @@ impl Payload {
     }
 }
 
+/*
 impl Filterable for Payload {
     fn filter<E, T, U>(
         self,
@@ -214,21 +292,24 @@ impl Filterable for Payload {
         filtered_fn: U,
     ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
-        T: Fn(TypeValue, DateTime<Utc>, Option<u8>) -> FilterResult<E>
+        T: Fn(TypeValue, DateTime<Utc>, Option<u8>, RouteContext) -> FilterResult<E>
             + Clone,
-        U: Fn(SourceId) + Clone,
+        //U: Fn(ingress::IngressId) + Clone,
+        U: Fn(IngressId) + Clone,
         FilterError: From<E>,
     {
         if let ControlFlow::Continue(filter_output) =
-            filter_fn(self.value, self.received, self.trace_id)?
+            // filter_fn(self.rx_value, self.received, self.trace_id)?
+            filter_fn(self.rx_value, self.received, self.trace_id, self.context.clone())?
         {
             Ok(Payload::from_filter_output(
-                self.source_id.clone(),
+                // self.source_id.clone(),
                 filter_output,
                 self.trace_id,
+                self.context
             ))
         } else {
-            filtered_fn(self.source_id);
+            filtered_fn(self.context.ingress_id());
             Ok(smallvec![])
         }
     }
@@ -241,9 +322,9 @@ impl Filterable for SmallVec<[Payload; 8]> {
         filtered_fn: U,
     ) -> Result<SmallVec<[Payload; 8]>, FilterError>
     where
-        T: Fn(TypeValue, DateTime<Utc>, Option<u8>) -> FilterResult<E>
+        T: Fn(TypeValue, DateTime<Utc>, Option<u8>, RouteContext) -> FilterResult<E>
             + Clone,
-        U: Fn(SourceId) + Clone,
+        U: Fn(IngressId) + Clone,
         FilterError: From<E>,
     {
         let mut out_payloads = smallvec![];
@@ -260,16 +341,27 @@ impl Filterable for SmallVec<[Payload; 8]> {
 
 impl Payload {
     pub fn from_filter_output(
-        source_id: SourceId,
         filter_output: FilterOutput,
         trace_id: Option<u8>,
+        context: RouteContext,
     ) -> SmallVec<[Payload; 8]> {
         let mut out_payloads = smallvec![];
 
+        // Add output stream messages to the result
+        if !filter_output.south.is_empty() {
+            out_payloads.extend(Self::from_output_stream_queue(
+                filter_output.south,
+                context.clone(),
+                trace_id,
+            ));
+        }
+
         // Make a payload out of it
         let new_payload = Payload::with_received(
-            source_id,
+            // source_id,
             filter_output.east,
+            context,
+            // filter_output.bgp_msg,
             trace_id,
             filter_output.received,
         );
@@ -277,23 +369,17 @@ impl Payload {
         // Add the payload to the result
         out_payloads.push(new_payload);
 
-        // Add output stream messages to the result
-        if !filter_output.south.is_empty() {
-            out_payloads.extend(Self::from_output_stream_queue(
-                filter_output.south,
-                trace_id,
-            ));
-        }
 
         out_payloads
     }
 
     pub fn from_output_stream_queue(
         osq: OutputStreamQueue,
+        context: RouteContext,
         trace_id: Option<u8>,
     ) -> SmallVec<[Payload; 8]> {
         osq.into_iter()
-            .map(|osm| Payload::new(SourceId::generated(), osm, trace_id))
+            .map(|osm| Payload::new(osm, context.clone(), trace_id))
             .collect()
     }
 }
@@ -310,20 +396,30 @@ impl From<Payload> for SmallVec<[Update; 1]> {
     }
 }
 
-impl From<TypeValue> for Payload {
-    fn from(tv: TypeValue) -> Self {
-        Self::new("generated", tv, None)
-    }
-}
+// impl From<TypeValue> for Payload {
+//     fn from(tv: TypeValue) -> Self {
+//         Self::new(tv, None, None)
+//     }
+// }
 
+*/
 //------------ Update --------------------------------------------------------
 
 #[derive(Clone, Debug)]
 pub enum Update {
     Single(Payload),
     Bulk(SmallVec<[Payload; 8]>),
-    QueryResult(Uuid, Result<QueryResult<RibValue>, String>),
+    // Withdraw everything or a particular AFISAFI because the session ended.
+    // Not to be used for 'normal' withdrawals.
+    Withdraw(IngressId, Option<AfiSafiType>),
+    // Withdraw everything for multiple sessions. This is used when a BMP
+    // connection goes down and everything for the monitored sessions has to
+    // be marked Withdrawn.
+    WithdrawBulk(SmallVec<[IngressId; 8]>),
+    QueryResult(Uuid, Result<QueryResult<crate::payload::RotondaPaMap>, String>),
     UpstreamStatusChange(UpstreamStatus),
+
+    OutputStream(SmallVec<[crate::common::roto_new::OutputStreamMessage; 2]>)
 }
 
 impl Update {
@@ -339,8 +435,12 @@ impl Update {
             Update::Bulk(payloads) => {
                 payloads.iter().filter(|p| p.trace_id().is_some()).collect()
             }
+            //Update::Withdraw(_ingress_id, _maybe_afisafi) => todo!(),
+            Update::Withdraw(_ingress_id, _maybe_afisafi) => smallvec![],
+            Update::WithdrawBulk(..) => smallvec![],
             Update::QueryResult(_, _) => smallvec![],
             Update::UpstreamStatusChange(_) => smallvec![],
+            Update::OutputStream(..) => smallvec![],
         }
     }
 }

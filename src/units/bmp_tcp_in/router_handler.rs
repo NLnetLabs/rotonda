@@ -1,23 +1,34 @@
 //! BMP message stream handler for a single connected BMP publishing client.
 use std::cell::RefCell;
+use std::hash::{self, DefaultHasher, Hash};
+use std::net::IpAddr;
 use std::sync::{Arc, RwLock};
 use std::{net::SocketAddr, ops::ControlFlow};
 
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use roto::types::{
-    builtin::BuiltinTypeValue, collections::BytesRecord,
-    lazyrecord_types::BmpMessage, typevalue::TypeValue,
-};
+use hash32::Hasher;
+use inetnum::asn::Asn;
+use log::{debug, error, info};
+//use roto::types::lazyrecord_types::BgpUpdateMessage;
+//use roto::types::{
+//    builtin::BuiltinTypeValue, collections::BytesRecord,
+//    lazyrecord_types::BmpMessage, typevalue::TypeValue,
+//};
 use routecore::bmp::message::Message;
+//use roto::types::builtin::{NlriStatus, PeerId, PeerRibType, Provenance, RouteContext, SourceId};
+
+use smallvec::smallvec;
 use tokio::sync::Mutex;
 use tokio::{io::AsyncRead, net::TcpStream};
 
-use crate::common::roto::{
-    FilterName, FilterOutput, RotoScripts, ThreadLocalVM,
-};
-use crate::payload::{RouterId, SourceId};
+use crate::common::roto_new::{FilterName, OutputStreamMessage, PeerRibType, Provenance, RotoOutputStream, RotoScripts, RouteContext};
+//use crate::common::roto::{
+//    FilterName, FilterOutput, RotoScripts, ThreadLocalVM,
+//};
+use crate::ingress::{self, IngressId};
+use crate::payload::RouterId;
 use crate::tracing::Tracer;
 use crate::{
     comms::{Gate, GateStatus},
@@ -32,12 +43,12 @@ use crate::{
 
 use super::io::FatalError;
 use super::state_machine::{BmpState, BmpStateMachineMetrics, MessageType};
-use super::unit::TracingMode;
+use super::unit::{RotoFunc, TracingMode};
 use super::util::format_source_id;
 
 pub struct RouterHandler {
     gate: Gate,
-    roto_scripts: RotoScripts,
+    roto_function: Option<RotoFunc>,
     router_id_template: Arc<ArcSwap<String>>,
     filter_name: Arc<ArcSwap<FilterName>>,
     status_reporter: Arc<BmpTcpInStatusReporter>,
@@ -49,14 +60,10 @@ pub struct RouterHandler {
 }
 
 impl RouterHandler {
-    thread_local!(
-        static VM: ThreadLocalVM = RefCell::new(None);
-    );
-
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         gate: Gate,
-        roto_scripts: RotoScripts,
+        roto_function: Option<RotoFunc>,
         router_id_template: Arc<ArcSwap<String>>,
         filter_name: Arc<ArcSwap<FilterName>>,
         status_reporter: Arc<BmpTcpInStatusReporter>,
@@ -68,7 +75,7 @@ impl RouterHandler {
     ) -> Self {
         Self {
             gate,
-            roto_scripts,
+            roto_function,
             router_id_template,
             filter_name,
             status_reporter,
@@ -103,6 +110,7 @@ impl RouterHandler {
             router_id,
             parent_status_reporter.clone(),
             bmp_metrics.clone(),
+            Arc::new(ingress::Register::new()),
         );
 
         let state_machine = Arc::new(Mutex::new(Some(state_machine)));
@@ -130,25 +138,53 @@ impl RouterHandler {
         &self,
         mut tcp_stream: TcpStream,
         router_addr: SocketAddr,
-        source_id: SourceId,
+        //source_id: SourceId,
+        ingress_id: IngressId,
+        ingress_register: Arc<ingress::Register>,
+        // we need access to the ingress Register to register new IDs, for
+        // every peer / session in the BMP connection
     ) {
+
         // Discard the write half of the TCP stream as we are a "monitoring
         // station" and per the BMP RFC 7584 specification _"No BMP message is
         // ever sent from the monitoring station to the monitored router"_.
         // See: https://datatracker.ietf.org/doc/html/rfc7854#section-3.2
         let (rx, _tx) = tcp_stream.split();
-        self.read_from_router(rx, router_addr, source_id).await;
+        self.read_from_router(rx, router_addr, ingress_id, ingress_register).await;
     }
 
     async fn read_from_router<T: AsyncRead + Unpin>(
         &self,
         rx: T,
         router_addr: SocketAddr,
-        source_id: SourceId,
+        //source_id: SourceId,
+        ingress_id: IngressId,
+        ingress_register: Arc<ingress::Register>,
     ) {
         // Setup BMP streaming
         let mut stream =
             BmpStream::new(rx, self.gate.clone(), self.tracing_mode.clone());
+
+        let mut router_id = hash32::FnvHasher::default();
+        router_addr.hash(&mut router_id);
+
+        //let mut connection_id =  hash32::FnvHasher::default();
+        //source_id.hash(&mut connection_id);
+
+
+        let router_ingress_id = ingress_register.register();
+
+
+        let provenance = Provenance::for_bmp(
+            router_ingress_id,
+            router_addr.ip(), // peer_ip: we are not diving into the BMP message to see
+                     // if this is a RouteMonitoring msg, just set to BMP IP
+                     // and overwrite later if necessary
+            Asn::from_u32(0), // peer_asn, set to Asn(0) for now, overwrite later
+            router_addr.ip(),
+            [0; 9],
+            PeerRibType::InPre,
+        );
 
         // Ensure that on first use the metrics for the "unknown" router are
         // correctly initialised.
@@ -222,7 +258,7 @@ impl RouterHandler {
                         self.tracer.clear_trace_id(trace_id);
                     }
 
-                    if let Ok(bmp_msg) = BmpMessage::from_octets(msg_buf) {
+                    if let Ok(bmp_msg) = Message::from_octets(msg_buf) {
                         let trace_id = if trace_id > 0
                             || tracing_mode == TracingMode::On
                         {
@@ -239,8 +275,11 @@ impl RouterHandler {
                             .process_msg(
                                 received,
                                 router_addr,
-                                source_id.clone(),
+                                //source_id.clone(),
+                                ingress_id,
                                 bmp_msg,
+                                //None,
+                                provenance,
                                 trace_id,
                             )
                             .await
@@ -262,11 +301,25 @@ impl RouterHandler {
             &bmp_state_lock.as_ref().unwrap().router_id(),
         );
 
+        // Signal withdrawal of all bgp sessions monitored via this BMP
+        // session:
+        let session_ids = ingress_register.ids_for_parent(ingress_id);
+        self.gate
+            .update_data(Update::WithdrawBulk(session_ids.into()))
+            .await;
+
+        // Signal withdrawal of all address families for this ingress_id.
+        // XXX if ingress ids are assigned properly, i.e. on the BGP level
+        // within this BMP stream, there should be no RIB entries for the
+        // ingress id of the BMP connector.
+        //self.gate
+        //    .update_data(Update::Withdraw(ingress_id, None))
+        //    .await;
+
         // Notify downstream units that the data stream for this
         // particular monitored router has ended.
-        let new_status = UpstreamStatus::EndOfStream {
-            source_id: router_addr.into(),
-        };
+        let new_status = UpstreamStatus::EndOfStream { ingress_id };
+
         self.gate
             .update_data(Update::UpstreamStatusChange(new_status))
             .await;
@@ -276,8 +329,10 @@ impl RouterHandler {
         &self,
         received: DateTime<Utc>,
         addr: SocketAddr,
-        source_id: SourceId,
+        //source_id: SourceId,
+        ingress_id: IngressId,
         msg: Message<Bytes>,
+        provenance: Provenance,
         trace_id: Option<u8>,
     ) -> Result<(), (Arc<RouterId>, String)> {
         let mut bmp_state_lock = self.state_machine.lock().await;
@@ -298,6 +353,150 @@ impl RouterHandler {
             msg.common_header().msg_type().into(),
         );
 
+
+        let mut output_stream = RotoOutputStream::new();
+        let verdict = self.roto_function.as_ref().map(
+            |roto_function|
+            {
+                roto_function.call(
+                    roto::Val(&mut output_stream),
+                    roto::Val(msg.clone()),
+                    roto::Val(provenance),
+                )
+            });
+        if !output_stream.is_empty() {
+            let mut osms = smallvec![];
+            use crate::common::roto_new::Output;
+            for entry in output_stream.drain() {
+                let osm = match entry {
+                    Output::Prefix(_prefix) => {
+                        OutputStreamMessage::prefix(
+                            None,
+                            Some(ingress_id),
+                        )
+                    }
+                    Output::Community(_u32) => {
+                        OutputStreamMessage::community(
+                            None,
+                            Some(ingress_id),
+                        )
+                    }
+                    Output::Asn(_u32) => {
+                        OutputStreamMessage::asn(
+                            None,
+                            Some(ingress_id),
+                        )
+                    }
+                    Output::Origin(_u32) => {
+                        OutputStreamMessage::origin(
+                            None,
+                            Some(ingress_id),
+                        )
+                    }
+                    Output::PeerDown => {
+                        if let Message::PeerDownNotification(ref pdn) = msg {
+                            let pph = pdn.per_peer_header();
+                            OutputStreamMessage::peer_down(
+                                "mqtt".into(),
+                                "peerdown".into(),
+                                pph.address(),
+                                pph.asn(),
+                                Some(ingress_id),
+                            )
+                        } else {
+                            error!("log_peer_down on a non-peerdownnotification");
+                            continue
+                        }
+                    },
+                    Output::Custom((id, local)) => {
+                        OutputStreamMessage::custom(
+                            id, local,
+                            Some(ingress_id),
+                        )
+                        
+                    }
+                };
+                osms.push(osm);
+            }
+            self.gate.update_data(Update::OutputStream(osms)).await;
+        }
+        let next_state = match verdict {
+            // Default action when no roto script is used
+            // is Accept (i.e. None here).
+            Some(roto::Verdict::Accept(_)) | None => {
+                self.status_reporter
+                    .message_processed(bmp_state.router_id());
+
+                let mut res = bmp_state.process_msg(received, msg, trace_id);
+
+                match res.message_type {
+                    MessageType::InvalidMessage { .. } => {
+                        self.status_reporter.message_processing_failure(
+                            res.next_state.router_id(),
+                        );
+                    }
+
+                    MessageType::StateTransition => {
+                        // If we have transitioned to the Dumping state that means we
+                        // just processed an Initiation message and MUST have captured
+                        // a sysName Information TLV string. Use the captured value to
+                        // make the router ID more meaningful, instead of the
+                        // UNKNOWN_ROUTER_SYSNAME sysName value we used until now.
+                        self.check_update_router_id(
+                            addr,
+                            ingress_id, //&source_id,
+                            &mut res.next_state,
+                        );
+                    }
+
+                    MessageType::RoutingUpdate { update } => {
+                        // Pass the routing update on to downstream units and/or targets.
+                        // This is where we send an update down the pipeline.
+                        self.gate.update_data(update).await;
+                    }
+
+                    MessageType::Other => {
+                        // A BMP initiation message received after the initiation
+                        // phase will result in this type of message.
+                        self.check_update_router_id(
+                            addr,
+                            ingress_id, //&source_id,
+                            &mut res.next_state,
+                        );
+                    }
+
+                    MessageType::Aborted => {
+                        // Something went fatally wrong and we've lost the BMP
+                        // state machine. The issue should already have been
+                        // logged so there's nothing more we can do here
+                        // except stop processing this BMP stream.
+                        return Err((
+                                res.next_state.router_id(),
+                                "Aborted".to_string(),
+                        ));
+                    }
+                }
+                res.next_state
+            }
+            Some(roto::Verdict::Reject(_)) => {
+                // increase metrics and continue
+                dbg!("bgp-in roto Reject");
+                bmp_state
+            }
+        };
+
+        *bmp_state_lock = Some(next_state);
+        Ok(())
+
+
+        //LH: we'll need roughly the same as in the BGP handler here:
+        //- execute the BMP pre-explosion filter
+        //- based on the verdict, call process_msg or not
+        //- handle any items in the outputstream queue
+
+
+        /*
+        
         let next_state = if let ControlFlow::Continue(FilterOutput {
             south,
             east,
@@ -305,8 +504,27 @@ impl RouterHandler {
         }) = Self::VM
             .with(|vm| {
                 let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(
-                    BytesRecord(msg),
+                    msg.into(),
                 ));
+                
+                // We will only create a context if we have a provenance, i.e.
+                // we have already processed a BMP PeerUpNotification (the
+                // first BMP message with a per-peer-header that contains some
+                // of the Provenance content).
+                //
+                // LH: but, we must have a RouteContext for the VM to build
+                // successfully...
+                // Currently, prior to the very first run of the VM,
+                // vm.borrow_mut().as_mut() will return None and thus the
+                // map() below has no effect.
+                let ctx;
+                if let Some(prov) = provenance {
+                    ctx = RouteContext::new(None, NlriStatus::InConvergence, prov);
+                    vm.borrow_mut().as_mut().map(|vm| vm.update_context(Arc::new(ctx.clone())));
+                } else {
+                    ctx = RouteContext::new(None, NlriStatus::InConvergence, Provenance::mock());
+                }
+
                 self.roto_scripts.exec_with_tracer(
                     vm,
                     &self.filter_name.load(),
@@ -314,6 +532,7 @@ impl RouterHandler {
                     received,
                     bound_tracer,
                     trace_id,
+                    ctx,
                 )
             })
             .map_err(|err| {
@@ -321,21 +540,26 @@ impl RouterHandler {
                 (bmp_state.router_id(), err.to_string())
             })? {
             if !south.is_empty() {
-                let payload =
-                    Payload::from_output_stream_queue(south, trace_id).into();
+                let context = RouteContext::new(
+                    None,
+                    NlriStatus::Empty,
+                    provenance.unwrap_or_else(||Provenance::mock())
+                );
+                let payload = Payload::from_output_stream_queue(
+                    south,
+                    context,
+                    trace_id
+                ).into();
                 self.gate.update_data(payload).await;
             }
 
             if let TypeValue::Builtin(BuiltinTypeValue::BmpMessage(msg)) =
                 east
             {
-                // let msg = Arc::into_inner(msg).unwrap(); // This should succeed
-                let msg = msg.0;
-
                 self.status_reporter
                     .message_processed(bmp_state.router_id());
 
-                let mut res = bmp_state.process_msg(received, msg, trace_id);
+                let mut res = bmp_state.process_msg(received, msg.into_inner(), trace_id);
 
                 match res.message_type {
                     MessageType::InvalidMessage { .. } => {
@@ -395,12 +619,15 @@ impl RouterHandler {
 
         *bmp_state_lock = Some(next_state);
         Ok(())
+        */
+
     }
 
     fn check_update_router_id(
         &self,
         _addr: SocketAddr, // TODO: Why both socket address AND source id?
-        source_id: &SourceId,
+        //source_id: &SourceId,
+        ingress_id: IngressId,
         next_state: &mut BmpState,
     ) {
         let new_sys_name = match next_state {
@@ -415,7 +642,8 @@ impl RouterHandler {
         let new_router_id = Arc::new(format_source_id(
             &self.router_id_template.load(),
             new_sys_name,
-            source_id,
+            //sources_id,
+            ingress_id,
         ));
 
         let old_router_id = next_state.router_id();
@@ -484,7 +712,12 @@ mod tests {
         eprintln!("STARTING ROUTER READER");
         let router_addr = "1.2.3.4:12345".parse().unwrap();
         let source_id = "dummy".into();
-        let join_handle = runner.read_from_router(rx, router_addr, source_id);
+        let join_handle = runner.read_from_router(
+            rx,
+            router_addr,
+            source_id,
+            Arc::new(ingress::Register::default()),
+        );
 
         // Simulate the unit terminating. Without this the reader continues
         // forever.
@@ -564,7 +797,12 @@ mod tests {
             0
         );
 
-        runner.read_from_router(rx, router_addr, source_id).await;
+        runner.read_from_router(
+            rx,
+            router_addr,
+            source_id,
+            Arc::new(ingress::Register::default()),
+        ).await;
 
         let metrics = get_testable_metrics_snapshot(
             &runner.status_reporter.metrics().unwrap(),
@@ -595,8 +833,8 @@ mod tests {
             BmpMessage::from_octets(mk_peer_down_notification_msg(&pph))
                 .unwrap();
 
-        process_msg(&runner, bad_initiation_msg).await.unwrap();
-        process_msg(&runner, bad_peer_down_msg).await.unwrap();
+        process_msg(&runner, bad_initiation_msg, None).await.unwrap();
+        process_msg(&runner, bad_peer_down_msg, None).await.unwrap();
 
         let metrics = get_testable_metrics_snapshot(
             &runner.status_reporter.metrics().unwrap(),
@@ -628,15 +866,15 @@ mod tests {
         .unwrap();
 
         // router id is "unknown" at this point
-        process_msg(&runner, bad_peer_down_msg.clone()).await.unwrap(); // 1
-        process_msg(&runner, initiation_msg).await.unwrap(); // 2
+        process_msg(&runner, bad_peer_down_msg.clone(), None).await.unwrap(); // 1
+        process_msg(&runner, initiation_msg, None).await.unwrap(); // 2
 
         // messages after this point are counted under router id SYS_NAME
-        process_msg(&runner, bad_peer_down_msg.clone()).await.unwrap(); // 3
-        process_msg(&runner, reinitiation_msg).await.unwrap(); // 4
+        process_msg(&runner, bad_peer_down_msg.clone(), None).await.unwrap(); // 3
+        process_msg(&runner, reinitiation_msg, None).await.unwrap(); // 4
 
         // messages after this point are counted under router id OTHER_SYS_NAME
-        process_msg(&runner, bad_peer_down_msg).await.unwrap(); // 5
+        process_msg(&runner, bad_peer_down_msg, None).await.unwrap(); // 5
 
         let metrics = get_testable_metrics_snapshot(
             &runner.status_reporter.metrics().unwrap(),
@@ -666,6 +904,7 @@ mod tests {
     async fn process_msg(
         router_handler: &RouterHandler,
         msg: BmpMessage,
+        provenance: Option<Provenance>
     ) -> Result<(), (Arc<String>, String)> {
         router_handler
             .process_msg(
@@ -673,7 +912,8 @@ mod tests {
                 "1.2.3.4:12345".parse().unwrap(),
                 "unknown".into(),
                 msg,
-                None,
+                provenance,
+                None
             )
             .await
     }

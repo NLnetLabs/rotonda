@@ -1,0 +1,103 @@
+# The bgp-in filter works on incoming BGP UPDATE messages.
+#
+# One such message can contain multiple NLRI, thus multiple announcements or
+# withdrawals). To act on individual announcements or withdrawals, use the
+# 'rib-in' filter-map below.
+filter bgp-in(
+    bgp_msg: BgpMsg,
+    output: Log,
+    prov: Provenance,
+) {
+
+    define {
+        origin_to_log = AS65536;
+        community_to_log = 0xffff029a;
+    }
+
+    apply {
+        if bgp_msg.aspath_origin(origin_to_log) {
+            output.log_matched_origin(origin_to_log);
+        }
+        if bgp_msg.contains_community(community_to_log) {
+            output.log_matched_community(community_to_log)
+        }
+
+        accept
+    }
+}
+
+# The bmp-in filter works on incoming BMP messages.
+#
+# While most BMP message will be of type RouteMonitoring (transporting route
+# information via an encapsulated BGP UPDATE message), this filter-map can act
+# on different types as well. Helper methods are provided, e.g.
+# 'is_peer_down()' returns true if the message is a BMP PeerDownNotification.
+filter bmp-in(
+    bmp_msg: BmpMsg,
+    output: Log,
+    prov: Provenance,
+) {
+    define {
+        my_asn = AS12345;
+        asn_to_log = AS65536;
+        community_to_log = 0xffff029a;
+    }
+
+    apply {
+        if bmp_msg.is_peer_down() {
+            output.log_peer_down()
+        }
+        if bmp_msg.is_ibgp(my_asn) {
+            reject
+        } else {
+            if bmp_msg.aspath_contains(asn_to_log) {
+                output.log_matched_asn(asn_to_log);
+            }
+            if bmp_msg.contains_community(community_to_log) {
+                output.log_matched_community(community_to_log)
+            }
+            accept
+        }
+    }
+}
+
+# The rib-in-pre filter processes individual routes prior to insertion into the
+# main RIB.
+#
+# Different from the BGP UPDATE message in the bgp-in filter-map, and the BMP
+# RouteMonitoring message in the bmp-in filter-map, the rib-in filter works on
+# individual announcements and withdrawals, typed Route.
+#
+# This enanbles for fine-grained, per announcement filtering and logging, and
+# allows comparing of and acting on the actual NLRI (most often, the prefix).
+#
+# Filtering purely based on values of attributes (regardless of the individual
+# NLRI) can and should be done in the bmp-in/bgp-in filter-maps, as making such
+# a decision early on is more efficient.
+filter rib-in-pre(
+    route: Route,
+    output: Log,
+    context: RouteContext,
+) {
+
+    define {
+        attribute_to_log = 35; # OTC
+        my_prefix_v4 = 209.127.80.0/20;
+        my_prefix_v6 = 2001:db8:1::/48;
+    }
+
+    apply {
+        if route.prefix_matches(my_prefix_v4) {
+            output.log_prefix(my_prefix_v4);
+            #accept
+        #} else {
+        #    reject            
+        }
+
+        if route.has_attribute(attribute_to_log) {
+          accept
+        } else {
+          reject
+        }
+    }
+}

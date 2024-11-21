@@ -7,7 +7,7 @@ use crate::units::bmp_tcp_in::state_machine::{
 use super::{dumping::Dumping, initiating::Initiating, updating::Updating};
 
 use bytes::Bytes;
-use roto::{types::builtin::BgpUpdateMessage, vm::OutputStreamQueue};
+//use roto::{types::lazyrecord_types::BgpUpdateMessage, vm::OutputStreamQueue};
 use routecore::bmp::message::Message as BmpMsg;
 
 /// BmpState machine state 'Terminated'.
@@ -26,9 +26,10 @@ pub struct Terminated;
 impl From<BmpStateDetails<Initiating>> for BmpStateDetails<Terminated> {
     fn from(v: BmpStateDetails<Initiating>) -> Self {
         Self {
-            source_id: v.source_id,
+            ingress_id: v.ingress_id,
             router_id: v.router_id,
             status_reporter: v.status_reporter,
+            ingress_register: v.ingress_register,
             details: v.details.into(),
         }
     }
@@ -37,9 +38,10 @@ impl From<BmpStateDetails<Initiating>> for BmpStateDetails<Terminated> {
 impl From<BmpStateDetails<Dumping>> for BmpStateDetails<Terminated> {
     fn from(v: BmpStateDetails<Dumping>) -> Self {
         Self {
-            source_id: v.source_id,
+            ingress_id: v.ingress_id,
             router_id: v.router_id,
             status_reporter: v.status_reporter,
+            ingress_register: v.ingress_register,
             details: v.details.into(),
         }
     }
@@ -48,9 +50,10 @@ impl From<BmpStateDetails<Dumping>> for BmpStateDetails<Terminated> {
 impl From<BmpStateDetails<Updating>> for BmpStateDetails<Terminated> {
     fn from(v: BmpStateDetails<Updating>) -> Self {
         Self {
-            source_id: v.source_id,
+            ingress_id: v.ingress_id,
             router_id: v.router_id,
             status_reporter: v.status_reporter,
+            ingress_register: v.ingress_register,
             details: v.details.into(),
         }
     }
@@ -81,11 +84,18 @@ impl BmpStateDetails<Terminated> {
         bmp_msg: BmpMsg<Bytes>,
         _trace_id: Option<u8>,
     ) -> ProcessingResult {
+        self.mk_invalid_message_result(format!(
+            "RFC 7854 4.3 violation: No messages should be received in the terminated state but received: {}",
+            bmp_msg
+        ), None, Some(Bytes::copy_from_slice(bmp_msg.as_ref())))
+        /*
         self.process_msg_with_filter(bmp_msg, None::<()>, |msg, _| {
             Ok(ControlFlow::Continue((msg, OutputStreamQueue::new())))
         })
+        */
     }
 
+    /*
     pub fn process_msg_with_filter<F, D>(
         self,
         bmp_msg: BmpMsg<Bytes>,
@@ -106,4 +116,5 @@ impl BmpStateDetails<Terminated> {
             bmp_msg
         ), None, Some(Bytes::copy_from_slice(bmp_msg.as_ref())))
     }
+    */
 }

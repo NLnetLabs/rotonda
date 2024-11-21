@@ -7,8 +7,8 @@ use chrono::{DateTime, Utc};
 use log::{debug, info, trace};
 use roto::{
     ast::{AcceptReject, ShortString},
-    compiler::{CompileError, Compiler, MirBlock, RotoPack, RotoPackArc},
-    types::typevalue::TypeValue,
+    compiler::{CompileError, MirBlock, RotoPack, RotoPackArc},
+    types::{builtin::RouteContext, typevalue::TypeValue},
     vm::{
         ExtDataSource, LinearMemory, OutputStreamQueue, VirtualMachine,
         VmBuilder, VmError, VmResult,
@@ -84,7 +84,7 @@ impl<'a, 'de: 'a> Deserialize<'de> for FilterName {
 
 //------------ VM -----------------------------------------------------------------------------------------------------
 
-pub type VM = VirtualMachine<Arc<[MirBlock]>, Arc<[ExtDataSource]>>;
+pub type VM = VirtualMachine<Arc<[MirBlock]>, Arc<RouteContext>, Arc<[ExtDataSource]>>;
 
 pub struct StatefulVM {
     /// The name of the filter this VM instance was compiled for
@@ -98,6 +98,12 @@ pub struct StatefulVM {
 
     /// The VM itself
     pub vm: VM,
+}
+
+impl StatefulVM {
+    pub(crate) fn update_context(&mut self, context: Arc<RouteContext>) {
+        self.vm.update_context(context);
+    }
 }
 
 pub type ThreadLocalVM = RefCell<Option<StatefulVM>>;
@@ -356,27 +362,29 @@ impl RotoScripts {
         // will store the resulting MIR, plus the required arguments (a
         // RotoPack) in the RotoScript struct. This we only have to compile
         // once.
-        let rotolo = Compiler::build(roto_script)
-            .map_err(|err| RotoError::compile_err(&origin, err))?;
+        let rotolos = roto::pipeline::run_string(roto_script.to_string())
+            .map_err(|err|
+                RotoError::compile_err(&origin, err.to_string().into())
+            )?;
 
-        if !rotolo.is_success() {
-            let report = rotolo.get_mis_compilations().iter().fold(
-                String::new(),
-                |mut acc, (scope, err)| {
-                    acc.push_str(&format!("Scope: {scope}, Error: {err}; "));
-                    acc
-                },
-            );
-            let report = report.trim_end_matches("; ");
-            return Err(RotoError::CompileError {
-                origin,
-                err: report.into(),
-            });
-        }
+        //if !rotolo.get_mis_compilations().is_empty() {
+        //    let report = rotolo.get_mis_compilations().iter().fold(
+        //        String::new(),
+        //        |mut acc, (scope, err)| {
+        //            acc.push_str(&format!("Scope: {scope}, Error: {err}; "));
+        //            acc
+        //        },
+        //    );
+        //    let report = report.trim_end_matches("; ");
+        //    return Err(RotoError::CompileError {
+        //        origin,
+        //        err: report.into(),
+        //    });
+        //}
 
         // Extract all the packs that are Filter(Map)s. Filter(Map)s can't
         // live in the Global scope, so these all have filter names.
-        let new_filter_maps = rotolo.clean_packs_to_owned();
+        let new_filter_maps = rotolos.iter().map(|r| r.clone().packs().0).flatten().collect::<Vec<_>>();
 
         // Check if any of the compiled filters have the same name as one that
         // we've already seen. If so, abort, as each Filter(Map) name must be
@@ -386,6 +394,7 @@ impl RotoScripts {
         // one file are checked by the Roto compiler, so that should already
         // have been caught earlier in this method.
         if !reload {
+            
             for filter_map in &new_filter_maps {
                 let filter_name = filter_map.get_filter_map_name();
 
@@ -397,7 +406,7 @@ impl RotoScripts {
                             in {}",
                         found.parent_script.origin
                     ));
-                    return Err(RotoError::CompileError { origin, err });
+                    return Err(RotoError::CompileError { origin, err }.into());
                 }
             }
         }
@@ -494,8 +503,9 @@ impl RotoScripts {
         filter_name: &FilterName,
         rx: TypeValue,
         received: DateTime<Utc>,
+        context: RouteContext,
     ) -> FilterResult<RotoError> {
-        self.do_exec(vm_ref, filter_name, rx, received, None)
+        self.do_exec(vm_ref, filter_name, rx, received, None, context)
     }
 
     pub fn exec_with_tracer(
@@ -506,6 +516,7 @@ impl RotoScripts {
         received: DateTime<Utc>,
         tracer: BoundTracer,
         trace_id: Option<u8>,
+        context: RouteContext
     ) -> FilterResult<RotoError> {
         if let Some(trace_id) = trace_id {
             self.do_exec(
@@ -514,9 +525,10 @@ impl RotoScripts {
                 rx,
                 received,
                 Some((tracer, trace_id)),
+                context
             )
         } else {
-            self.do_exec(vm_ref, filter_name, rx, received, None)
+            self.do_exec(vm_ref, filter_name, rx, received, None, context)
         }
     }
 
@@ -527,6 +539,7 @@ impl RotoScripts {
         rx: TypeValue,
         received: DateTime<Utc>,
         trace_details: Option<(BoundTracer, u8)>,
+        context: RouteContext,
     ) -> FilterResult<RotoError> {
         // Let the payload through if it is actually an output stream message as we don't filter those, we just forward them
         // down the pipeline to a target where they can be handled, or if no roto script exists.
@@ -552,7 +565,7 @@ impl RotoScripts {
         }
 
         // Initialize the VM if needed.
-        let was_initialized_res = self.init_vm(vm_ref, filter_name);
+        let was_initialized_res = self.init_vm(vm_ref, filter_name, context.clone());
 
         // Don't fail on missing filters. If they are missing this is because
         // the earlier check in RotoScripts allows them to be missing because
@@ -587,7 +600,7 @@ impl RotoScripts {
             if found_filter.parent_script.loaded_when > stateful_vm.built_when
             {
                 debug!("Updating roto VM");
-                stateful_vm.vm = self.build_vm(filter_name)?;
+                stateful_vm.vm = self.build_vm(filter_name, context)?;
                 stateful_vm.built_when =
                     found_filter.parent_script.loaded_when;
             } else {
@@ -675,6 +688,7 @@ impl RotoScripts {
         &self,
         vm_ref: &ThreadLocalVM,
         filter_name: &FilterName,
+        context: RouteContext,
     ) -> Result<bool, RotoError> {
         let mut was_replaced = true;
         let vm_ref = &mut vm_ref.borrow_mut();
@@ -682,7 +696,7 @@ impl RotoScripts {
         if vm_ref.is_none() {
             let filter_name = filter_name.clone();
             let built_when = Instant::now();
-            let vm = self.build_vm(&filter_name)?;
+            let vm = self.build_vm(&filter_name, context)?;
             let mem = LinearMemory::uninit();
             vm_ref.replace(StatefulVM {
                 filter_name,
@@ -714,7 +728,7 @@ impl RotoScripts {
         }
     }
 
-    fn build_vm(&self, filter_name: &FilterName) -> Result<VM, RotoError> {
+    fn build_vm(&self, filter_name: &FilterName, context: RouteContext) -> Result<VM, RotoError> {
         // Find the script that contains the named filter
         let scoped_script = self
             .scripts_by_filter
@@ -725,8 +739,12 @@ impl RotoScripts {
         VmBuilder::new()
             .with_mir_code(pack.mir)
             .with_data_sources(pack.data_sources)
+            .with_context(Arc::new(context))
             .build()
-            .map_err(|err| RotoError::build_err(filter_name, err))
+            .map_err(|err| {
+                dbg!("erroring from build_vm");
+                RotoError::build_err(filter_name, err)
+            })
     }
 }
 
@@ -762,6 +780,7 @@ impl FilterOutput {
     }
 }
 
+/*
 #[cfg(test)]
 mod tests {
     use roto::types::{
@@ -777,7 +796,8 @@ mod tests {
     #[test]
     fn single_update_yields_single_result() {
         let test_value: TypeValue = 0_u8.into();
-        let in_payload = Payload::new("test", test_value.clone(), None);
+        let test_name = "test";
+        let in_payload = Payload::new(test_value.clone(), None, None);
         let out_payloads = in_payload
             .filter(
                 |payload, received, _trace_id| {
@@ -790,14 +810,15 @@ mod tests {
             .unwrap();
         assert_eq!(out_payloads.len(), 1);
         assert!(
-            matches!(&out_payloads[0], Payload { source_id, value, .. } if source_id.name() == Some("test") && *value == test_value)
+            matches!(&out_payloads[0], Payload { rx_value, .. } if source_id.name() == Some("test") && *rx_value == test_value)
         );
     }
 
     #[test]
     fn single_update_plus_output_stream_yields_both_as_bulk_update() {
         let test_value: TypeValue = 0_u8.into();
-        let in_payload = Payload::new("test", test_value.clone(), None);
+        // let in_payload = Payload::new("test", test_value.clone());
+        let in_payload = Payload::new(test_value.clone(), None, None);
         let test_output_stream_message =
             mk_roto_output_stream_payload(test_value.clone(), TypeDef::U8);
         let mut output_stream_queue = OutputStreamQueue::new();
@@ -819,10 +840,10 @@ mod tests {
 
         assert_eq!(out_payloads.len(), 2);
         assert!(
-            matches!(&out_payloads[0], Payload { source_id, value, .. } if source_id.name() == Some("test") && *value == test_value)
+            matches!(&out_payloads[0], Payload { rx_value, .. } if source_id.name() == Some("test") && *rx_value == test_value)
         );
         assert!(
-            matches!(&out_payloads[1], Payload { source_id, value: TypeValue::OutputStreamMessage(osm), .. } if source_id.name() == Some("generated") && **osm == test_output_stream_message)
+            matches!(&out_payloads[1], Payload { rx_value: TypeValue::OutputStreamMessage(osm), .. } if source_id.name() == Some("generated") && **osm == test_output_stream_message)
         );
     }
 
@@ -830,8 +851,8 @@ mod tests {
     fn bulk_update_yields_bulk_update() {
         let test_value1: TypeValue = 1_u8.into();
         let test_value2: TypeValue = 2_u8.into();
-        let payload1 = Payload::new("test1", test_value1.clone(), None);
-        let payload2 = Payload::new("test2", test_value2.clone(), None);
+        let payload1 = Payload::new("test1", None, test_value1.clone());
+        let payload2 = Payload::new("test2", None, test_value2.clone());
         let in_payload = smallvec![payload1, payload2];
         let out_payloads = in_payload
             .filter(
@@ -846,10 +867,10 @@ mod tests {
 
         assert_eq!(out_payloads.len(), 2);
         assert!(
-            matches!(&out_payloads[0], Payload { source_id, value, .. } if source_id.name() == Some("test1") && *value == test_value1)
+            matches!(&out_payloads[0], Payload { provenance, rx_value, .. } if provenance.source_id().name() == Some("test1") && *rx_value == test_value1)
         );
         assert!(
-            matches!(&out_payloads[1], Payload { source_id, value, .. } if source_id.name() == Some("test2") && *value == test_value2)
+            matches!(&out_payloads[1], Payload { provenance, rx_value, .. } if provenance.source_id().name() == Some("test2") && *rx_value == test_value2)
         );
     }
 
@@ -857,8 +878,8 @@ mod tests {
     fn bulk_update_plus_output_stream_yields_bulk_update() {
         let test_value1: TypeValue = 1_u8.into();
         let test_value2: TypeValue = 2_u8.into();
-        let payload1 = Payload::new("test1", test_value1.clone(), None);
-        let payload2 = Payload::new("test2", test_value2.clone(), None);
+        let payload1 = Payload::new("test1", None, test_value1.clone());
+        let payload2 = Payload::new("test2", None, test_value2.clone());
         let in_payload = smallvec![payload1, payload2];
         let test_output_stream_message =
             mk_roto_output_stream_payload(test_value1.clone(), TypeDef::U8);
@@ -881,16 +902,16 @@ mod tests {
 
         assert_eq!(out_payloads.len(), 4);
         assert!(
-            matches!(&out_payloads[0], Payload { source_id, value, .. } if source_id.name() == Some("test1") && *value == test_value1)
+            matches!(&out_payloads[0], Payload { provenance, rx_value, .. } if provenance.source_id.name() == Some("test1") && *rx_value == test_value1)
         );
         assert!(
-            matches!(&out_payloads[1], Payload { source_id, value: TypeValue::OutputStreamMessage(osm), .. } if source_id.name() == Some("generated") && **osm == test_output_stream_message)
+            matches!(&out_payloads[1], Payload { provenance, rx_value: TypeValue::OutputStreamMessage(osm), .. } if provenance.source_id.name() == Some("generated") && **osm == test_output_stream_message)
         );
         assert!(
-            matches!(&out_payloads[2], Payload { source_id, value, .. } if source_id.name() == Some("test2") && *value == test_value2)
+            matches!(&out_payloads[2], Payload { provenance, rx_value, .. } if provenance.source_id.name() == Some("test2") && *rx_value == test_value2)
         );
         assert!(
-            matches!(&out_payloads[3], Payload { source_id, value: TypeValue::OutputStreamMessage(osm), .. } if source_id.name() == Some("generated") && **osm == test_output_stream_message)
+            matches!(&out_payloads[3], Payload { provenance, rx_value: TypeValue::OutputStreamMessage(osm), .. } if provenance.source_id.name() == Some("generated") && **osm == test_output_stream_message)
         );
     }
 
@@ -911,3 +932,4 @@ mod tests {
         OutputStreamMessage::from(record)
     }
 }
+*/

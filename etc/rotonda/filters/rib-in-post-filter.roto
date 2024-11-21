@@ -1,9 +1,0 @@
-filter rib-in-post-filter {
-    define {
-        rx route: Route;
-    }
-
-    apply {
-        accept;
-    }
-}

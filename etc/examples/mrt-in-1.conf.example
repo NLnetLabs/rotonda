@@ -1,0 +1,19 @@
+# Example Rotonda Configuration for mrt import
+#
+# This file is an example Rotonda file. It allows you to import one mrt file
+# and load it into a RIB.
+
+http_listen = ["127.0.0.1:8080"]
+
+[units.mrt-in]
+type = "mrt-file-in"
+# Fill out the correct path to the downloaded bview file here.
+filename = "../bview/latest-bview-rrc26"
+
+[units.rib]
+type = "rib"
+sources = ["mrt-in"]
+
+[targets.null]
+type = "null-out"
+sources = "rib"

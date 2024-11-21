@@ -8,12 +8,8 @@
 use crate::http;
 use crate::log::{LogConfig, Terminate};
 use crate::manager::{Manager, TargetSet, UnitSet};
-use crate::mvp::{
-    MvpConfig, ARG_CONFIG, CFG_TARGET_BMP_PROXY, CFG_TARGET_MQTT,
-    CFG_UNIT_BGP_IN, CFG_UNIT_BMP_IN,
-};
 use clap::{Arg, ArgMatches, Command};
-use log::{error, info, trace};
+use log::{error, trace};
 use serde::Deserialize;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -26,6 +22,8 @@ use toml::{Spanned, Value};
 
 const CFG_UNITS: &str = "units";
 const CFG_TARGETS: &str = "targets";
+
+const ARG_CONFIG: &str = "config";
 
 //------------ Config --------------------------------------------------------
 
@@ -40,9 +38,10 @@ const CFG_TARGETS: &str = "targets";
 /// [`from_arg_matches`](Self::from_arg_matches) will then load the file
 /// referenced in the command line and, upon success, return the config.
 #[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
-    /// The location from which to load user defined Roto script files.
-    pub roto_scripts_path: Option<PathBuf>,
+    /// Location of the .roto script containing all user defined filters.
+    pub roto_script: Option<PathBuf>,
 
     /// The set of configured units.
     pub units: UnitSet,
@@ -57,10 +56,6 @@ pub struct Config {
     /// The HTTP server configuration.
     #[serde(flatten)]
     pub http: http::Server,
-
-    /// MVP specific configuration for overriding the embedded config.
-    #[serde(flatten)]
-    pub mvp_overrides: MvpConfig,
 }
 
 impl Config {
@@ -91,12 +86,11 @@ impl Config {
             Arg::new(ARG_CONFIG)
                 .short('c')
                 .long(ARG_CONFIG)
-                .required(false)
+                .required(true)
                 .value_name("PATH")
-                .help("Config file to use [default: embedded]"),
+                .help("Config file to use"),
         );
-        let app = LogConfig::config_args(app);
-        MvpConfig::config_args(app)
+        LogConfig::config_args(app)
     }
 
     /// Loads the configuration based on command line options provided.
@@ -114,37 +108,20 @@ impl Config {
         cur_dir: &Path,
         manager: &mut Manager,
     ) -> Result<(Source, Self), Terminate> {
-        let config_file = match args.get_one::<String>(ARG_CONFIG) {
-            Some(conf_path_arg) => {
-                // --config command line argument supplied, load and use the config file
-                let config_path = cur_dir.join(conf_path_arg);
-
-                // Load the config file from the given path and parse it as-is.
-                ConfigFile::load(&config_path).map_err(|err| {
-                    error!(
-                        "Failed to read config file '{}': {}",
-                        config_path.display(),
-                        err
-                    );
-                    Terminate::error()
-                })?
-            }
-
-            None => {
-                // No --config command line argument specified, use the embedded MVP config
-                let bytes = include_bytes!("../etc/rotonda/rotonda.builtin.conf").to_vec();
-
-                // Detect command line arguments designed to override and alter the embedded MVP config file.
-                let mut mvp_overrides = MvpConfig::default();
-                mvp_overrides.update_with_arg_matches(args)?;
-
-                // Parse the given config bytes using MVP overrides to adjust the config as desired.
-                ConfigFile::new(bytes, Source::default(), Some(mvp_overrides)).map_err(|_| Terminate::error())?
-            }
+        let config_file = {
+            // With ARG_CONFIG required, we can unwrap here.
+            let conf_path_arg = args.get_one::<String>(ARG_CONFIG).unwrap();
+            let config_path = cur_dir.join(conf_path_arg);
+            ConfigFile::load(&config_path).map_err(|err| { error!(
+                    "Failed to read config file '{}': {}",
+                    config_path.display(),
+                    err
+                );
+                Terminate::error()
+            })?
         };
 
         let mut config = manager.load(&config_file)?;
-        config.mvp_overrides.update_with_arg_matches(args)?;
         config.log.update_with_arg_matches(args, cur_dir)?;
         config.finalise(config_file, manager)
     }
@@ -163,11 +140,7 @@ impl Config {
     ) -> Result<(Source, Self), Terminate> {
         self.log.switch_logging(false)?;
 
-        if self.mvp_overrides.print_config_and_exit {
-            info!("The --print-config-and-exit command line argument was used. After processing the config file looks like this:");
-            info!("{}", config_file.to_string());
-            return Err(Terminate::normal());
-        } else if log::log_enabled!(log::Level::Trace) {
+        if log::log_enabled!(log::Level::Trace) {
             trace!("After processing the config file looks like this:");
             trace!("{}", config_file.to_string());
         }
@@ -363,7 +336,7 @@ impl ConfigFile {
     /// Load a config file from disk.
     pub fn load(path: &impl AsRef<Path>) -> Result<Self, io::Error> {
         match fs::read(path) {
-            Ok(bytes) => Self::new(bytes, path.into(), None),
+            Ok(bytes) => Self::new(bytes, path.into()),
             Err(e) => Err(e)
         }
     }
@@ -371,7 +344,6 @@ impl ConfigFile {
     pub fn new(
         bytes: Vec<u8>,
         source: Source,
-        mvp_overrides: Option<MvpConfig>,
     ) -> Result<Self, io::Error> {
         // Handle the special case of a rib unit that is actually a physical rib unit and one or more virtual rib
         // units. Rather than have the user manually configure these separate rib units by hand in the config file,
@@ -407,152 +379,6 @@ impl ConfigFile {
         if let Some(source_remappings) = source_remappings {
             if let Some(Value::Table(targets)) = toml.get_mut(CFG_TARGETS) {
                 Self::remap_sources(targets, &source_remappings);
-            }
-        }
-
-        if let Some(mvp_overrides) = mvp_overrides {
-            let Value::Table(ref mut root) = toml else {
-                unreachable!()
-            };
-
-            // Handle the special MVP case of allowing a user to complete or remove the BMP proxy target config based
-            // on the command line arguments supplied.
-            match mvp_overrides.bmp_proxy_destination_addr {
-                Some(addr) => {
-                    // Reconfigure the dummy proxy definition to use the destination.
-                    let Value::Table(ref mut targets) =
-                        root.get_mut(CFG_TARGETS).unwrap()
-                    else {
-                        unreachable!()
-                    };
-                    let Value::Table(ref mut bmp_proxy) =
-                        targets.get_mut(CFG_TARGET_BMP_PROXY).unwrap()
-                    else {
-                        unreachable!()
-                    };
-                    let Value::String(ref mut destination) =
-                        bmp_proxy.get_mut("destination").unwrap()
-                    else {
-                        unreachable!()
-                    };
-                    *destination = addr.to_string();
-                }
-
-                None => {
-                    // Remove the dummy proxy target definition as the MVP user did not supply a destination to proxy
-                    // to.
-                    let Value::Table(ref mut targets) =
-                        root.get_mut(CFG_TARGETS).unwrap()
-                    else {
-                        unreachable!()
-                    };
-                    targets.remove(CFG_TARGET_BMP_PROXY);
-                }
-            }
-
-            if let Some(new_tracing_mode) = mvp_overrides.tracing_mode {
-                let Value::Table(ref mut units) =
-                    root.get_mut(CFG_UNITS).unwrap()
-                else {
-                    unreachable!()
-                };
-                let Value::Table(ref mut bmp_in) =
-                    units.get_mut(CFG_UNIT_BMP_IN).unwrap()
-                else {
-                    unreachable!()
-                };
-                let Value::String(ref mut tracing_mode) =
-                    bmp_in.get_mut("tracing_mode").unwrap()
-                else {
-                    unreachable!()
-                };
-                *tracing_mode = new_tracing_mode.to_string();
-            }
-
-            // Handle the special MVP case of allowing a user to complete or remove the MQTT target config based on the
-            // command line arguments supplied.
-            match mvp_overrides.mqtt_destination_addr {
-                Some(addr) => {
-                    // Reconfigure the dummy mqtt target definition to use the destination.
-                    let Value::Table(ref mut targets) =
-                        root.get_mut(CFG_TARGETS).unwrap()
-                    else {
-                        unreachable!()
-                    };
-                    let Value::Table(ref mut mqtt) =
-                        targets.get_mut(CFG_TARGET_MQTT).unwrap()
-                    else {
-                        unreachable!()
-                    };
-                    let Value::String(ref mut destination) =
-                        mqtt.get_mut("destination").unwrap()
-                    else {
-                        unreachable!()
-                    };
-                    *destination = addr.to_string();
-                }
-
-                None => {
-                    // Remove the dummy mqtt target definition as the MVP user did not supply a destination to publish
-                    // to.
-                    let Value::Table(ref mut targets) =
-                        root.get_mut(CFG_TARGETS).unwrap()
-                    else {
-                        unreachable!()
-                    };
-                    targets.remove(CFG_TARGET_MQTT);
-                }
-            }
-
-            // Handle the special MVP case of allowing listen ports to be overridden on the command line.
-            if let Some(addr) = mvp_overrides.http_listen_addr {
-                let Value::Array(ref mut listen_array) =
-                    root.get_mut("http_listen").unwrap()
-                else {
-                    unreachable!()
-                };
-                let Value::String(ref mut listen) =
-                    listen_array.get_mut(0).unwrap()
-                else {
-                    unreachable!()
-                };
-                *listen = addr.to_string();
-            }
-            if let Some(addr) = mvp_overrides.bgp_listen_addr {
-                let Value::Table(ref mut units) =
-                    root.get_mut(CFG_UNITS).unwrap()
-                else {
-                    unreachable!()
-                };
-                let Value::Table(ref mut bgp_in) =
-                    units.get_mut(CFG_UNIT_BGP_IN).unwrap()
-                else {
-                    unreachable!()
-                };
-                let Value::String(ref mut listen) =
-                    bgp_in.get_mut("listen").unwrap()
-                else {
-                    unreachable!()
-                };
-                *listen = addr.to_string();
-            }
-            if let Some(addr) = mvp_overrides.bmp_listen_addr {
-                let Value::Table(ref mut units) =
-                    root.get_mut(CFG_UNITS).unwrap()
-                else {
-                    unreachable!()
-                };
-                let Value::Table(ref mut bmp_tcp_in) =
-                    units.get_mut(CFG_UNIT_BMP_IN).unwrap()
-                else {
-                    unreachable!()
-                };
-                let Value::String(ref mut listen) =
-                    bmp_tcp_in.get_mut("listen").unwrap()
-                else {
-                    unreachable!()
-                };
-                *listen = addr.to_string();
             }
         }
 

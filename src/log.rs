@@ -362,7 +362,10 @@ impl LogConfig {
             .level(self.log_level.0)
             .level_for("rustls", LevelFilter::Error)
             .level_for("rumqttd", LevelFilter::Warn)
-            .level_for("tracing::span", LevelFilter::Off);
+            .level_for("tracing::span", LevelFilter::Off)
+            .level_for("cranelift_codegen", LevelFilter::Warn)
+            .level_for("cranelift_jit", LevelFilter::Warn)
+            ;
 
         // Boost the log level of modules for which the operator has requested more diagnostics for.
         res = res
@@ -377,7 +380,8 @@ impl LogConfig {
                 .level_for("hyper", LevelFilter::Info)
                 .level_for("reqwest", LevelFilter::Info)
                 .level_for("h2", LevelFilter::Info)
-                .level_for("mio", LevelFilter::Info);
+                .level_for("mio", LevelFilter::Info)
+                ;
 
             // Conversely, when the main log level is at least debug, disable limitations on logging normally in place
             // for some modules.
@@ -486,7 +490,7 @@ impl LogFilter {
 
 impl Default for LogFilter {
     fn default() -> Self {
-        LogFilter(log::LevelFilter::Warn)
+        LogFilter(log::LevelFilter::Info)
     }
 }
 

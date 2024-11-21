@@ -1,0 +1,26 @@
+# Example Rotonda Configuration for mrt imports
+#
+# This file is an example Rotonda file. It allows you to import two mrt files
+# and load them into a RIB.
+
+http_listen = ["127.0.0.1:8080"]
+
+# It's perfectly fine to have mulitple mrt-in connectors
+
+[units.mrt-in-1]
+type = "mrt-file-in"
+filename = "../bview/latest-bview-rrc26"
+
+[units.mrt-in-2]
+type = "mrt-file-in"
+filename = "../bview/latest-bview-rrc3"
+
+# Both mrt-in connectors are connected to this RIB
+[units.rib]
+type = "rib"
+sources = ["mrt-in-1","mrt-in-2"]
+
+[targets.null]
+type = "null-out"
+sources = "rib"
+

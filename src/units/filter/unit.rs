@@ -1,14 +1,14 @@
 use crate::{
     common::{
-        roto::{FilterName, RotoScripts, ThreadLocalVM},
-        status_reporter::{AnyStatusReporter, UnitStatusReporter},
+        //roto::{FilterName, RotoScripts, ThreadLocalVM},
+        roto_new::{FilterName, RotoScripts}, status_reporter::{AnyStatusReporter, UnitStatusReporter}
     },
     comms::{
         AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus,
         Terminated,
     },
     manager::{Component, WaitPoint},
-    payload::{FilterError, Filterable, Update, UpstreamStatus},
+    payload::{/*FilterError, Filterable,*/ Payload, RotondaRoute, Update, UpstreamStatus},
     tracing::Tracer,
     units::Unit,
 };
@@ -47,7 +47,7 @@ impl Filter {
 }
 
 struct RotoFilterRunner {
-    roto_scripts: RotoScripts,
+    //roto_scripts: RotoScripts,
     gate: Arc<Gate>,
     status_reporter: Arc<RotoFilterStatusReporter>,
     filter_name: Arc<ArcSwap<FilterName>>,
@@ -55,9 +55,11 @@ struct RotoFilterRunner {
 }
 
 impl RotoFilterRunner {
+    /*
     thread_local!(
         static VM: ThreadLocalVM = RefCell::new(None);
     );
+    */
 
     fn new(
         gate: Gate,
@@ -76,11 +78,11 @@ impl RotoFilterRunner {
             Arc::new(RotoFilterStatusReporter::new(&unit_name, metrics));
 
         let filter_name = Arc::new(ArcSwap::from_pointee(filter_name));
-        let roto_scripts = component.roto_scripts().clone();
+        //let roto_scripts = component.roto_scripts().clone();
         let tracer = component.tracer().clone();
 
         Self {
-            roto_scripts,
+            //roto_scripts,
             gate,
             status_reporter,
             filter_name,
@@ -93,8 +95,9 @@ impl RotoFilterRunner {
         roto_script: &str,
         filter_name: &str,
     ) -> (Self, crate::comms::GateAgent) {
-        use crate::common::roto::RotoScriptOrigin;
+        //use crate::common::roto::RotoScriptOrigin;
 
+        /*
         let roto_scripts = RotoScripts::default();
         roto_scripts
             .add_or_update_script(
@@ -102,6 +105,7 @@ impl RotoFilterRunner {
                 roto_script,
             )
             .unwrap();
+        */
         let (gate, gate_agent) = Gate::new(0);
         let gate = gate.into();
         let status_reporter = RotoFilterStatusReporter::default().into();
@@ -110,7 +114,7 @@ impl RotoFilterRunner {
         let tracer = Arc::new(Tracer::new());
 
         let runner = Self {
-            roto_scripts,
+            //roto_scripts,
             gate,
             status_reporter,
             filter_name,
@@ -202,7 +206,7 @@ impl RotoFilterRunner {
     async fn process_update(
         &self,
         update: Update,
-    ) -> Result<(), FilterError> {
+    ) -> Result<(), String /*FilterError*/> {
         match update {
             Update::UpstreamStatusChange(UpstreamStatus::EndOfStream {
                 ..
@@ -211,7 +215,7 @@ impl RotoFilterRunner {
                 self.gate.update_data(update).await;
             }
 
-            Update::Single(payload) => self.filter_payload(payload).await?,
+            Update::Single(payload) => self.filter_payload([payload]).await?,
 
             Update::Bulk(payloads) => self.filter_payload(payloads).await?,
 
@@ -224,17 +228,20 @@ impl RotoFilterRunner {
         Ok(())
     }
 
-    async fn filter_payload<T: Filterable>(
+    async fn filter_payload(
         &self,
-        payload: T,
-    ) -> Result<(), FilterError> {
+        _payloads: impl IntoIterator<Item = Payload>, 
+    ) -> Result<(), String /*FilterError*/> {
+        todo!()
+
+        /*
         let tracer = self.tracer.bind(self.gate.id());
 
         if let Some(filtered_update) = Self::VM
             .with(|vm| {
                 payload
                     .filter(
-                        |value, received, trace_id| {
+                        |value, received, trace_id, context| {
                             self.roto_scripts.exec_with_tracer(
                                 vm,
                                 &self.filter_name.load(),
@@ -242,6 +249,7 @@ impl RotoFilterRunner {
                                 received,
                                 tracer.clone(),
                                 trace_id,
+                                context
                             )
                         },
                         |source_id| {
@@ -267,6 +275,7 @@ impl RotoFilterRunner {
         }
 
         Ok(())
+        */
     }
 }
 
@@ -291,14 +300,16 @@ mod tests {
 
     use bytes::Bytes;
     use roto::types::{
-        builtin::BuiltinTypeValue, collections::BytesRecord,
+        builtin::{BuiltinTypeValue, RouteContext}, collections::BytesRecord,
         lazyrecord_types::BmpMessage, typevalue::TypeValue,
     };
-    use routecore::{asn::Asn, bmp::message::PeerType};
+    use inetnum::asn::Asn;
+    use routecore::bmp::message::PeerType;
+    use roto::types::builtin::SourceId;
 
     use crate::{
         bgp::encode::{Announcements, Prefixes},
-        payload::{Payload, SourceId},
+        payload::Payload,
         tests::util::internal::{
             enable_logging, get_testable_metrics_snapshot,
         },
@@ -540,9 +551,14 @@ mod tests {
         let source_id =
             SourceId::SocketAddr("127.0.0.1:8080".parse().unwrap());
         let bmp_msg =
-            BytesRecord(BmpMessage::from_octets(msg_buf).unwrap());
+            BytesRecord::from(BmpMessage::from_octets(msg_buf).unwrap());
         let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
-        Update::Single(Payload::new(source_id, value, None))
+        //Update::Single(Payload::new(value, None, None))
+        Update::Single(Payload::new(
+                value,
+                RouteContext::for_reprocessing(),
+                None
+        ))
     }
 
     async fn is_filtered(filter: &RotoFilterRunner, update: Update) -> bool {

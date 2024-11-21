@@ -1,23 +1,24 @@
-use std::{collections::hash_map::Keys, ops::ControlFlow};
+use std::{collections::hash_map::Keys, ops::ControlFlow, sync::Arc};
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use roto::types::builtin::RouteStatus;
+use log::debug;
+//use roto::types::builtin::NlriStatus;
+use inetnum::addr::Prefix;
 use routecore::{
-    addr::Prefix,
     bgp::{
         message::{SessionConfig, UpdateMessage},
-        types::AfiSafi,
+        types::AfiSafiType,
+        nlri::afisafi::Nlri
     },
     bmp::message::{Message as BmpMsg, PerPeerHeader, TerminationMessage},
 };
 use smallvec::SmallVec;
 
 use crate::{
-    payload::{Payload, Update},
-    units::bmp_tcp_in::state_machine::machine::{
+    ingress, payload::{Payload, Update}, units::bmp_tcp_in::state_machine::machine::{
         BmpStateIdx, PeerState, PeerStates,
-    },
+    }
 };
 
 use super::super::{
@@ -79,7 +80,7 @@ impl BmpStateDetails<Updating> {
             BmpMsg::RouteMonitoring(msg) => self.route_monitoring(
                 received,
                 msg,
-                RouteStatus::UpToDate,
+                //NlriStatus::UpToDate,
                 trace_id,
                 |s, pph, update| {
                     s.route_monitoring_preprocessing(pph, update)
@@ -102,8 +103,8 @@ impl BmpStateDetails<Updating> {
         pph: &PerPeerHeader<Bytes>,
         update: &UpdateMessage<Bytes>,
     ) -> ControlFlow<ProcessingResult, Self> {
-        if let Ok(Some((afi, safi))) = update.is_eor() {
-            if self.details.remove_pending_eor(pph, (afi, safi).try_into().unwrap()) {
+        if let Ok(Some(afi_safi)) = update.is_eor() {
+            if self.details.remove_pending_eor(pph, afi_safi) {
                 let num_pending_eors = self.details.num_pending_eors();
                 self.status_reporter.pending_eors_update(
                     self.router_id.clone(),
@@ -116,9 +117,27 @@ impl BmpStateDetails<Updating> {
     }
 
     pub fn terminate(
-        mut self,
+        self,
         _msg: Option<TerminationMessage<Bytes>>,
     ) -> ProcessingResult {
+        debug!("updating terminate");
+        let mut ids = SmallVec::<[ingress::IngressId; 8]>::new();
+        for pph in self.details.get_peers() {
+            if let Some(id) = self.details.get_peer_ingress_id(pph) {
+                ids.push(id);
+            }
+        }
+
+        let next_state = BmpState::Terminated(self.into());
+
+        if ids.is_empty() {
+            Self::mk_state_transition_result(BmpStateIdx::Dumping, next_state)
+        } else {
+            let update = Update::WithdrawBulk(ids);
+            Self::mk_final_routing_update_result(next_state, update)
+        }
+
+        /*
         // let reason = msg
         //     .information()
         //     .map(|tlv| tlv.to_string())
@@ -141,6 +160,7 @@ impl BmpStateDetails<Updating> {
                 Update::Bulk(routes),
             )
         }
+        */
     }
 }
 
@@ -159,9 +179,10 @@ impl From<BmpStateDetails<Dumping>> for BmpStateDetails<Updating> {
     fn from(v: BmpStateDetails<Dumping>) -> Self {
         let details: Updating = v.details.into();
         Self {
-            source_id: v.source_id,
+            ingress_id: v.ingress_id,
             router_id: v.router_id,
             status_reporter: v.status_reporter,
+            ingress_register: v.ingress_register,
             details,
         }
     }
@@ -190,13 +211,25 @@ impl PeerAware for Updating {
         pph: PerPeerHeader<Bytes>,
         session_config: SessionConfig,
         eor_capable: bool,
+        ingress_register: Arc<ingress::Register>,
+        bmp_ingress_id: ingress::IngressId,
     ) -> bool {
         self.peer_states
-            .add_peer_config(pph, session_config, eor_capable)
+            .add_peer_config(
+                pph,
+                session_config,
+                eor_capable,
+                ingress_register,
+                bmp_ingress_id,
+            )
     }
 
     fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState> {
         self.peer_states.get_peers()
+    }
+
+    fn get_peer_ingress_id(&self, pph: &PerPeerHeader<Bytes>) -> Option<ingress::IngressId> {
+        self.peer_states.get_peer_ingress_id(pph)
     }
 
     fn update_peer_config(
@@ -214,7 +247,7 @@ impl PeerAware for Updating {
         self.peer_states.get_peer_config(pph)
     }
 
-    fn remove_peer(&mut self, pph: &PerPeerHeader<Bytes>) -> bool {
+    fn remove_peer(&mut self, pph: &PerPeerHeader<Bytes>) -> Option<PeerState> {
         self.peer_states.remove_peer(pph)
     }
 
@@ -232,7 +265,7 @@ impl PeerAware for Updating {
     fn add_pending_eor(
         &mut self,
         pph: &PerPeerHeader<Bytes>,
-        afi_safi: AfiSafi
+        afi_safi: AfiSafiType
     ) -> usize {
         self.peer_states.add_pending_eor(pph, afi_safi)
     }
@@ -240,7 +273,7 @@ impl PeerAware for Updating {
     fn remove_pending_eor(
         &mut self,
         pph: &PerPeerHeader<Bytes>,
-        afi_safi: AfiSafi,
+        afi_safi: AfiSafiType,
     ) -> bool {
         self.peer_states.remove_pending_eor(pph, afi_safi)
     }
@@ -252,23 +285,23 @@ impl PeerAware for Updating {
     fn add_announced_prefix(
         &mut self,
         pph: &PerPeerHeader<Bytes>,
-        prefix: routecore::addr::Prefix,
+        nlri: Nlri<bytes::Bytes>,
     ) -> bool {
-        self.peer_states.add_announced_prefix(pph, prefix)
+        self.peer_states.add_announced_prefix(pph, nlri)
     }
 
     fn remove_announced_prefix(
         &mut self,
         pph: &PerPeerHeader<Bytes>,
-        prefix: &routecore::addr::Prefix,
+        nlri: &Nlri<bytes::Bytes>,
     ) {
-        self.peer_states.remove_announced_prefix(pph, prefix)
+        self.peer_states.remove_announced_prefix(pph, nlri)
     }
 
     fn get_announced_prefixes(
         &self,
         pph: &PerPeerHeader<Bytes>,
-    ) -> Option<std::collections::hash_set::Iter<Prefix>> {
+    ) -> Option<std::collections::hash_set::Iter<Nlri<bytes::Bytes>>> {
         self.peer_states.get_announced_prefixes(pph)
     }
 }

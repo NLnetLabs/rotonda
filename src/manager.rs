@@ -1,9 +1,10 @@
 //! Controlling the entire operation.
 
-use crate::common::file_io::{FileIo, TheFileIo};
-use crate::common::roto::{
-    FilterName, LoadErrorKind, RotoError, RotoScriptOrigin, RotoScripts,
-};
+use crate::common::file_io::TheFileIo;
+//use crate::common::roto::{
+//    FilterName, LoadErrorKind, RotoError, RotoScriptOrigin, RotoScripts,
+//};
+use crate::common::roto_new::{rotonda_roto_runtime, FilterName};
 use crate::comms::{
     DirectLink, Gate, GateAgent, GraphStatus, Link, DEF_UPDATE_QUEUE_LEN,
 };
@@ -12,7 +13,7 @@ use crate::log::Terminate;
 use crate::targets::Target;
 use crate::tracing::{MsgRelation, Trace, Tracer};
 use crate::units::Unit;
-use crate::{http, metrics};
+use crate::{http, metrics, ingress};
 use arc_swap::ArcSwap;
 use futures::future::{join_all, select, Either};
 use log::{debug, error, info, log_enabled, trace, warn};
@@ -20,7 +21,6 @@ use non_empty_vec::NonEmpty;
 use reqwest::Client as HttpClient;
 use serde::Deserialize;
 use std::collections::HashSet;
-use std::ffi::OsStr;
 use std::ops::Deref;
 use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::{Duration, Instant};
@@ -57,11 +57,14 @@ pub struct Component {
     /// A reference to the HTTP resources collection.
     http_resources: http::Resources,
 
-    /// A reference to the Roto script collection.
-    roto_scripts: RotoScripts,
+    /// A reference to the compiled Roto script.
+    roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
 
     /// A reference to the Tracer
     tracer: Arc<Tracer>,
+
+    /// A reference to the ingress sources.
+    ingresses: Arc<ingress::Register>,
 }
 
 #[cfg(test)]
@@ -73,8 +76,9 @@ impl Default for Component {
             http_client: Default::default(),
             metrics: Default::default(),
             http_resources: Default::default(),
-            roto_scripts: Default::default(),
+            roto_compiled: Default::default(),
             tracer: Default::default(),
+            ingresses: Default::default(),
         }
     }
 }
@@ -87,8 +91,9 @@ impl Component {
         http_client: HttpClient,
         metrics: metrics::Collection,
         http_resources: http::Resources,
-        roto_scripts: RotoScripts,
+        roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
         tracer: Arc<Tracer>,
+        ingresses: Arc<ingress::Register>,
     ) -> Self {
         Component {
             name: name.into(),
@@ -96,8 +101,9 @@ impl Component {
             http_client: Some(http_client),
             metrics: Some(metrics),
             http_resources,
-            roto_scripts,
+            roto_compiled,
             tracer,
+            ingresses,
         }
     }
 
@@ -120,8 +126,8 @@ impl Component {
         &self.http_resources
     }
 
-    pub fn roto_scripts(&self) -> &RotoScripts {
-        &self.roto_scripts
+    pub fn roto_compiled(&self) -> &Option<Arc<crate::common::roto_new::CompiledRoto>> {
+        &self.roto_compiled
     }
 
     pub fn tracer(&self) -> &Arc<Tracer> {
@@ -141,6 +147,7 @@ impl Component {
         process: Arc<dyn http::ProcessRequest>,
         rel_base_url: &str,
     ) {
+        debug!("registering resource {:?}", &rel_base_url);
         self.http_resources.register(
             Arc::downgrade(&process),
             self.name.clone(),
@@ -156,6 +163,7 @@ impl Component {
         process: Arc<dyn http::ProcessRequest>,
         rel_base_url: &str,
     ) {
+        debug!("registering resource {:?}", &rel_base_url);
         self.http_resources.register(
             Arc::downgrade(&process),
             self.name.clone(),
@@ -163,6 +171,15 @@ impl Component {
             rel_base_url,
             true,
         )
+    }
+
+
+    pub fn register_ingress(&self) -> ingress::IngressId {
+        self.ingresses.register()
+    }
+
+    pub fn ingresses(&self) -> Arc<ingress::Register> {
+        self.ingresses.clone()
     }
 }
 
@@ -578,8 +595,8 @@ pub struct Manager {
     /// The HTTP resources collection maintained by this manager.
     http_resources: http::Resources,
 
-    /// A reference to the Roto script collection.
-    roto_scripts: RotoScripts,
+    /// A reference to the compiled Roto script.
+    roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
 
     graph_svg_processor: Arc<dyn ProcessRequest>,
 
@@ -590,6 +607,8 @@ pub struct Manager {
     tracer: Arc<Tracer>,
 
     tracer_processor: Arc<dyn ProcessRequest>,
+
+    ingresses: Arc<ingress::Register>,
 }
 
 impl Default for Manager {
@@ -606,6 +625,7 @@ impl Manager {
             LinkReport::new(),
         )));
         let tracer = Arc::new(Tracer::new());
+        let ingresses = Arc::new(ingress::Register::new());
 
         let (graph_svg_processor, graph_svg_rel_base_url) =
             Self::mk_svg_http_processor(
@@ -627,12 +647,13 @@ impl Manager {
             http_client: Default::default(),
             metrics: Default::default(),
             http_resources: Default::default(),
-            roto_scripts: Default::default(),
+            roto_compiled: Default::default(),
             graph_svg_processor,
             graph_svg_data,
             file_io: TheFileIo::default(),
             tracer,
             tracer_processor,
+            ingresses,
         };
 
         // Register the /status/graph endpoint.
@@ -785,7 +806,7 @@ impl Manager {
                 None => error!("{}", err),
             }
             Terminate::error()
-        })
+        })    
     }
 
     /// Prepare for spawning.
@@ -803,66 +824,19 @@ impl Manager {
         config: &Config,
         file: &ConfigFile,
     ) -> Result<(), Terminate> {
-        let mut res = Ok(());
 
-        // Load any .roto script files that exist (and unload any that no
-        // longer exist)
-        self.load_roto_scripts(&config.roto_scripts_path).or_else(|err| {
-            let msg = format!("Unable to load Roto scripts: {err}.");
-            if matches!(err, RotoError::LoadError { .. })
-                && config.mvp_overrides.ignore_missing_filters
-            {
-                warn!("{msg}");
-                Ok(())
-            } else {
-                error!("{msg}");
-                Err(Terminate::error())
-            }
-        })?;
+        let roto_script = config.roto_script.as_ref()
+            .and_then(|roto_script|
+                file.path()
+                    .and_then(|p| p.parent())
+                    .map(|d| d.to_path_buf())
+                    .map(|mut dir|{ dir.push(roto_script); dir})
+        );
 
-        // Drain the singleton static ROTO_FILTER_NAMES contents to a local
-        // variable.
-        let config_filter_names = ROTO_FILTER_NAMES
-            .with(|filter_names| {
-                filter_names.replace(Some(Default::default()))
-            })
-            .unwrap();
-
-        // Check if all filter names exist in the loaded filter set
-        let loaded_filter_names = self.roto_scripts.get_filter_names();
-        let unknown_filter_names = config_filter_names
-            .difference(&loaded_filter_names)
-            .map(|fname| format!("'{}'", fname))
-            .collect::<Vec<_>>();
-        if !unknown_filter_names.is_empty() {
-            let unknown_filter_names = unknown_filter_names.join(", ");
-            let loaded_roto_scripts = self.roto_scripts.get_script_origins();
-            let reason: String = if loaded_roto_scripts.is_empty() {
-                if let Some(path) = &config.roto_scripts_path {
-                    format!("no .roto scripts could be loaded from the \
-                    configured `roto_scripts_path` directory '{}'.", path.display())
-                } else {
-                    "the `roto_scripts_path` setting is not specified so no \
-                    filters were loaded."
-                        .to_string()
-                }
-            } else {
-                let scripts = loaded_roto_scripts
-                    .iter()
-                    .map(|v| format!("'{v}'"))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                format!("none of the loaded .roto scripts ({scripts}) contains them")
-            };
-            let msg = format!("Roto filters {unknown_filter_names} are \
-            referenced by your configuration but do not exist because {reason}");
-
-            if config.mvp_overrides.ignore_missing_filters {
-                warn!("{msg} These filters will be ignored.");
-            } else {
-                error!("{msg}");
-                res = Err(Terminate::error());
-            }
+        if let Err(err) = self.compile_roto_script(&roto_script) {
+            let msg = format!("Unable to load main Roto script: {err}.");
+            error!("{msg}");
+            Err(Terminate::error())?
         }
 
         // Drain the singleton static GATES contents to a local variable.
@@ -891,6 +865,7 @@ impl Manager {
                             ))
                         );
                     }
+                    return Err(Terminate::error());
                 } else {
                     self.pending_gates
                         .insert(name.clone(), (gate, load.agent));
@@ -904,53 +879,26 @@ impl Manager {
         // started Units and Targets. The caller should invoke spawn() to run
         // each Unit and Target and assign Gates to Units by name.
 
-        res
+        Ok(())
     }
 
-    // TODO: Use Marked for returned error so that the location in the config
-    // file in question can be reported to the user. TODO: Don't load .roto
-    // script files that are not referenced by any units or targets?
-    pub fn load_roto_scripts(
+    pub fn compile_roto_script(
         &mut self,
-        roto_scripts_path: &Option<std::path::PathBuf>,
-    ) -> Result<(), RotoError> {
-        let mut new_origins = HashSet::<RotoScriptOrigin>::new();
+        roto_scripts_path: &Option<std::path::PathBuf>
+    ) -> Result<(), String> {
+        let path = if let Some(p) = roto_scripts_path {
+            p
+        } else {
+            info!("no roto scripts path to load filters from");
+            return Ok(());
+        };
 
-        if let Some(roto_scripts_path) = roto_scripts_path {
-            let entries =
-                self.file_io.read_dir(roto_scripts_path).map_err(|err| {
-                    LoadErrorKind::read_dir_err(roto_scripts_path, err)
-                })?;
-            for entry in entries {
-                let entry = entry.map_err(|err| {
-                    LoadErrorKind::read_dir_entry_err(roto_scripts_path, err)
-                })?;
+        let i = roto::read_files([path.to_string_lossy()])
+            .map_err(|e| e.to_string())?;
+        let c = i.compile(rotonda_roto_runtime().unwrap(), usize::BITS / 8)
+            .map_err(|e| e.to_string())?;
 
-                if matches!(entry.path().extension(), Some(ext) if ext == OsStr::new("roto"))
-                {
-                    let roto_script = self
-                        .file_io
-                        .read_to_string(entry.path())
-                        .map_err(|err| {
-                            LoadErrorKind::read_file_err(entry.path(), err)
-                        })?;
-
-                    let origin = RotoScriptOrigin::Path(entry.path());
-                    self.roto_scripts
-                        .add_or_update_script(origin.clone(), &roto_script)?;
-
-                    new_origins.insert(origin);
-                }
-            }
-        }
-
-        // Unload any no longer existing scripts
-        let loaded_origins = self.roto_scripts.get_script_origins();
-        let excess_origins = loaded_origins.difference(&new_origins);
-        for origin in excess_origins {
-            self.roto_scripts.remove_script(origin);
-        }
-
+        self.roto_compiled = Some(Arc::new(Mutex::new(c)));
         Ok(())
     }
 
@@ -1175,8 +1123,9 @@ impl Manager {
                 self.http_client.clone(),
                 self.metrics.clone(),
                 self.http_resources.clone(),
-                self.roto_scripts.clone(),
+                self.roto_compiled.clone(),
                 self.tracer.clone(),
+                self.ingresses.clone(),
             );
 
             let target_type = std::mem::discriminant(&new_target);
@@ -1252,8 +1201,9 @@ impl Manager {
                 self.http_client.clone(),
                 self.metrics.clone(),
                 self.http_resources.clone(),
-                self.roto_scripts.clone(),
+                self.roto_compiled.clone(),
                 self.tracer.clone(),
+                self.ingresses.clone(),
             );
 
             let unit_type = std::mem::discriminant(&new_unit);
@@ -3007,7 +2957,6 @@ mod tests {
         ConfigFile::new(
             toml.as_bytes().to_vec(),
             Source::default(),
-            Default::default(),
         ).unwrap()
     }
 

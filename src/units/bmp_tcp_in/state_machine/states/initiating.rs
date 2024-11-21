@@ -1,12 +1,13 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use routecore::bmp::message::Message as BmpMsg;
+use routecore::bmp::message::{InformationTlvType, Message as BmpMsg};
 
 use crate::{
-    payload::{RouterId, SourceId},
-    units::bmp_tcp_in::state_machine::machine::BmpStateIdx,
+    ingress, payload::RouterId, units::bmp_tcp_in::state_machine::machine::BmpStateIdx
 };
+
+//use roto::types::builtin::ingress::IngressId;
 
 use super::super::{
     machine::{BmpState, BmpStateDetails, Initiable},
@@ -47,14 +48,16 @@ pub struct Initiating {
 
 impl BmpStateDetails<Initiating> {
     pub fn new(
-        source_id: SourceId,
+        ingress_id: ingress::IngressId,
         router_id: Arc<RouterId>,
         status_reporter: Arc<BmpStateMachineStatusReporter>,
+        ingress_register: Arc<ingress::Register>,
     ) -> Self {
         BmpStateDetails {
-            source_id,
+            ingress_id,
             router_id,
             status_reporter,
+            ingress_register,
             details: Initiating::default(),
         }
     }
@@ -68,6 +71,24 @@ impl BmpStateDetails<Initiating> {
         match bmp_msg {
             // already verified upstream
             BmpMsg::InitiationMessage(msg) => {
+                self.ingress_register.update_info(
+                    self.ingress_id,
+                    ingress::IngressInfo::new()
+                        .with_name(
+                            msg.information_tlvs().find(|t|
+                                t.typ() == InformationTlvType::SysName
+                            )
+                            .map(|t| String::from_utf8_lossy(t.value()).to_string())
+                            .unwrap_or("no-sysname".to_string())
+                        )
+                        .with_desc(
+                            msg.information_tlvs().find(|t|
+                                t.typ() == InformationTlvType::SysDesc
+                            )
+                            .map(|t| String::from_utf8_lossy(t.value()).to_string())
+                            .unwrap_or("no-sysdesc".to_string())
+                        )
+                );
                 let res = self.initiate(msg);
 
                 match res.message_type {
@@ -128,7 +149,8 @@ impl Initiable for Initiating {
 mod tests {
     use std::ops::Deref;
 
-    use routecore::{asn::Asn, bmp::message::PeerType};
+    use inetnum::asn::Asn;
+    use routecore::bmp::message::PeerType;
 
     use crate::{
         bgp::encode::{
@@ -248,11 +270,12 @@ mod tests {
 
     fn mk_test_processor() -> BmpStateDetails<Initiating> {
         let router_addr = "127.0.0.1:1818".parse().unwrap();
-        let source_id = SourceId::SocketAddr(router_addr);
+        let source_id = ingress::IngressId::SocketAddr(router_addr);
         let router_id = Arc::new(TEST_ROUTER_ID.to_string());
         BmpStateDetails::<Initiating>::new(
             source_id,
             router_id,
+            Arc::default(),
             Arc::default(),
         )
     }

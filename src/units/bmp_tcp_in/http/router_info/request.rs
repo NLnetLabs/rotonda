@@ -7,14 +7,13 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use hyper::{Body, Method, Request, Response};
 use tokio::sync::Mutex;
+//use roto::types::builtin::SourceId;
 
 use crate::{
-    http::{self, PercentDecodedPath, ProcessRequest},
-    payload::SourceId,
-    units::bmp_tcp_in::{
+    http::{self, PercentDecodedPath, ProcessRequest}, ingress, units::bmp_tcp_in::{
         metrics::BmpTcpInMetrics,
         state_machine::{BmpState, BmpStateDetails, BmpStateMachineMetrics},
-    },
+    }
 };
 
 use super::response::Focus;
@@ -22,12 +21,14 @@ use super::response::Focus;
 pub struct RouterInfoApi {
     http_resources: http::Resources,
     http_api_path: Arc<String>,
-    source_id: SourceId,
+    //source_id: SourceId,
+    ingress_id: ingress::IngressId,
     conn_metrics: Arc<BmpTcpInMetrics>,
     bmp_metrics: Arc<BmpStateMachineMetrics>,
     connected_at: DateTime<Utc>,
     last_message_at: Arc<RwLock<DateTime<Utc>>>,
     state_machine: Weak<Mutex<Option<BmpState>>>,
+    ingresses: Arc<ingress::Register>,
 }
 
 impl RouterInfoApi {
@@ -35,22 +36,26 @@ impl RouterInfoApi {
     pub fn new(
         http_resources: http::Resources,
         http_api_path: Arc<String>,
-        source_id: SourceId,
+        //source_id: SourceId,
+        ingress_id: ingress::IngressId,
         conn_metrics: Arc<BmpTcpInMetrics>,
         bmp_metrics: Arc<BmpStateMachineMetrics>,
         connected_at: DateTime<Utc>,
         last_message_at: Arc<RwLock<DateTime<Utc>>>,
         state_machine: Weak<Mutex<Option<BmpState>>>,
+        ingresses: Arc<ingress::Register>,
     ) -> Self {
         Self {
             http_resources,
             http_api_path,
-            source_id,
+            //source_id,
+            ingress_id,
             conn_metrics,
             bmp_metrics,
             connected_at,
             last_message_at,
             state_machine,
+            ingresses,
         }
     }
 }
@@ -116,14 +121,20 @@ impl ProcessRequest for RouterInfoApi {
                             }
                         };
 
-                    if router == self.source_id.to_string()
+                    let ingress_info = self.ingresses.get(self.ingress_id);
+                    let addr = ingress_info.and_then(|i| i.remote_addr)
+                        .map(|a| a.to_string()).unwrap_or("".to_string());
+                    //if router == self.source_id.to_string()
+                    if router == self.ingress_id.to_string()
                         || router == router_id.as_str()
                         || router == sys_name
+                        || router == addr
                     {
                         return Some(Self::build_response(
                             self.http_resources.clone(),
                             format!("{}{}", base_path, router),
-                            self.source_id.clone(),
+                            //self.source_id.clone(),
+                            self.ingress_id,
                             router_id,
                             sys_name,
                             sys_desc,

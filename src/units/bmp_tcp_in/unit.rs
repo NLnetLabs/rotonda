@@ -9,32 +9,25 @@ use std::{
 };
 
 use arc_swap::ArcSwap;
+use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::{future::select, pin_mut, Future};
+use routecore::bmp::message::Message as BmpMessage;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use tokio::{
     sync::{Mutex, RwLock},
     time::sleep,
 };
+//use roto::types::builtin::SourceId;
 
 use crate::{
     common::{
-        frim::FrimMap,
-        net::{
+        frim::FrimMap, net::{
             StandardTcpListenerFactory, StandardTcpStream, TcpListener,
             TcpListenerFactory, TcpStreamWrapper,
-        },
-        roto::{FilterName, RotoScripts},
-        status_reporter::Chainable,
-        unit::UnitActivity,
-    },
-    comms::{Gate, GateStatus, Terminated},
-    manager::{Component, WaitPoint},
-    payload::SourceId,
-    tokio::TokioTaskMetrics,
-    tracing::Tracer,
-    units::Unit,
+        }, roto_new::{FilterName, Provenance, RotoOutputStream, RotoScripts}, status_reporter::Chainable, unit::UnitActivity
+    }, comms::{Gate, GateStatus, Terminated}, ingress::{self, IngressId, IngressInfo}, manager::{Component, WaitPoint}, tokio::TokioTaskMetrics, tracing::Tracer, units::Unit
 };
 
 use super::{
@@ -89,6 +82,17 @@ impl std::fmt::Display for TracingMode {
         }
     }
 }
+
+
+
+pub(super) type RotoFunc = roto::TypedFunc<
+    (
+        roto::Val<*mut RotoOutputStream>,
+        roto::Val<BmpMessage<Bytes>>,
+        roto::Val<Provenance>,
+    ),
+    roto::Verdict<(),()>
+>;
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
@@ -161,6 +165,7 @@ impl BmpTcpIn {
                 bmp_metrics.clone(),
                 router_id_template.clone(),
                 router_states.clone(),
+                component.ingresses().clone(),
             ));
 
             component.register_http_resource(
@@ -171,8 +176,11 @@ impl BmpTcpIn {
             (processor, router_info)
         };
 
-        let roto_scripts = component.roto_scripts().clone();
+        let roto_compiled = component.roto_compiled().clone();
         let tracer = component.tracer().clone();
+
+
+        let ingress_register = component.ingresses();
 
         // Wait for other components to be, and signal to other components
         // that we are, ready to start. All units and targets start together,
@@ -201,11 +209,12 @@ impl BmpTcpIn {
             bmp_in_metrics,
             state_machine_metrics,
             status_reporter,
-            roto_scripts,
+            roto_compiled,
             router_id_template,
             filter_name,
             tracer,
             tracing_mode,
+            ingress_register,
         )
         .run::<_, _, StandardTcpStream, BmpTcpInRunner>(Arc::new(
             StandardTcpListenerFactory,
@@ -232,11 +241,16 @@ trait ConfigAcceptor {
         router_handler: RouterHandler,
         tcp_stream: impl TcpStreamWrapper,
         router_addr: SocketAddr,
-        source_id: &SourceId,
+        //source_id: &SourceId,
+        ingress_id: ingress::IngressId,
         router_states: &Arc<
-            FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
+            //FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
+            FrimMap<ingress::IngressId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
         >, // Option is never None, instead Some is take()'n and replace()'d.
-        router_info: &Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
+        router_info:
+            //&Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
+            &Arc<FrimMap<ingress::IngressId, Arc<RouterInfo>>>,
+        ingress_register: Arc<ingress::Register>,
     );
 }
 
@@ -246,17 +260,20 @@ struct BmpTcpInRunner {
     http_api_path: Arc<String>,
     gate: Gate,
     router_states:
-        Arc<FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>, // Option is never None, instead Some is take()'n and replace()'d.
-    router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
+        //Arc<FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>, // Option is never None, instead Some is take()'n and replace()'d.
+        Arc<FrimMap<ingress::IngressId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>, // Option is never None, instead Some is take()'n and replace()'d.
+    //router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
+    router_info: Arc<FrimMap<ingress::IngressId, Arc<RouterInfo>>>,
     bmp_metrics: Arc<BmpStateMachineMetrics>,
     bmp_in_metrics: Arc<BmpTcpInMetrics>,
     _state_machine_metrics: Arc<TokioTaskMetrics>,
     status_reporter: Arc<BmpTcpInStatusReporter>,
-    roto_scripts: RotoScripts,
+    roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
     router_id_template: Arc<ArcSwap<String>>,
     filter_name: Arc<ArcSwap<FilterName>>,
     tracer: Arc<Tracer>,
     tracing_mode: Arc<ArcSwap<TracingMode>>,
+    ingress_register: Arc<ingress::Register>,
 }
 
 impl BmpTcpInRunner {
@@ -267,18 +284,21 @@ impl BmpTcpInRunner {
         http_api_path: Arc<String>,
         gate: Gate,
         router_states: Arc<
-            FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
+            //FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
+            FrimMap<ingress::IngressId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
         >, // Option is never None, instead Some is take()'n and replace()'d.
-        router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
+        //router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
+        router_info: Arc<FrimMap<ingress::IngressId, Arc<RouterInfo>>>,
         bmp_metrics: Arc<BmpStateMachineMetrics>,
         bmp_in_metrics: Arc<BmpTcpInMetrics>,
         _state_machine_metrics: Arc<TokioTaskMetrics>,
         status_reporter: Arc<BmpTcpInStatusReporter>,
-        roto_scripts: RotoScripts,
+        roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
         router_id_template: Arc<ArcSwap<String>>,
         filter_name: Arc<ArcSwap<FilterName>>,
         tracer: Arc<Tracer>,
         tracing_mode: Arc<ArcSwap<TracingMode>>,
+        ingress_register: Arc<ingress::Register>,
     ) -> Self {
         Self {
             component,
@@ -291,11 +311,12 @@ impl BmpTcpInRunner {
             bmp_in_metrics,
             _state_machine_metrics,
             status_reporter,
-            roto_scripts,
+            roto_compiled,
             router_id_template,
             filter_name,
             tracer,
             tracing_mode,
+            ingress_register,
         }
     }
 
@@ -321,6 +342,7 @@ impl BmpTcpInRunner {
             filter_name: Default::default(),
             tracer: Default::default(),
             tracing_mode: Default::default(),
+            ingress_register: Arc::default(),
         };
 
         (runner, gate_agent)
@@ -339,6 +361,11 @@ impl BmpTcpInRunner {
         // Loop until terminated, accepting TCP connections from routers and
         // spawning tasks to handle them.
         let status_reporter = self.status_reporter.clone();
+
+        let roto_function: Option<RotoFunc> = self.roto_compiled.clone().and_then(|c| {
+            let mut c = c.lock().unwrap();
+            c.get_function("bmp-in").ok()
+        });
 
         loop {
             let listen_addr = self.listen.clone();
@@ -374,22 +401,28 @@ impl BmpTcpInRunner {
             'inner: loop {
                 match self.process_until(listener.accept()).await {
                     ControlFlow::Continue(Ok((tcp_stream, client_addr))) => {
-                        let source_id = SourceId::from(client_addr);
+                        //let source_id = SourceId::from(client_addr);
+
+                        let ingress_id = self.ingress_register.register();
+                        self.ingress_register.update_info(ingress_id,
+                            IngressInfo::new()
+                            .with_remote_addr(client_addr.ip())
+                        ); 
 
                         let state_machine = Arc::new(Mutex::new(Some(
-                            self.router_connected(&source_id),
+                            self.router_connected(ingress_id),
                         )));
 
                         let last_msg_at = {
                             let weak_ref = Arc::downgrade(&state_machine);
                             self.setup_router_specific_api_endpoint(
-                                weak_ref, &source_id,
+                                weak_ref, ingress_id,
                             )
                             .await
                         };
 
                         self.router_states
-                            .insert(source_id.clone(), state_machine.clone());
+                            .insert(ingress_id, state_machine.clone());
 
                         status_reporter
                             .listener_connection_accepted(client_addr);
@@ -415,7 +448,7 @@ impl BmpTcpInRunner {
 
                         let router_handler = RouterHandler::new(
                             self.gate.clone(),
-                            self.roto_scripts.clone(),
+                            roto_function.clone(),
                             self.router_id_template.clone(),
                             self.filter_name.clone(),
                             child_status_reporter,
@@ -431,9 +464,11 @@ impl BmpTcpInRunner {
                             router_handler,
                             tcp_stream,
                             client_addr,
-                            &source_id,
+                            //&source_id,
+                            ingress_id,
                             &self.router_states,
                             &self.router_info,
+                            self.ingress_register.clone(),
                         );
                     }
                     ControlFlow::Continue(Err(_err)) => break 'inner,
@@ -524,15 +559,16 @@ impl BmpTcpInRunner {
         }
     }
 
-    fn router_connected(&self, source_id: &SourceId) -> BmpState {
+    //fn router_connected(&self, source_id: &SourceId) -> BmpState {
+    fn router_connected(&self, ingress_id: IngressId) -> BmpState {
         let router_id = Arc::new(format_source_id(
             &self.router_id_template.load(),
             "unknown",
-            source_id,
+            ingress_id, //source_id,
         ));
 
         // Choose a name to be reported in application logs.
-        let child_name = format!("router[{}]", source_id);
+        let child_name = format!("router[{}]", ingress_id);
 
         // Create a status reporter whose name in output will be a combination
         // of ours as parent and the newly chosen child name, enabling logged
@@ -544,16 +580,17 @@ impl BmpTcpInRunner {
 
         {
             let this_router_info = Arc::new(RouterInfo::new());
-            self.router_info.insert(source_id.clone(), this_router_info);
+            self.router_info.insert(ingress_id, this_router_info);
         }
 
         let metrics = self.bmp_metrics.clone();
 
         BmpState::new(
-            source_id.clone(),
+            ingress_id, //source_id.clone(),
             router_id,
             child_status_reporter,
             metrics,
+            self.ingress_register.clone(),
         )
     }
 
@@ -562,14 +599,16 @@ impl BmpTcpInRunner {
     async fn setup_router_specific_api_endpoint(
         &self,
         state_machine: Weak<Mutex<Option<BmpState>>>,
-        #[allow(unused_variables)] source_id: &SourceId,
+        //#[allow(unused_variables)]
+        //source_id: &SourceId,
+        ingress_id: IngressId,
     ) -> Option<Arc<std::sync::RwLock<DateTime<Utc>>>> {
-        match self.router_info.get(source_id) {
+        match self.router_info.get(&ingress_id) {
             None => {
                 // This should never happen.
                 self.status_reporter.internal_error(format!(
-                    "Router info for source {} doesn't exist",
-                    source_id,
+                    "Router info for ingress_id {} doesn't exist",
+                    ingress_id,
                 ));
 
                 None
@@ -583,12 +622,13 @@ impl BmpTcpInRunner {
                 let processor = RouterInfoApi::new(
                     self.component.read().await.http_resources().clone(),
                     self.http_api_path.clone(),
-                    source_id.clone(),
+                    ingress_id,
                     self.bmp_in_metrics.clone(),
                     self.bmp_metrics.clone(),
                     this_router_info.connected_at,
                     last_msg_at.clone(),
                     state_machine,
+                    self.ingress_register.clone(),
                 );
 
                 let processor = Arc::new(processor);
@@ -602,7 +642,7 @@ impl BmpTcpInRunner {
                     Arc::make_mut(&mut this_router_info);
                 updatable_router_info.api_processor = Some(processor);
 
-                self.router_info.insert(source_id.clone(), this_router_info);
+                self.router_info.insert(ingress_id, this_router_info);
 
                 Some(last_msg_at)
 
@@ -619,13 +659,15 @@ impl ConfigAcceptor for BmpTcpInRunner {
         router_handler: RouterHandler,
         tcp_stream: impl TcpStreamWrapper,
         client_addr: SocketAddr,
-        source_id: &SourceId,
+        //source_id: &SourceId,
+        ingress_id: IngressId,
         router_states: &Arc<
-            FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
+            FrimMap<IngressId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
         >, // Option is never None, instead Some is take()'n and replace()'d.
-        router_info: &Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
+        router_info: &Arc<FrimMap<IngressId, Arc<RouterInfo>>>,
+        ingress_register: Arc<ingress::Register>,
     ) {
-        let source_id = source_id.clone();
+        //let source_id = source_id.clone();
         let router_states = router_states.clone();
         let router_info = router_info.clone();
 
@@ -634,10 +676,11 @@ impl ConfigAcceptor for BmpTcpInRunner {
 
         crate::tokio::spawn(&child_name, async move {
             router_handler
-                .run(tcp_stream, client_addr, source_id.clone())
+                //.run(tcp_stream, client_addr, source_id.clone(), ingress_register)
+                .run(tcp_stream, client_addr, ingress_id, ingress_register)
                 .await;
-            router_states.remove(&source_id);
-            router_info.remove(&source_id);
+            router_states.remove(&ingress_id);
+            router_info.remove(&ingress_id);
         });
     }
 }
@@ -662,21 +705,18 @@ mod tests {
     };
 
     use tokio::{sync::Mutex, time::timeout};
+    use roto::types::builtin::SourceId;
 
     use crate::{
         common::{
             frim::FrimMap, net::TcpStreamWrapper,
             status_reporter::AnyStatusReporter,
-        },
-        comms::{Gate, GateAgent, Terminated},
-        payload::SourceId,
-        tests::util::{
+        }, comms::{Gate, GateAgent, Terminated}, ingress, tests::util::{
             internal::{enable_logging, get_testable_metrics_snapshot},
             net::{
                 MockTcpListener, MockTcpListenerFactory, MockTcpStreamWrapper,
             },
-        },
-        units::{
+        }, units::{
             bmp_tcp_in::{
                 metrics::BmpTcpInMetrics, router_handler::RouterHandler,
                 state_machine::BmpState,
@@ -684,7 +724,7 @@ mod tests {
                 unit::BmpTcpInRunner,
             },
             Unit,
-        },
+        }
     };
 
     use super::{BmpTcpIn, ConfigAcceptor};
@@ -1035,6 +1075,7 @@ mod tests {
             filter_name: Default::default(),
             tracing_mode: Default::default(),
             tracer: Default::default(),
+            ingress_register: Arc::new(ingress::Register::default()),
         };
 
         (runner, gate_agent, status_reporter)
@@ -1053,6 +1094,7 @@ mod tests {
                 FrimMap<SourceId, Arc<Mutex<Option<BmpState>>>>,
             >, // Option is never None, instead Some is take()'n and replace()'d.
             _router_info: &Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
+            _ingress_register: Arc<ingress::Register>,
         ) {
         }
     }

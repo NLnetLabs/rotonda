@@ -55,16 +55,16 @@ fn run_with_cmdline_args() -> Result<(), Terminate> {
         Config::from_arg_matches(&matches, &cur_dir, &mut manager)?;
     debug!("application working directory {:?}", cur_dir);
     debug!("configuration source file {:?}", config_source);
-    debug!("configuration directory {:?}", &config.roto_scripts_path);
-    let roto_scripts_path = config.roto_scripts_path.clone();
+    debug!("roto script {:?}", &config.roto_script);
+    let roto_script = config.roto_script.clone();
     let runtime = run_with_config(&mut manager, config)?;
-    runtime.block_on(handle_signals(config_source, roto_scripts_path, manager))?;
+    runtime.block_on(handle_signals(config_source, roto_script, manager))?;
     Ok(())
 }
 
 async fn handle_signals(
     config_source: Source,
-    roto_scripts_path: Option<std::path::PathBuf>,
+    roto_script: Option<std::path::PathBuf>,
     mut manager: Manager,
 ) -> Result<(), ExitError> {
     let mut hup_signals = signal(SignalKind::hangup()).map_err(|err| {
@@ -123,14 +123,14 @@ async fn handle_signals(
                         }
                     }
                     None => {
-                        if let Some(ref rsp) = roto_scripts_path {
+                        if let Some(ref rsp) = roto_script {
                             info!("SIGHUP signal received, re-loading roto scripts \
                             from location {:?}", rsp);
                         } else {
                             error!("No location for roto scripts. Not reloading");
                             continue;
                         }
-                        match manager.load_roto_scripts(&roto_scripts_path) {
+                        match manager.compile_roto_script(&roto_script) {
                             Ok(_) => { info!("Done reloading roto scripts"); }
                             Err(e) => {
                                 error!("Cannot reload roto scripts: {e}. Not reloading");

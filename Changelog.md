@@ -1,14 +1,14 @@
 # Changelog
 
-## 0.1.1
+## 0.2.0 'Happy Fuzzballs'
 
-Breaking changes
+Released 2024-11-21
 
-New
+This release contains mostly refactored components, aiming at better performance
+and reduced resource requirements.
 
-Bug fixes
-
-Other changes
+Most notably, our filter language Roto is now compiled to machine code and
+offers user friendly error messages. 
 
 
 ## 0.1.0  ‘For the sake of Whiskey, color Televisions and Pianos’

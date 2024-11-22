@@ -1,25 +1,13 @@
 use crate::{
     common::{
         frim::FrimMap,
-        roto_new::{
-            FilterName, FreshRouteContext, InsertionInfo, MrtContext,
-            OutputStream, OutputStreamMessage, RotoOutputStream, RotoScripts,
-            RouteContext,
-        },
         status_reporter::{AnyStatusReporter, UnitStatusReporter},
-    },
-    comms::{
+    }, comms::{
         AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus, Link,
         Terminated, TriggerData,
-    },
-    ingress,
-    manager::{Component, WaitPoint},
-    payload::{
+    }, ingress, manager::{Component, WaitPoint}, payload::{
         Payload, RotondaPaMap, RotondaRoute, RouterId, Update, UpstreamStatus,
-    },
-    tokio::TokioTaskMetrics,
-    tracing::{BoundTracer, Tracer},
-    units::Unit,
+    }, roto_runtime::{self, types::{FilterName, InsertionInfo, Output, OutputStreamMessage, RotoOutputStream, RouteContext}}, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::Unit
 };
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
@@ -60,7 +48,7 @@ thread_local!(
 
 type RotoFuncPre = roto::TypedFunc<
     (
-        roto::Val<crate::common::roto_runtime::Log>,
+        roto::Val<roto_runtime::Log>,
         roto::Val<RotondaRoute>,
         roto::Val<RouteContext>,
     ),
@@ -69,7 +57,7 @@ type RotoFuncPre = roto::TypedFunc<
 
 type RotoFuncPost = roto::TypedFunc<
     (
-        roto::Val<crate::common::roto_runtime::Log>,
+        roto::Val<roto_runtime::Log>,
         roto::Val<RotondaRoute>,
         roto::Val<InsertionInfo>,
     ),
@@ -372,7 +360,7 @@ impl RibUnitRunner {
     ) -> (Self, crate::comms::GateAgent) {
         //use crate::common::roto::RotoScriptOrigin;
 
-        use crate::common::roto_new::RotoScripts;
+        use crate::roto_runtime::types::RotoScripts;
 
         let roto_scripts = RotoScripts::default();
         // if !roto_script.is_empty() {
@@ -389,7 +377,7 @@ impl RibUnitRunner {
             Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
         //let rib_keys = RibUnit::default_rib_keys();
         //let rib = Self::mk_rib(rib_type, &rib_keys); //, settings);
-        let rib = Rib::new();
+        let rib = Rib::new_physical();
         let status_reporter = RibUnitStatusReporter::default().into();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
         let filter_name =
@@ -397,8 +385,10 @@ impl RibUnitRunner {
         let _process_metrics = Arc::new(TokioTaskMetrics::new());
         let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> =
             Default::default();
+
+        let shared_rib = Arc::new(ArcSwap::new(Arc::new(rib)));
         let http_processor = Arc::new(PrefixesApi::new(
-            rib.clone(),
+            shared_rib.clone(),
             Arc::new("dummy".to_string()),
             query_limits.clone(),
             rib_type,
@@ -413,7 +403,7 @@ impl RibUnitRunner {
             gate,
             http_processor,
             query_limits,
-            rib,
+            rib: shared_rib,
             rib_type,
             status_reporter,
             filter_name,
@@ -421,6 +411,8 @@ impl RibUnitRunner {
             _process_metrics,
             rib_merge_update_stats,
             tracer,
+            roto_function_pre: todo!(),
+            roto_function_post: todo!(),
         };
 
         (runner, gate_agent)
@@ -806,7 +798,6 @@ where
             if !output_stream.is_empty() {
                 let mut osms = smallvec![];
 
-                use crate::common::roto_new::Output;
                 for entry in output_stream.drain() {
                     debug!("output stream entry {entry:?}");
                     let osm = match entry {

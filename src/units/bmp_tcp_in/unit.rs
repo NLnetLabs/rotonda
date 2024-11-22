@@ -28,16 +28,9 @@ use crate::{
             StandardTcpListenerFactory, StandardTcpStream, TcpListener,
             TcpListenerFactory, TcpStreamWrapper,
         },
-        roto_new::{FilterName, Provenance, RotoOutputStream, RotoScripts},
         status_reporter::Chainable,
         unit::UnitActivity,
-    },
-    comms::{Gate, GateStatus, Terminated},
-    ingress::{self, IngressId, IngressInfo},
-    manager::{Component, WaitPoint},
-    tokio::TokioTaskMetrics,
-    tracing::Tracer,
-    units::Unit,
+    }, comms::{Gate, GateStatus, Terminated}, ingress::{self, IngressId, IngressInfo}, manager::{Component, WaitPoint}, roto_runtime::types::{CompiledRoto, FilterName, Provenance, RotoOutputStream, RotoScripts}, tokio::TokioTaskMetrics, tracing::Tracer, units::Unit
 };
 
 use super::{
@@ -279,7 +272,7 @@ struct BmpTcpInRunner {
     bmp_in_metrics: Arc<BmpTcpInMetrics>,
     _state_machine_metrics: Arc<TokioTaskMetrics>,
     status_reporter: Arc<BmpTcpInStatusReporter>,
-    roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
+    roto_compiled: Option<Arc<CompiledRoto>>,
     router_id_template: Arc<ArcSwap<String>>,
     filter_name: Arc<ArcSwap<FilterName>>,
     tracer: Arc<Tracer>,
@@ -307,7 +300,7 @@ impl BmpTcpInRunner {
         bmp_in_metrics: Arc<BmpTcpInMetrics>,
         _state_machine_metrics: Arc<TokioTaskMetrics>,
         status_reporter: Arc<BmpTcpInStatusReporter>,
-        roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
+        roto_compiled: Option<Arc<CompiledRoto>>,
         router_id_template: Arc<ArcSwap<String>>,
         filter_name: Arc<ArcSwap<FilterName>>,
         tracer: Arc<Tracer>,
@@ -349,7 +342,7 @@ impl BmpTcpInRunner {
             bmp_in_metrics: Default::default(),
             _state_machine_metrics: Default::default(),
             status_reporter: Default::default(),
-            roto_scripts: Default::default(),
+            // roto_scripts: Default::default(),
             router_id_template: Arc::new(ArcSwap::from_pointee(
                 BmpTcpIn::default_router_id_template(),
             )),
@@ -357,6 +350,7 @@ impl BmpTcpInRunner {
             tracer: Default::default(),
             tracing_mode: Default::default(),
             ingress_register: Arc::default(),
+            roto_compiled: todo!(),
         };
 
         (runner, gate_agent)
@@ -720,7 +714,6 @@ mod tests {
         time::Duration,
     };
 
-    use roto::types::builtin::SourceId;
     use tokio::{sync::Mutex, time::timeout};
 
     use crate::{
@@ -729,7 +722,7 @@ mod tests {
             status_reporter::AnyStatusReporter,
         },
         comms::{Gate, GateAgent, Terminated},
-        ingress,
+        ingress::{self, IngressId},
         tests::util::{
             internal::{enable_logging, get_testable_metrics_snapshot},
             net::{
@@ -1090,12 +1083,13 @@ mod tests {
             bmp_in_metrics: metrics,
             _state_machine_metrics: Default::default(),
             status_reporter: status_reporter.clone(),
-            roto_scripts: Default::default(),
+            // roto_scripts: Default::default(),
             router_id_template: Default::default(),
             filter_name: Default::default(),
             tracing_mode: Default::default(),
             tracer: Default::default(),
             ingress_register: Arc::new(ingress::Register::default()),
+            roto_compiled: todo!(),
         };
 
         (runner, gate_agent, status_reporter)
@@ -1109,11 +1103,11 @@ mod tests {
             _router_handler: RouterHandler,
             _tcp_stream: impl TcpStreamWrapper,
             _router_addr: SocketAddr,
-            _source_id: &SourceId,
+            _source_id: &IngressId,
             _router_states: &Arc<
-                FrimMap<SourceId, Arc<Mutex<Option<BmpState>>>>,
+                FrimMap<IngressId, Arc<Mutex<Option<BmpState>>>>,
             >, // Option is never None, instead Some is take()'n and replace()'d.
-            _router_info: &Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
+            _router_info: &Arc<FrimMap<IngressId, Arc<RouterInfo>>>,
             _ingress_register: Arc<ingress::Register>,
         ) {
         }

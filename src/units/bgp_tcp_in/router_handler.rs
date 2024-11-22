@@ -43,11 +43,8 @@ use routecore::bgp::fsm::session::{
 
 //use roto::types::builtin::basic_route::SourceId;
 
-use crate::common::roto_new::{
-    explode_announcements, explode_withdrawals, rotonda_roto_runtime,
-    CompiledRoto, FreshRouteContext, Output, OutputStream,
-    OutputStreamMessage, Provenance, RotoOutputStream, RotoScripts,
-    RouteContext,
+use crate::roto_runtime::types::{
+    explode_announcements, explode_withdrawals, FreshRouteContext, Output, OutputStreamMessage, Provenance, RotoOutputStream,
 };
 //use crate::bgp::encode::Announcements;
 //use crate::common::roto::{FilterOutput, RotoScripts, ThreadLocalVM};
@@ -357,7 +354,7 @@ impl Processor {
                             });
                             if !output_stream.is_empty() {
                                 let mut osms = smallvec![];
-                                use crate::common::roto_new::Output;
+                                use crate::roto_runtime::types::Output;
                                 for entry in output_stream.drain() {
                                     debug!("output stream entry {entry:?}");
                                     let osm = match entry {

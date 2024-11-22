@@ -13,8 +13,6 @@ use rotonda_store::prelude::multi::RouteStatus;
 use routecore::bgp::{message::UpdateMessage, nlri::afisafi::Nlri};
 use serde::Deserialize;
 
-pub use super::roto_runtime::rotonda_roto_runtime;
-
 use crate::{
     ingress::IngressId,
     manager,
@@ -39,7 +37,9 @@ impl<'a, 'de: 'a> Deserialize<'de> for FilterName {
     {
         // This has to be a String, even though we pass a &str to
         // ShortString::from(), because of the way that newer versions of the
-        // toml crate work. See: https://github.com/toml-rs/toml/issues/597
+        // toml crate work.
+        //
+        // See: https://github.com/toml-rs/toml/issues/597
         let s: String = Deserialize::deserialize(deserializer)?;
         let filter_name = FilterName(s);
         Ok(manager::load_filter_name(filter_name))
@@ -242,17 +242,6 @@ impl FreshRouteContext {
     pub fn update_status(&mut self, status: RouteStatus) {
         self.status = status;
     }
-
-    /*
-    pub fn get_attrs_builder(&self) -> Result<PaMap, VmError> {
-        if let Some(msg) = &self.bgp_msg {
-            PaMap::from_update_pdu(&msg.clone().into_inner())
-                .map_err(|_| VmError::InvalidMsgType)
-        } else {
-            Err(VmError::InvalidPayload)
-        }
-    }
-    */
 }
 
 //------------ Provenance ----------------------------------------------------

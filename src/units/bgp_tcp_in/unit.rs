@@ -28,8 +28,8 @@ use crate::common::net::{
     StandardTcpListenerFactory, StandardTcpStream, TcpListener,
     TcpListenerFactory, TcpStreamWrapper,
 };
-use crate::common::roto_new::{
-    FilterName, Provenance, RotoOutputStream, RotoScripts,
+use crate::roto_runtime::types::{
+    CompiledRoto, FilterName, Provenance, RotoOutputStream, RotoScripts
 };
 //use crate::common::roto::{FilterName, RotoScripts};
 use crate::common::status_reporter::{Chainable, UnitStatusReporter};
@@ -187,7 +187,7 @@ struct BgpTcpInRunner {
 
     status_reporter: Arc<BgpTcpInStatusReporter>,
 
-    roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
+    roto_compiled: Option<Arc<CompiledRoto>>,
 
     // To send commands to a Session based on peer IP + ASN.
     live_sessions: Arc<Mutex<LiveSessions>>,
@@ -209,7 +209,7 @@ impl BgpTcpInRunner {
         gate: Gate,
         metrics: Arc<BgpTcpInMetrics>,
         status_reporter: Arc<BgpTcpInStatusReporter>,
-        roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
+        roto_compiled: Option<Arc<CompiledRoto>>,
         ingresses: Arc<ingress::Register>,
     ) -> Self {
         BgpTcpInRunner {
@@ -234,6 +234,7 @@ impl BgpTcpInRunner {
             status_reporter: Default::default(),
             live_sessions: Arc::new(Mutex::new(HashMap::new())),
             ingresses: Arc::new(ingress::Register::default()),
+            roto_compiled: todo!(),
         };
 
         (runner, gate_agent)
@@ -590,22 +591,18 @@ mod tests {
 
     use crate::{
         common::{
-            net::TcpStreamWrapper, roto::RotoScripts,
+            net::TcpStreamWrapper,
             status_reporter::AnyStatusReporter,
-        },
-        comms::{Gate, GateAgent, Terminated},
-        ingress,
-        tests::util::{
+        }, comms::{Gate, GateAgent, Terminated}, ingress, roto_runtime::types::RotoScripts, tests::util::{
             internal::get_testable_metrics_snapshot,
             net::{
                 MockTcpListener, MockTcpListenerFactory, MockTcpStreamWrapper,
             },
-        },
-        units::bgp_tcp_in::{
+        }, units::bgp_tcp_in::{
             peer_config::{PeerConfig, PrefixOrExact},
             status_reporter::BgpTcpInStatusReporter,
             unit::{BgpTcpIn, BgpTcpInRunner, ConfigAcceptor, LiveSessions},
-        },
+        }
     };
 
     #[tokio::test(flavor = "multi_thread")]
@@ -767,7 +764,7 @@ mod tests {
     impl ConfigAcceptor for NoOpConfigAcceptor {
         fn accept_config(
             _child_name: String,
-            //_roto_scripts: &RotoScripts,
+            _roto_scripts: &RotoScripts,
             _gate: &Gate,
             _bgp: &BgpTcpIn,
             _tcp_stream: impl TcpStreamWrapper,

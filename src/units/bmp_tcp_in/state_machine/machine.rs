@@ -60,15 +60,15 @@ use std::{
 
 use crate::{
     common::{
-        roto_new::{
-            explode_announcements, explode_withdrawals, FreshRouteContext,
-            PeerId, PeerRibType, Provenance,
-        },
         routecore_extra::generate_alternate_config,
         status_reporter::AnyStatusReporter,
     },
     ingress,
     payload::{Payload, RouterId, Update},
+    roto_runtime::types::{
+        explode_announcements, explode_withdrawals, FreshRouteContext,
+        PeerId, PeerRibType, Provenance,
+    },
 };
 
 use super::{

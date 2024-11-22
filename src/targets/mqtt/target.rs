@@ -9,16 +9,14 @@ use super::{
 };
 
 use crate::{
-    common::{
-        roto_new::OutputStreamMessage,
-        status_reporter::{AnyStatusReporter, TargetStatusReporter},
-    },
+        common::status_reporter::{AnyStatusReporter, TargetStatusReporter},
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
     ingress,
     manager::{Component, TargetCommand, WaitPoint},
     payload::{Update, UpstreamStatus},
     targets::Target,
 };
+use crate::roto_runtime::types::OutputStreamMessage;
 
 use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;

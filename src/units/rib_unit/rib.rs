@@ -29,9 +29,9 @@ use routecore::bgp::{
 use serde::Serialize;
 
 use crate::{
-    common::roto_new::Provenance,
     ingress::IngressId,
     payload::{RotondaPaMap, RotondaRoute, RouterId},
+    roto_runtime::types::Provenance,
 };
 
 // -------- PhysicalRib ------------------------------------------------------

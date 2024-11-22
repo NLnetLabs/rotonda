@@ -9,15 +9,16 @@ use routecore::bgp::nlri::afisafi::IsPrefix;
 use routecore::bmp::message::PerPeerHeader;
 use routecore::bmp::message::{Message as BmpMsg, MessageType as BmpMsgType};
 
-use crate::common::roto_new::{RotoOutputStream, RouteContext};
-use crate::payload::RotondaRoute;
-
-use super::roto_new::{InsertionInfo, Output, Provenance};
 use roto::roto_method;
+
+use super::types::{
+    InsertionInfo, Output, Provenance, RotoOutputStream, RouteContext,
+};
+use crate::payload::RotondaRoute;
 
 pub(crate) type Log = *mut RotoOutputStream;
 
-pub fn rotonda_roto_runtime() -> Result<roto::Runtime, String> {
+pub fn create_runtime() -> Result<roto::Runtime, String> {
     let mut rt = roto::Runtime::basic()?;
 
     // --- General types

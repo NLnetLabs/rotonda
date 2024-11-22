@@ -1,6 +1,6 @@
-use rotonda::common::roto_runtime::rotonda_roto_runtime;
+use rotonda::roto_runtime::create_runtime;
 
 fn main() {
-    let runtime = rotonda_roto_runtime().unwrap();
+    let runtime = create_runtime().unwrap();
     runtime.print_documentation();
 }

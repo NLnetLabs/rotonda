@@ -17,9 +17,8 @@ use smallvec::smallvec;
 use tokio::sync::Mutex;
 use tokio::{io::AsyncRead, net::TcpStream};
 
-use crate::common::roto_new::{
-    FilterName, OutputStreamMessage, PeerRibType, Provenance,
-    RotoOutputStream, RotoScripts, RouteContext,
+use crate::roto_runtime::types::{
+    FilterName, Output, OutputStreamMessage, PeerRibType, Provenance, RotoOutputStream, RotoScripts, RouteContext
 };
 
 use crate::ingress::{self, IngressId};
@@ -90,8 +89,7 @@ impl RouterHandler {
 
         let (parent_gate, gate_agent) = Gate::new(0);
 
-        let source_id =
-            SourceId::SocketAddr("1.2.3.4:12345".parse().unwrap());
+        let source_id = 0;
         let router_id = Arc::new("unknown".into());
         let bmp_in_metrics = Arc::new(BmpTcpInMetrics::default());
         let bmp_metrics = Arc::new(BmpStateMachineMetrics::default());
@@ -112,7 +110,7 @@ impl RouterHandler {
 
         let mock = Self {
             gate: parent_gate.clone(),
-            roto_scripts: Default::default(),
+            // roto_scripts: Default::default(),
             router_id_template: Arc::new(ArcSwap::from_pointee(
                 BmpTcpIn::default_router_id_template(),
             )),
@@ -123,6 +121,7 @@ impl RouterHandler {
             tracing_mode: Default::default(),
             last_msg_at: None,
             bmp_metrics,
+            roto_function: todo!(),
         };
 
         (mock, gate_agent, parent_gate)
@@ -341,7 +340,7 @@ impl RouterHandler {
             }
         }
 
-        let bound_tracer = self.tracer.bind(self.gate.id());
+        let _bound_tracer = self.tracer.bind(self.gate.id());
 
         self.status_reporter.message_received(
             bmp_state.router_id(),
@@ -358,7 +357,6 @@ impl RouterHandler {
         });
         if !output_stream.is_empty() {
             let mut osms = smallvec![];
-            use crate::common::roto_new::Output;
             for entry in output_stream.drain() {
                 let osm = match entry {
                     Output::Prefix(_prefix) => {
@@ -694,7 +692,7 @@ mod tests {
 
         eprintln!("STARTING ROUTER READER");
         let router_addr = "1.2.3.4:12345".parse().unwrap();
-        let source_id = "dummy".into();
+        let source_id = 0_u32.into();
         let join_handle = runner.read_from_router(
             rx,
             router_addr,
@@ -767,7 +765,7 @@ mod tests {
         }
 
         let router_addr = "1.2.3.4:12345".parse().unwrap();
-        let source_id = "dummy".into();
+        let source_id = 0_u32.into();
 
         let rx = MockRouterStream {
             interrupted_already: false,
@@ -808,7 +806,7 @@ mod tests {
         let (runner, _, _) = RouterHandler::mock();
 
         // A BMP Initiation message that lacks required fields
-        let bad_initiation_msg = BmpMessage::from_octets(
+        let bad_initiation_msg = Message::from_octets(
             mk_invalid_initiation_message_that_lacks_information_tlvs(),
         )
         .unwrap();
@@ -817,7 +815,7 @@ mod tests {
         // Up Notification message.
         let pph = mk_per_peer_header("10.0.0.1", 12345);
         let bad_peer_down_msg =
-            BmpMessage::from_octets(mk_peer_down_notification_msg(&pph))
+            Message::from_octets(mk_peer_down_notification_msg(&pph))
                 .unwrap();
 
         process_msg(&runner, bad_initiation_msg, None)
@@ -842,13 +840,13 @@ mod tests {
     async fn new_counters_should_be_started_if_the_router_id_changes() {
         let (runner, ..) = RouterHandler::mock();
         let initiation_msg =
-            BmpMessage::from_octets(mk_initiation_msg(SYS_NAME, SYS_DESCR))
+            Message::from_octets(mk_initiation_msg(SYS_NAME, SYS_DESCR))
                 .unwrap();
         let pph = mk_per_peer_header("10.0.0.1", 12345);
         let bad_peer_down_msg =
-            BmpMessage::from_octets(mk_peer_down_notification_msg(&pph))
+            Message::from_octets(mk_peer_down_notification_msg(&pph))
                 .unwrap();
-        let reinitiation_msg = BmpMessage::from_octets(mk_initiation_msg(
+        let reinitiation_msg = Message::from_octets(mk_initiation_msg(
             OTHER_SYS_NAME,
             SYS_DESCR,
         ))
@@ -911,16 +909,16 @@ mod tests {
 
     async fn process_msg(
         router_handler: &RouterHandler,
-        msg: BmpMessage,
+        msg: Message<bytes::Bytes>,
         provenance: Option<Provenance>,
     ) -> Result<(), (Arc<String>, String)> {
         router_handler
             .process_msg(
                 Utc::now(),
                 "1.2.3.4:12345".parse().unwrap(),
-                "unknown".into(),
+                0_u32.into(),
                 msg,
-                provenance,
+                provenance.unwrap(),
                 None,
             )
             .await

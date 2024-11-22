@@ -9,23 +9,8 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use log::{debug, error, warn};
-// use roto::types::builtin::{
-//     BgpUpdateMessage, /*IpAddress,*/
-//     RotondaId, RouteStatus, UpdateMessage,
-// };
-//use roto::types::builtin::{
-//    /*Asn as RotoAsn,*/
-//    explode_announcements, explode_withdrawals, BuiltinTypeValue, Nlri, NlriStatus, Provenance, FreshRouteContext, RouteContext
-//};
-//use roto::types::collections::BytesRecord;
-//use roto::types::lazyrecord_types::BgpUpdateMessage;
-// use roto::types::lazyrecord_types::BgpUpdateMessage;
-//use roto::types::typevalue::TypeValue;
-//use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
 use rotonda_store::prelude::multi::RouteStatus;
-//use routecore::bgp::message::update_builder::ComposeError;
-// use routecore::bgp::message::UpdateMessage as UpdatePdu;
 use routecore::bgp::message::{Message as BgpMsg, UpdateMessage};
 use smallvec::{smallvec, SmallVec};
 use tokio::net::TcpStream;
@@ -139,7 +124,7 @@ impl Processor {
         let (pdu_out_tx, _) = mpsc::channel(16);
 
         let processor = Self {
-            roto_scripts: Default::default(),
+            // roto_scripts: Default::default(),
             gate,
             unit_cfg,
             //bgp_ltime: 0,

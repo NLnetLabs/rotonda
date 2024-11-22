@@ -5,7 +5,7 @@ use std::path::Path;
 use async_trait::async_trait;
 use tokio::io::AsyncWrite;
 
-// --- FileIo trait ---------------------------------------------------------
+// --- FileIo trait ----------------------------------------------------------
 
 #[async_trait]
 /// A trait for abstracting filesystem operations so that they can be mocked.
@@ -43,8 +43,7 @@ pub trait FileIo: Default {
     ) -> std::io::Result<fileio::ReadDir>;
 }
 
-// --- FileIo trait: real filesystem implementation -------------------------
-
+// --- FileIo trait: real filesystem implementation --------------------------
 #[cfg(not(test))]
 mod fileio {
     //! Filesystem I/O.

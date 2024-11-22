@@ -13,7 +13,7 @@ use crate::log::Terminate;
 use crate::targets::Target;
 use crate::tracing::{MsgRelation, Trace, Tracer};
 use crate::units::Unit;
-use crate::{http, metrics, ingress};
+use crate::{http, ingress, metrics};
 use arc_swap::ArcSwap;
 use futures::future::{join_all, select, Either};
 use log::{debug, error, info, log_enabled, trace, warn};
@@ -126,7 +126,9 @@ impl Component {
         &self.http_resources
     }
 
-    pub fn roto_compiled(&self) -> &Option<Arc<crate::common::roto_new::CompiledRoto>> {
+    pub fn roto_compiled(
+        &self,
+    ) -> &Option<Arc<crate::common::roto_new::CompiledRoto>> {
         &self.roto_compiled
     }
 
@@ -172,7 +174,6 @@ impl Component {
             true,
         )
     }
-
 
     pub fn register_ingress(&self) -> ingress::IngressId {
         self.ingresses.register()
@@ -387,8 +388,9 @@ impl LinkReport {
                 if let Some(from_node) = nodes.get(gate_name) {
                     vg.add_edge(arrow, *from_node, *to_node);
                 } else {
-                    // This can happen if a unit or target didn't honor a new set of sources announced to it via
-                    // a reconfigure message.
+                    // This can happen if a unit or target didn't honor a new
+                    // set of sources announced to it via a reconfigure
+                    // message.
                     error!("Internal error: Component '{unit_or_target_name}' has broken link {} to non-existent gate {}", link.id, link.gate_id);
                 }
             }
@@ -418,22 +420,24 @@ fn extract_msg_indices(trace: &Trace, gate_id: Uuid) -> String {
                     (None, Some(_l)) => unreachable!(),
                     (Some(f), None) => {
                         match *idx {
-                            idx if idx == f + 1 => { last = Some(idx); },
+                            idx if idx == f + 1 => {
+                                last = Some(idx);
+                            }
                             idx if idx > f + 1 => {
                                 if !out.is_empty() {
                                     out.push_str(", ");
                                 }
                                 out.push_str(&format!("{}", f));
                                 first = Some(idx);
-                            },
-                            _ => unreachable!()
+                            }
+                            _ => unreachable!(),
                         };
                     }
                     (Some(f), Some(l)) => {
                         match *idx {
                             idx if idx == l + 1 => {
                                 last = Some(idx);
-                            },
+                            }
                             idx if idx > l + 1 => {
                                 if !out.is_empty() {
                                     out.push_str(", ");
@@ -441,7 +445,7 @@ fn extract_msg_indices(trace: &Trace, gate_id: Uuid) -> String {
                                 out.push_str(&format!("{}-{}", f, l));
                                 first = Some(idx);
                                 last = None;
-                            },
+                            }
                             _ => {}
                         };
                     }
@@ -707,7 +711,7 @@ impl Manager {
         //     upstream = "b"
         //
         // Results in something like this:
-    
+
         //   unit             unit             target
         //   ┌───┐            ┌───┐            ┌───┐
         //   │ a │gate◀───link│ b │gate◀───link│ c │
@@ -736,7 +740,7 @@ impl Manager {
         //                   │
         //                  config
         //                  file
-    
+
         // Where for Unit (and not shown here but similar for Target):
         //
         //     #[derive(Debug, Deserialize)]
@@ -806,7 +810,7 @@ impl Manager {
                 None => error!("{}", err),
             }
             Terminate::error()
-        })    
+        })
     }
 
     /// Prepare for spawning.
@@ -824,14 +828,16 @@ impl Manager {
         config: &Config,
         file: &ConfigFile,
     ) -> Result<(), Terminate> {
-
-        let roto_script = config.roto_script.as_ref()
-            .and_then(|roto_script|
+        let roto_script =
+            config.roto_script.as_ref().and_then(|roto_script| {
                 file.path()
                     .and_then(|p| p.parent())
                     .map(|d| d.to_path_buf())
-                    .map(|mut dir|{ dir.push(roto_script); dir})
-        );
+                    .map(|mut dir| {
+                        dir.push(roto_script);
+                        dir
+                    })
+            });
 
         if let Err(err) = self.compile_roto_script(&roto_script) {
             let msg = format!("Unable to load main Roto script: {err}.");
@@ -884,7 +890,7 @@ impl Manager {
 
     pub fn compile_roto_script(
         &mut self,
-        roto_scripts_path: &Option<std::path::PathBuf>
+        roto_scripts_path: &Option<std::path::PathBuf>,
     ) -> Result<(), String> {
         let path = if let Some(p) = roto_scripts_path {
             p
@@ -895,7 +901,8 @@ impl Manager {
 
         let i = roto::read_files([path.to_string_lossy()])
             .map_err(|e| e.to_string())?;
-        let c = i.compile(rotonda_roto_runtime().unwrap(), usize::BITS / 8)
+        let c = i
+            .compile(rotonda_roto_runtime().unwrap(), usize::BITS / 8)
             .map_err(|e| e.to_string())?;
 
         self.roto_compiled = Some(Arc::new(Mutex::new(c)));
@@ -1156,9 +1163,9 @@ impl Manager {
                             terminate_unit(&name, running_unit_agent.into());
                         } else {
                             error!(
-                                "Unit '{}' is unused and will not be started.",
-                                name
-                            );
+                            "Unit '{}' is unused and will not be started.",
+                            name
+                        );
                         }
                         continue;
                     }
@@ -1810,21 +1817,20 @@ pub fn load_link(link_id: Marked<String>) -> Link {
 /// richer more meaningful configuration syntax for configuring the queue
 /// size.
 fn get_queue_size_for_link(link_id: String) -> (String, usize) {
-    let (name, queue_size) = if let Some((name, options)) =
-        link_id.split_once(':')
-    {
-        let queue_len = options.parse::<usize>().unwrap_or_else(|err| {
-            warn!(
+    let (name, queue_size) =
+        if let Some((name, options)) = link_id.split_once(':') {
+            let queue_len = options.parse::<usize>().unwrap_or_else(|err| {
+                warn!(
                 "Invalid queue length '{}' for '{}', falling back to the \
                 default ({}): {}",
                 options, name, DEF_UPDATE_QUEUE_LEN, err
             );
-            DEF_UPDATE_QUEUE_LEN
-        });
-        (name.to_string(), queue_len)
-    } else {
-        (link_id, DEF_UPDATE_QUEUE_LEN)
-    };
+                DEF_UPDATE_QUEUE_LEN
+            });
+            (name.to_string(), queue_len)
+        } else {
+            (link_id, DEF_UPDATE_QUEUE_LEN)
+        };
     (name, queue_size)
 }
 
@@ -1900,7 +1906,7 @@ mod tests {
 
     //     #[test]
     //     fn config_with_unresolvable_links_should_fail() {
-    //         // given a config with only a single target with a link to a 
+    //         // given a config with only a single target with a link to a
     //         // missing unit
     //         let toml = r#"
     //         http_listen = []
@@ -1921,7 +1927,7 @@ mod tests {
 
     //     #[test]
     //     fn config_with_unresolvable_filter_names_should_fail() {
-    //         // given a config with only unit that takes a filter_name 
+    //         // given a config with only unit that takes a filter_name
     //         // referring to a roto filter that has not been loaded
     //         let toml = r#"
     //         http_listen = []
@@ -2954,10 +2960,7 @@ mod tests {
     // --- Test helpers ------------------------------------------------------
 
     fn mk_config_from_toml(toml: &str) -> ConfigFile {
-        ConfigFile::new(
-            toml.as_bytes().to_vec(),
-            Source::default(),
-        ).unwrap()
+        ConfigFile::new(toml.as_bytes().to_vec(), Source::default()).unwrap()
     }
 
     type UnitOrTargetName = String;

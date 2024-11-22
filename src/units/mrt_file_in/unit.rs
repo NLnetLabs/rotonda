@@ -5,20 +5,20 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
-use routecore::bgp::message::PduParseInfo;
-use routecore::bgp::ParseError;
-use tokio::pin;
-use tokio::sync::mpsc;
 use futures::future::{select, Either};
 use futures::{pin_mut, FutureExt, TryFutureExt};
 use log::{debug, error, info, warn};
-use routecore::mrt::MrtFile;
 use rand::seq::SliceRandom;
+use routecore::bgp::message::PduParseInfo;
 use routecore::bgp::nlri::afisafi::{Ipv4UnicastNlri, Nlri};
 use routecore::bgp::types::AfiSafiType;
 use routecore::bgp::workshop::route::RouteWorkshop;
+use routecore::bgp::ParseError;
+use routecore::mrt::MrtFile;
 use serde::Deserialize;
 use smallvec::SmallVec;
+use tokio::pin;
+use tokio::sync::mpsc;
 
 use crate::common::roto_new::{Provenance, RouteContext};
 use crate::common::unit::UnitActivity;
@@ -27,7 +27,6 @@ use crate::ingress::{self, IngressInfo};
 use crate::manager::{Component, WaitPoint};
 use crate::payload::{Payload, RotondaPaMap, RotondaRoute, Update};
 use crate::units::{Gate, Unit};
-
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct MrtFileIn {
@@ -52,22 +51,15 @@ impl MrtFileIn {
         gate: Gate,
         mut waitpoint: WaitPoint,
     ) -> Result<(), crate::comms::Terminated> {
-
         gate.process_until(waitpoint.ready()).await?;
         waitpoint.running().await;
 
         let (tx, rx) = mpsc::channel(10);
 
         let ingresses = component.ingresses().clone();
-        let _  = tx.send(self.filename.clone()).await;
+        let _ = tx.send(self.filename.clone()).await;
 
-        MrtInRunner::new(
-            self,
-            gate,
-            ingresses,
-            tx,
-        ).run(rx).await
-
+        MrtInRunner::new(self, gate, ingresses, tx).run(rx).await
     }
 }
 
@@ -76,9 +68,8 @@ impl MrtInRunner {
         mrtin: MrtFileIn,
         gate: Gate,
         ingresses: Arc<ingress::Register>,
-        queue_tx: mpsc::Sender<PathBuf>
-        //queue: mpsc::Receiver<PathBuf>
-        )  -> Self {
+        queue_tx: mpsc::Sender<PathBuf>,
+    ) -> Self {
         Self {
             gate,
             config: mrtin,
@@ -92,13 +83,13 @@ impl MrtInRunner {
     async fn process_file(
         gate: Gate,
         ingresses: Arc<ingress::Register>,
-        filename: PathBuf
+        filename: PathBuf,
     ) -> Result<(), MrtError> {
         info!("processing {}", filename.to_string_lossy());
         let t0 = Instant::now();
-        
+
         let file = std::fs::File::open(&filename)?;
-        let mmap = unsafe { memmap2::Mmap::map(&file)?  };
+        let mmap = unsafe { memmap2::Mmap::map(&file)? };
         let mrt_file = MrtFile::new(&mmap[..]);
 
         let peer_index_table = mrt_file.pi()?;
@@ -106,11 +97,11 @@ impl MrtInRunner {
         for peer_entry in &peer_index_table[..] {
             let id = ingresses.register();
             ingresses.update_info(
-                id, 
+                id,
                 IngressInfo::new()
                     .with_remote_addr(peer_entry.addr)
                     .with_remote_asn(peer_entry.asn)
-                    .with_filename(filename.clone())
+                    .with_filename(filename.clone()),
             );
             ingress_map.push(id);
         }
@@ -171,55 +162,60 @@ impl MrtInRunner {
         Ok(())
     }
 
-    async fn run(mut self, mut queue: mpsc::Receiver<PathBuf>)
-        -> Result<(), Terminated>
-    {
+    async fn run(
+        mut self,
+        mut queue: mpsc::Receiver<PathBuf>,
+    ) -> Result<(), Terminated> {
         loop {
             let until_fut = queue.recv().then(|o| async {
                 o.ok_or(std::io::Error::other("MRT queue closed"))
             });
 
             match self.process_until(until_fut).await {
-                ControlFlow::Continue(c) => {
-                    match c {
-                        Ok(ref filename) => {
-                            self.processing = Some(filename.clone());
-                            let gate = self.gate.clone();
-                            let ingresses = self.ingresses.clone();
-                            let r = self.process_until(Self::process_file(
+                ControlFlow::Continue(c) => match c {
+                    Ok(ref filename) => {
+                        self.processing = Some(filename.clone());
+                        let gate = self.gate.clone();
+                        let ingresses = self.ingresses.clone();
+                        let r = self
+                            .process_until(
+                                Self::process_file(
                                     gate,
                                     ingresses,
-                                    filename.clone()
-                            ).map_err(Into::into)).await;
-                            match r {
-                                ControlFlow::Continue(Ok(..)) => {
-                                    if let Some(filename) = self.processing.take() {
-                                        self.processed.push(filename)
-                                    }
-                                }
-                                ControlFlow::Continue(Err(e)) => {
-                                    error!("failed to process {}: {e}",
-                                        filename.to_string_lossy()
-                                    );
-                                    return Err(Terminated)
-                                }
-                                ControlFlow::Break(_terminated) => {
-                                    info!("got Termintaed in lvl2");
-                                    return Err(Terminated)
+                                    filename.clone(),
+                                )
+                                .map_err(Into::into),
+                            )
+                            .await;
+                        match r {
+                            ControlFlow::Continue(Ok(..)) => {
+                                if let Some(filename) = self.processing.take()
+                                {
+                                    self.processed.push(filename)
                                 }
                             }
+                            ControlFlow::Continue(Err(e)) => {
+                                error!(
+                                    "failed to process {}: {e}",
+                                    filename.to_string_lossy()
+                                );
+                                return Err(Terminated);
+                            }
+                            ControlFlow::Break(_terminated) => {
+                                info!("got Termintaed in lvl2");
+                                return Err(Terminated);
+                            }
                         }
-                        Err(e) => error!("{e}"),
                     }
-                }
+                    Err(e) => error!("{e}"),
+                },
                 ControlFlow::Break(_) => {
                     info!("terminating unit, processed {:?}", self.processed);
-                    return Err(Terminated)
+                    return Err(Terminated);
                 }
             }
         }
     }
-
 
     async fn process_until<T, U>(
         &self,
@@ -239,11 +235,21 @@ impl MrtInRunner {
             match res {
                 Either::Left((Ok(gate_status), next_fut)) => {
                     match gate_status {
-                        GateStatus::Active | GateStatus::Dormant => { },
-                        GateStatus::Reconfiguring { new_config: Unit::MrtFileIn(MrtFileIn { filename: new_filename, .. }) } => {
+                        GateStatus::Active | GateStatus::Dormant => {}
+                        GateStatus::Reconfiguring {
+                            new_config:
+                                Unit::MrtFileIn(MrtFileIn {
+                                    filename: new_filename,
+                                    ..
+                                }),
+                        } => {
                             if new_filename != self.config.filename {
                                 info!("Reloading mrt-in, processing new file {}", &new_filename.to_string_lossy());
-                                if let Err(e) = self.queue_tx.send(new_filename.clone()).await {
+                                if let Err(e) = self
+                                    .queue_tx
+                                    .send(new_filename.clone())
+                                    .await
+                                {
                                     error!(
                                         "Failed to process {}: {}",
                                         new_filename.to_string_lossy(),
@@ -252,9 +258,8 @@ impl MrtInRunner {
                                 }
                                 //self.config.file
                             }
-
                         }
-                        GateStatus::Reconfiguring { .. }  => {
+                        GateStatus::Reconfiguring { .. } => {
                             // reconfiguring for other unit types, ignore
                         }
                         GateStatus::ReportLinks { report } => {
@@ -266,11 +271,11 @@ impl MrtInRunner {
                         }
                     }
                     until_fut = next_fut;
-                },
+                }
                 Either::Left((Err(Terminated), _next_fut)) => {
                     debug!("self.process_until Left Terminated");
-                    return ControlFlow::Break(Terminated)
-                },
+                    return ControlFlow::Break(Terminated);
+                }
                 Either::Right((Ok(until_res), _next_fut)) => {
                     return ControlFlow::Continue(Ok(until_res))
                 }
@@ -297,7 +302,7 @@ impl MrtError {
     }
 }
 
-impl std::error::Error for MrtError { }
+impl std::error::Error for MrtError {}
 impl std::fmt::Display for MrtError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match &self.0 {
@@ -324,4 +329,3 @@ impl From<MrtError> for std::io::Error {
         std::io::Error::other(e.to_string())
     }
 }
-

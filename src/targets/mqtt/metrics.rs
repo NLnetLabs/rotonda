@@ -92,13 +92,12 @@ impl MqttMetrics {
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    // The rumqttc library has this count internally but doesn't expose it to us.
-    // const PUBLISH_NOT_ACKNOWLEDGED_COUNT_METRIC: Metric = Metric::new(
-    //     "mqtt_target_published_not_acknowledged_count",
-    //     "the number of QoS 1 or QoS 2 messages for which confirmation by the MQTT broker is pending (QoS 1) or incomplete (QoS 2)",
-    //     MetricType::Counter,
-    //     MetricUnit::Total,
-    // );
+    // The rumqttc library has this count internally but doesn't expose it to
+    // us. const PUBLISH_NOT_ACKNOWLEDGED_COUNT_METRIC: Metric = Metric::new(
+    //     "mqtt_target_published_not_acknowledged_count", "the number of QoS
+    //     1 or QoS 2 messages for which confirmation by the MQTT broker is
+    //     pending (QoS 1) or incomplete (QoS 2)", MetricType::Counter,
+    //     MetricUnit::Total, );
 }
 
 impl MqttMetrics {

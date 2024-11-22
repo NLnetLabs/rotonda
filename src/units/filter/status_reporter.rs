@@ -10,7 +10,8 @@ use log::error;
 use crate::{
     common::status_reporter::{
         sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter,
-    }, ingress::IngressId,
+    },
+    ingress::IngressId,
     // payload::FilterError
 };
 
@@ -30,8 +31,8 @@ impl RotoFilterStatusReporter {
         }
     }
 
-    // We don't have an init_per_proxy_metrics() fn in this struct because
-    // we don't have a moment where we "handle" a new router when we are
+    // We don't have an init_per_proxy_metrics() fn in this struct because we
+    // don't have a moment where we "handle" a new router when we are
     // filtering, we just pass everything through looking at specific details
     // of the BMP messages not caring if they are for a not seen before router
     // or for an existing router. Instead we use the pattern

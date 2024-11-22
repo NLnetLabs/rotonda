@@ -1,36 +1,21 @@
 use chrono::{DateTime, Utc};
-use log::{debug, error, warn};
-//use roto::types::collections::BytesRecord;
-//use roto::types::lazyrecord_types::BgpUpdateMessage;
-//use roto::{types::typevalue::TypeValue, vm::OutputStreamQueue};
-//use roto::types::builtin::{RouteContext, ingress::IngressId};
+use log::debug;
 use rotonda_store::QueryResult;
 
-use routecore::bgp::communities::{Community, HumanReadableCommunity, StandardCommunity};
-use routecore::bgp::message::update_builder::StandardCommunitiesList;
-use routecore::bgp::nlri::afisafi::IsPrefix;
-use routecore::bgp::path_attributes::{PaMap, PathAttribute};
+use routecore::bgp::communities::{Community, HumanReadableCommunity};
+use routecore::bgp::path_attributes::PathAttribute;
 use routecore::bgp::types::AfiSafiType;
-use serde::ser::{SerializeSeq, SerializeStruct, SerializeTuple};
+use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::{Serialize, Serializer};
 use smallvec::{smallvec, SmallVec};
 use std::fmt;
-use std::{
-    fmt::Display,
-    ops::ControlFlow,
-};
 use uuid::Uuid;
 
 use crate::common::roto_new::RouteContext;
 use crate::ingress::{self, IngressId};
-use crate::{
-    //common::roto::{FilterOutput, FilterResult, RotoError},
-    //units::RibValue,
-};
 
 // TODO: make this a reference
 pub type RouterId = String;
-
 
 //------------ UpstreamStatus ------------------------------------------------
 
@@ -97,12 +82,16 @@ impl Display for FilterError {
 pub enum RotondaRoute {
     Ipv4Unicast(routecore::bgp::nlri::afisafi::Ipv4UnicastNlri, RotondaPaMap),
     Ipv6Unicast(routecore::bgp::nlri::afisafi::Ipv6UnicastNlri, RotondaPaMap),
-    Ipv4Multicast(routecore::bgp::nlri::afisafi::Ipv4MulticastNlri, RotondaPaMap),
-    Ipv6Multicast(routecore::bgp::nlri::afisafi::Ipv6MulticastNlri, RotondaPaMap),
-
-     // TODO support all routecore AfiSafiTypes
+    Ipv4Multicast(
+        routecore::bgp::nlri::afisafi::Ipv4MulticastNlri,
+        RotondaPaMap,
+    ),
+    Ipv6Multicast(
+        routecore::bgp::nlri::afisafi::Ipv6MulticastNlri,
+        RotondaPaMap,
+    ),
+    // TODO support all routecore AfiSafiTypes
 }
-
 
 impl Serialize for RotondaRoute {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -113,8 +102,12 @@ impl Serialize for RotondaRoute {
         match self {
             RotondaRoute::Ipv4Unicast(n, _) => s.serialize_field("prefix", n),
             RotondaRoute::Ipv6Unicast(n, _) => s.serialize_field("prefix", n),
-            RotondaRoute::Ipv4Multicast(n, _) => s.serialize_field("prefix", n),
-            RotondaRoute::Ipv6Multicast(n, _) => s.serialize_field("prefix", n),
+            RotondaRoute::Ipv4Multicast(n, _) => {
+                s.serialize_field("prefix", n)
+            }
+            RotondaRoute::Ipv6Multicast(n, _) => {
+                s.serialize_field("prefix", n)
+            }
         }?;
 
         s.serialize_field("attributes", self.rotonda_pamap())?;
@@ -123,7 +116,9 @@ impl Serialize for RotondaRoute {
 }
 
 impl RotondaRoute {
-    pub fn owned_map(&self) -> &routecore::bgp::path_attributes::OwnedPathAttributes {
+    pub fn owned_map(
+        &self,
+    ) -> &routecore::bgp::path_attributes::OwnedPathAttributes {
         match self {
             RotondaRoute::Ipv4Unicast(_, p) => &p.0,
             RotondaRoute::Ipv6Unicast(_, p) => &p.0,
@@ -145,16 +140,27 @@ impl RotondaRoute {
 impl fmt::Display for RotondaRoute {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            RotondaRoute::Ipv4Unicast(p, ..) => write!(f, "RR-Ipv4Unicast {}", p),
-            RotondaRoute::Ipv6Unicast(p, ..) => write!(f, "RR-Ipv6Unicast {}", p),
-            RotondaRoute::Ipv4Multicast(p, ..) => write!(f, "RR-Ipv4Multicast {}", p),
-            RotondaRoute::Ipv6Multicast(p, ..) => write!(f, "RR-Ipv6Multicast {}", p),
+            RotondaRoute::Ipv4Unicast(p, ..) => {
+                write!(f, "RR-Ipv4Unicast {}", p)
+            }
+            RotondaRoute::Ipv6Unicast(p, ..) => {
+                write!(f, "RR-Ipv6Unicast {}", p)
+            }
+            RotondaRoute::Ipv4Multicast(p, ..) => {
+                write!(f, "RR-Ipv4Multicast {}", p)
+            }
+            RotondaRoute::Ipv6Multicast(p, ..) => {
+                write!(f, "RR-Ipv6Multicast {}", p)
+            }
         }
     }
 }
 
 impl rotonda_store::Meta for RotondaPaMap {
-    type Orderable<'a> = routecore::bgp::path_selection::OrdRoute<'a, routecore::bgp::path_selection::Rfc4271>;
+    type Orderable<'a> = routecore::bgp::path_selection::OrdRoute<
+        'a,
+        routecore::bgp::path_selection::Rfc4271,
+    >;
 
     type TBI = rotonda_store::prelude::multi::TiebreakerInfo;
 
@@ -164,7 +170,9 @@ impl rotonda_store::Meta for RotondaPaMap {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct RotondaPaMap(pub routecore::bgp::path_attributes::OwnedPathAttributes);
+pub struct RotondaPaMap(
+    pub routecore::bgp::path_attributes::OwnedPathAttributes,
+);
 
 impl fmt::Display for RotondaPaMap {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -183,22 +191,30 @@ impl Serialize for RotondaPaMap {
             match pa.to_owned().unwrap() {
                 PathAttribute::StandardCommunities(list) => {
                     for c in list.communities() {
-                        communities.push(HumanReadableCommunity(Community::from(*c)));
+                        communities.push(HumanReadableCommunity(
+                            Community::from(*c),
+                        ));
                     }
                 }
                 PathAttribute::ExtendedCommunities(list) => {
                     for c in list.communities() {
-                        communities.push(HumanReadableCommunity(Community::from(*c)));
+                        communities.push(HumanReadableCommunity(
+                            Community::from(*c),
+                        ));
                     }
                 }
                 PathAttribute::LargeCommunities(list) => {
                     for c in list.communities() {
-                        communities.push(HumanReadableCommunity(Community::from(*c)));
+                        communities.push(HumanReadableCommunity(
+                            Community::from(*c),
+                        ));
                     }
                 }
                 PathAttribute::Ipv6ExtendedCommunities(list) => {
                     for c in list.communities() {
-                        communities.push(HumanReadableCommunity(Community::from(*c)));
+                        communities.push(HumanReadableCommunity(
+                            Community::from(*c),
+                        ));
                     }
                 }
 
@@ -221,20 +237,20 @@ impl Serialize for RotondaPaMap {
 
         if !communities.is_empty() {
             #[derive(Serialize)]
-            struct Communities{communities: Vec<HumanReadableCommunity>}
-        
-            let c = Communities{communities};
+            struct Communities {
+                communities: Vec<HumanReadableCommunity>,
+            }
+
+            let c = Communities { communities };
             s.serialize_element(&c)?;
         }
         s.end()
     }
 }
 
-
-
 #[derive(Clone, Debug, Eq)]
 pub struct Payload {
-    pub rx_value: RotondaRoute,//RouteWorkshop<N>, //was: TypeValue,
+    pub rx_value: RotondaRoute, //RouteWorkshop<N>, //was: TypeValue,
     pub context: RouteContext,
     pub trace_id: Option<u8>,
     pub received: DateTime<Utc>,
@@ -244,8 +260,7 @@ impl PartialEq for Payload {
     fn eq(&self, other: &Self) -> bool {
         // Don't compare the received timestamp
         // self.source_id == other.source_id &&
-        self.rx_value == other.rx_value && 
-            self.trace_id == other.trace_id
+        self.rx_value == other.rx_value && self.trace_id == other.trace_id
     }
 }
 
@@ -253,8 +268,8 @@ impl Payload {
     pub fn new(
         rx_value: RotondaRoute,
         context: RouteContext,
-        trace_id: Option<u8>) -> Self
-    {
+        trace_id: Option<u8>,
+    ) -> Self {
         Self {
             // source_id: source_id.into(),
             rx_value,
@@ -416,10 +431,13 @@ pub enum Update {
     // connection goes down and everything for the monitored sessions has to
     // be marked Withdrawn.
     WithdrawBulk(SmallVec<[IngressId; 8]>),
-    QueryResult(Uuid, Result<QueryResult<crate::payload::RotondaPaMap>, String>),
+    QueryResult(
+        Uuid,
+        Result<QueryResult<crate::payload::RotondaPaMap>, String>,
+    ),
     UpstreamStatusChange(UpstreamStatus),
 
-    OutputStream(SmallVec<[crate::common::roto_new::OutputStreamMessage; 2]>)
+    OutputStream(SmallVec<[crate::common::roto_new::OutputStreamMessage; 2]>),
 }
 
 impl Update {

@@ -1,14 +1,18 @@
 use crate::{
     common::{
         //roto::{FilterName, RotoScripts, ThreadLocalVM},
-        roto_new::{FilterName, RotoScripts}, status_reporter::{AnyStatusReporter, UnitStatusReporter}
+        roto_new::{FilterName, RotoScripts},
+        status_reporter::{AnyStatusReporter, UnitStatusReporter},
     },
     comms::{
         AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus,
         Terminated,
     },
     manager::{Component, WaitPoint},
-    payload::{/*FilterError, Filterable,*/ Payload, RotondaRoute, Update, UpstreamStatus},
+    payload::{
+        /*FilterError, Filterable,*/ Payload, RotondaRoute, Update,
+        UpstreamStatus,
+    },
     tracing::Tracer,
     units::Unit,
 };
@@ -136,13 +140,16 @@ impl RotoFilterRunner {
             link.connect(arc_self.clone(), false).await.unwrap();
         }
 
-        // Wait for other components to be, and signal to other components that we are, ready to start. All units and
-        // targets start together, otherwise data passed from one component to another may be lost if the receiving
-        // component is not yet ready to accept it.
+        // Wait for other components to be, and signal to other components
+        // that we are, ready to start. All units and targets start together,
+        // otherwise data passed from one component to another may be lost if
+        // the receiving component is not yet ready to accept it.
         arc_self.gate.process_until(waitpoint.ready()).await?;
 
-        // Signal again once we are out of the process_until() so that anyone waiting to send important gate status
-        // updates won't send them while we are in process_until() which will just eat them without handling them.
+        // Signal again once we are out of the process_until() so that anyone
+        // waiting to send important gate status updates won't send them while
+        // we are in process_until() which will just eat them without handling
+        // them.
         waitpoint.running().await;
 
         loop {
@@ -170,8 +177,8 @@ impl RotoFilterRunner {
                             // Notify that we have reconfigured ourselves
                             arc_self.status_reporter.reconfigured();
 
-                            // Register as a direct update receiver with the new
-                            // set of linked gates.
+                            // Register as a direct update receiver with the
+                            // new set of linked gates.
                             arc_self
                                 .status_reporter
                                 .upstream_sources_changed(
@@ -230,7 +237,7 @@ impl RotoFilterRunner {
 
     async fn filter_payload(
         &self,
-        _payloads: impl IntoIterator<Item = Payload>, 
+        _payloads: impl IntoIterator<Item = Payload>,
     ) -> Result<(), String /*FilterError*/> {
         todo!()
 
@@ -299,13 +306,15 @@ mod tests {
     use std::sync::atomic::Ordering::SeqCst;
 
     use bytes::Bytes;
-    use roto::types::{
-        builtin::{BuiltinTypeValue, RouteContext}, collections::BytesRecord,
-        lazyrecord_types::BmpMessage, typevalue::TypeValue,
-    };
     use inetnum::asn::Asn;
-    use routecore::bmp::message::PeerType;
     use roto::types::builtin::SourceId;
+    use roto::types::{
+        builtin::{BuiltinTypeValue, RouteContext},
+        collections::BytesRecord,
+        lazyrecord_types::BmpMessage,
+        typevalue::TypeValue,
+    };
+    use routecore::bmp::message::PeerType;
 
     use crate::{
         bgp::encode::{Announcements, Prefixes},
@@ -555,9 +564,9 @@ mod tests {
         let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(bmp_msg));
         //Update::Single(Payload::new(value, None, None))
         Update::Single(Payload::new(
-                value,
-                RouteContext::for_reprocessing(),
-                None
+            value,
+            RouteContext::for_reprocessing(),
+            None,
         ))
     }
 
@@ -573,10 +582,12 @@ mod tests {
             gate_metrics.num_dropped_updates.load(SeqCst);
         let num_updates_after = gate_metrics.num_updates.load(SeqCst);
 
-        // If not filtered then the number of updates processed by the gate should have increased,
-        // either by failing to deliver the update i.e. dropping it, or by delivering it. So if the
-        // dropped and not dropped metrics remain the same it means no attempt was made to send an
-        // update through the Gate, i.e. it was filtered out before sending via the Gate.
+        // If not filtered then the number of updates processed by the gate
+        // should have increased, either by failing to deliver the update i.e.
+        // dropping it, or by delivering it. So if the dropped and not dropped
+        // metrics remain the same it means no attempt was made to send an
+        // update through the Gate, i.e. it was filtered out before sending
+        // via the Gate.
         num_dropped_updates_before == num_dropped_updates_after
             && num_updates_before == num_updates_after
     }

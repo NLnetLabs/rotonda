@@ -9,15 +9,18 @@ use hyper::{Body, Method, Request, Response};
 //use roto::types::builtin::ingress::IngressId;
 
 use crate::{
-    common::frim::FrimMap, http::{
+    common::frim::FrimMap,
+    http::{
         self, extract_params, get_param, MatchedParam, PercentDecodedPath,
         ProcessRequest,
-    }, ingress, units::bmp_tcp_in::{
+    },
+    ingress,
+    units::bmp_tcp_in::{
         metrics::BmpTcpInMetrics,
         state_machine::{BmpState, BmpStateDetails, BmpStateMachineMetrics},
         types::RouterInfo,
         util::{calc_u8_pc, format_source_id},
-    }
+    },
 };
 
 pub struct RouterListApi {
@@ -27,8 +30,12 @@ pub struct RouterListApi {
     pub router_metrics: Arc<BmpTcpInMetrics>,
     pub bmp_metrics: Arc<BmpStateMachineMetrics>,
     pub router_id_template: Arc<ArcSwap<String>>,
-    pub router_states:
-        Arc<FrimMap<ingress::IngressId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>,
+    pub router_states: Arc<
+        FrimMap<
+            ingress::IngressId,
+            Arc<tokio::sync::Mutex<Option<BmpState>>>,
+        >,
+    >,
     pub ingresses: Arc<ingress::Register>,
 }
 
@@ -79,7 +86,10 @@ impl RouterListApi {
         bmp_metrics: Arc<BmpStateMachineMetrics>,
         router_id_template: Arc<ArcSwap<String>>,
         router_states: Arc<
-            FrimMap<ingress::IngressId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
+            FrimMap<
+                ingress::IngressId,
+                Arc<tokio::sync::Mutex<Option<BmpState>>>,
+            >,
         >,
         ingresses: Arc<ingress::Register>,
     ) -> Self {
@@ -111,7 +121,8 @@ impl RouterListApi {
                 .collect(),
 
             Some("sys_name") | Some("sys_desc") => {
-                let mut sort_tmp: Vec<(String, ingress::IngressId)> = Vec::new();
+                let mut sort_tmp: Vec<(String, ingress::IngressId)> =
+                    Vec::new();
 
                 for (source_id, state_machine) in
                     self.router_states.guard().iter()
@@ -164,7 +175,8 @@ impl RouterListApi {
             | Some("invalid_messages")
             | Some("soft_parse_errors")
             | Some("hard_parse_errors") => {
-                let mut sort_tmp: Vec<(usize, ingress::IngressId)> = Vec::new();
+                let mut sort_tmp: Vec<(usize, ingress::IngressId)> =
+                    Vec::new();
 
                 for (ingress_id, state_machine) in
                     self.router_states.guard().iter()

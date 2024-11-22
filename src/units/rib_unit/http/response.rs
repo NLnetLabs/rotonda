@@ -7,19 +7,28 @@ use log::{debug, error};
 //    builtin::{BuiltinTypeValue, PrefixRoute}, collections::ElementTypeValue,
 //    typevalue::TypeValue,
 //};
-use rotonda_store::{prelude::{multi::RouteStatus, Prefix}, PublicRecord};
 use inetnum::asn::Asn;
+use rotonda_store::{
+    prelude::{multi::RouteStatus, Prefix},
+    PublicRecord,
+};
 
 use routecore::bgp::{
-    aspath::{AsPath, Hop, HopPath}, communities::{
-        Community as CommunityEnum, HumanReadableCommunity as Community
-    }, nlri::afisafi::{AfiSafiNlri, IsPrefix}, path_attributes::FromAttribute, workshop::route::RouteWorkshop
+    aspath::{AsPath, Hop, HopPath},
+    communities::{
+        Community as CommunityEnum, HumanReadableCommunity as Community,
+    },
+    nlri::afisafi::{AfiSafiNlri, IsPrefix},
+    path_attributes::FromAttribute,
+    workshop::route::RouteWorkshop,
 };
 
 use serde_json::{json, Value};
 
 use crate::{
-    common::json::EasilyExtendedJSONObject, ingress::{self, IngressId, IngressInfo}, payload::{RotondaPaMap, RotondaRoute},// units::rib_unit::rib::RibValue
+    common::json::EasilyExtendedJSONObject,
+    ingress::{self, IngressId, IngressInfo},
+    payload::{RotondaPaMap, RotondaRoute},
 };
 
 use super::{
@@ -45,11 +54,7 @@ impl PrefixesApi {
 
         //debug!("creating response for {:#?}", res);
 
-        
-
         if let Some(prefix) = res.prefix {
-            // now a vec instead of an option
-            //if let Some(routes_per_router) = res.prefix_meta {
             for public_record in res.prefix_meta {
                 Self::prefixes_as_json(
                     &prefix,
@@ -131,17 +136,26 @@ impl PrefixesApi {
         result_prefixes: &mut Vec<Value>,
         ingress_register: &Arc<ingress::Register>,
     ) {
-
         let ingress_id = record.multi_uniq_id;
         let status = record.status;
 
         let ingress_info = ingress_register.get(ingress_id);
 
-        //let mut sortable_results = Some(Arc::new(TypeValue::from(rib_value.clone())))
         let mut sortable_results = Some(record.meta.clone())
             .iter()
-            .filter(|&item| Self::include_item_in_results(filter_cfg, item, &ingress_info))
-            .map(|item| Self::mk_result(query_prefix, item, ingress_id, status, details_cfg, &ingress_info))
+            .filter(|&item| {
+                Self::include_item_in_results(filter_cfg, item, &ingress_info)
+            })
+            .map(|item| {
+                Self::mk_result(
+                    query_prefix,
+                    item,
+                    ingress_id,
+                    status,
+                    details_cfg,
+                    &ingress_info,
+                )
+            })
             .collect::<Vec<Value>>();
 
         Self::sort_results(sort_cfg, &mut sortable_results);
@@ -167,12 +181,13 @@ impl PrefixesApi {
                             (None, Some(_)) => Ordering::Less,
                             (Some(_), None) => Ordering::Greater,
                             (Some(lhs), Some(rhs)) => {
-                                // serde_json::Value doesn't implement PartialOrd
-                                // so we can't call cmp
+                                // serde_json::Value doesn't implement
+                                // PartialOrd so we can't call cmp
                                 match Self::cmp_json_values(lhs, rhs) {
                                     Ordering::Less => Ordering::Less,
                                     Ordering::Equal => {
-                                        // Try to break the tie using the next sort key, if one exists
+                                        // Try to break the tie using the next
+                                        // sort key, if one exists
                                         continue;
                                     }
                                     Ordering::Greater => Ordering::Greater,
@@ -188,13 +203,15 @@ impl PrefixesApi {
         };
     }
 
-    // Cmp for serde_json::Value for sorting. Not implemented for object types.
+    // Cmp for serde_json::Value for sorting. Not implemented for object
+    // types.
     fn cmp_json_values(lhs: &Value, rhs: &Value) -> Ordering {
         if lhs == rhs {
             Ordering::Equal
         } else {
-            // When comparing we expect to compare values of the same type as we are selecting the same field from
-            // multiple results in the data and sorting by them.
+            // When comparing we expect to compare values of the same type as
+            // we are selecting the same field from multiple results in the
+            // data and sorting by them.
             match (lhs, rhs) {
                 (Value::Null, Value::Null) => Ordering::Equal,
                 (Value::Bool(v1), Value::Bool(v2)) => v1.cmp(v2),
@@ -213,8 +230,9 @@ impl PrefixesApi {
                 (Value::Array(v1), Value::Array(v2)) => {
                     let mut it1 = v1.iter();
                     let mut it2 = v2.iter();
-                    // Do lexicographic compare because serde_json::Value doesn't implement the Ord trait so we can't
-                    // just compare the two Vec<Value> instances.
+                    // Do lexicographic compare because serde_json::Value
+                    // doesn't implement the Ord trait so we can't just
+                    // compare the two Vec<Value> instances.
                     loop {
                         match (it1.next(), it2.next()) {
                             (None, None) => return Ordering::Equal,
@@ -257,7 +275,8 @@ impl PrefixesApi {
             "status": status.to_string(),
             "attributes": route,
 
-        })).unwrap()
+        }))
+        .unwrap()
     }
 
     fn include_item_in_results(
@@ -284,12 +303,15 @@ impl PrefixesApi {
                 Self::match_community(item, community)
             }
 
-            //FilterKind::PeerAs(peer_as) => Self::match_peer_as(item, *peer_as),
+            //FilterKind::PeerAs(peer_as) => Self::match_peer_as(item,
+            //*peer_as),
 
             // NB: we don't have a Provenance available here, but we should
             // have a remote ASN in the ingress::Register for the
             // MUI/ingress_id stored in the prefix store.
-            FilterKind::PeerAs(peer_as) => Self::match_peer_as(item, *peer_as, ingress_info),
+            FilterKind::PeerAs(peer_as) => {
+                Self::match_peer_as(item, *peer_as, ingress_info)
+            }
         };
 
         let mut discards = filter_cfg.discards().iter();
@@ -314,31 +336,34 @@ impl PrefixesApi {
         item: &RotondaPaMap,
         filter_as_path: &[Asn],
     ) -> bool {
-            let as_path = item.0.get::<HopPath>();
-            let as_path = if let Some(as_path) = as_path {
-                debug!("trying to match as_path {:?}", as_path);
-                as_path
-            } else {
-                debug!("Ignoring AS path matching for {:?} with {:?}", item, filter_as_path);
-                return false;
-            };
-            let mut actual_it = as_path.iter();
-            let mut wanted_it = filter_as_path.iter();
+        let as_path = item.0.get::<HopPath>();
+        let as_path = if let Some(as_path) = as_path {
+            debug!("trying to match as_path {:?}", as_path);
+            as_path
+        } else {
+            debug!(
+                "Ignoring AS path matching for {:?} with {:?}",
+                item, filter_as_path
+            );
+            return false;
+        };
+        let mut actual_it = as_path.iter();
+        let mut wanted_it = filter_as_path.iter();
 
-            loop {
-                match (actual_it.next(), wanted_it.next()) {
-                    (Some(Hop::Asn(actual_asn)), Some(wanted_asn))
-                        if actual_asn == wanted_asn =>
-                    {
-                        continue
-                    }
-
-                    (None, None) => return true,
-
-                    _ => return false,
+        loop {
+            match (actual_it.next(), wanted_it.next()) {
+                (Some(Hop::Asn(actual_asn)), Some(wanted_asn))
+                    if actual_asn == wanted_asn =>
+                {
+                    continue
                 }
+
+                (None, None) => return true,
+
+                _ => return false,
             }
-            /*
+        }
+        /*
         match item {
             TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(ref route)) => {
                 //let mut route = route.clone();
@@ -383,54 +408,53 @@ impl PrefixesApi {
         item: &RotondaPaMap,
         community: &Community,
     ) -> bool {
-
         #[allow(unused_variables)] // false positive
         let wanted_c = community.0;
         debug!("in match_community, wanted_c {:?}", &wanted_c);
 
-
         if let Some(communities) = item.0.get::<Vec<CommunityEnum>>() {
             #[allow(unused_variables)] // false positive
             communities.iter().any(|item| {
-                //let match_res = matches!(
-                //    item,
-                //    //ElementTypeValue::Primitive(TypeValue::Builtin(possible_c)) if *possible_c == wanted_c
-                //    wanted_c
-                //);
+                //let match_res = matches!( item,
+                //    //ElementTypeValue::Primitive(TypeValue::Builtin(possible_c))
+                //    if *possible_c == wanted_c wanted_c );
                 let match_res = item == &wanted_c;
                 debug!("does {:?} match? {}", &item, match_res);
                 match_res
             })
         } else {
-            debug!("Ignoring community matching for {:?} with {:?}", item, community);
+            debug!(
+                "Ignoring community matching for {:?} with {:?}",
+                item, community
+            );
             false
         }
 
         /*
 
-        //let wanted_c = BuiltinTypeValue::try_from(*community).unwrap();
-        match **item {
-            TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(ref route)) => {
-                //let mut route = route.clone();
-                //if let Ok(attrs) = route.get_attrs() {
-                if let Some(communities) = route.get_attr::<Vec<CommunityEnum>>() {
-                    #[allow(unused_variables)] // false positive
-                    communities.iter().any(|item| {
-                        matches!(
-                            item,
-                            //ElementTypeValue::Primitive(TypeValue::Builtin(possible_c)) if *possible_c == wanted_c
-                            community
-                        )
-                    })
-                } else {
-                    debug!("Ignoring community matching for {:?} with {:?}", route, community);
-                    false
+            //let wanted_c = BuiltinTypeValue::try_from(*community).unwrap();
+            match **item {
+                TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(ref route)) => {
+                    //let mut route = route.clone();
+                    //if let Ok(attrs) = route.get_attrs() {
+                    if let Some(communities) = route.get_attr::<Vec<CommunityEnum>>() {
+                        #[allow(unused_variables)] // false positive
+                        communities.iter().any(|item| {
+                            matches!(
+                                item,
+                                //ElementTypeValue::Primitive(TypeValue::Builtin(possible_c)) if *possible_c == wanted_c
+                                community
+                            )
+                        })
+                    } else {
+                        debug!("Ignoring community matching for {:?} with {:?}", route, community);
+                        false
+                    }
                 }
+                _ => false,
             }
-            _ => false,
         }
-    }
-        */
+            */
     }
 
     //fn match_peer_as(item: &Arc<TypeValue>, peer_asn: Asn) -> bool {
@@ -440,18 +464,14 @@ impl PrefixesApi {
         _item: &RotondaPaMap,
         peer_asn: Asn,
         ingress_info: &Option<IngressInfo>,
-        ) -> bool {
+    ) -> bool {
         // FIXME we need the peer ASN here, which is not part of the TypeValue
-        // (anymore).
-        // We'll need to store (parts of) the provenance in the store or some
-        // such.
-        //item.as_ref().provenance().peer_asn == peer_asn
+        // (anymore). We'll need to store (parts of) the provenance in the
+        // store or some such. item.as_ref().provenance().peer_asn == peer_asn
 
         // possible workaround: get the neighbour AS from the HopPath in the
         // RouteWorkshop for this PrefixRoute. This will not work for iBGP
         // with empty AS_PATHs.
-
-
 
         // NB:as long as we make sure the ingress_info describes the BGP
         // session (even when it comes in via BMP), we can use the remote_asn
@@ -473,9 +493,11 @@ impl PrefixesApi {
 mod test {
     use std::str::FromStr;
 
-    use roto::types::{builtin::{
-        PrefixRoute, NlriStatus, Provenance, RotondaId
-    }, collections::BytesRecord, lazyrecord_types::BgpUpdateMessage};
+    use roto::types::{
+        builtin::{NlriStatus, PrefixRoute, Provenance, RotondaId},
+        collections::BytesRecord,
+        lazyrecord_types::BgpUpdateMessage,
+    };
     use routecore::bgp::{message::SessionConfig, types::AfiSafiType};
 
     use crate::bgp::encode::{mk_bgp_update, Announcements, Prefixes};

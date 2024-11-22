@@ -7,9 +7,12 @@ use std::{
 };
 
 use crate::{
-    common::frim::FrimMap, comms::{Gate, GateMetrics}, ingress::IngressId, metrics::{
+    common::frim::FrimMap,
+    comms::{Gate, GateMetrics},
+    ingress::IngressId,
+    metrics::{
         self, util::append_per_router_metric, Metric, MetricType, MetricUnit,
-    }
+    },
 };
 
 #[derive(Debug, Default)]

@@ -75,9 +75,9 @@ use chrono::{DateTime, Utc};
 use crossbeam_utils::atomic::AtomicCell;
 use futures::future::{select, Either, Future};
 use futures::pin_mut;
+use inetnum::addr::Prefix;
 use log::{error, log_enabled, trace, Level};
 use rotonda_store::MatchOptions;
-use inetnum::addr::Prefix;
 use serde::Deserialize;
 use tokio::sync::mpsc::Sender;
 
@@ -183,9 +183,10 @@ pub struct Gate {
     tracer: Option<Arc<Tracer>>,
 }
 
-// On drop, notify the parent of a cloned gate that this clone is detaching itself so that the parent Gate remove the
-// corresponding entry from its clone senders collection, otherwise clones "leak" memory in the parent because a
-// reference to them is never cleaned up.
+// On drop, notify the parent of a cloned gate that this clone is detaching
+// itself so that the parent Gate remove the corresponding entry from its
+// clone senders collection, otherwise clones "leak" memory in the parent
+// because a reference to them is never cleaned up.
 impl Drop for Gate {
     fn drop(&mut self) {
         if log_enabled!(Level::Trace) {
@@ -248,7 +249,8 @@ impl Gate {
 
     /// Take the key internals of a Gate to use elsewhere.
     ///
-    /// Can't be done manually via destructuring due to the existence of the Drop impl for Gate.
+    /// Can't be done manually via destructuring due to the existence of the
+    /// Drop impl for Gate.
     ///
     /// For internal use only, hence not public.
     fn take(
@@ -482,7 +484,8 @@ impl Gate {
                         "Cloned gates do not support the Reconfigure command"
                     );
 
-                    // Ensure we drop the lock before we hit the .awaits below as we cannot hold the lock across an .await.
+                    // Ensure we drop the lock before we hit the .awaits below
+                    // as we cannot hold the lock across an .await.
                     {
                         let new_id = *new_gate.id.lock().unwrap();
                         let mut id = self.id.lock().unwrap();
@@ -497,9 +500,11 @@ impl Gate {
                         *id = new_id;
                     }
 
-                    // This is an ugly way to take over the internals of the given Gate object and use them ourselves.
-                    // We need to take() because just destructuring the Gate struct causes compilation failure because the
-                    // Gate innards can't be moved out when Gate has a Drop impl.
+                    // This is an ugly way to take over the internals of the
+                    // given Gate object and use them ourselves. We need to
+                    // take() because just destructuring the Gate struct
+                    // causes compilation failure because the Gate innards
+                    // can't be moved out when Gate has a Drop impl.
                     let (new_commands, new_updates) = new_gate.take();
                     *self.commands.write().await = new_commands;
                     self.updates.replace(new_updates);
@@ -628,7 +633,8 @@ impl Gate {
         while end > Instant::now() {
             match timeout_at(end, self.process()).await {
                 Ok(Ok(_status)) => {
-                    // Wait interrupted by internal gate status change, keep waiting
+                    // Wait interrupted by internal gate status change, keep
+                    // waiting
                 }
                 Ok(Err(Terminated)) => {
                     // Wait interrupted by gate termination, abort
@@ -654,56 +660,56 @@ impl Gate {
     /// otherwise.
     pub async fn update_data(&self, update: Update) {
         // let mut sender_lost = false;
-            let mut sent_at_least_once = false;
+        let mut sent_at_least_once = false;
 
-            if log_enabled!(Level::Trace) {
-                let clone_txt = if self.is_clone() {
-                    format!("{} clone of ", self.clone_id())
-                } else {
-                    String::new()
-                };
-                trace!(
-                    "Gate[{} ({}{})]: Starting update",
-                    self.name,
-                    clone_txt,
-                    self.id()
-                );
-            }
-            for (uuid, item) in self.updates.guard().iter() {
-                match (&item.queue, &item.direct) {
-                    (Some(sender), None) => {
-                        if let Some(tracer) = &self.tracer {
-                            for payload in update.trace_ids() {
-                                tracer.note_gate_event(
+        if log_enabled!(Level::Trace) {
+            let clone_txt = if self.is_clone() {
+                format!("{} clone of ", self.clone_id())
+            } else {
+                String::new()
+            };
+            trace!(
+                "Gate[{} ({}{})]: Starting update",
+                self.name,
+                clone_txt,
+                self.id()
+            );
+        }
+        for (uuid, item) in self.updates.guard().iter() {
+            match (&item.queue, &item.direct) {
+                (Some(sender), None) => {
+                    if let Some(tracer) = &self.tracer {
+                        for payload in update.trace_ids() {
+                            tracer.note_gate_event(
                                     payload.trace_id().unwrap(),
                                     self.id(),
                                     format!("Sent by queue from gate {} to slot {uuid}: {payload:#?}", self.id()),
                                 );
-                            }
-                        }
-                        if sender.send(Ok(update.clone())).await.is_ok() {
-                            sent_at_least_once = true;
-                            continue;
                         }
                     }
-                    (None, Some(direct)) => {
-                        if log_enabled!(log::Level::Trace) {
-                            let clone_txt = if self.is_clone() {
-                                format!("{} clone of ", self.clone_id())
-                            } else {
-                                String::new()
-                            };
-                            trace!(
+                    if sender.send(Ok(update.clone())).await.is_ok() {
+                        sent_at_least_once = true;
+                        continue;
+                    }
+                }
+                (None, Some(direct)) => {
+                    if log_enabled!(log::Level::Trace) {
+                        let clone_txt = if self.is_clone() {
+                            format!("{} clone of ", self.clone_id())
+                        } else {
+                            String::new()
+                        };
+                        trace!(
                                 "Gate[{} ({}{})]: Sending direct update for slot {}",
                                 self.name,
                                 clone_txt,
                                 self.id(),
                                 uuid
                             );
-                        }
-                        if let Some(tracer) = &self.tracer {
-                            for payload in update.trace_ids() {
-                                tracer.note_gate_event(
+                    }
+                    if let Some(tracer) = &self.tracer {
+                        for payload in update.trace_ids() {
+                            tracer.note_gate_event(
                                     payload.trace_id().unwrap(),
                                     self.id(),
                                     format!(
@@ -711,46 +717,45 @@ impl Gate {
                                         self.id()
                                     ),
                                 );
-                            }
                         }
-                        if let Some(direct) = direct.upgrade() {
-                            direct.direct_update(update.clone()).await;
-                            sent_at_least_once = true;
-                        }
-                        continue;
                     }
-                    _ => {}
+                    if let Some(direct) = direct.upgrade() {
+                        direct.direct_update(update.clone()).await;
+                        sent_at_least_once = true;
+                    }
+                    continue;
                 }
-                // We don't actually have any usage of queue based sending at present
-                // so we can skip doing this for now.
-                // item.queue = None;
-                // sender_lost = true;
+                _ => {}
             }
-            if log_enabled!(Level::Trace) {
-                let clone_txt = if self.is_clone() {
-                    format!("{} clone of ", self.clone_id())
-                } else {
-                    String::new()
-                };
-                trace!(
-                    "Gate[{} ({}{})]: Finished update",
-                    self.name,
-                    clone_txt,
-                    self.id()
-                );
-            }
-
-            // if sender_lost {
-            //     let updates = self.updates.load();
-            //     updates.retain(|_, item| item.queue.is_some());
-            //     self.updates_len.store(updates.len(), SeqCst);
-            // }
-
-            self.metrics.update(
-                &update,
-                self.updates.clone(),
-                sent_at_least_once,
+            // We don't actually have any usage of queue based sending at
+            // present so we can skip doing this for now. item.queue = None;
+            // sender_lost = true;
+        }
+        if log_enabled!(Level::Trace) {
+            let clone_txt = if self.is_clone() {
+                format!("{} clone of ", self.clone_id())
+            } else {
+                String::new()
+            };
+            trace!(
+                "Gate[{} ({}{})]: Finished update",
+                self.name,
+                clone_txt,
+                self.id()
             );
+        }
+
+        // if sender_lost {
+        //     let updates = self.updates.load();
+        //     updates.retain(|_, item| item.queue.is_some());
+        //     self.updates_len.store(updates.len(), SeqCst);
+        // }
+
+        self.metrics.update(
+            &update,
+            self.updates.clone(),
+            sent_at_least_once,
+        );
     }
 
     /// Returns the current gate status.
@@ -1561,21 +1566,25 @@ pub enum GateStatus {
 
     /// The gate is not connected to any active links.
     ///
-    /// This doesn't necessarily mean that there are no links at all, only that currently none of the links is
-    /// interested in receiving updates from this unit.
+    /// This doesn't necessarily mean that there are no links at all, only
+    /// that currently none of the links is interested in receiving updates
+    /// from this unit.
     Dormant,
 
     /// The unit owning this gate should update its configuration.
     ///
-    /// The payload contains the new configuration settings that the unit should adopt, where possible. In particular
-    /// any changes to upstream links should be honored as soon as possible.
+    /// The payload contains the new configuration settings that the unit
+    /// should adopt, where possible. In particular any changes to upstream
+    /// links should be honored as soon as possible.
     Reconfiguring { new_config: Unit },
 
-    /// The unit owning this gate should report its upstream link configuration.
+    /// The unit owning this gate should report its upstream link
+    /// configuration.
     ///
-    /// The payload should be populated with information about how the unit owning this gate is linked to its upstream
-    /// units. This enables the caller (the Manager) to establish the actual current relationships between the set of
-    /// deployed units.
+    /// The payload should be populated with information about how the unit
+    /// owning this gate is linked to its upstream units. This enables the
+    /// caller (the Manager) to establish the actual current relationships
+    /// between the set of deployed units.
     ReportLinks { report: UpstreamLinkReport },
 
     /// The unit owning this gate has been triggered by a downstream unit.
@@ -1836,7 +1845,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[cfg(not(tarpaulin))]
     async fn gate_link_lifecycle_test() {
-        use roto::types::builtin::RouteContext;
+        use crate::common::roto_new::RouteContext;
 
         // Lifecycle of a connected gate and link:
         //
@@ -1908,7 +1917,8 @@ mod tests {
 
         eprintln!("STARTING");
         // Create a gate. Updates sent via the gate will be received by links.
-        let (gate, mut agent) = Gate::new(1); // the minimum allowed queue capacity is 1
+        // the minimum allowed queue capacity is 1
+        let (gate, mut agent) = Gate::new(1);
 
         // Create a link from the gate agent to receive updates from the gate.
         let mut link = agent.create_link();
@@ -2014,9 +2024,8 @@ mod tests {
         let gate_clone = gate.clone();
 
         eprintln!("CHECKING GATE DOES NOT YET HAVE CLONE SENDER");
-        assert!(
-            matches!(&gate.state, GateState::Normal(NormalGateState { clone_senders, .. }) if clone_senders.is_empty())
-        );
+        assert!(matches!(&gate.state, GateState::Normal(NormalGateState {
+                clone_senders, .. }) if clone_senders.is_empty()));
 
         // Give the parent gate a chance to process the AttachClone command
         // that will be sent by the new clone.
@@ -2025,9 +2034,8 @@ mod tests {
             .await;
 
         eprintln!("CHECKING GATE HAS CLONE SENDER");
-        assert!(
-            matches!(&gate.state, GateState::Normal(NormalGateState { clone_senders, .. }) if !clone_senders.is_empty())
-        );
+        assert!(matches!(&gate.state, GateState::Normal(NormalGateState {
+                clone_senders, .. }) if !clone_senders.is_empty()));
 
         eprintln!("SENDING TERMINATION COMMAND");
         agent.terminate().await;
@@ -2057,9 +2065,8 @@ mod tests {
         let gate_clone = gate.clone();
 
         eprintln!("CHECKING GATE DOES NOT YET HAVE CLONE SENDER");
-        assert!(
-            matches!(&gate.state, GateState::Normal(NormalGateState { clone_senders, .. }) if clone_senders.is_empty())
-        );
+        assert!(matches!(&gate.state, GateState::Normal(NormalGateState {
+                clone_senders, .. }) if clone_senders.is_empty()));
 
         // Give the parent gate a chance to process the AttachClone command
         // that will be sent by the new clone.
@@ -2068,9 +2075,8 @@ mod tests {
             .await;
 
         eprintln!("CHECKING GATE HAS CLONE SENDER");
-        assert!(
-            matches!(&gate.state, GateState::Normal(NormalGateState { clone_senders, .. }) if !clone_senders.is_empty())
-        );
+        assert!(matches!(&gate.state, GateState::Normal(NormalGateState { 
+                clone_senders, .. }) if !clone_senders.is_empty()));
 
         eprintln!("SENDING TERMINATION COMMAND");
         agent.terminate().await;
@@ -2090,9 +2096,8 @@ mod tests {
         let gate_clone = gate.clone();
 
         eprintln!("CHECKING GATE DOES NOT YET HAVE CLONE SENDER");
-        assert!(
-            matches!(&gate.state, GateState::Normal(NormalGateState { clone_senders, .. }) if clone_senders.is_empty())
-        );
+        assert!(matches!(&gate.state, GateState::Normal(NormalGateState { 
+                clone_senders, .. }) if clone_senders.is_empty()));
 
         // Give the parent gate a chance to process the AttachClone command
         // that will be sent by the new clone.
@@ -2101,9 +2106,8 @@ mod tests {
             .await;
 
         eprintln!("CHECKING GATE HAS CLONE SENDER");
-        assert!(
-            matches!(&gate.state, GateState::Normal(NormalGateState { clone_senders, .. }) if !clone_senders.is_empty())
-        );
+        assert!(matches!(&gate.state, GateState::Normal(NormalGateState { 
+                clone_senders, .. }) if !clone_senders.is_empty()));
 
         eprintln!("DROPPING CLONED GATE");
         drop(gate_clone);
@@ -2113,8 +2117,7 @@ mod tests {
         gate.wait(1).await.unwrap();
 
         eprintln!("CHECKING GATE HAS NO CLONE SENDER");
-        assert!(
-            matches!(&gate.state, GateState::Normal(NormalGateState { clone_senders, .. }) if clone_senders.is_empty())
-        );
+        assert!(matches!(&gate.state, GateState::Normal(NormalGateState { 
+                clone_senders, .. }) if clone_senders.is_empty()));
     }
 }

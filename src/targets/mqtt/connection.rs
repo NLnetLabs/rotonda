@@ -259,11 +259,12 @@ impl<C: Client> Connection<C> {
                 Err(err) => {
                     // Any error reported by rumqttc already resulted in it
                     // calling its own `clean()` fn internally which forgets
-                    // the network connection causing the next call to `poll()`
-                    // to reconnect. However, we don't want to reconnect
-                    // immediately and potentially repeatedly, we want to have
-                    // a reconnection backoff strategy. So break out of here
-                    // to allow the caller to wait before reconnecting.
+                    // the network connection causing the next call to
+                    // `poll()` to reconnect. However, we don't want to
+                    // reconnect immediately and potentially repeatedly, we
+                    // want to have a reconnection backoff strategy. So break
+                    // out of here to allow the caller to wait before
+                    // reconnecting.
                     status_reporter.connection_error(err);
                     retry = true;
                 }

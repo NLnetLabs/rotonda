@@ -50,7 +50,8 @@ fn main() {
 
                 file.read_exact(&mut bmp_bytes).unwrap();
                 bytes_left -= bmp_bytes.len();
-                let bmp_msg = BmpMsg::from_octets(bmp_bytes.as_slice()).unwrap();
+                let bmp_msg =
+                    BmpMsg::from_octets(bmp_bytes.as_slice()).unwrap();
 
                 // Did the original stream contain the message at this
                 // point in time or do we need to wait a bit so as to
@@ -58,10 +59,14 @@ fn main() {
                 // data was seen?
                 if let Some(last_ts) = last_ts {
                     let millis_between_messages = ts - last_ts;
-                    let millis_since_last_push = last_push.elapsed().as_millis();
+                    let millis_since_last_push =
+                        last_push.elapsed().as_millis();
                     if millis_since_last_push < millis_between_messages {
-                        let _millis_to_sleep = millis_between_messages - millis_since_last_push;
-                        sleep(Duration::from_millis(_millis_to_sleep.try_into().unwrap()));
+                        let _millis_to_sleep =
+                            millis_between_messages - millis_since_last_push;
+                        sleep(Duration::from_millis(
+                            _millis_to_sleep.try_into().unwrap(),
+                        ));
                     }
                 }
 

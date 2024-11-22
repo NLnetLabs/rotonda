@@ -13,13 +13,11 @@ use futures::{pin_mut, Future};
 use log::{debug, error, warn};
 use non_empty_vec::NonEmpty;
 //use roto::types::{builtin::BuiltinTypeValue, typevalue::TypeValue};
-use routecore::bgp::fsm::session::{Command, DisconnectReason};
 use inetnum::asn::Asn;
+use routecore::bgp::fsm::session::{Command, DisconnectReason};
 use routecore::bgp::message::UpdateMessage;
 use routecore::bgp::message::{
-    SessionConfig,
-    update_builder::UpdateBuilder,
-    Message as BgpMsg,
+    update_builder::UpdateBuilder, Message as BgpMsg, SessionConfig,
 };
 
 use serde::Deserialize;
@@ -30,16 +28,18 @@ use crate::common::net::{
     StandardTcpListenerFactory, StandardTcpStream, TcpListener,
     TcpListenerFactory, TcpStreamWrapper,
 };
-use crate::common::roto_new::{FilterName, Provenance, RotoOutputStream, RotoScripts};
+use crate::common::roto_new::{
+    FilterName, Provenance, RotoOutputStream, RotoScripts,
+};
 //use crate::common::roto::{FilterName, RotoScripts};
 use crate::common::status_reporter::{Chainable, UnitStatusReporter};
-use crate::ingress;
-use crate::payload::Update;
 use crate::common::unit::UnitActivity;
 use crate::comms::{
-    AnyDirectUpdate, DirectUpdate, DirectLink, GateStatus, Terminated
+    AnyDirectUpdate, DirectLink, DirectUpdate, GateStatus, Terminated,
 };
+use crate::ingress;
 use crate::manager::{Component, WaitPoint};
+use crate::payload::Update;
 use crate::units::{Gate, Unit};
 
 use super::metrics::BgpTcpInMetrics;
@@ -50,25 +50,22 @@ use super::peer_config::{CombinedConfig, PeerConfigs};
 
 //----------- BgpTcpIn -------------------------------------------------------
 
-
-
 pub(super) type RotoFunc = roto::TypedFunc<
     (
         roto::Val<*mut RotoOutputStream>,
         roto::Val<UpdateMessage<Bytes>>,
         roto::Val<Provenance>,
     ),
-    roto::Verdict<(),()>
+    roto::Verdict<(), ()>,
 >;
-
-
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct BgpTcpIn {
     /// Address:port to listen on incoming BGP connections over TCP.
     pub listen: String,
 
-    pub my_asn: Asn, // TODO make getters, or impl Into<-fsm::bgp::Config>
+    // TODO make getters, or impl Into<-fsm::bgp::Config>
+    pub my_asn: Asn,
 
     pub my_bgp_id: [u8; 4],
 
@@ -77,7 +74,6 @@ pub struct BgpTcpIn {
 
     #[serde(default)]
     pub filter_name: FilterName,
-
     ///// Outgoing BGP UPDATEs can come from these sources.
     //pub sources: Vec<DirectLink>
 }
@@ -152,8 +148,9 @@ impl BgpTcpIn {
         .run::<_, _, StandardTcpStream, BgpTcpInRunner>(
             //sources,
             Vec::new(),
-            Arc::new(StandardTcpListenerFactory,)
-        ).await
+            Arc::new(StandardTcpListenerFactory),
+        )
+        .await
     }
 }
 
@@ -176,7 +173,7 @@ trait ConfigAcceptor {
 
 pub type LiveSessions = HashMap<
     (IpAddr, Asn),
-    (mpsc::Sender<Command>, mpsc::Sender<BgpMsg<Bytes>>)
+    (mpsc::Sender<Command>, mpsc::Sender<BgpMsg<Bytes>>),
 >;
 
 //#[derive(Debug)]
@@ -205,7 +202,6 @@ impl fmt::Debug for BgpTcpInRunner {
         write!(f, "BgpTcpInRunner: {{ bgp: {:?}  }}", self.bgp)
     }
 }
-
 
 impl BgpTcpInRunner {
     fn new(
@@ -258,17 +254,17 @@ impl BgpTcpInRunner {
         // spawning tasks to handle them.
         let status_reporter = self.status_reporter.clone();
 
-
         let arc_self = Arc::new(self);
         // Register as a direct update receiver with the linked gates.
         for link in sources.iter_mut() {
             link.connect(arc_self.clone(), false).await.unwrap();
         }
 
-        let roto_function: Option<RotoFunc> = arc_self.roto_compiled.clone().and_then(|c| {
-            let mut c = c.lock().unwrap();
-            c.get_function("bgp-in").ok()
-        });
+        let roto_function: Option<RotoFunc> =
+            arc_self.roto_compiled.clone().and_then(|c| {
+                let mut c = c.lock().unwrap();
+                c.get_function("bgp-in").ok()
+            });
 
         loop {
             let listen_addr = arc_self.bgp.load().listen.clone();
@@ -290,12 +286,12 @@ impl BgpTcpInRunner {
                 }
             };
 
-            let listener = match arc_self.process_until(bind_with_backoff()).await
-            {
-                ControlFlow::Continue(Ok(res)) => res,
-                ControlFlow::Continue(Err(_err)) => continue,
-                ControlFlow::Break(Terminated) => return Err(Terminated),
-            };
+            let listener =
+                match arc_self.process_until(bind_with_backoff()).await {
+                    ControlFlow::Continue(Ok(res)) => res,
+                    ControlFlow::Continue(Err(_err)) => continue,
+                    ControlFlow::Break(Terminated) => return Err(Terminated),
+                };
 
             status_reporter.listener_listening(&listen_addr);
 
@@ -305,16 +301,18 @@ impl BgpTcpInRunner {
                         status_reporter
                             .listener_connection_accepted(peer_addr);
 
-                        // Now:
-                        // check for the peer_addr.ip() in the new PeerConfig
-                        // and spawn a Session for it.
-                        // We might need some new stuff:
-                        // a temporary 'pending' list/map, keyed on only the peer
-                        // IP, from which entries will be removed once the OPENs
-                        // are exchanged and we know the remote ASN.
+                        // Now: check for the peer_addr.ip() in the new
+                        // PeerConfig and spawn a Session for it. We might
+                        // need some new stuff: a temporary 'pending'
+                        // list/map, keyed on only the peer IP, from which
+                        // entries will be removed once the OPENs are
+                        // exchanged and we know the remote ASN.
 
-                        if let Some((remote_net, cfg)) =
-                            arc_self.bgp.load().peer_configs.get(peer_addr.ip())
+                        if let Some((remote_net, cfg)) = arc_self
+                            .bgp
+                            .load()
+                            .peer_configs
+                            .get(peer_addr.ip())
                         {
                             let child_name = format!(
                                 "bgp[{}:{}]",
@@ -386,7 +384,8 @@ impl BgpTcpInRunner {
                             // router_handler() tasks will receive their
                             // own copy of this Reconfiguring status
                             // update and can react to it accordingly.
-                            let rebind = self.bgp.load().listen != new_unit.listen;
+                            let rebind =
+                                self.bgp.load().listen != new_unit.listen;
 
                             self.bgp.store(new_unit.into());
 
@@ -433,7 +432,7 @@ impl DirectUpdate for BgpTcpInRunner {
     async fn direct_update(&self, update: Update) {
         error!("Using a Bgp-in unit as target is currently not supported");
         return;
-            /*
+        /*
         let process_update = |value: TypeValue| async {
             if let TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(pfr)) = value {
                 //debug!("got {} for prefix {} from {:?}@{:?}",
@@ -554,8 +553,8 @@ impl ConfigAcceptor for BgpTcpInRunner {
         ingresses: Arc<ingress::Register>,
         connector_ingress_id: ingress::IngressId,
     ) {
-        let (cmds_tx, cmds_rx) = mpsc::channel(10*10); //XXX this is limiting and
-                                                    //causes loss
+        let (cmds_tx, cmds_rx) = mpsc::channel(10 * 10); //XXX this is limiting and
+                                                         //causes loss
         let tcp_stream = tcp_stream.into_inner().unwrap(); // SAFETY: StandardTcpStream::into_inner() always returns Ok(...)
         crate::tokio::spawn(
             &child_name,
@@ -570,7 +569,7 @@ impl ConfigAcceptor for BgpTcpInRunner {
                 child_status_reporter,
                 live_sessions,
                 ingresses,
-                connector_ingress_id
+                connector_ingress_id,
             ),
         );
     }
@@ -593,16 +592,20 @@ mod tests {
         common::{
             net::TcpStreamWrapper, roto::RotoScripts,
             status_reporter::AnyStatusReporter,
-        }, comms::{Gate, GateAgent, Terminated}, ingress, tests::util::{
+        },
+        comms::{Gate, GateAgent, Terminated},
+        ingress,
+        tests::util::{
             internal::get_testable_metrics_snapshot,
             net::{
                 MockTcpListener, MockTcpListenerFactory, MockTcpStreamWrapper,
             },
-        }, units::bgp_tcp_in::{
+        },
+        units::bgp_tcp_in::{
             peer_config::{PeerConfig, PrefixOrExact},
             status_reporter::BgpTcpInStatusReporter,
             unit::{BgpTcpIn, BgpTcpInRunner, ConfigAcceptor, LiveSessions},
-        }
+        },
     };
 
     #[tokio::test(flavor = "multi_thread")]
@@ -749,8 +752,10 @@ mod tests {
 
         let status_reporter = runner.status_reporter.clone();
 
-        let runner_fut = runner
-            .run::<_, _, _, NoOpConfigAcceptor>(vec![], mock_listener_factory.into());
+        let runner_fut = runner.run::<_, _, _, NoOpConfigAcceptor>(
+            vec![],
+            mock_listener_factory.into(),
+        );
 
         (runner_fut, gate_agent, status_reporter)
     }

@@ -10,10 +10,12 @@ use tokio::sync::Mutex;
 //use roto::types::builtin::SourceId;
 
 use crate::{
-    http::{self, PercentDecodedPath, ProcessRequest}, ingress, units::bmp_tcp_in::{
+    http::{self, PercentDecodedPath, ProcessRequest},
+    ingress,
+    units::bmp_tcp_in::{
         metrics::BmpTcpInMetrics,
         state_machine::{BmpState, BmpStateDetails, BmpStateMachineMetrics},
-    }
+    },
 };
 
 use super::response::Focus;
@@ -122,8 +124,10 @@ impl ProcessRequest for RouterInfoApi {
                         };
 
                     let ingress_info = self.ingresses.get(self.ingress_id);
-                    let addr = ingress_info.and_then(|i| i.remote_addr)
-                        .map(|a| a.to_string()).unwrap_or("".to_string());
+                    let addr = ingress_info
+                        .and_then(|i| i.remote_addr)
+                        .map(|a| a.to_string())
+                        .unwrap_or("".to_string());
                     //if router == self.source_id.to_string()
                     if router == self.ingress_id.to_string()
                         || router == router_id.as_str()

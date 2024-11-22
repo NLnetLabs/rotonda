@@ -11,22 +11,17 @@ use chrono::{DateTime, Utc};
 use hash32::Hasher;
 use inetnum::asn::Asn;
 use log::{debug, error, info};
-//use roto::types::lazyrecord_types::BgpUpdateMessage;
-//use roto::types::{
-//    builtin::BuiltinTypeValue, collections::BytesRecord,
-//    lazyrecord_types::BmpMessage, typevalue::TypeValue,
-//};
 use routecore::bmp::message::Message;
-//use roto::types::builtin::{NlriStatus, PeerId, PeerRibType, Provenance, RouteContext, SourceId};
 
 use smallvec::smallvec;
 use tokio::sync::Mutex;
 use tokio::{io::AsyncRead, net::TcpStream};
 
-use crate::common::roto_new::{FilterName, OutputStreamMessage, PeerRibType, Provenance, RotoOutputStream, RotoScripts, RouteContext};
-//use crate::common::roto::{
-//    FilterName, FilterOutput, RotoScripts, ThreadLocalVM,
-//};
+use crate::common::roto_new::{
+    FilterName, OutputStreamMessage, PeerRibType, Provenance,
+    RotoOutputStream, RotoScripts, RouteContext,
+};
+
 use crate::ingress::{self, IngressId};
 use crate::payload::RouterId;
 use crate::tracing::Tracer;
@@ -144,13 +139,13 @@ impl RouterHandler {
         // we need access to the ingress Register to register new IDs, for
         // every peer / session in the BMP connection
     ) {
-
         // Discard the write half of the TCP stream as we are a "monitoring
         // station" and per the BMP RFC 7584 specification _"No BMP message is
         // ever sent from the monitoring station to the monitored router"_.
         // See: https://datatracker.ietf.org/doc/html/rfc7854#section-3.2
         let (rx, _tx) = tcp_stream.split();
-        self.read_from_router(rx, router_addr, ingress_id, ingress_register).await;
+        self.read_from_router(rx, router_addr, ingress_id, ingress_register)
+            .await;
     }
 
     async fn read_from_router<T: AsyncRead + Unpin>(
@@ -171,16 +166,16 @@ impl RouterHandler {
         //let mut connection_id =  hash32::FnvHasher::default();
         //source_id.hash(&mut connection_id);
 
-
         let router_ingress_id = ingress_register.register();
-
 
         let provenance = Provenance::for_bmp(
             router_ingress_id,
-            router_addr.ip(), // peer_ip: we are not diving into the BMP message to see
-                     // if this is a RouteMonitoring msg, just set to BMP IP
-                     // and overwrite later if necessary
-            Asn::from_u32(0), // peer_asn, set to Asn(0) for now, overwrite later
+            // peer_ip: we are not diving into the BMP message to see if this
+            // is a RouteMonitoring msg, just set to BMP IP and overwrite
+            // later if necessary
+            router_addr.ip(),
+            // peer_asn, set to Asn(0) for now, overwrite later
+            Asn::from_u32(0),
             router_addr.ip(),
             [0; 9],
             PeerRibType::InPre,
@@ -353,45 +348,30 @@ impl RouterHandler {
             msg.common_header().msg_type().into(),
         );
 
-
         let mut output_stream = RotoOutputStream::new();
-        let verdict = self.roto_function.as_ref().map(
-            |roto_function|
-            {
-                roto_function.call(
-                    roto::Val(&mut output_stream),
-                    roto::Val(msg.clone()),
-                    roto::Val(provenance),
-                )
-            });
+        let verdict = self.roto_function.as_ref().map(|roto_function| {
+            roto_function.call(
+                roto::Val(&mut output_stream),
+                roto::Val(msg.clone()),
+                roto::Val(provenance),
+            )
+        });
         if !output_stream.is_empty() {
             let mut osms = smallvec![];
             use crate::common::roto_new::Output;
             for entry in output_stream.drain() {
                 let osm = match entry {
                     Output::Prefix(_prefix) => {
-                        OutputStreamMessage::prefix(
-                            None,
-                            Some(ingress_id),
-                        )
+                        OutputStreamMessage::prefix(None, Some(ingress_id))
                     }
                     Output::Community(_u32) => {
-                        OutputStreamMessage::community(
-                            None,
-                            Some(ingress_id),
-                        )
+                        OutputStreamMessage::community(None, Some(ingress_id))
                     }
                     Output::Asn(_u32) => {
-                        OutputStreamMessage::asn(
-                            None,
-                            Some(ingress_id),
-                        )
+                        OutputStreamMessage::asn(None, Some(ingress_id))
                     }
                     Output::Origin(_u32) => {
-                        OutputStreamMessage::origin(
-                            None,
-                            Some(ingress_id),
-                        )
+                        OutputStreamMessage::origin(None, Some(ingress_id))
                     }
                     Output::PeerDown => {
                         if let Message::PeerDownNotification(ref pdn) = msg {
@@ -404,16 +384,18 @@ impl RouterHandler {
                                 Some(ingress_id),
                             )
                         } else {
-                            error!("log_peer_down on a non-peerdownnotification");
-                            continue
+                            error!(
+                                "log_peer_down on a non-peerdownnotification"
+                            );
+                            continue;
                         }
-                    },
+                    }
                     Output::Custom((id, local)) => {
                         OutputStreamMessage::custom(
-                            id, local,
+                            id,
+                            local,
                             Some(ingress_id),
                         )
-                        
                     }
                 };
                 osms.push(osm);
@@ -437,11 +419,13 @@ impl RouterHandler {
                     }
 
                     MessageType::StateTransition => {
-                        // If we have transitioned to the Dumping state that means we
-                        // just processed an Initiation message and MUST have captured
-                        // a sysName Information TLV string. Use the captured value to
-                        // make the router ID more meaningful, instead of the
-                        // UNKNOWN_ROUTER_SYSNAME sysName value we used until now.
+                        // If we have transitioned to the Dumping state that
+                        // means we just processed an Initiation message and
+                        // MUST have captured a sysName Information TLV
+                        // string. Use the captured value to make the router
+                        // ID more meaningful, instead of the
+                        // UNKNOWN_ROUTER_SYSNAME sysName value we used until
+                        // now.
                         self.check_update_router_id(
                             addr,
                             ingress_id, //&source_id,
@@ -450,14 +434,16 @@ impl RouterHandler {
                     }
 
                     MessageType::RoutingUpdate { update } => {
-                        // Pass the routing update on to downstream units and/or targets.
-                        // This is where we send an update down the pipeline.
+                        // Pass the routing update on to downstream units
+                        // and/or targets. This is where we send an update
+                        // down the pipeline.
                         self.gate.update_data(update).await;
                     }
 
                     MessageType::Other => {
-                        // A BMP initiation message received after the initiation
-                        // phase will result in this type of message.
+                        // A BMP initiation message received after the
+                        // initiation phase will result in this type of
+                        // message.
                         self.check_update_router_id(
                             addr,
                             ingress_id, //&source_id,
@@ -471,8 +457,8 @@ impl RouterHandler {
                         // logged so there's nothing more we can do here
                         // except stop processing this BMP stream.
                         return Err((
-                                res.next_state.router_id(),
-                                "Aborted".to_string(),
+                            res.next_state.router_id(),
+                            "Aborted".to_string(),
                         ));
                     }
                 }
@@ -488,15 +474,13 @@ impl RouterHandler {
         *bmp_state_lock = Some(next_state);
         Ok(())
 
-
         //LH: we'll need roughly the same as in the BGP handler here:
         //- execute the BMP pre-explosion filter
         //- based on the verdict, call process_msg or not
         //- handle any items in the outputstream queue
 
-
         /*
-        
+
         let next_state = if let ControlFlow::Continue(FilterOutput {
             south,
             east,
@@ -506,7 +490,7 @@ impl RouterHandler {
                 let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(
                     msg.into(),
                 ));
-                
+
                 // We will only create a context if we have a provenance, i.e.
                 // we have already processed a BMP PeerUpNotification (the
                 // first BMP message with a per-peer-header that contains some
@@ -620,7 +604,6 @@ impl RouterHandler {
         *bmp_state_lock = Some(next_state);
         Ok(())
         */
-
     }
 
     fn check_update_router_id(
@@ -758,7 +741,9 @@ mod tests {
                     let metrics = get_testable_metrics_snapshot(
                         &self.status_reporter.metrics().unwrap(),
                     );
-                    let label = ("router", "unknown"); // Unknown because no BMP Initiation message with a sysName was processed
+                    // Unknown because no BMP Initiation message with a
+                    // sysName was processed
+                    let label = ("router", "unknown");
                     assert_eq!(
                         metrics.with_label::<usize>(
                             "bmp_tcp_in_num_bmp_messages_received",
@@ -797,12 +782,14 @@ mod tests {
             0
         );
 
-        runner.read_from_router(
-            rx,
-            router_addr,
-            source_id,
-            Arc::new(ingress::Register::default()),
-        ).await;
+        runner
+            .read_from_router(
+                rx,
+                router_addr,
+                source_id,
+                Arc::new(ingress::Register::default()),
+            )
+            .await;
 
         let metrics = get_testable_metrics_snapshot(
             &runner.status_reporter.metrics().unwrap(),
@@ -833,7 +820,9 @@ mod tests {
             BmpMessage::from_octets(mk_peer_down_notification_msg(&pph))
                 .unwrap();
 
-        process_msg(&runner, bad_initiation_msg, None).await.unwrap();
+        process_msg(&runner, bad_initiation_msg, None)
+            .await
+            .unwrap();
         process_msg(&runner, bad_peer_down_msg, None).await.unwrap();
 
         let metrics = get_testable_metrics_snapshot(
@@ -887,16 +876,35 @@ mod tests {
         // influence the router id of the metric counter which the receipt of
         // the BMP Initiation Message causes us to increment.
 
-        assert_metric_label_value(&metrics, "unknown", "bmp_tcp_in_num_bmp_messages_received", "msg_type", "Peer Down Notification", 1); // from 1
-        assert_metric_value(&metrics, "unknown", "bmp_in_num_invalid_bmp_messages", 1); // from 1
-        assert_metric_label_value(&metrics, "unknown", "bmp_tcp_in_num_bmp_messages_received", "msg_type", "Initiation Message", 1); // from 2
-
-        assert_metric_label_value(&metrics, SYS_NAME, "bmp_tcp_in_num_bmp_messages_received", "msg_type", "Peer Down Notification", 1); // from 3
-        assert_metric_value(&metrics, SYS_NAME, "bmp_in_num_invalid_bmp_messages", 1); // from 3
-        assert_metric_label_value(&metrics, SYS_NAME, "bmp_tcp_in_num_bmp_messages_received", "msg_type", "Initiation Message", 1); // from 4
-
-        assert_metric_value(&metrics, OTHER_SYS_NAME, "bmp_in_num_invalid_bmp_messages", 1); // from 5
-        assert_metric_label_value(&metrics, OTHER_SYS_NAME, "bmp_tcp_in_num_bmp_messages_received", "msg_type", "Peer Down Notification", 1); // from 5
+        assert_metric_label_value(
+            &metrics, "unknown", "bmp_tcp_in_num_bmp_messages_received",
+            "msg_type", "Peer Down Notification", 1
+        ); // from 1
+        assert_metric_value(
+            &metrics, "unknown", "bmp_in_num_invalid_bmp_messages", 1
+        ); // from 1
+        assert_metric_label_value(
+            &metrics, "unknown", "bmp_tcp_in_num_bmp_messages_received",
+            "msg_type", "Initiation Message", 1
+        ); // from 2
+        assert_metric_label_value(
+            &metrics, SYS_NAME, "bmp_tcp_in_num_bmp_messages_received",
+            "msg_type", "Peer Down Notification", 1
+        ); // from 3
+        assert_metric_value(
+            &metrics, SYS_NAME, "bmp_in_num_invalid_bmp_messages", 1
+        ); // from 3
+        assert_metric_label_value(
+            &metrics, SYS_NAME, "bmp_tcp_in_num_bmp_messages_received",
+            "msg_type", "Initiation Message", 1
+        ); // from 4
+        assert_metric_value(
+            &metrics, OTHER_SYS_NAME, "bmp_in_num_invalid_bmp_messages", 1
+        ); // from 5
+        assert_metric_label_value(
+            &metrics, OTHER_SYS_NAME, "bmp_tcp_in_num_bmp_messages_received",
+            "msg_type", "Peer Down Notification", 1
+        ); // from 5
     }
 
     // --- Test helpers ------------------------------------------------------
@@ -904,7 +912,7 @@ mod tests {
     async fn process_msg(
         router_handler: &RouterHandler,
         msg: BmpMessage,
-        provenance: Option<Provenance>
+        provenance: Option<Provenance>,
     ) -> Result<(), (Arc<String>, String)> {
         router_handler
             .process_msg(
@@ -913,7 +921,7 @@ mod tests {
                 "unknown".into(),
                 msg,
                 provenance,
-                None
+                None,
             )
             .await
     }

@@ -2,17 +2,14 @@ use std::{net::IpAddr, str::FromStr, sync::Arc};
 
 use bytes::Bytes;
 use chrono::Utc;
+use inetnum::{addr::Prefix, asn::Asn};
+use roto::types::builtin::SourceId;
 use roto::types::{
     builtin::{BuiltinTypeValue, NlriStatus, RouteContext},
     typevalue::TypeValue,
 };
-use inetnum::{
-    addr::Prefix,
-    asn::Asn
-};
 use rotonda_store::prelude::multi::RouteStatus;
 use routecore::bmp::message::{Message as BmpMsg, PerPeerHeader};
-use roto::types::builtin::SourceId;
 
 use crate::{
     bgp::encode::{mk_per_peer_header, Announcements, Prefixes},
@@ -359,45 +356,45 @@ fn peer_up_route_monitoring_peer_down() {
     if let MessageType::RoutingUpdate { update } = res.message_type {
         assert!(matches!(update, Update::Bulk(_)));
         todo!() // the line above will panic for now anyway
-        /*
-        if let Update::Bulk(mut bulk) = update {
-            assert_eq!(bulk.len(), 1);
+                /*
+                if let Update::Bulk(mut bulk) = update {
+                    assert_eq!(bulk.len(), 1);
 
-            // Verify that the update fits inline into the SmallVec without spilling on to the heap.
-            assert!(!bulk.spilled());
+                    // Verify that the update fits inline into the SmallVec without spilling on to the heap.
+                    assert!(!bulk.spilled());
 
-            let pfx = Prefix::from_str("2001:2000:3080:e9c::2/128").unwrap();
-            let mut expected_roto_prefixes: Vec<TypeValue> = vec![pfx.into()];
-            for Payload {rx_value: value,..} in bulk.drain(..) {
-                if let TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(route)) =
-                    value
-                {
-                    // let materialized_route = MaterializedRoute2::from(route);
-                    // let pa = route.0.attributes();
-                    let found_pfx = route.prefix(); //.into();
-                    //let position = expected_roto_prefixes
-                    //    .iter()
-                    //    .position(|pfx| pfx == found_pfx)
-                    //    .unwrap();
-                    expected_roto_prefixes.remove(position);
-                     
-                    //assert_eq!(
-                    //    route.0.status,
-                    //    NlriStatus::Withdrawn
-                    //);
-                    // If the attributes are empty, this likely is a
-                    // withdrawal. 
-                    // XXX but, we will never get here because we do not send
-                    // out Update::Bulk for this anymore, but
-                    // Update::Withdraw(Bulk)
-                    assert!(route.attributes().is_empty());
-                } else {
-                    panic!("Expected TypeValue::Builtin(BuiltinTypeValue::Route(_)");
+                    let pfx = Prefix::from_str("2001:2000:3080:e9c::2/128").unwrap();
+                    let mut expected_roto_prefixes: Vec<TypeValue> = vec![pfx.into()];
+                    for Payload {rx_value: value,..} in bulk.drain(..) {
+                        if let TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(route)) =
+                            value
+                        {
+                            // let materialized_route = MaterializedRoute2::from(route);
+                            // let pa = route.0.attributes();
+                            let found_pfx = route.prefix(); //.into();
+                            //let position = expected_roto_prefixes
+                            //    .iter()
+                            //    .position(|pfx| pfx == found_pfx)
+                            //    .unwrap();
+                            expected_roto_prefixes.remove(position);
+
+                            //assert_eq!(
+                            //    route.0.status,
+                            //    NlriStatus::Withdrawn
+                            //);
+                            // If the attributes are empty, this likely is a
+                            // withdrawal.
+                            // XXX but, we will never get here because we do not send
+                            // out Update::Bulk for this anymore, but
+                            // Update::Withdraw(Bulk)
+                            assert!(route.attributes().is_empty());
+                        } else {
+                            panic!("Expected TypeValue::Builtin(BuiltinTypeValue::Route(_)");
+                        }
+                    }
+                    assert!(expected_roto_prefixes.is_empty());
                 }
-            }
-            assert!(expected_roto_prefixes.is_empty());
-        }
-        */
+                */
     } else {
         unreachable!();
     }
@@ -945,8 +942,11 @@ fn route_monitoring_invalid_message() {
 
     // Then
     assert!(matches!(res.next_state, BmpState::Dumping(_)));
-    assert_invalid_msg_starts_with(&res, "Invalid BMP RouteMonitoring BGP \
-    UPDATE message. One or more elements in the NLRI(s) cannot be parsed");
+    assert_invalid_msg_starts_with(
+        &res,
+        "Invalid BMP RouteMonitoring BGP \
+    UPDATE message. One or more elements in the NLRI(s) cannot be parsed",
+    );
 
     // Check the metrics
     let processor = res.next_state;
@@ -995,7 +995,8 @@ fn route_monitoring_announce_route() {
         if let Update::Bulk(updates) = &update {
             assert_eq!(updates.len(), 1);
             if let Payload {
-                rx_value: TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(route)),
+                rx_value:
+                    TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(route)),
                 context: RouteContext::Fresh(ctx),
                 ..
             } = &updates[0]

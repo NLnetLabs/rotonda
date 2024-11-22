@@ -9,7 +9,15 @@ use super::{
 };
 
 use crate::{
-    common::{roto_new::OutputStreamMessage, status_reporter::{AnyStatusReporter, TargetStatusReporter}}, comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated}, ingress, manager::{Component, TargetCommand, WaitPoint}, payload::{Update, UpstreamStatus}, targets::Target
+    common::{
+        roto_new::OutputStreamMessage,
+        status_reporter::{AnyStatusReporter, TargetStatusReporter},
+    },
+    comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
+    ingress,
+    manager::{Component, TargetCommand, WaitPoint},
+    payload::{Update, UpstreamStatus},
+    targets::Target,
 };
 
 use arc_swap::{ArcSwap, ArcSwapOption};
@@ -139,9 +147,10 @@ where
             link.connect(arc_self.clone(), false).await.unwrap();
         }
 
-        // Wait for other components to be, and signal to other components that we are, ready to start. All units and
-        // targets start together, otherwise data passed from one component to another may be lost if the receiving
-        // component is not yet ready to accept it.
+        // Wait for other components to be, and signal to other components
+        // that we are, ready to start. All units and targets start together,
+        // otherwise data passed from one component to another may be lost if
+        // the receiving component is not yet ready to accept it.
         waitpoint.running().await;
 
         arc_self
@@ -186,14 +195,15 @@ where
     ) -> Result<(), Terminated> {
         while connection.active() {
             tokio::select! {
-                biased; // Disable tokio::select!() random branch selection
+                // Disable tokio::select!() random branch selection
+                biased;
 
                 client = connection.process() => {
                     self.client.store(client.map(Arc::new));
                 }
 
-                // If nothing happened above, check for new internal Rotonda target commands
-                // to handle.
+                // If nothing happened above, check for new internal Rotonda
+                // target commands to handle.
                 cmd = cmd_rx.recv() => {
                     if let Some(cmd) = &cmd {
                         self.status_reporter.command_received(cmd);
@@ -224,9 +234,9 @@ where
                     }
                 }
 
-                // And finally if not doing anything else we can process messages
-                // waiting in our internal queue to be published, which were
-                // enqueued by the direct_update() method below.
+                // And finally if not doing anything else we can process
+                // messages waiting in our internal queue to be published,
+                // which were enqueued by the direct_update() method below.
                 msg = pub_q_rx.recv() => {
                     match msg {
                         Some(SenderMsg {
@@ -387,7 +397,8 @@ where
         osm: OutputStreamMessage,
     ) -> Option<SenderMsg> {
         if *osm.get_name() == **self.component.name() {
-            let ingress_info = osm.get_ingress_id().and_then(|id| self.ingresses.get(id));
+            let ingress_info =
+                osm.get_ingress_id().and_then(|id| self.ingresses.get(id));
 
             match serde_json::to_string(&(ingress_info, osm.get_record())) {
                 Ok(content) => {
@@ -432,7 +443,9 @@ impl ConnectionFactory for MqttRunner<mqtt::AsyncClient> {
         create_opts.set_inflight(1000);
         create_opts.set_keep_alive(Duration::from_secs(20));
 
-        if let (Some(username), Some(password)) = (&config.username, &config.password) {
+        if let (Some(username), Some(password)) =
+            (&config.username, &config.password)
+        {
             create_opts.set_credentials(username, password);
         }
 
@@ -459,8 +472,7 @@ where
 
             Update::OutputStream(msgs) => {
                 for osm in msgs {
-                    if let Some(msg) =
-                        self.output_stream_message_to_msg(osm)
+                    if let Some(msg) = self.output_stream_message_to_msg(osm)
                     {
                         if let Err(err) =
                             self.pub_q_tx.as_ref().unwrap().send(msg).await
@@ -468,7 +480,6 @@ where
                             error!("failed to send MQTT message: {err}");
                         }
                     }
-
                 }
             }
 
@@ -506,8 +517,9 @@ where
                 }
             }
             */
-
-            _ => { /* We may have received the output from another unit, but we are not interested in it */
+            _ => {
+                // We may have received the output from another unit, but we
+                // are not interested in it
             }
         }
     }

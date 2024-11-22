@@ -1,17 +1,25 @@
 use core::fmt;
-use std::{collections::{HashMap, HashSet}, net::IpAddr, path::PathBuf};
+use std::{
+    collections::{HashMap, HashSet},
+    net::IpAddr,
+    path::PathBuf,
+};
 
 use bytes::Bytes;
 use chrono::Utc;
 use inetnum::{addr::Prefix, asn::Asn};
-use log::{debug, warn};
+use log::debug;
 use rotonda_store::prelude::multi::RouteStatus;
 use routecore::bgp::{message::UpdateMessage, nlri::afisafi::Nlri};
 use serde::Deserialize;
 
 pub use super::roto_runtime::rotonda_roto_runtime;
 
-use crate::{ingress::IngressId, manager, payload::{RotondaPaMap, RotondaRoute}};
+use crate::{
+    ingress::IngressId,
+    manager,
+    payload::{RotondaPaMap, RotondaRoute},
+};
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct FilterName(String);
@@ -29,8 +37,9 @@ impl<'a, 'de: 'a> Deserialize<'de> for FilterName {
     where
         D: serde::Deserializer<'de>,
     {
-        // This has to be a String, even though we pass a &str to ShortString::from(), because of the way that newer
-        // versions of the toml crate work. See: https://github.com/toml-rs/toml/issues/597
+        // This has to be a String, even though we pass a &str to
+        // ShortString::from(), because of the way that newer versions of the
+        // toml crate work. See: https://github.com/toml-rs/toml/issues/597
         let s: String = Deserialize::deserialize(deserializer)?;
         let filter_name = FilterName(s);
         Ok(manager::load_filter_name(filter_name))
@@ -39,7 +48,7 @@ impl<'a, 'de: 'a> Deserialize<'de> for FilterName {
 
 impl From<String> for FilterName {
     fn from(value: String) -> Self {
-        Self {0: value}
+        Self { 0: value }
     }
 }
 
@@ -72,11 +81,10 @@ impl RotoScripts {
     }
 }
 
-
 pub type CompiledRoto = std::sync::Mutex<roto::Compiled>;
 
 #[derive(Default)]
-pub struct OutputStream<M>{
+pub struct OutputStream<M> {
     msgs: Vec<M>,
 }
 
@@ -106,7 +114,6 @@ impl<M> IntoIterator for OutputStream<M> {
     fn into_iter(self) -> Self::IntoIter {
         self.msgs.into_iter()
     }
-
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -114,15 +121,16 @@ pub enum Output {
     /// Community observed in Path Attributes.
     Community(u32),
 
-    /// ASN observed in the AS_PATH Path Attribute. 
+    /// ASN observed in the AS_PATH Path Attribute.
     Asn(Asn),
 
     /// ASN observed as right-most AS in the AS_PATH.
     Origin(Asn),
 
-    /// A BMP PeerDownNotification was observed. 
-    PeerDown, // TODO stick the PeerIp in here from roto, if we can, otherwise
-              // get it from elsewhere in Rotonda
+    // TODO stick the PeerIp in here from roto, if we can, otherwise get it
+    // from elsewhere in Rotonda
+    /// A BMP PeerDownNotification was observed.
+    PeerDown,
     /// Prefix observed in the BGP or BMP message.
     Prefix(Prefix),
 
@@ -137,7 +145,6 @@ pub struct InsertionInfo {
     //is_new_best: bool,
     //replaced_route: RotondaRoute,
 }
-
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FreshRouteContext {
@@ -162,10 +169,12 @@ impl MrtContext {
 // LH: attempt to capture both fresh and re-process contexts with an enum:
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RouteContext {
-    Fresh(FreshRouteContext), // Fresh, Realtime,
+    // Fresh, Realtime,
+    Fresh(FreshRouteContext),
     Mrt(MrtContext),
-    Reprocess // Data coming form a pRIB somewhere West. XXX could/should this
-              // contain an IngressId/MUI ?
+    // Data coming form a pRIB somewhere West. XXX could/should this
+    // contain an IngressId/MUI ?
+    Reprocess,
 }
 
 impl From<FreshRouteContext> for RouteContext {
@@ -182,7 +191,7 @@ impl RouteContext {
     pub fn for_mrt_dump(provenance: Provenance) -> Self {
         Self::Mrt(MrtContext {
             status: RouteStatus::Active,
-            provenance
+            provenance,
         })
     }
 
@@ -191,11 +200,7 @@ impl RouteContext {
         status: RouteStatus,
         provenance: Provenance,
     ) -> Self {
-        FreshRouteContext::new(
-            bgp_msg,
-            status,
-            provenance,
-        ).into()
+        FreshRouteContext::new(bgp_msg, status, provenance).into()
     }
 
     // XXX add setter for withdrawals?
@@ -204,11 +209,10 @@ impl RouteContext {
         match self {
             Self::Fresh(ctx) => ctx.provenance().ingress_id,
             Self::Mrt(ctx) => ctx.provenance().ingress_id,
-            Self::Reprocess => todo!()
+            Self::Reprocess => todo!(),
         }
     }
 }
-
 
 impl FreshRouteContext {
     pub fn new(
@@ -251,28 +255,25 @@ impl FreshRouteContext {
     */
 }
 
-
 //------------ Provenance ----------------------------------------------------
 
 /// A sized struct containing session/state information for BMP and/or BGP.
 ///
 /// The Provenance struct holds information that pertains to the session. This
-/// information comes from configuration, or is exchanged in the first
-/// stage of a session prior to the actual routing information is exchanged.
+/// information comes from configuration, or is exchanged in the first stage
+/// of a session prior to the actual routing information is exchanged.
 /// Typically, the information in Provenance is not available in the
 /// individual routing information messages (e.g. BGP UPDATE PDUs), but is
 /// useful or necessary to process such messages.
 ///
-/// For BGP, this means information from the BGP OPEN message.
-/// For BMP, that is information from the PerPeerHeader: as we currently split
-/// up the encapsulated BGP UPDATE message per NLRI into N `PrefixRoutes`
-/// typevalues, we lose the PerPeerHeader after the filter in the connector
-/// Unit.
+/// For BGP, this means information from the BGP OPEN message. For BMP, that
+/// is information from the PerPeerHeader: as we currently split up the
+/// encapsulated BGP UPDATE message per NLRI into N `PrefixRoutes` typevalues,
+/// we lose the PerPeerHeader after the filter in the connector Unit.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 pub struct Provenance {
     //#[serde(skip)]
     pub timestamp: chrono::DateTime<Utc>,
-
 
     /// The unique ID for the session.
     ///
@@ -296,32 +297,25 @@ pub struct Provenance {
 
     /// The remote ip address for the TCP connection.
     ///
-    /// For BGP, the connection_ip and peer_ip are the same.
-    /// For BMP, the connection_ip holds the IP address of the monitored
-    /// router.
+    /// For BGP, the connection_ip and peer_ip are the same. For BMP, the
+    /// connection_ip holds the IP address of the monitored router.
     pub connection_ip: IpAddr,
 
     // pub peer_bgp_id: routecore::bgp::path_attributes::BgpIdentifier,
-
     /// The BMP PeerType (1 byte) and PeerDistuingisher (8 bytes).
     ///
     /// These are stored together as the combination of the two is used to
-    /// disambiguate peers in certain scenarios.
-    /// PeerType can be 0, 1 or 2, and only for 1 or 2 the RouteDistinguisher
-    /// is set. So for the majority, the value of peer_distuingisher will be a
-    /// 0 for PeerType == Global Instance Peer, followed by 8 more zeroes.
+    /// disambiguate peers in certain scenarios. PeerType can be 0, 1 or 2,
+    /// and only for 1 or 2 the RouteDistinguisher is set. So for the
+    /// majority, the value of peer_distuingisher will be a 0 for PeerType ==
+    /// Global Instance Peer, followed by 8 more zeroes.
     pub peer_distuingisher: [u8; 9],
 
     pub peer_rib_type: PeerRibType,
 }
 
 impl Provenance {
-
-    pub fn for_bgp(
-        ingress_id: u32,
-        peer_ip: IpAddr,
-        peer_asn: Asn,
-    ) -> Self {
+    pub fn for_bgp(ingress_id: u32, peer_ip: IpAddr, peer_asn: Asn) -> Self {
         Self::new(
             ingress_id,
             peer_ip,
@@ -426,8 +420,7 @@ impl fmt::Display for PeerRibType {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-#[derive(serde::Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, serde::Serialize)]
 #[serde(untagged)]
 pub enum OutputStreamMessageRecord {
     Route(Option<RotondaRoute>),
@@ -435,8 +428,7 @@ pub enum OutputStreamMessageRecord {
     Custom(CustomLogEntry),
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
-#[derive(serde::Serialize)]
+#[derive(Debug, PartialEq, Eq, Clone, serde::Serialize)]
 pub struct CustomLogEntry {
     id: u32,
     value: u32,
@@ -444,7 +436,10 @@ pub struct CustomLogEntry {
 
 impl From<(u32, u32)> for CustomLogEntry {
     fn from(t: (u32, u32)) -> Self {
-        Self { id: t.0, value: t.1 }
+        Self {
+            id: t.0,
+            value: t.1,
+        }
     }
 }
 
@@ -559,33 +554,33 @@ impl<O> TryFrom<(Nlri<O>, RotondaPaMap)> for RotondaRoute {
             Nlri::Ipv6Unicast(n) => RotondaRoute::Ipv6Unicast(n, value.1),
             Nlri::Ipv6Multicast(n) => RotondaRoute::Ipv6Multicast(n, value.1),
 
-            Nlri::Ipv4UnicastAddpath(..) |
-            Nlri::Ipv4MulticastAddpath(..) |
-            Nlri::Ipv4MplsUnicast(..) |
-            Nlri::Ipv4MplsUnicastAddpath(..) |
-            Nlri::Ipv4MplsVpnUnicast(..) |
-            Nlri::Ipv4MplsVpnUnicastAddpath(..) |
-            Nlri::Ipv4RouteTarget(..) |
-            Nlri::Ipv4RouteTargetAddpath(..) |
-            Nlri::Ipv4FlowSpec(..) |
-            Nlri::Ipv4FlowSpecAddpath(..) |
-            Nlri::Ipv6UnicastAddpath(..) |
-            Nlri::Ipv6MulticastAddpath(..) |
-            Nlri::Ipv6MplsUnicast(..) |
-            Nlri::Ipv6MplsUnicastAddpath(..) |
-            Nlri::Ipv6MplsVpnUnicast(..) |
-            Nlri::Ipv6MplsVpnUnicastAddpath(..) |
-            Nlri::Ipv6FlowSpec(..) |
-            Nlri::Ipv6FlowSpecAddpath(..) |
-            Nlri::L2VpnVpls(..) |
-            Nlri::L2VpnVplsAddpath(..) |
-            Nlri::L2VpnEvpn(..) |
-            Nlri::L2VpnEvpnAddpath(..) => {
+            Nlri::Ipv4UnicastAddpath(..)
+            | Nlri::Ipv4MulticastAddpath(..)
+            | Nlri::Ipv4MplsUnicast(..)
+            | Nlri::Ipv4MplsUnicastAddpath(..)
+            | Nlri::Ipv4MplsVpnUnicast(..)
+            | Nlri::Ipv4MplsVpnUnicastAddpath(..)
+            | Nlri::Ipv4RouteTarget(..)
+            | Nlri::Ipv4RouteTargetAddpath(..)
+            | Nlri::Ipv4FlowSpec(..)
+            | Nlri::Ipv4FlowSpecAddpath(..)
+            | Nlri::Ipv6UnicastAddpath(..)
+            | Nlri::Ipv6MulticastAddpath(..)
+            | Nlri::Ipv6MplsUnicast(..)
+            | Nlri::Ipv6MplsUnicastAddpath(..)
+            | Nlri::Ipv6MplsVpnUnicast(..)
+            | Nlri::Ipv6MplsVpnUnicastAddpath(..)
+            | Nlri::Ipv6FlowSpec(..)
+            | Nlri::Ipv6FlowSpecAddpath(..)
+            | Nlri::L2VpnVpls(..)
+            | Nlri::L2VpnVplsAddpath(..)
+            | Nlri::L2VpnEvpn(..)
+            | Nlri::L2VpnEvpnAddpath(..) => {
                 debug!(
                     "AFI/SAFI {} not yet supported in RotondaRoute",
                     value.0.to_string()
                 );
-                return Err(())
+                return Err(());
             }
         };
 
@@ -594,7 +589,7 @@ impl<O> TryFrom<(Nlri<O>, RotondaPaMap)> for RotondaRoute {
 }
 
 pub(crate) fn explode_announcements(
-    bgp_update: &UpdateMessage<Bytes>
+    bgp_update: &UpdateMessage<Bytes>,
 ) -> Result<Vec<RotondaRoute>, routecore::bgp::ParseError> {
     let mut res = vec![];
 
@@ -613,15 +608,15 @@ pub(crate) fn explode_announcements(
 }
 
 pub(crate) fn explode_withdrawals(
-    bgp_update: &UpdateMessage<Bytes>
+    bgp_update: &UpdateMessage<Bytes>,
 ) -> Result<Vec<RotondaRoute>, routecore::bgp::ParseError> {
     let mut res = vec![];
 
     let pamap = RotondaPaMap(
         routecore::bgp::path_attributes::OwnedPathAttributes::new(
             bgp_update.pdu_parse_info(),
-            vec![]
-        )
+            vec![],
+        ),
     );
 
     for w in bgp_update.withdrawals()? {
@@ -635,8 +630,7 @@ pub(crate) fn explode_withdrawals(
     Ok(res)
 }
 
-//------------ Temporary types ------------------------------------------------
-
+//------------ Temporary types -----------------------------------------------
 
 // PeerId was part of the old roto, but used throughout the BMP state machine.
 // This should go (elsewhere), eventually.
@@ -652,4 +646,3 @@ impl PeerId {
         Self { addr, asn }
     }
 }
-

@@ -8,17 +8,19 @@ use inetnum::addr::Prefix;
 use routecore::{
     bgp::{
         message::{SessionConfig, UpdateMessage},
+        nlri::afisafi::Nlri,
         types::AfiSafiType,
-        nlri::afisafi::Nlri
     },
     bmp::message::{Message as BmpMsg, PerPeerHeader, TerminationMessage},
 };
 use smallvec::SmallVec;
 
 use crate::{
-    ingress, payload::{Payload, Update}, units::bmp_tcp_in::state_machine::machine::{
+    ingress,
+    payload::{Payload, Update},
+    units::bmp_tcp_in::state_machine::machine::{
         BmpStateIdx, PeerState, PeerStates,
-    }
+    },
 };
 
 use super::super::{
@@ -214,21 +216,23 @@ impl PeerAware for Updating {
         ingress_register: Arc<ingress::Register>,
         bmp_ingress_id: ingress::IngressId,
     ) -> bool {
-        self.peer_states
-            .add_peer_config(
-                pph,
-                session_config,
-                eor_capable,
-                ingress_register,
-                bmp_ingress_id,
-            )
+        self.peer_states.add_peer_config(
+            pph,
+            session_config,
+            eor_capable,
+            ingress_register,
+            bmp_ingress_id,
+        )
     }
 
     fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState> {
         self.peer_states.get_peers()
     }
 
-    fn get_peer_ingress_id(&self, pph: &PerPeerHeader<Bytes>) -> Option<ingress::IngressId> {
+    fn get_peer_ingress_id(
+        &self,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> Option<ingress::IngressId> {
         self.peer_states.get_peer_ingress_id(pph)
     }
 
@@ -247,7 +251,10 @@ impl PeerAware for Updating {
         self.peer_states.get_peer_config(pph)
     }
 
-    fn remove_peer(&mut self, pph: &PerPeerHeader<Bytes>) -> Option<PeerState> {
+    fn remove_peer(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> Option<PeerState> {
         self.peer_states.remove_peer(pph)
     }
 
@@ -265,7 +272,7 @@ impl PeerAware for Updating {
     fn add_pending_eor(
         &mut self,
         pph: &PerPeerHeader<Bytes>,
-        afi_safi: AfiSafiType
+        afi_safi: AfiSafiType,
     ) -> usize {
         self.peer_states.add_pending_eor(pph, afi_safi)
     }

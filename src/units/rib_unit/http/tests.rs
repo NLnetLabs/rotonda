@@ -3,17 +3,25 @@ use std::{collections::BTreeSet, str::FromStr, sync::Arc};
 use arc_swap::ArcSwap;
 use assert_json_diff::{assert_json_matches_no_panic, CompareMode, Config};
 use hyper::{body::Bytes, Body, Request, StatusCode};
-use roto::types::{builtin::{BuiltinTypeValue, NlriStatus, PrefixRoute, Provenance, RotondaId}, collections::BytesRecord, lazyrecord_types::BgpUpdateMessage, typevalue::TypeValue};
-use inetnum::{
-    addr::Prefix,
-    asn::Asn
+use inetnum::{addr::Prefix, asn::Asn};
+use roto::types::{
+    builtin::{
+        BuiltinTypeValue, NlriStatus, PrefixRoute, Provenance, RotondaId,
+    },
+    collections::BytesRecord,
+    lazyrecord_types::BgpUpdateMessage,
+    typevalue::TypeValue,
 };
 
 use routecore::bgp::{
-        communities::{
-            Community, ExtendedCommunity, LargeCommunity, ParseError,
-            StandardCommunity, Wellknown,
-        }, message::{SessionConfig, UpdateMessage}, nlri::afisafi::Ipv4UnicastNlri, types::AfiSafiType, workshop::route::RouteWorkshop
+    communities::{
+        Community, ExtendedCommunity, LargeCommunity, ParseError,
+        StandardCommunity, Wellknown,
+    },
+    message::{SessionConfig, UpdateMessage},
+    nlri::afisafi::Ipv4UnicastNlri,
+    types::AfiSafiType,
+    workshop::route::RouteWorkshop,
 };
 use serde_json::{json, Value};
 
@@ -21,13 +29,17 @@ use crate::{
     bgp::{
         encode::{mk_bgp_update, Announcements, Prefixes},
         raw::communities::{extended::*, large::*, standard::*},
-    }, common::{frim::FrimMap, json::EasilyExtendedJSONObject}, http::ProcessRequest, ingress, units::{
+    },
+    common::{frim::FrimMap, json::EasilyExtendedJSONObject},
+    http::ProcessRequest,
+    ingress,
+    units::{
         rib_unit::{
             rib::HashedRib,
             unit::{MoreSpecifics, QueryLimits},
         },
         RibType,
-    }
+    },
 };
 
 use super::PrefixesApi;
@@ -154,7 +166,7 @@ async fn exact_match_with_more_and_less_specifics_ipv4() {
 async fn issue_79_exact_match() {
     let rib = mk_rib();
 
-    insert_announcement(rib.clone(), "8.8.8.0/24", 1,);
+    insert_announcement(rib.clone(), "8.8.8.0/24", 1);
     insert_announcement(rib.clone(), "8.0.0.0/12", 2);
     insert_announcement(rib.clone(), "8.0.0.0/9", 3);
 
@@ -253,11 +265,14 @@ async fn error_with_too_short_more_specifics_ipv6() {
     insert_announcement(rib.clone(), "2001:DB8:2222:0000::/64", 2);
     insert_announcement(rib.clone(), "2001:DB8:2222:0001::/64", 3);
 
-    // Test with a prefix whose first bit is the only bit set. 0x8000 is 1000000000000000 in binary. If we were to
-    // test with any pattern of bits with a bit set further to the right, as the /N mask value increases the
-    // boundary between net bits and host bits shifts so that the number of net bits decreases and the number of
-    // host bits increases, to the point where the bit set in the query becomes treated as a host bit and thus
-    // causes the query to fail with HTTP 400 Bad Request: The host portion of the address has non-zero bits set.
+    // Test with a prefix whose first bit is the only bit set. 0x8000 is
+    // 1000000000000000 in binary. If we were to test with any pattern of bits
+    // with a bit set further to the right, as the /N mask value increases the
+    // boundary between net bits and host bits shifts so that the number of
+    // net bits decreases and the number of host bits increases, to the point
+    // where the bit set in the query becomes treated as a host bit and thus
+    // causes the query to fail with HTTP 400 Bad Request: The host portion of
+    // the address has non-zero bits set.
     for n in MoreSpecifics::default_shortest_prefix_ipv6()..=128 {
         assert_query_eq(
             rib.clone(),
@@ -791,22 +806,28 @@ fn insert_routes(
         let roto_update_msg = BytesRecord::<BgpUpdateMessage>::new(
             bgp_update_bytes.clone(),
             SessionConfig::modern(),
-        ).unwrap();
+        )
+        .unwrap();
 
         let loaded_rib = rib.load();
         for p in prefixes.iter() {
             if p.is_v4() {
-                loaded_rib.insert(
-                    p,
-                    RouteWorkshop::new(Ipv4UnicastNlri::try_from(*p).unwrap()).into(),
-                    NlriStatus::InConvergence,
-                    Provenance::for_bgp(
-                        0,
-                        format!("192.168.0.{n}").parse().unwrap(), //peer_ip,
-                        Asn::from_u32(1000 + (n as u32)),
-                    ),
-                    0, //ltime,
-                ).unwrap();
+                loaded_rib
+                    .insert(
+                        p,
+                        RouteWorkshop::new(
+                            Ipv4UnicastNlri::try_from(*p).unwrap(),
+                        )
+                        .into(),
+                        NlriStatus::InConvergence,
+                        Provenance::for_bgp(
+                            0,
+                            format!("192.168.0.{n}").parse().unwrap(), //peer_ip,
+                            Asn::from_u32(1000 + (n as u32)),
+                        ),
+                        0, //ltime,
+                    )
+                    .unwrap();
             }
         }
         /*
@@ -824,7 +845,7 @@ fn insert_routes(
             //     SessionConfig::modern(),
             // ).unwrap();
 
-            
+
             // let afi_safi = if prefix.is_v4() { AfiSafi::Ipv4Unicast } else { AfiSafi::Ipv6Unicast };
             // let raw_route = RouteWorkshop::<>::new(
             //     *prefix,
@@ -923,8 +944,18 @@ fn insert_announcement_full<C: Into<Community> + Copy>(
     );
 }
 
-fn mk_response_announced_prefix(prefix: &str, afi_safi: AfiSafiType, router_n: u8) -> Value {
-    mk_response_announced_prefix_full(prefix, afi_safi, router_n, &[123, 456], None)
+fn mk_response_announced_prefix(
+    prefix: &str,
+    afi_safi: AfiSafiType,
+    router_n: u8,
+) -> Value {
+    mk_response_announced_prefix_full(
+        prefix,
+        afi_safi,
+        router_n,
+        &[123, 456],
+        None,
+    )
 }
 
 fn mk_response_announced_prefix_full(

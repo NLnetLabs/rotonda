@@ -3,23 +3,28 @@ use std::{ops::Deref, str::FromStr, sync::Arc};
 use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
 use hyper::{Body, Method, Request, Response};
+use inetnum::{addr::Prefix, asn::Asn};
 use log::{debug, trace};
 use rotonda_store::MatchOptions;
-use inetnum::{addr::Prefix, asn::Asn};
 use routecore::bgp::communities::HumanReadableCommunity as Community;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use crate::{
-    comms::{Link, TriggerData}, http::{
+    comms::{Link, TriggerData},
+    http::{
         extract_params, get_all_params, get_param, MatchedParam,
         PercentDecodedPath, ProcessRequest, QueryParams,
-    }, ingress, units::{
+    },
+    ingress,
+    units::{
         rib_unit::{
-            http::types::{FilterKind, FilterOp}, rib::Rib, unit::{PendingVirtualRibQueryResults, QueryLimits}
+            http::types::{FilterKind, FilterOp},
+            rib::Rib,
+            unit::{PendingVirtualRibQueryResults, QueryLimits},
         },
         RibType,
-    }
+    },
 };
 
 use super::types::{Details, Filter, FilterMode, Filters, Includes, SortKey};
@@ -72,11 +77,13 @@ impl ProcessRequest for PrefixesApi {
         &self,
         request: &Request<Body>,
     ) -> Option<Response<Body>> {
-        // Percent decoding the path shouldn't be necessary for the requests we support at the moment, but later
-        // it may matter, and it shouldn't hurt, and it's been demonstrated that there are clients that encode the
-        // URL path component when perhaps (not that clear from RFC 3986) they don't have to (e.g. when the path
-        // component contains a ':' as in an IPv6 address). Let's be lenient about the UTF-8 decoding as well while
-        // we are at it...
+        // Percent decoding the path shouldn't be necessary for the requests
+        // we support at the moment, but later it may matter, and it shouldn't
+        // hurt, and it's been demonstrated that there are clients that encode
+        // the URL path component when perhaps (not that clear from RFC 3986)
+        // they don't have to (e.g. when the path component contains a ':' as
+        // in an IPv6 address). Let's be lenient about the UTF-8 decoding as
+        // well while we are at it...
         let req_path = &request.uri().decoded_path();
 
         debug!("RibUnit ProcessRequest {:?}", &req_path);
@@ -99,7 +106,8 @@ impl ProcessRequest for PrefixesApi {
                 ),
             }
         } else {
-            // Start of HTTP relative URL did not match the one defined for this processor
+            // Start of HTTP relative URL did not match the one defined for
+            // this processor
             None
         }
     }
@@ -151,10 +159,11 @@ impl PrefixesApi {
         //
         // Query the prefix store
         //
-        // For a physical RIB we own the store and can query it directly.
-        // For a virtual RIB we must send a query command to store nearest to our Western edge,
-        // which we've been given a Link to so we can send it commands. Once we've sent it the
-        // query command we then have to wait to receive the query result back.
+        // For a physical RIB we own the store and can query it directly. For
+        // a virtual RIB we must send a query command to store nearest to our
+        // Western edge, which we've been given a Link to so we can send it
+        // commands. Once we've sent it the query command we then have to wait
+        // to receive the query result back.
         //
         let options = MatchOptions {
             match_type: rotonda_store::MatchType::ExactMatch,
@@ -164,22 +173,20 @@ impl PrefixesApi {
             mui: None,
         };
 
-        // XXX res: QueryResult will be different 
+        // XXX res: QueryResult will be different
         let res = match self.rib_type {
             RibType::Physical => {
-                // XXX res: QueryResult will be different 
-                match self.rib.load().match_prefix(
-                    &prefix, &options,
-                ) {
+                // XXX res: QueryResult will be different
+                match self.rib.load().match_prefix(&prefix, &options) {
                     Ok(res) => res,
-                    Err(e) =>{
+                    Err(e) => {
                         let res = Response::builder()
                             .status(hyper::StatusCode::INTERNAL_SERVER_ERROR)
                             .header("Content-Type", "text/plain")
                             .body(
                                 "Cannot query non-existent RIB store"
-                                .to_string()
-                                .into(),
+                                    .to_string()
+                                    .into(),
                             )
                             .unwrap();
                         return Ok(res);
@@ -204,19 +211,24 @@ impl PrefixesApi {
             }
             RibType::GeneratedVirtual(_) | RibType::Virtual => {
                 trace!("Handling virtual RIB query");
-                // Generate a unique query ID to tie the request and later response together.
+                // Generate a unique query ID to tie the request and later
+                // response together.
                 let uuid = Uuid::new_v4();
                 // XXX LH: eventually, this should be broadened to carry NLRI
                 // other than simple prefixes.
                 let data = TriggerData::MatchPrefix(uuid, prefix, options);
 
-                // Create a oneshot channel and store the sender to it by the query ID we generated.
+                // Create a oneshot channel and store the sender to it by the
+                // query ID we generated.
                 let (tx, rx) = oneshot::channel();
                 self.pending_vrib_query_results.insert(uuid, Arc::new(tx));
 
-                // Send a command asynchronously to the upstream physical RIB unit to perform the desired query on its
-                // store and to send the result back to us through the pipeline (being operated on as necessary by any
-                // intermediate virtual RIB roto scripts). This command includes the query ID that we generated.
+                // Send a command asynchronously to the upstream physical RIB
+                // unit to perform the desired query on its store and to send
+                // the result back to us through the pipeline (being operated
+                // on as necessary by any intermediate virtual RIB roto
+                // scripts). This command includes the query ID that we
+                // generated.
                 trace!("Triggering upstream physical RIB {} to do the actual query", self.vrib_upstream.load().as_ref().unwrap().id());
                 self.vrib_upstream
                     .load()
@@ -225,8 +237,10 @@ impl PrefixesApi {
                     .trigger(data)
                     .await;
 
-                // Wait for the main unit which operates the Gate to receive a Query Result that matches the query ID
-                // we just generated, and to pick the oneshot channel by query ID and use it to pass the results to us.
+                // Wait for the main unit which operates the Gate to receive a
+                // Query Result that matches the query ID we just generated,
+                // and to pick the oneshot channel by query ID and use it to
+                // pass the results to us.
                 trace!("Waiting for physical RIB query result to arrive");
                 match rx.await {
                     Ok(Ok(query_result)) => {
@@ -263,7 +277,14 @@ impl PrefixesApi {
         let res = match format {
             None => {
                 // default format
-                Self::mk_json_response(res, includes, details, filters, sort, &self.ingress_register)
+                Self::mk_json_response(
+                    res,
+                    includes,
+                    details,
+                    filters,
+                    sort,
+                    &self.ingress_register,
+                )
             }
 
             Some(format) if format.value() == "dump" => {
@@ -295,7 +316,8 @@ impl PrefixesApi {
         debug!("in handle_ingress_id_query");
 
         let ingress_id = req_path
-            .strip_prefix(self.http_api_path.as_str()).unwrap()
+            .strip_prefix(self.http_api_path.as_str())
+            .unwrap()
             .parse::<ingress::IngressId>()
             .map_err(|e| e.to_string())?;
 
@@ -305,7 +327,9 @@ impl PrefixesApi {
 
         let store = self.rib.load();
         let mut res = String::new();
-        let records = store.match_ingress_id(ingress_id).map_err(|e| e.to_string())?;
+        let records = store
+            .match_ingress_id(ingress_id)
+            .map_err(|e| e.to_string())?;
 
         for pubrec in records {
             res += &pubrec.prefix.to_string();
@@ -316,14 +340,11 @@ impl PrefixesApi {
                 res.push('\n');
             }
         }
-        
-        Ok(
-            Response::builder()
-                .header("Content-Type", "text/plain")
-                .body(res.into())
-                .unwrap()
-        )
-            
+
+        Ok(Response::builder()
+            .header("Content-Type", "text/plain")
+            .body(res.into())
+            .unwrap())
     }
 
     fn parse_include_param(

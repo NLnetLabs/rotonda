@@ -5,10 +5,11 @@ use indoc::formatdoc;
 //use roto::types::builtin::ingress::IngressId;
 
 use crate::{
-    ingress, units::bmp_tcp_in::{
+    ingress,
+    units::bmp_tcp_in::{
         state_machine::{BmpState, BmpStateDetails},
         util::{calc_u8_pc, format_source_id},
-    }
+    },
 };
 
 use super::request::RouterListApi;
@@ -28,7 +29,8 @@ impl RouterListApi {
             http_api_path,
             &mut response_body,
             self.ingresses.clone(),
-        ).await;
+        )
+        .await;
 
         self.build_response_footer(&mut response_body);
 
@@ -86,10 +88,11 @@ impl RouterListApi {
         response_body: &mut String,
         ingresses: Arc<ingress::Register>,
     ) {
-
         for ingress_id in keys.iter() {
             let ingress_info = ingresses.get(*ingress_id);
-            let addr = ingress_info.and_then(|i| i.remote_addr).unwrap_or([0,0,0,0].into());
+            let addr = ingress_info
+                .and_then(|i| i.remote_addr)
+                .unwrap_or([0, 0, 0, 0].into());
             if let Some(state_machine) = self.router_states.get(ingress_id) {
                 let locked = state_machine.lock().await;
                 let (sys_name, sys_desc) = if let Some(sm) = locked.as_ref() {

@@ -9,9 +9,13 @@ use std::{
 use arc_swap::{ArcSwap, ArcSwapAny};
 
 use crate::{
-    common::frim::FrimMap, comms::{Gate, GateMetrics}, ingress::IngressId, metrics::{
+    common::frim::FrimMap,
+    comms::{Gate, GateMetrics},
+    ingress::IngressId,
+    metrics::{
         self, util::append_per_router_metric, Metric, MetricType, MetricUnit,
-    }, payload::RouterId
+    },
+    payload::RouterId,
 };
 
 use super::statistics::RibMergeUpdateStatistics;
@@ -42,10 +46,10 @@ impl RibUnitMetrics {
     ) -> Arc<RouterMetrics> {
         #[allow(clippy::unwrap_or_default)]
         self.routers
-            //.entry(router_id)
-            .entry(ingress_id) // do we still need the Arc for Key K now that
-                               // it's basically a u32 instead of a
-                               // String/enum ?
+            // do we still need the Arc for Key K now that
+            // it's basically a u32 instead of a
+            // String/enum ?
+            .entry(ingress_id)
             .or_insert_with(Default::default)
     }
 }
@@ -214,9 +218,9 @@ impl metrics::Source for RibUnitMetrics {
             append_per_router_metric(
                 unit_name,
                 target,
-                format!("{}", router_id), // TODO this should come from the
-                                          // ingress::Register and preferably
-                                          // be a nice name or ip address
+                // TODO this should come from the ingress::Register and
+                // preferably be a nice name or ip address
+                format!("{}", router_id),
                 Self::LAST_END_TO_END_DELAY_PER_ROUTER_METRIC,
                 metrics.last_e2e_delay_millis.load(SeqCst),
             );

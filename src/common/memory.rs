@@ -131,7 +131,8 @@ mod tests {
         let mut test_set =
             TestSet::<usize>::with_capacity_in(0, allocator.clone());
 
-        let arc_allocator = Arc::new(allocator); // needed for the calls to `get_num_bytes_allocated_metric_value()`.
+        // needed for the calls to `get_num_bytes_allocated_metric_value()`.
+        let arc_allocator = Arc::new(allocator);
 
         let metric_value_at_start =
             get_num_bytes_allocated_metric_value(&arc_allocator);

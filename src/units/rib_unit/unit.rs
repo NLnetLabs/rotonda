@@ -1,38 +1,43 @@
-use std::io::prelude::*;
 use crate::{
     common::{
-        frim::FrimMap, roto_new::{FilterName, FreshRouteContext, InsertionInfo, MrtContext, OutputStream, OutputStreamMessage, RotoOutputStream, RotoScripts, RouteContext}, status_reporter::{AnyStatusReporter, UnitStatusReporter}
-    }, comms::{
+        frim::FrimMap,
+        roto_new::{
+            FilterName, FreshRouteContext, InsertionInfo, MrtContext,
+            OutputStream, OutputStreamMessage, RotoOutputStream, RotoScripts,
+            RouteContext,
+        },
+        status_reporter::{AnyStatusReporter, UnitStatusReporter},
+    },
+    comms::{
         AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus, Link,
         Terminated, TriggerData,
-    }, ingress, manager::{Component, WaitPoint}, payload::{
-        //FilterError, Filterable,
-        Payload, RotondaPaMap, RotondaRoute, RouterId, Update, UpstreamStatus
-    }, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::Unit
+    },
+    ingress,
+    manager::{Component, WaitPoint},
+    payload::{
+        Payload, RotondaPaMap, RotondaRoute, RouterId, Update, UpstreamStatus,
+    },
+    tokio::TokioTaskMetrics,
+    tracing::{BoundTracer, Tracer},
+    units::Unit,
 };
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
+use std::io::prelude::*;
 
 use chrono::Utc;
 use hash_hasher::{HashBuildHasher, HashedSet};
 use log::{debug, error, info, log_enabled, trace, warn};
 use non_empty_vec::NonEmpty;
-//use roto::types::{
-//    builtin::{BasicRouteToken, BuiltinTypeValue, NlriStatus, PrefixRoute, RouteContext},
-//    collections::ElementTypeValue,
-//    typevalue::TypeValue,
-//};
 use rotonda_store::{
-    custom_alloc::UpsertReport,
-    prelude::multi::PrefixStoreError,
-    QueryResult,
-    RecordSet,
+    custom_alloc::UpsertReport, prelude::multi::PrefixStoreError,
+    QueryResult, RecordSet,
 };
 
 use inetnum::addr::Prefix;
 use routecore::bgp::types::AfiSafiType;
 use serde::Deserialize;
-use smallvec::{SmallVec, smallvec};
+use smallvec::{smallvec, SmallVec};
 use std::{
     cell::RefCell, ops::Deref, str::FromStr, string::ToString, sync::Arc,
 };
@@ -42,22 +47,16 @@ use uuid::Uuid;
 use super::{
     http::PrefixesApi,
     metrics::RibUnitMetrics,
-    rib::{
-        /*HashedRib, PreHashedTypeValue, RibValue,*/ Rib, RouteExtra, StoreInsertionEffect /*StoreMergeUpdateUserData,*/
-    },
+    rib::{Rib, RouteExtra, StoreInsertionEffect},
     status_reporter::RibUnitStatusReporter,
 };
 use super::{
     rib::StoreInsertionReport, statistics::RibMergeUpdateStatistics,
 };
 
-const RECORD_MERGE_UPDATE_SPEED_EVERY_N_CALLS: u64 = 1000;
-
 thread_local!(
     static STATS_COUNTER: RefCell<u64> = RefCell::new(0);
 );
-
-
 
 type RotoFuncPre = roto::TypedFunc<
     (
@@ -65,7 +64,7 @@ type RotoFuncPre = roto::TypedFunc<
         roto::Val<RotondaRoute>,
         roto::Val<RouteContext>,
     ),
-    roto::Verdict<(),()>
+    roto::Verdict<(), ()>,
 >;
 
 type RotoFuncPost = roto::TypedFunc<
@@ -74,9 +73,8 @@ type RotoFuncPost = roto::TypedFunc<
         roto::Val<RotondaRoute>,
         roto::Val<InsertionInfo>,
     ),
-    roto::Verdict<(),()>
+    roto::Verdict<(), ()>,
 >;
-
 
 impl From<UpsertReport> for InsertionInfo {
     fn from(value: UpsertReport) -> Self {
@@ -87,28 +85,32 @@ impl From<UpsertReport> for InsertionInfo {
     }
 }
 
-
 #[derive(Clone, Debug, Deserialize)]
 pub struct MoreSpecifics {
-    /// The shortest IPv4 prefix, N (from /N), for which more specific (i.e. longer prefix) matches can be queried.
+    /// The shortest IPv4 prefix, N (from /N), for which more specific (i.e.
+    /// longer prefix) matches can be queried.
     #[serde(default = "MoreSpecifics::default_shortest_prefix_ipv4")]
     pub shortest_prefix_ipv4: u8,
 
-    /// The shortest IPv6 prefix, N (from /N), for which more specific (i.e. longer prefix) matches can be queried.
+    /// The shortest IPv6 prefix, N (from /N), for which more specific (i.e.
+    /// longer prefix) matches can be queried.
     #[serde(default = "MoreSpecifics::default_shortest_prefix_ipv6")]
     pub shortest_prefix_ipv6: u8,
 }
 
 impl MoreSpecifics {
     pub fn default_shortest_prefix_ipv4() -> u8 {
-        // IPv4 space is densely populated, tree size quickly becomes very large at shorter prefix lengths so limit
-        // searches to prefixes no shorter than /8, i.e. /7 is not permitted, but /32 is.
+        // IPv4 space is densely populated, tree size quickly becomes very
+        // large at shorter prefix lengths so limit searches to prefixes no
+        // shorter than /8, i.e. /7 is not permitted, but /32 is.
         8
     }
 
     pub fn default_shortest_prefix_ipv6() -> u8 {
-        // IPv6 space is sparsely populated compared to IPv4 space so the tree is less dense at shorter prefixes
-        // than the equivalent for IPv4 and so we can afford to be permit "deeper" searches for IPv6 than for IPv4.
+        // IPv6 space is sparsely populated compared to IPv4 space so the tree
+        // is less dense at shorter prefixes than the equivalent for IPv4 and
+        // so we can afford to be permit "deeper" searches for IPv6 than for
+        // IPv4.
         19
     }
 
@@ -139,20 +141,23 @@ pub struct QueryLimits {
 
 #[derive(Copy, Clone, Debug, Default, Deserialize)]
 pub enum RibType {
-    /// A physical RIB has zero or one roto scripts and a prefix store. Queries to its HTTP API are answered using the
-    /// local store.
+    /// A physical RIB has zero or one roto scripts and a prefix store.
+    /// Queries to its HTTP API are answered using the local store.
     #[default]
     Physical,
 
-    /// A virtual RIB has one roto script and no prefix store. Queries to its HTTP API are answered by sending a
-    /// command to the nearest physical Rib to the West of the virtual RIB. A `Link` to the gate of that physical Rib
-    /// is automatically injected as the vrib_upstream value in the RibUnit config below by the config loading
-    /// process so that it can be used to send a GateCommand::Query message upstream to the physical Rib unit that owns
-    /// the Gate that the Link refers to.
+    /// A virtual RIB has one roto script and no prefix store. Queries to its
+    /// HTTP API are answered by sending a command to the nearest physical Rib
+    /// to the West of the virtual RIB. A `Link` to the gate of that physical
+    /// Rib is automatically injected as the vrib_upstream value in the
+    /// RibUnit config below by the config loading process so that it can be
+    /// used to send a GateCommand::Query message upstream to the physical Rib
+    /// unit that owns the Gate that the Link refers to.
     Virtual,
 
-    /// The index (zero-based) indicates how far from the physical RIB this vRIB is. This is used to suffix the HTTP API
-    /// path differently for each vRIB compared to each other and the pRIB.
+    /// The index (zero-based) indicates how far from the physical RIB this
+    /// vRIB is. This is used to suffix the HTTP API path differently for each
+    /// vRIB compared to each other and the pRIB.
     GeneratedVirtual(u8),
 }
 
@@ -167,27 +172,25 @@ pub struct RibUnit {
     /// The set of units to receive updates from.
     pub sources: NonEmpty<DirectLink>,
 
-    /// The relative path at which we should listen for HTTP query API requests
+    /// The relative path at which we should listen for HTTP query API
+    /// requests
     #[serde(default = "RibUnit::default_http_api_path")]
     pub http_api_path: String,
 
     #[serde(default = "RibUnit::default_query_limits")]
     pub query_limits: QueryLimits,
 
-    /// The name of the Roto filter to execute.
-    /// Note: Due to a special hack in `config.rs` the user can actually supply a collection of fileter names here.
-    /// Additional RibUnit instances will be spawned for the additional filter names with each additional unit
-    /// wired up downstream from this one with its `rib_type` set to `Virtual`.
+    /// The name of the Roto filter to execute. Note: Due to a special hack in
+    /// `config.rs` the user can actually supply a collection of filter names
+    /// here. Additional RibUnit instances will be spawned for the additional
+    /// filter names with each additional unit wired up downstream from this
+    /// one with its `rib_type` set to `Virtual`.
     #[serde(default)]
     pub filter_name: Option<FilterName>,
 
     /// What type of RIB is this?
     #[serde(default)]
     pub rib_type: RibType,
-
-    ///// Which fields are the key for RIB metadata items?
-    //#[serde(default = "RibUnit::default_rib_keys")]
-    //pub rib_keys: NonEmpty<BasicRouteToken>,
 
     /// Virtual RIB upstream physical RIB. Only used when rib_type is Virtual.
     #[serde(default)]
@@ -222,26 +225,15 @@ impl RibUnit {
     fn default_query_limits() -> QueryLimits {
         QueryLimits::default()
     }
-
-    /*
-    fn default_rib_keys() -> NonEmpty<BasicRouteToken> {
-        NonEmpty::try_from(vec![
-            //BasicRouteToken::PeerId,
-            //BasicRouteToken::PeerAsn,
-            BasicRouteToken::AsPath,
-        ])
-        .unwrap()
-    }
-    */
 }
-
 
 pub struct RibUnitRunner {
     roto_function_pre: Option<RotoFuncPre>,
     roto_function_post: Option<RotoFuncPost>,
     gate: Arc<Gate>,
     #[allow(dead_code)]
-    // A strong ref needs to be held to http_processor but not used otherwise the HTTP resource manager will discard its registration
+    // A strong ref needs to be held to http_processor but not used otherwise
+    // the HTTP resource manager will discard its registration
     http_processor: Arc<PrefixesApi>,
     query_limits: Arc<ArcSwap<QueryLimits>>,
     //rib: Arc<ArcSwap<HashedRib>>, // XXX LH: why the ArcSwap here?
@@ -273,7 +265,6 @@ impl std::fmt::Debug for RibUnitRunner {
 impl AnyDirectUpdate for RibUnitRunner {}
 
 pub type QueryId = Uuid;
-//pub type QueryOperationResult = Result<QueryResult<RotondaRoute>, String>;
 pub type QueryOperationResult = Result<QueryResult<RotondaPaMap>, String>;
 pub type QueryOperationResultSender = oneshot::Sender<QueryOperationResult>;
 pub type PendingVirtualRibQueryResults =
@@ -288,17 +279,11 @@ impl RibUnitRunner {
         query_limits: QueryLimits,
         filter_name: FilterName,
         rib_type: RibType,
-        //rib_keys: &[BasicRouteToken],
         vrib_upstream: Option<Link>,
     ) -> Self {
         let unit_name = component.name().clone();
         let gate = Arc::new(gate);
         let rib = Arc::new(ArcSwap::from_pointee(Rib::new_physical()));
-        //let rib = Self::mk_rib(
-        //    rib_type,
-        //    //rib_keys,
-        //    //StoreEvictionPolicy::UpdateStatusOnWithdraw.into(),
-        //);
         let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> =
             Default::default();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
@@ -320,8 +305,9 @@ impl RibUnitRunner {
         // Setup the Roto filter source
         let filter_name = Arc::new(ArcSwap::from_pointee(filter_name));
 
-        // Setup REST API endpoint. vRIBs listen at the vRIB HTTP prefix + /n/ where n is the index assigned to the vRIB
-        // during configuration post-processing.
+        // Setup REST API endpoint. vRIBs listen at the vRIB HTTP prefix + /
+        // n/ where n is the index assigned to the vRIB during configuration
+        // post-processing.
         let (http_api_path, is_sub_resource) =
             Self::http_api_path_for_rib_type(&http_api_path, rib_type);
         let query_limits = Arc::new(ArcSwap::from_pointee(query_limits));
@@ -348,15 +334,17 @@ impl RibUnitRunner {
         }
 
         let roto_compiled = component.roto_compiled().clone();
-        let roto_function_pre: Option<RotoFuncPre> = roto_compiled.clone().and_then(|c|{
-            let mut c = c.lock().unwrap();
-            c.get_function("rib-in-pre").ok()
-        });
+        let roto_function_pre: Option<RotoFuncPre> =
+            roto_compiled.clone().and_then(|c| {
+                let mut c = c.lock().unwrap();
+                c.get_function("rib-in-pre").ok()
+            });
 
-        let roto_function_post: Option<RotoFuncPost> = roto_compiled.and_then(|c|{
-            let mut c = c.lock().unwrap();
-            c.get_function("rib-in-post").ok()
-        });
+        let roto_function_post: Option<RotoFuncPost> = roto_compiled
+            .and_then(|c| {
+                let mut c = c.lock().unwrap();
+                c.get_function("rib-in-post").ok()
+            });
 
         let tracer = component.tracer().clone();
 
@@ -387,14 +375,14 @@ impl RibUnitRunner {
         use crate::common::roto_new::RotoScripts;
 
         let roto_scripts = RotoScripts::default();
-        if !roto_script.is_empty() {
-            roto_scripts
-                .add_or_update_script(
-                    RotoScriptOrigin::Named("mock".to_string()),
-                    roto_script,
-                )
-                .unwrap();
-        }
+        // if !roto_script.is_empty() {
+        //     roto_scripts
+        //         .add_or_update_script(
+        //             RotoScriptOrigin::Named("mock".to_string()),
+        //             roto_script,
+        //         )
+        //         .unwrap();
+        // }
         let (gate, gate_agent) = Gate::new(0);
         let gate = gate.into();
         let query_limits =
@@ -421,7 +409,7 @@ impl RibUnitRunner {
         let tracer = Arc::new(Tracer::new());
 
         let runner = Self {
-            roto_scripts,
+            // roto_scripts,
             gate,
             http_processor,
             query_limits,
@@ -455,27 +443,27 @@ impl RibUnitRunner {
     }
 
     /*
-    fn mk_rib(
-        rib_type: RibType,
-        rib_keys: &[BasicRouteToken],
-        //settings: StoreMergeUpdateUserData,
-    ) -> Arc<ArcSwap<HashedRib>> {
-        //
-        // --- TODO: Create the Rib based on the Roto script Rib 'contains' type
-        //
-        // TODO: If the roto script changes we have to be able to detect if the record type changed, and if it
-        // did, recreate the store, dropping the current data, right?
-        //
-        // TOOD: And that also these steps should be done at reconfiguration time as well, not just at
-        // initialisation time (i.e. where we handle GateStatus::Reconfiguring below).
-        //
-        // --- End: Create the Rib based on the Roto script Rib 'contains' type
-        //
-        let physical = matches!(rib_type, RibType::Physical);
-        let rib = HashedRib::new(rib_keys, physical, /*settings*/);
-        Arc::new(ArcSwap::from_pointee(rib))
-    }
-*/
+        fn mk_rib(
+            rib_type: RibType,
+            rib_keys: &[BasicRouteToken],
+            //settings: StoreMergeUpdateUserData,
+        ) -> Arc<ArcSwap<HashedRib>> {
+            //
+            // --- TODO: Create the Rib based on the Roto script Rib 'contains' type
+            //
+            // TODO: If the roto script changes we have to be able to detect if the record type changed, and if it
+            // did, recreate the store, dropping the current data, right?
+            //
+            // TOOD: And that also these steps should be done at reconfiguration time as well, not just at
+            // initialisation time (i.e. where we handle GateStatus::Reconfiguring below).
+            //
+            // --- End: Create the Rib based on the Roto script Rib 'contains' type
+            //
+            let physical = matches!(rib_type, RibType::Physical);
+            let rib = HashedRib::new(rib_keys, physical, /*settings*/);
+            Arc::new(ArcSwap::from_pointee(rib))
+        }
+    */
 
     #[cfg(test)]
     pub(super) fn status_reporter(&self) -> Arc<RibUnitStatusReporter> {
@@ -492,14 +480,14 @@ impl RibUnitRunner {
         self.rib.load().clone()
     }
 
-
     fn signal_withdraw(
         &self,
         ingress_id: ingress::IngressId,
         specific_afisafi: Option<AfiSafiType>,
     ) {
-
-        self.rib.load().withdraw_for_ingress(ingress_id, specific_afisafi);
+        self.rib
+            .load()
+            .withdraw_for_ingress(ingress_id, specific_afisafi);
     }
 
     pub async fn run(
@@ -514,13 +502,16 @@ impl RibUnitRunner {
             link.connect(arc_self.clone(), false).await.unwrap();
         }
 
-        // Wait for other components to be ready, and signal to other components that we are, ready to start. All units
-        // and targets start together, otherwise data passed from one component to another may be lost if the receiving
-        // component is not yet ready to accept it.
+        // Wait for other components to be ready, and signal to other
+        // components that we are, ready to start. All units and targets start
+        // together, otherwise data passed from one component to another may
+        // be lost if the receiving component is not yet ready to accept it.
         arc_self.gate.process_until(waitpoint.ready()).await?;
 
-        // Signal again once we are out of the process_until() so that anyone waiting to send important gate status
-        // updates won't send them while we are in process_until() which will just eat them without handling them.
+        // Signal again once we are out of the process_until() so that anyone
+        // waiting to send important gate status updates won't send them while
+        // we are in process_until() which will just eat them without handling
+        // them.
         waitpoint.running().await;
 
         loop {
@@ -556,17 +547,6 @@ impl RibUnitRunner {
                                     old_http_api_path, new_http_api_path
                                 );
                             }
-
-                            /*
-                            let old_rib_keys =
-                                arc_self.rib.load().key_fields();
-                            if new_rib_keys.as_slice() != old_rib_keys {
-                                warn!(
-                                    "Ignoring changed rib_keys: {:?} -> {:?}",
-                                    old_rib_keys, new_rib_keys
-                                );
-                            }
-                            */
 
                             if new_rib_type != arc_self.rib_type {
                                 warn!(
@@ -660,32 +640,12 @@ impl RibUnitRunner {
                                 // prefixes', we default to unicast for now.
                                 // Eventually, this should facilitate all
                                 // afisafis.
-                                arc_self.rib.load()
-                                    .match_prefix(
-                                        &prefix,
-                                        &match_options,
-                                    )
+                                arc_self
+                                    .rib
+                                    .load()
+                                    .match_prefix(&prefix, &match_options)
                             };
 
-                            /*
-                            let res = {
-                                if let Ok(store) = arc_self.rib.load().store()
-                                {
-                                    let guard = &epoch::pin();
-                                    trace!(
-                                        "Performing triggered query {uuid}"
-                                    );
-                                    Ok(store.match_prefix(
-                                        &prefix,
-                                        &match_options,
-                                        guard,
-                                    ))
-                                } else {
-                                    Err("Cannot query non-existent RIB"
-                                        .to_string())
-                                }
-                            };
-                            */
                             trace!("Sending query {uuid} results downstream");
                             arc_self
                                 .gate
@@ -705,13 +665,13 @@ impl RibUnitRunner {
         }
     }
 
-    pub(super) async fn process_update/*<F>*/(
+    pub(super) async fn process_update(
         &self,
         update: Update,
         /*insert_fn: F,*/
-    //) -> Result<(), FilterError>
+        //) -> Result<(), FilterError>
     ) -> Result<(), String>
-    where
+where
         /*
         F: Fn(
                 &Prefix,
@@ -728,8 +688,7 @@ impl RibUnitRunner {
             + Clone
             + Send
             + 'static,
-        */
-    {
+        */ {
         match update {
             Update::UpstreamStatusChange(UpstreamStatus::EndOfStream {
                 ..
@@ -740,18 +699,19 @@ impl RibUnitRunner {
             }
 
             Update::Bulk(payloads) => {
-                self.filter_payload(payloads,/* insert_fn*/).await?
+                self.filter_payload(payloads /* insert_fn*/).await?
             }
 
             Update::Single(payload) => {
-                self.filter_payload([payload],/* insert_fn*/).await?
+                self.filter_payload([payload] /* insert_fn*/).await?
             }
 
             Update::WithdrawBulk(ingress_ids) => {
-                ingress_ids.iter()
+                ingress_ids
+                    .iter()
                     .for_each(|&id| self.signal_withdraw(id, None));
             }
-            
+
             Update::Withdraw(ingress_id, maybe_afisafi) => {
                 self.signal_withdraw(ingress_id, maybe_afisafi)
             }
@@ -789,12 +749,12 @@ impl RibUnitRunner {
         Ok(())
     }
 
-    async fn filter_payload/*<T, F>*/(
+    async fn filter_payload(
         &self,
         payload: impl IntoIterator<Item = Payload>,
         /*insert_fn: F,*/
     ) -> Result<(), String /*FilterError*/>
-    /*
+/*
     where
         T: Filterable,
         F: Fn(
@@ -813,8 +773,7 @@ impl RibUnitRunner {
             + Clone
             + Send
             + 'static,
-        */
-    {
+        */ {
         let mut res = SmallVec::<[Payload; 8]>::new();
 
         let mut output_stream = RotoOutputStream::new();
@@ -823,15 +782,14 @@ impl RibUnitRunner {
             let ingress_id = match &p.context {
                 RouteContext::Fresh(f) => Some(f.provenance().ingress_id),
                 RouteContext::Mrt(m) => Some(m.provenance().ingress_id),
-                _ => None
+                _ => None,
             };
             if let Some(ref roto_function) = self.roto_function_pre {
-
                 match roto_function.call(
                     roto::Val(&mut output_stream),
                     roto::Val(p.rx_value.clone()),
                     roto::Val(p.context.clone()),
-                )  {
+                ) {
                     roto::Verdict::Accept(_) => {
                         self.insert_payload(&p);
                         res.push(p.clone());
@@ -847,7 +805,7 @@ impl RibUnitRunner {
             }
             if !output_stream.is_empty() {
                 let mut osms = smallvec![];
-                
+
                 use crate::common::roto_new::Output;
                 for entry in output_stream.drain() {
                     debug!("output stream entry {entry:?}");
@@ -864,28 +822,20 @@ impl RibUnitRunner {
                                 ingress_id,
                             )
                         }
-                        Output::Asn(_u32) => {
-                            OutputStreamMessage::asn(
-                                Some(p.rx_value.clone()),
-                                ingress_id,
-                            )
-                        }
-                        Output::Origin(_u32) => {
-                            OutputStreamMessage::origin(
-                                Some(p.rx_value.clone()),
-                                ingress_id,
-                            )
-                        }
+                        Output::Asn(_u32) => OutputStreamMessage::asn(
+                            Some(p.rx_value.clone()),
+                            ingress_id,
+                        ),
+                        Output::Origin(_u32) => OutputStreamMessage::origin(
+                            Some(p.rx_value.clone()),
+                            ingress_id,
+                        ),
                         Output::PeerDown => {
                             debug!("Logged PeerDown from Rib unit, ignoring");
-                            continue
+                            continue;
                         }
                         Output::Custom((id, local)) => {
-                            OutputStreamMessage::custom(
-                                id, local,
-                                ingress_id,
-                            )
-                            
+                            OutputStreamMessage::custom(id, local, ingress_id)
                         }
                     };
                     osms.push(osm);
@@ -923,56 +873,56 @@ impl RibUnitRunner {
         */
 
         match res.len() {
-            0 => { }, 
+            0 => {}
             1 => {
-                self.gate.update_data(
-                    Update::Single(res.into_iter().next().unwrap())
-                ).await;
+                self.gate
+                    .update_data(Update::Single(
+                        res.into_iter().next().unwrap(),
+                    ))
+                    .await;
             }
             _ => {
-                self.gate.update_data(
-                    Update::Bulk(res)
-                ).await;
+                self.gate.update_data(Update::Bulk(res)).await;
             }
         }
 
         Ok(())
         /*
-        let bound_tracer = self.tracer.bind(self.gate.id());
-        if let Some(filtered_update) = Self::VM
-            .with(|vm| {
-                payload
-                    .filter(|value, received, trace_id, context| {
-                        self.roto_scripts.exec_with_tracer(
-                            vm,
-                            &self.filter_name.load(),
-                            value,
-                            received,
-                            bound_tracer.clone(),
-                            trace_id,
-                            context
-                        )
-                    },
-                    |_source_id| { /* TODO: self.status_reporter.message_filtered(source_id) */ })
-                    .map(|filtered_payloads| {
-                        self.insert_payloads(filtered_payloads,/* insert_fn*/)
-                    })
-            })
-            .map_err(|err| {
-                self.status_reporter.message_filtering_failure(&err);
-                err
-            })?
-        {
-            self.gate.update_data(filtered_update).await;
-        }
+            let bound_tracer = self.tracer.bind(self.gate.id());
+            if let Some(filtered_update) = Self::VM
+                .with(|vm| {
+                    payload
+                        .filter(|value, received, trace_id, context| {
+                            self.roto_scripts.exec_with_tracer(
+                                vm,
+                                &self.filter_name.load(),
+                                value,
+                                received,
+                                bound_tracer.clone(),
+                                trace_id,
+                                context
+                            )
+                        },
+                        |_source_id| { /* TODO: self.status_reporter.message_filtered(source_id) */ })
+                        .map(|filtered_payloads| {
+                            self.insert_payloads(filtered_payloads,/* insert_fn*/)
+                        })
+                })
+                .map_err(|err| {
+                    self.status_reporter.message_filtering_failure(&err);
+                    err
+                })?
+            {
+                self.gate.update_data(filtered_update).await;
+            }
 
-        if let Ok(rib) = self.rib.load().store() {
-            self.status_reporter
-                .unique_prefix_count_updated(rib.prefixes_count());
-        }
+            if let Ok(rib) = self.rib.load().store() {
+                self.status_reporter
+                    .unique_prefix_count_updated(rib.prefixes_count());
+            }
 
-        Ok(())
-    */
+            Ok(())
+        */
     }
 
     /* // LH: we only use fn insert_payload (singular) now
@@ -1012,8 +962,8 @@ impl RibUnitRunner {
     }
     */
 
-    pub fn insert_payload/*<F>*/(&self, payload: &Payload/*, insert_fn: F*/)
-        /*
+    pub fn insert_payload(&self, payload: &Payload /*, insert_fn: F*/)
+    /*
     where
         F: Fn(
                 &Prefix,
@@ -1030,216 +980,214 @@ impl RibUnitRunner {
     {
         let rib = self.rib.load();
         if !rib.is_physical() {
-            return
+            return;
         }
 
-
         /*
-         * HashedRib only has PrefixRoute for its RibValues now.
-         * Perhaps we can store Record.prefix things in a separate
-         * RIB/HashMap like we'll do with more exotic AFI/SAFI NLRIs.
-         *
-         TypeValue::Record(record) => match record
-         .get_value_for_field("prefix")
-         {
-         Some(ElementTypeValue::Primitive(
-         TypeValue::Builtin(BuiltinTypeValue::Prefix(prefix)),
-         )) => Some(*prefix),
-         _ => None,
-         },
-         */
+        * HashedRib only has PrefixRoute for its RibValues now.
+        * Perhaps we can store Record.prefix things in a separate
+        * RIB/HashMap like we'll do with more exotic AFI/SAFI NLRIs.
+        *
+        TypeValue::Record(record) => match record
+        .get_value_for_field("prefix")
+        {
+        Some(ElementTypeValue::Primitive(
+        TypeValue::Builtin(BuiltinTypeValue::Prefix(prefix)),
+        )) => Some(*prefix),
+        _ => None,
+        },
+        */
 
         //if let TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(prefix_route)) = &payload.rx_value {
         //match payload.rx_value {payload.rx
         //    RotondaRoute::Ipv4Unicast(rr) => { let bool = rr.nlri(); todo!() }
         //    RotondaRoute::Ipv6Unicast(rr) => todo!(),
         //}
-           // let prefix = prefix_route.prefix();
+        // let prefix = prefix_route.prefix();
 
-            
-            
-            //let is_announcement = payload.context.nlri_status() != NlriStatus::Withdrawn;
-            //let is_announcement = !payload.rx_value.is_withdrawn();
-            //let router_id =
-            //    payload.rx_value.router_id().unwrap_or_else(|| {
-            //        Arc::new(RouterId::from_str("unknown").unwrap())
-            //    });
+        //let is_announcement = payload.context.nlri_status() != NlriStatus::Withdrawn;
+        //let is_announcement = !payload.rx_value.is_withdrawn();
+        //let router_id =
+        //    payload.rx_value.router_id().unwrap_or_else(|| {
+        //        Arc::new(RouterId::from_str("unknown").unwrap())
+        //    });
 
-            //let ingress_id = payload.context.provenance().ingrespayload.rxs_id;
+        //let ingress_id = payload.context.provenance().ingrespayload.rxs_id;
 
-            let pre_insert = Utc::now();
+        let pre_insert = Utc::now();
 
-            // XXX this is where we need to adapt to the new store
-            // this basically translates to
-            // rib.insert(prefix, rx_value, prov)
-            // returning a Result<(Upsert<StoreInsertionReport, u32)>
-            //
-            // this has to become
-            //
-            //pub 
-            //match insert_fn(&prefix, payload.rx_value.clone(), &rib, payload.context.provenance()) {
+        // XXX this is where we need to adapt to the new store
+        // this basically translates to
+        // rib.insert(prefix, rx_value, prov)
+        // returning a Result<(Upsert<StoreInsertionReport, u32)>
+        //
+        // this has to become
+        //
+        //pub
+        //match insert_fn(&prefix, payload.rx_value.clone(), &rib, payload.context.provenance()) {
 
-            let (route_status, provenance) = match &payload.context {
-                RouteContext::Fresh(ctx) => { (ctx.status, ctx.provenance) },
-                RouteContext::Mrt(ctx) => { (ctx.status, ctx.provenance) },
-                RouteContext::Reprocess => {
-                    error!("unexpected RouteContext::Reprocess in insert_payload");
-                    self.status_reporter.insert_failed(&payload.rx_value, "unexpected RouteContext::Reprocess");
-                    return;
-                }
-            };
-
-            let ltime = 0_u64;
-            //debug!("pre rib.insert for {}, status {}",
-            //    payload.rx_value, &route_context.status()
-            //);
-            match rib.insert(
-                &payload.rx_value, route_status, provenance, ltime
-            ) {
-                Ok(report) => {
-                    let post_insert = Utc::now();
-                    let store_op_delay =
-                        (post_insert - pre_insert).to_std().unwrap();
-                    let propagation_delay = (post_insert
-                        - payload.received)
-                        .to_std()
-                        .unwrap();
-
-                    let change = if report.prefix_new {
-                        StoreInsertionEffect::RouteAdded
-                    } else {
-                        StoreInsertionEffect::RouteUpdated
-                    };
-
-                    self.status_reporter.insert_ok(
-                        provenance.ingress_id,
-                        store_op_delay,
-                        propagation_delay,
-                        //num_retries,
-                        report.cas_count.try_into().unwrap_or(u32::MAX),
-                        change,
-                    );
-
-                    // XXX re-introduce sometime later
-                    //if let Some(ref roto_function) = self.roto_function_post {
-                    //    let mut insertion_info = report.into();
-                    //    let mut output_stream = RotoOutputStream::new();
-                    //    let _ = roto_function.call(
-                    //        roto::Val(&mut output_stream),
-                    //        roto::Val(payload.rx_value.clone()),
-                    //        roto::Val(insertion_info),
-                    //    );
-                    //    // TODO process outputstream
-                    //}
-                }
-                Err(err) => {
-                    self.status_reporter.insert_failed(&payload.rx_value, err);
-                }
+        let (route_status, provenance) = match &payload.context {
+            RouteContext::Fresh(ctx) => (ctx.status, ctx.provenance),
+            RouteContext::Mrt(ctx) => (ctx.status, ctx.provenance),
+            RouteContext::Reprocess => {
+                error!(
+                    "unexpected RouteContext::Reprocess in insert_payload"
+                );
+                self.status_reporter.insert_failed(
+                    &payload.rx_value,
+                    "unexpected RouteContext::Reprocess",
+                );
+                return;
             }
+        };
 
-            /*
+        let ltime = 0_u64;
+        //debug!("pre rib.insert for {}, status {}",
+        //    payload.rx_value, &route_context.status()
+        //);
+        match rib.insert(&payload.rx_value, route_status, provenance, ltime) {
+            Ok(report) => {
+                let post_insert = Utc::now();
+                let store_op_delay =
+                    (post_insert - pre_insert).to_std().unwrap();
+                let propagation_delay =
+                    (post_insert - payload.received).to_std().unwrap();
 
-            match rib.insert(&prefix, prefix_route.clone(), route_context.nlri_status(), route_context.provenance(), ltime) {
-                Ok(report) => {
-                    let post_insert = Utc::now();
-                    let store_op_delay =
-                        (post_insert - pre_insert).to_std().unwrap();
-                    let propagation_delay = (post_insert
-                        - payload.received)
-                        .to_std()
-                        .unwrap();
-
-                    let change = if report.prefix_new {
-                        StoreInsertionEffect::RouteAdded
-                    } else {
-                        StoreInsertionEffect::RouteUpdated
-                    };
-
-                    self.status_reporter.insert_ok(
-                        route_context.provenance().ingress_id,
-                        store_op_delay,
-                        propagation_delay,
-                        //num_retries,
-                        report.cas_count.try_into().unwrap_or(u32::MAX),
-                        change,
-                    );
-                }
-                Err(err) => {
-                    self.status_reporter.insert_failed(prefix, err);
-                }
-
-                /*
-
-                   Ok((upsert, num_retries)) => {
-                   let post_insert = Utc::now();
-                   let store_op_delay =
-                   (post_insert - pre_insert).to_std().unwrap();
-                   let propagation_delay = (post_insert
-                   - payload.received)
-                   .to_std()
-                   .unwrap();
-
-                // are we still going to get a Upsert:: back from the
-                // new rotonda_store methods? If so, what will be the
-                // T in Upsert::Update<T> ?
-                // would be nice to have the change/effect, the
-                // op_duraiton we can do ourselves here, and the
-                // item_count... not sure how interesting that is, and
-                // moreover, what would it entail: the number of Metas
-                // for the Prefix? Or something for the Prefix+UniqId?
-                match upsert {
-                Upsert::Insert => {
-                let change = if is_announcement {
-                StoreInsertionEffect::RouteAdded
+                let change = if report.prefix_new {
+                    StoreInsertionEffect::RouteAdded
                 } else {
-                // WTF - a withdrawal should NOT result in 'Insert' as that means
-                // that the prefix didn't yet have any routes associated with it
-                // so what was there to withdraw?
-                StoreInsertionEffect::RoutesWithdrawn(0)
+                    StoreInsertionEffect::RouteUpdated
                 };
+
                 self.status_reporter.insert_ok(
-                //router_id,
-                ingress_id,
-                store_op_delay,
-                propagation_delay,
-                num_retries,
-                change,
+                    provenance.ingress_id,
+                    store_op_delay,
+                    propagation_delay,
+                    //num_retries,
+                    report.cas_count.try_into().unwrap_or(u32::MAX),
+                    change,
                 );
-                }
-                Upsert::Update(StoreInsertionReport { change,
-                item_count,
-                op_duration,
-                }) => {
-                STATS_COUNTER.with(|counter| {
-                 *counter.borrow_mut() += 1;
-                 let res = *counter.borrow();
-                 if res % RECORD_MERGE_UPDATE_SPEED_EVERY_N_CALLS == 0 {
-                 self.rib_merge_update_stats.add(
-                 op_duration.num_microseconds().unwrap_or(i64::MAX)
-                 as u64,
-                 item_count,
-                 is_announcement,
-                 );
-                 }
-                 });
 
-                 self.status_reporter.update_ok(
-                //router_id,
-                ingress_id,
-                store_op_delay,
-                propagation_delay,
-                num_retries,
-                change,
-                );
-                }
-                }
-                }
-
-                Err(err) => {
-                self.status_reporter.insert_failed(prefix, err);
-                } */
+                // XXX re-introduce sometime later
+                //if let Some(ref roto_function) = self.roto_function_post {
+                //    let mut insertion_info = report.into();
+                //    let mut output_stream = RotoOutputStream::new();
+                //    let _ = roto_function.call(
+                //        roto::Val(&mut output_stream),
+                //        roto::Val(payload.rx_value.clone()),
+                //        roto::Val(insertion_info),
+                //    );
+                //    // TODO process outputstream
+                //}
             }
-    */
+            Err(err) => {
+                self.status_reporter.insert_failed(&payload.rx_value, err);
+            }
+        }
+
+        /*
+
+                match rib.insert(&prefix, prefix_route.clone(), route_context.nlri_status(), route_context.provenance(), ltime) {
+                    Ok(report) => {
+                        let post_insert = Utc::now();
+                        let store_op_delay =
+                            (post_insert - pre_insert).to_std().unwrap();
+                        let propagation_delay = (post_insert
+                            - payload.received)
+                            .to_std()
+                            .unwrap();
+
+                        let change = if report.prefix_new {
+                            StoreInsertionEffect::RouteAdded
+                        } else {
+                            StoreInsertionEffect::RouteUpdated
+                        };
+
+                        self.status_reporter.insert_ok(
+                            route_context.provenance().ingress_id,
+                            store_op_delay,
+                            propagation_delay,
+                            //num_retries,
+                            report.cas_count.try_into().unwrap_or(u32::MAX),
+                            change,
+                        );
+                    }
+                    Err(err) => {
+                        self.status_reporter.insert_failed(prefix, err);
+                    }
+
+                    /*
+
+                       Ok((upsert, num_retries)) => {
+                       let post_insert = Utc::now();
+                       let store_op_delay =
+                       (post_insert - pre_insert).to_std().unwrap();
+                       let propagation_delay = (post_insert
+                       - payload.received)
+                       .to_std()
+                       .unwrap();
+
+                    // are we still going to get a Upsert:: back from the
+                    // new rotonda_store methods? If so, what will be the
+                    // T in Upsert::Update<T> ?
+                    // would be nice to have the change/effect, the
+                    // op_duraiton we can do ourselves here, and the
+                    // item_count... not sure how interesting that is, and
+                    // moreover, what would it entail: the number of Metas
+                    // for the Prefix? Or something for the Prefix+UniqId?
+                    match upsert {
+                    Upsert::Insert => {
+                    let change = if is_announcement {
+                    StoreInsertionEffect::RouteAdded
+                    } else {
+                    // WTF - a withdrawal should NOT result in 'Insert' as that means
+                    // that the prefix didn't yet have any routes associated with it
+                    // so what was there to withdraw?
+                    StoreInsertionEffect::RoutesWithdrawn(0)
+                    };
+                    self.status_reporter.insert_ok(
+                    //router_id,
+                    ingress_id,
+                    store_op_delay,
+                    propagation_delay,
+                    num_retries,
+                    change,
+                    );
+                    }
+                    Upsert::Update(StoreInsertionReport { change,
+                    item_count,
+                    op_duration,
+                    }) => {
+                    STATS_COUNTER.with(|counter| {
+                     *counter.borrow_mut() += 1;
+                     let res = *counter.borrow();
+                     if res % RECORD_MERGE_UPDATE_SPEED_EVERY_N_CALLS == 0 {
+                     self.rib_merge_update_stats.add(
+                     op_duration.num_microseconds().unwrap_or(i64::MAX)
+                     as u64,
+                     item_count,
+                     is_announcement,
+                     );
+                     }
+                     });
+
+                     self.status_reporter.update_ok(
+                    //router_id,
+                    ingress_id,
+                    store_op_delay,
+                    propagation_delay,
+                    num_retries,
+                    change,
+                    );
+                    }
+                    }
+                    }
+
+                    Err(err) => {
+                    self.status_reporter.insert_failed(prefix, err);
+                    } */
+                }
+        */
         //}
     }
 
@@ -1263,20 +1211,23 @@ impl RibUnitRunner {
         //        self.reprocess_rib_value(rib_value).await;
         //}
         for record in res.prefix_meta {
-            let (mui, ltime, status) = (record.multi_uniq_id, record.ltime, record.status);
-            
+            let (mui, ltime, status) =
+                (record.multi_uniq_id, record.ltime, record.status);
+
             // XXX how can we do without the clone here?
             // we can not keep track of the other fields and create a new
             // PublicRecord only if reprocess_rib_value returns Some(..),
             // because PublicRecord is not public.
             //
             //let mut maybe_keep = record.clone();
-            if let Some(meta)  = self.reprocess_rib_value(record.meta).await {
+            if let Some(meta) = self.reprocess_rib_value(record.meta).await {
                 //maybe_keep.meta = meta;
                 processed_res.prefix_meta.push(
                     //maybe_keep
                     //rotonda_store::PublicRecord::<RotondaRoute>::new(mui, ltime, status, meta)
-                    rotonda_store::PublicRecord::<RotondaPaMap>::new(mui, ltime, status, meta)
+                    rotonda_store::PublicRecord::<RotondaPaMap>::new(
+                        mui, ltime, status, meta,
+                    ),
                 );
             }
         }
@@ -1292,7 +1243,8 @@ impl RibUnitRunner {
         }
 
         if log_enabled!(log::Level::Trace) {
-            let is_out_prefix_meta_set = !processed_res.prefix_meta.is_empty();
+            let is_out_prefix_meta_set =
+                !processed_res.prefix_meta.is_empty();
             let exact_match_diff = (is_in_prefix_meta_set as u8)
                 - (is_out_prefix_meta_set as u8);
             let less_specifics_diff =
@@ -1337,7 +1289,6 @@ impl RibUnitRunner {
 
         let tracer = BoundTracer::new(self.tracer.clone(), self.gate.id());
 
-
         // XXX where is our ingress_id ?
         //let prov = self.ingresses.get(
 
@@ -1347,13 +1298,14 @@ impl RibUnitRunner {
         // in this context. Then, Roto filters can act upon that bool.
         // This might cause discrepancies between 'normal' processing and
         // re-processing, though.
-        
+
         //let ctx = RouteContext::for_reprocessing(
         //    NlriStatus::UpToDate, // XXX is this
         //    provenance,
         //);
-        let ctx = RouteContext::for_reprocessing();
+        let _ctx = RouteContext::for_reprocessing();
 
+        trace!("Re-processing route");
         todo!(); // figure out how to construct a Payload when we do not have
                  // the RotondaRoute anymore, only the RotondaPamap.
                  // This will depend on what type the roto function expects.
@@ -1361,15 +1313,14 @@ impl RibUnitRunner {
                  // signature of fn reprocess_rib_value and call it
                  // differently from reprocess_record_set and
                  // reprocess_query_results
-        /*
-        let payload = Payload::new(
-            rib_value,
-            ctx.clone(),
-            None
-        );
-        */
+                 /*
+                 let payload = Payload::new(
+                     rib_value,
+                     ctx.clone(),
+                     None
+                 );
+                 */
 
-        trace!("Re-processing route");
         todo!() // filter using new roto
 
         // LH:
@@ -1378,78 +1329,78 @@ impl RibUnitRunner {
         // SmallVec<Payload> even if the input is a single Payload.
         // However, we work on a single RibValue here, so whatever comes out
         // of the filter is a SmallVec of either 0 or 1 items.
-        // or perhaps not: can a single Payload going in result in both the 
+        // or perhaps not: can a single Payload going in result in both the
         // input Payload (PrefixRoute) _AND_ a OutputStreamMessage (is that
         // something going out South?)
 
         //let res: Option<RibValue>;
 
         /*
-        if let Ok(filtered_payloads) = Self::VM.with(|vm| {
-            payload.filter(
-                |value, received, trace_id, context| {
-                    self.roto_scripts.exec_with_tracer(
-                        vm,
-                        &self.filter_name.load(),
-                        value,
-                        received,
-                        tracer.clone(),
-                        trace_id,
-                        context
-                    )
-                },
-                |_source_id| {
-                    /* TODO:
-                     * self.status_reporter.message_filtered(source_id) */
-                }
-            )
-        }) {
-            // LH: so, filtered_payloads is a mixed SmallVec where a Payload
-            // can be either a Output Stream Message ('south') and/or a
-            // Payload to be passed on east-wards.
-            filtered_payloads
-                .into_iter()
-                //.filter(|payload| {
-                .find(|payload| {
-                    !matches!(
-                        payload.rx_value,
-                        TypeValue::OutputStreamMessage(_)
-                    )
+            if let Ok(filtered_payloads) = Self::VM.with(|vm| {
+                payload.filter(
+                    |value, received, trace_id, context| {
+                        self.roto_scripts.exec_with_tracer(
+                            vm,
+                            &self.filter_name.load(),
+                            value,
+                            received,
+                            tracer.clone(),
+                            trace_id,
+                            context
+                        )
+                    },
+                    |_source_id| {
+                        /* TODO:
+                         * self.status_reporter.message_filtered(source_id) */
+                    }
+                )
+            }) {
+                // LH: so, filtered_payloads is a mixed SmallVec where a Payload
+                // can be either a Output Stream Message ('south') and/or a
+                // Payload to be passed on east-wards.
+                filtered_payloads
+                    .into_iter()
+                    //.filter(|payload| {
+                    .find(|payload| {
+                        !matches!(
+                            payload.rx_value,
+                            TypeValue::OutputStreamMessage(_)
+                        )
+                    })
+                .map(|payload| {
+                    // Add this processed query result route into the new query result
+                    //let hash = self
+                    //    .rib
+                    //    .load()
+                    //    .precompute_hash_code(&payload.rx_value);
+                    /*
+                       PreHashedTypeValue::new(
+                       payload.rx_value,
+                       route.provenance(),
+                    /*hash*/)
+                    .into()
+                        */
+                        payload.rx_value.try_into().unwrap()
                 })
-            .map(|payload| {
-                // Add this processed query result route into the new query result
-                //let hash = self
-                //    .rib
-                //    .load()
-                //    .precompute_hash_code(&payload.rx_value);
-                /*
-                   PreHashedTypeValue::new(
-                   payload.rx_value,
-                   route.provenance(),
-                /*hash*/)
-                .into()
-                    */
-                    payload.rx_value.try_into().unwrap()
-            })
-        } else {
-            None
-        }//;
+            } else {
+                None
+            }//;
 
-        //res
+            //res
 
-        //if new_values.is_empty() {
-        //    None
-        //} else {
-        //    Some(new_values.into())
-        //}
-    */
+            //if new_values.is_empty() {
+            //    None
+            //} else {
+            //    Some(new_values.into())
+            //}
+        */
     }
 
     async fn reprocess_record_set(
         &self,
         //record_set: &RecordSet<RotondaRoute>,
         record_set: &RecordSet<RotondaPaMap>,
-    //) -> Option<RecordSet<RotondaRoute>> {
+        //) -> Option<RecordSet<RotondaRoute>> {
     ) -> Option<RecordSet<RotondaPaMap>> {
         //let mut new_record_set = RecordSet::<RotondaRoute>::new();
         let mut new_record_set = RecordSet::<RotondaPaMap>::new();
@@ -1457,7 +1408,8 @@ impl RibUnitRunner {
         for record in record_set.iter() {
             // XXX can we safely do this?
             for mut pub_rec in record.meta {
-                if let Some(rib_value) = self.reprocess_rib_value(pub_rec.meta).await
+                if let Some(rib_value) =
+                    self.reprocess_rib_value(pub_rec.meta).await
                 {
                     pub_rec.meta = rib_value;
                     new_record_set.push(record.prefix, vec![pub_rec]);
@@ -1516,7 +1468,7 @@ impl RibUnitRunner {
 //     ])
 // }
 
-// --- Tests ----------------------------------------------------------------------------------------------------------
+// --- Tests -----------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

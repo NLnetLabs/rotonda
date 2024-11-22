@@ -43,7 +43,12 @@ use routecore::bgp::fsm::session::{
 
 //use roto::types::builtin::basic_route::SourceId;
 
-use crate::common::roto_new::{explode_announcements, explode_withdrawals, rotonda_roto_runtime, CompiledRoto, FreshRouteContext, Output, OutputStream, OutputStreamMessage, Provenance, RotoOutputStream, RotoScripts, RouteContext};
+use crate::common::roto_new::{
+    explode_announcements, explode_withdrawals, rotonda_roto_runtime,
+    CompiledRoto, FreshRouteContext, Output, OutputStream,
+    OutputStreamMessage, Provenance, RotoOutputStream, RotoScripts,
+    RouteContext,
+};
 //use crate::bgp::encode::Announcements;
 //use crate::common::roto::{FilterOutput, RotoScripts, ThreadLocalVM};
 //use crate::common::routecore_extra::mk_withdrawals_for_peers_announced_prefixes;
@@ -89,7 +94,6 @@ impl BgpSession<CombinedConfig> for Session<CombinedConfig> {
     }
 }
 
-
 struct Processor {
     roto_function: Option<RotoFunc>,
     gate: Gate,
@@ -117,8 +121,6 @@ impl Processor {
         ingresses: Arc<ingress::Register>,
         ingress_id: ingress::IngressId,
     ) -> Self {
-
-
         Processor {
             roto_function,
             gate,
@@ -207,8 +209,6 @@ impl Processor {
         }
         */
 
-
-        
         // XXX this should happen earlier, now any roto error will cause a
         // panic only when a BGP session is set up.
         // Move this to the manager/loading phase, somehow.
@@ -226,8 +226,6 @@ impl Processor {
             }
         });
         */
-        
-
 
         // XXX is this all OK cancel-safety-wise?
         loop {
@@ -396,7 +394,7 @@ impl Processor {
                                                 id, local,
                                                 Some(session_ingress_id),
                                             )
-                                            
+
                                         }
                                     };
                                     osms.push(osm);
@@ -479,10 +477,10 @@ impl Processor {
                             }
                             // register ingress
                             //session_ingress_id = self.ingresses.register();
-                            
+
                             debug!(
                                 "got assigned {} for this session",
-                                session_ingress_id 
+                                session_ingress_id
                             );
                             debug!("get: {:?}", self.ingresses.get(session_ingress_id));
                             self.ingresses.update_info(
@@ -493,7 +491,7 @@ impl Processor {
                                     .with_remote_asn(negotiated.remote_asn())
                                 );
                             debug!("get 2: {:?}", self.ingresses.get(session_ingress_id));
-                                
+
 
 
                         }
@@ -548,9 +546,9 @@ impl Processor {
                 }
                 */
 
-                self.gate.update_data(
-                    Update::Withdraw(session_ingress_id, None)
-                ).await;
+                self.gate
+                    .update_data(Update::Withdraw(session_ingress_id, None))
+                    .await;
             }
         }
 
@@ -584,8 +582,6 @@ impl Processor {
             //context: RouteContext,
             context: FreshRouteContext,
         ) -> Payload {
-            
-
             // let tv;
             // if let Ok(route) = route.try_into() {
             //     tv = TypeValue::Builtin(
@@ -594,14 +590,8 @@ impl Processor {
             // } else {
             //     return Err(session::Error::for_str("Cannot parse route"));
             // }
-            
-            Payload::with_received(
-                rr,
-                context.into(),
-                None,
-                received
-            )
-            
+
+            Payload::with_received(rr, context.into(), None, received)
         }
 
         // When sending both v4 and v6 nlri using exabgp, exa sends a v4
@@ -640,34 +630,33 @@ impl Processor {
 
         //let bgp_msg = context.message().clone().unwrap().into_inner();
         //let bgp_msg = context.message();
-        
+
         //explode_announcements(&bgp_msg).
 
-    
         //let rws = explode_announcements(&bgp_msg, &mut self.observed_nlri)?;
-        
+
         //  RotondaRoute announcements:
         let rr_reach = explode_announcements(&bgp_msg)?;
         let rr_unreach = explode_withdrawals(&bgp_msg)?;
         let context = FreshRouteContext::new(
             bgp_msg.clone(),
             RouteStatus::Active,
-            provenance
+            provenance,
         );
 
         payloads.extend(
             //rws.into_iter().map(|rws| mk_payload(rws, received, context.clone()))
-            rr_reach.into_iter().map(|rr|
+            rr_reach.into_iter().map(|rr| {
                 Payload::with_received(
                     rr,
                     context.clone().into(),
                     None,
-                    received
+                    received,
                 )
-            )
+            }),
         );
 
-        let context = FreshRouteContext{
+        let context = FreshRouteContext {
             status: RouteStatus::Withdrawn,
             ..context
         };
@@ -679,8 +668,7 @@ impl Processor {
                 context.clone().into(),
                 None,
                 received
-            )
-        ));
+            )));
 
         Ok(payloads.into())
     }
@@ -736,15 +724,13 @@ pub async fn handle_connection(
     let cmds_tx2 = cmds_tx.clone();
     let sess_tx2 = sess_tx.clone();
 
-
-    let mut session =
-        Session::new(
-            candidate_config,
-            tcp_in,
-            sess_tx,
-            cmds_rx,
-            pdu_out_tx.clone(),
-        );
+    let mut session = Session::new(
+        candidate_config,
+        tcp_in,
+        sess_tx,
+        cmds_rx,
+        pdu_out_tx.clone(),
+    );
 
     if delay_open {
         session.enable_delay_open();
@@ -779,21 +765,26 @@ pub async fn handle_connection(
             //    warn!("error sending pdu ({:?}): {}", tcp_out.peer_addr(), e);
             //}
             match tcp_out.try_write(pdu.as_ref()) {
-                Ok(_) => { },
-                Err(ref e) if e.kind() == tokio::io::ErrorKind::WouldBlock => {
+                Ok(_) => {}
+                Err(ref e)
+                    if e.kind() == tokio::io::ErrorKind::WouldBlock =>
+                {
                     debug!("WouldBlock after writable().await");
                 }
                 Err(e) => {
                     warn!(
                         "error sending pdu ({:?}): {}",
-                        tcp_out.peer_addr(), e
+                        tcp_out.peer_addr(),
+                        e
                     );
                     break;
                 }
             }
         }
         // Make sure we get rid of the other half of the TcpStream:
-        let _ = cmds_tx2.send(Command::Disconnect(DisconnectReason::Other)).await;
+        let _ = cmds_tx2
+            .send(Command::Disconnect(DisconnectReason::Other))
+            .await;
         let _ = sess_tx2.send(Message::ConnectionLost(None)).await;
         debug!("pre tcp_out.forget()");
         tcp_out.forget();
@@ -811,8 +802,8 @@ mod tests {
         sync::{Arc, Mutex},
     };
 
-    use routecore::bgp::fsm::session::{self, Message, NegotiatedConfig};
     use inetnum::asn::Asn;
+    use routecore::bgp::fsm::session::{self, Message, NegotiatedConfig};
     use tokio::{sync::mpsc, task::JoinHandle};
 
     use crate::{
@@ -861,7 +852,8 @@ mod tests {
 
         // Emulate the real session behaviour of sending a ConnectionLost
         // message.
-        let msg = Message::ConnectionLost(Some("10.0.0.2:12345".parse().unwrap()));
+        let msg =
+            Message::ConnectionLost(Some("10.0.0.2:12345".parse().unwrap()));
         let _ = sess_tx.send(msg).await;
 
         // Now it's safe to wait for the processor to abort.

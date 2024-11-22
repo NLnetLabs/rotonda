@@ -13,10 +13,12 @@ use crate::{
 };
 use chrono::Utc;
 use futures::future::join_all;
+use inetnum::{addr::Prefix, asn::Asn};
 use roto::types::builtin::{PrefixRoute, RouteContext};
 use roto::types::{
     builtin::{
-         BuiltinTypeValue, RotondaId,
+        BuiltinTypeValue,
+        RotondaId,
         //BgpUpdateMessage,
         //RouteStatus, UpdateMessage,
     },
@@ -24,12 +26,11 @@ use roto::types::{
 };
 use rotonda_store::prelude::multi::{PrefixStoreError, RouteStatus};
 use rotonda_store::{epoch, MatchOptions, MatchType};
-use inetnum::{asn::Asn, addr::Prefix};
 use routecore::bgp::communities::Wellknown;
 use routecore::bgp::message::update_builder::StandardCommunitiesList;
+use routecore::bgp::message::{SessionConfig, UpdateMessage};
 use routecore::bgp::path_attributes::{PathAttribute, PathAttributeType};
 use routecore::bgp::types::AfiSafiType;
-use routecore::bgp::message::{SessionConfig, UpdateMessage};
 use smallvec::SmallVec;
 
 use std::collections::BTreeSet;
@@ -65,10 +66,7 @@ async fn process_non_route_update() {
 
 #[tokio::test]
 async fn process_update_single_route() {
-    let (runner, _) = RibUnitRunner::mock(
-        "",
-        RibType::Physical,
-    );
+    let (runner, _) = RibUnitRunner::mock("", RibType::Physical);
 
     // Given a BGP update containing a single route announcement
     let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
@@ -86,10 +84,7 @@ async fn process_update_single_route() {
 
 #[tokio::test]
 async fn process_update_withdraw_unannounced_route() {
-    let (runner, _) = RibUnitRunner::mock(
-        "",
-        RibType::Physical,
-    );
+    let (runner, _) = RibUnitRunner::mock("", RibType::Physical);
 
     // Given a BGP update containing a single route withdrawal
     let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
@@ -116,10 +111,7 @@ async fn process_update_withdraw_unannounced_route() {
 
 #[tokio::test]
 async fn process_update_same_route_twice() {
-    let (runner, _) = RibUnitRunner::mock(
-        "",
-        RibType::Physical,
-    );
+    let (runner, _) = RibUnitRunner::mock("", RibType::Physical);
 
     // Given a BGP update containing a single route announcement
     let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
@@ -691,22 +683,28 @@ fn mk_route_update_with_communities(
     }
     let bgp_update_bytes = mk_bgp_update(&wit, &ann, &[]);
 
-    let roto_update_msg =
-        UpdateMessage::from_octets(bgp_update_bytes, &SessionConfig::modern())
-            .unwrap();
-    let rws = roto::types::builtin::explode_announcements(&roto_update_msg, &mut BTreeSet::new()).unwrap();
-    let wdws = roto::types::builtin::explode_withdrawals(&roto_update_msg, &mut BTreeSet::new()).unwrap();
+    let roto_update_msg = UpdateMessage::from_octets(
+        bgp_update_bytes,
+        &SessionConfig::modern(),
+    )
+    .unwrap();
+    let rws = roto::types::builtin::explode_announcements(
+        &roto_update_msg,
+        &mut BTreeSet::new(),
+    )
+    .unwrap();
+    let wdws = roto::types::builtin::explode_withdrawals(
+        &roto_update_msg,
+        &mut BTreeSet::new(),
+    )
+    .unwrap();
 
     let mut bulk = SmallVec::new();
     for r in rws {
-        bulk.push(
-            Payload::new(r, RouteContext::for_reprocessing(), None)
-        );
+        bulk.push(Payload::new(r, RouteContext::for_reprocessing(), None));
     }
     for w in wdws {
-        bulk.push(
-            Payload::new(w, RouteContext::for_reprocessing(), None)
-        );
+        bulk.push(Payload::new(w, RouteContext::for_reprocessing(), None));
     }
     Update::Bulk(bulk)
 
@@ -732,16 +730,16 @@ fn mk_route_update_with_communities(
 
 async fn is_filtered(_runner: &RibUnitRunner, _update: Update) -> bool {
     todo!() // before we start using this again, adapt it to the new codebase
-        /*
-    runner
-        .process_update(update, |pfx, meta, store| store.insert(pfx, meta))
-        .await
-        .unwrap();
-    let gate_metrics = runner.gate().metrics();
-    let num_dropped_updates = gate_metrics.num_dropped_updates.load(SeqCst);
-    let num_updates = gate_metrics.num_updates.load(SeqCst);
-    num_dropped_updates == 0 && num_updates == 0
-        */
+            /*
+            runner
+                .process_update(update, |pfx, meta, store| store.insert(pfx, meta))
+                .await
+                .unwrap();
+            let gate_metrics = runner.gate().metrics();
+            let num_dropped_updates = gate_metrics.num_dropped_updates.load(SeqCst);
+            let num_updates = gate_metrics.num_updates.load(SeqCst);
+            num_dropped_updates == 0 && num_updates == 0
+                */
 }
 
 fn query_metrics(

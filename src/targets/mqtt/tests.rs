@@ -15,7 +15,8 @@ use mqtt::{
 };
 use roto::{
     types::{
-        builtin::RouteContext, collections::Record, outputs::OutputStreamMessage, typedef::TypeDef
+        builtin::RouteContext, collections::Record,
+        outputs::OutputStreamMessage, typedef::TypeDef,
     },
     vm::OutputStreamQueue,
 };
@@ -142,7 +143,7 @@ async fn connection_established() {
 
 // MQTT message publication can be done in one of three ways depending on the
 // QoS setting:
-//   - QoS 0: "At most once delivery" - Fire and forget, there is no 
+//   - QoS 0: "At most once delivery" - Fire and forget, there is no
 //            confirmation that the message was actually published. The best
 //            we could do is detect if it has been sent by the rumqttc library
 //            and not just queued for sending.
@@ -181,11 +182,11 @@ async fn publish_msg() {
     let test_output_stream_message = mk_roto_output_stream_payload();
     let mut output_stream_queue = OutputStreamQueue::new();
     output_stream_queue.push(test_output_stream_message.clone());
-    let payload =
-        Payload::from_output_stream_queue(
-            output_stream_queue,
-            RouteContext::for_reprocessing(),
-            None);
+    let payload = Payload::from_output_stream_queue(
+        output_stream_queue,
+        RouteContext::for_reprocessing(),
+        None,
+    );
     runner.direct_update(payload.into()).await;
 
     assert_metric(
@@ -227,16 +228,13 @@ async fn publish_msg() {
 // messages on connection error and sends them once it reconnects, there's
 // nothing to unit test without the real rumqttc library event loop and that
 // cannot be made to run without making a real outbound connection.
-// #[tokio::test]
-// async fn publishing_resumes_after_reconnect() {}
+// #[tokio::test] async fn publishing_resumes_after_reconnect() {}
 //
-// #[tokio::test]
-// #[ignore = "to do"]
-// async fn publishing_errors_are_counted() {}
+// #[tokio::test] #[ignore = "to do"] async fn publishing_errors_are_counted()
+// {}
 //
-// #[tokio::test]
-// #[ignore = "to do"]
-// async fn retryable_publishing_error_is_retried() {}
+// #[tokio::test] #[ignore = "to do"] async fn
+// retryable_publishing_error_is_retried() {}
 
 #[tokio::test]
 #[ignore = "to do"]
@@ -267,9 +265,13 @@ async fn mqtt_target_can_be_reconfigured_while_running() {
 
     // Reconfigure the MQTT target
     let mut config = mk_mqtt_runner_config();
-    config.destination = Destination::try_from("othermockhost:12345".to_string()).unwrap();
+    config.destination =
+        Destination::try_from("othermockhost:12345".to_string()).unwrap();
     let new_config = Mqtt(config.into());
-    cmd_tx.send(TargetCommand::Reconfigure { new_config }).await.unwrap();
+    cmd_tx
+        .send(TargetCommand::Reconfigure { new_config })
+        .await
+        .unwrap();
 
     assert_metric(
         &metrics,
@@ -409,7 +411,7 @@ async fn connection_loss_and_reconnect() {
     assert_metrics(&metrics, (1, 0, 1));
 }
 
-// --- Test helpers -----------------------------------------------------------------------------------------------
+// --- Test helpers ----------------------------------------------------------
 
 #[derive(Clone, Debug)]
 struct MockClient {

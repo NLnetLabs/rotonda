@@ -31,8 +31,9 @@ impl std::fmt::Display for CumAvg {
     }
 }
 
-// The cumulative average per bucket where the bucket value is average time taken and the bucket range denotes the
-// size of the HashSet that was being MergeUpdate'd into at the time.
+// The cumulative average per bucket where the bucket value is average time
+// taken and the bucket range denotes the size of the HashSet that was being
+// MergeUpdate'd into at the time.
 #[derive(Debug, Default)]
 #[allow(non_snake_case)]
 pub struct TimingBuckets {

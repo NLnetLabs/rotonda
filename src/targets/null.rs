@@ -34,9 +34,10 @@ impl Target {
             source.suspend().await;
         }
 
-        // Wait for other components to be, and signal to other components that we are, ready to start. All units and
-        // targets start together, otherwise data passed from one component to another may be lost if the receiving
-        // component is not yet ready to accept it.
+        // Wait for other components to be, and signal to other components
+        // that we are, ready to start. All units and targets start together,
+        // otherwise data passed from one component to another may be lost if
+        // the receiving component is not yet ready to accept it.
         waitpoint.running().await;
 
         while let Some(cmd) = cmd_rx.recv().await {

@@ -15,9 +15,9 @@
 use std::collections::BTreeMap;
 use std::net::IpAddr;
 
-use routecore::bgp::fsm::session::BgpConfig;
 use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
+use routecore::bgp::fsm::session::BgpConfig;
 use routecore::bgp::types::AfiSafiType;
 use serde::Deserialize;
 
@@ -307,7 +307,6 @@ addpath = ["Ipv4Unicast", "Ipv6Unicast"]
         let ip6 = IpAddr::from_str("2001:0db8::1").unwrap();
         assert!(cfg.peer_configs.get(ip6).is_none());
 
-
         let cfg4 = cfg
             .peer_configs
             .get(IpAddr::from_str("2.3.4.7").unwrap())
@@ -321,8 +320,5 @@ addpath = ["Ipv4Unicast", "Ipv6Unicast"]
             cfg4.1.addpath,
             vec![AfiSafiType::Ipv4Unicast, AfiSafiType::Ipv6Unicast]
         );
-
-
-
     }
 }

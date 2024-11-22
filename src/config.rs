@@ -112,7 +112,8 @@ impl Config {
             // With ARG_CONFIG required, we can unwrap here.
             let conf_path_arg = args.get_one::<String>(ARG_CONFIG).unwrap();
             let config_path = cur_dir.join(conf_path_arg);
-            ConfigFile::load(&config_path).map_err(|err| { error!(
+            ConfigFile::load(&config_path).map_err(|err| {
+                error!(
                     "Failed to read config file '{}': {}",
                     config_path.display(),
                     err
@@ -147,8 +148,9 @@ impl Config {
 
         manager.prepare(&self, &config_file)?;
 
-        // Pass the config file path, as well as the processed config, back to the caller so that they can monitor it
-        // for changes while the application is running.
+        // Pass the config file path, as well as the processed config, back to
+        // the caller so that they can monitor it for changes while the
+        // application is running.
         Ok((config_file.source, self))
     }
 }
@@ -337,38 +339,43 @@ impl ConfigFile {
     pub fn load(path: &impl AsRef<Path>) -> Result<Self, io::Error> {
         match fs::read(path) {
             Ok(bytes) => Self::new(bytes, path.into()),
-            Err(e) => Err(e)
+            Err(e) => Err(e),
         }
     }
 
-    pub fn new(
-        bytes: Vec<u8>,
-        source: Source,
-    ) -> Result<Self, io::Error> {
-        // Handle the special case of a rib unit that is actually a physical rib unit and one or more virtual rib
-        // units. Rather than have the user manually configure these separate rib units by hand in the config file,
-        // we expand any units with unit `type = "rib"` and `filter_name = [a, b, c, ...]` into multiple chained units
-        // each with a single roto script path.
+    pub fn new(bytes: Vec<u8>, source: Source) -> Result<Self, io::Error> {
+        // Handle the special case of a rib unit that is actually a physical
+        // rib unit and one or more virtual rib units. Rather than have the
+        // user manually configure these separate rib units by hand in the
+        // config file, we expand any units with unit `type = "rib"` and
+        // `filter_name = [a, b, c, ...]` into multiple chained units each
+        // with a single roto script path.
         //
-        // Why don't we do this as part of the normal config deserialization then unit/target/gate creation and
-        // linking? A single unit can't currently during deserialization cause the creation of additional units.
+        // Why don't we do this as part of the normal config deserialization
+        // then unit/target/gate creation and linking? A single unit can't
+        // currently during deserialization cause the creation of additional
+        // units.
         //
-        // One downside of the approach used here is it will cause line numbers for config file syntax error reports
-        // to be confusing as we are changing the users provided config file without them knowing.
+        // One downside of the approach used here is it will cause line
+        // numbers for config file syntax error reports to be confusing as we
+        // are changing the users provided config file without them knowing.
         //
-        // Another downside is that we have to lookup TOML fields by string name and if the actual field names are
-        // later changed in the actual unit and target config definitions those changes won't break anything here at
-        // compile time, it will just cease to work as expected at runtime. The "integration test" in main.rs exercises
-        // this expansion capability to give at least some verification that it is not obviously broken, but it's not
-        // enough.
+        // Another downside is that we have to lookup TOML fields by string
+        // name and if the actual field names are later changed in the actual
+        // unit and target config definitions those changes won't break
+        // anything here at compile time, it will just cease to work as
+        // expected at runtime. The "integration test" in main.rs exercises
+        // this expansion capability to give at least some verification that
+        // it is not obviously broken, but it's not enough.
         let config_str = String::from_utf8_lossy(&bytes);
-        let mut toml: Value = if let Ok(toml) = 
-            toml::de::from_str(&config_str) {
+        let mut toml: Value =
+            if let Ok(toml) = toml::de::from_str(&config_str) {
                 toml
             } else {
-                return Err(io::Error::new(std::io::ErrorKind::InvalidInput,
-                    "Cannot parse config file")
-                );
+                return Err(io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Cannot parse config file",
+                ));
             };
         let mut source_remappings = None;
 
@@ -523,16 +530,18 @@ impl ConfigFile {
                                     source = new_unit_name;
                                 }
 
-                                // Replace the multiple roto script paths used by the physical rib unit with just
-                                // the first roto script path.
+                                // Replace the multiple roto script paths used
+                                // by the physical rib unit with just the
+                                // first roto script path.
                                 unit_table.insert(
                                     "filter_name".to_string(),
                                     filter_names[0].clone(),
                                 );
 
-                                // This unit should no longer be the source of another unit, rather the last vRIB
-                                // that we added should replace it as source in all places it was used before. See
-                                // *1 below.
+                                // This unit should no longer be the source of
+                                // another unit, rather the last vRIB that we
+                                // added should replace it as source in all
+                                // places it was used before. See *1 below.
                                 source_remappings
                                     .insert(unit_name.clone(), source);
                             }

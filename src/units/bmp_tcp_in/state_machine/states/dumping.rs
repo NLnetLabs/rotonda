@@ -1,22 +1,27 @@
-use std::{collections::hash_map::Keys, fmt::Debug, ops::ControlFlow, sync::Arc};
+use std::{
+    collections::hash_map::Keys, fmt::Debug, ops::ControlFlow, sync::Arc,
+};
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use log::debug;
-//use roto::types::builtin::NlriStatus;
-use routecore::bgp::nlri::afisafi::Nlri;
 use inetnum::addr::Prefix;
+use log::debug;
+use routecore::bgp::nlri::afisafi::Nlri;
 use routecore::bgp::{
-        message::{SessionConfig, UpdateMessage},
-        types::AfiSafiType,
-    };
-use routecore::bmp::message::{Message as BmpMsg, PerPeerHeader, TerminationMessage};
+    message::{SessionConfig, UpdateMessage},
+    types::AfiSafiType,
+};
+use routecore::bmp::message::{
+    Message as BmpMsg, PerPeerHeader, TerminationMessage,
+};
 use smallvec::SmallVec;
 
 use crate::{
-    ingress, payload::{Payload, Update}, units::bmp_tcp_in::state_machine::machine::{
+    ingress,
+    payload::{Payload, Update},
+    units::bmp_tcp_in::state_machine::machine::{
         BmpStateIdx, PeerState, PeerStates,
-    }
+    },
 };
 
 use super::initiating::Initiating;
@@ -47,22 +52,22 @@ use super::super::{
 /// >
 /// > ...
 /// >
-/// > It subsequently sends a Peer Up message over the BMP session for
-/// > each of its monitored BGP peers that is in the Established state.
+/// > It subsequently sends a Peer Up message over the BMP session for each of
+/// > its monitored BGP peers that is in the Established state.
 /// >
 /// > -- <https://datatracker.ietf.org/doc/html/rfc7854#section-3.3>
 ///
 /// So we should expect to see Peer Up messages.
 ///
 /// > It follows by sending the contents of its Adj-RIBs-In (pre-policy,
-/// > post-policy, or both, see Section 5) encapsulated in Route
-/// > Monitoring messages.
+/// > post-policy, or both, see Section 5) encapsulated in Route Monitoring
+/// > messages.
 ///
 /// So we should expect to see Route Monitoring messages.
 ///
 /// > Once it has sent all the routes for a given peer, it MUST send an
-/// > End-of-RIB message for that peer; when End-of-RIB has been sent for
-/// > each monitored peer, the initial table dump has completed."
+/// > End-of-RIB message for that peer; when End-of-RIB has been sent for each
+/// > monitored peer, the initial table dump has completed."
 ///
 /// ... hence the name 'Dumping'.
 ///
@@ -106,9 +111,9 @@ use super::super::{
 /// >
 /// > The initiation message provides a means for the monitored router to
 /// > inform the monitoring station of its vendor, software version, and so
-/// > on.  An initiation message MUST be sent as the first message after
-/// > the TCP session comes up.  An initiation message MAY be sent at any
-/// > point thereafter, if warranted by a change on the monitored router.
+/// > on.  An initiation message MUST be sent as the first message after the
+/// > TCP session comes up.  An initiation message MAY be sent at any point
+/// > thereafter, if warranted by a change on the monitored router.
 ///
 /// So we should expect to see Initiation messages.
 ///
@@ -116,21 +121,20 @@ use super::super::{
 /// >
 /// > ...
 /// >
-/// > A Route Mirroring message may be sent any time it would be legal to
-/// > send a Route Monitoring message.
+/// > A Route Mirroring message may be sent any time it would be legal to send
+/// > a Route Monitoring message.
 ///
 /// So we should expect to see Route Mirroring messages.
 ///
 /// > **4.8.  Stats Reports**
 /// >
-/// > These messages contain information that could be used by the
-/// > monitoring station to observe interesting events that occur on the
-/// > router.
+/// > These messages contain information that could be used by the monitoring
+/// > station to observe interesting events that occur on the router.
 /// >
 /// > Transmission of SR messages could be timer triggered or event driven
 /// > (for example, when a significant event occurs or a threshold is
-/// > reached).  This specification does not impose any timing restrictions
-/// > on when and on what event these reports have to be transmitted.
+/// > reached).  This specification does not impose any timing restrictions on
+/// > when and on what event these reports have to be transmitted.
 ///
 /// So we should expect to see Stats Reports messages.
 ///
@@ -138,25 +142,28 @@ use super::super::{
 /// might be useful as a way to sanity check things like the number of routes
 /// seen so far, but it's not clear to me if one can assume that the point at
 /// which the Stats Report message is seen is the point at which the counters
-/// should be equivalent to the count of counted messages of the
-/// corresponding type seen until this point.
+/// should be equivalent to the count of counted messages of the corresponding
+/// type seen until this point.
 ///
 /// > **9.  Using BMP**
 /// >
-/// > Once the BMP session is established, route monitoring starts dumping
-/// > the current snapshot as well as incremental changes simultaneously.
+/// > Once the BMP session is established, route monitoring starts dumping the
+/// > current snapshot as well as incremental changes simultaneously.
 ///
-/// This would seem to indicate that changes to the routing table may be
-/// seen while receiving the initial table dump. We separate our processing
-/// into "Dumping" and "Updating" phases but in reality there may be no such
-/// hard separation between the phases and thus we must share behaviour with
-/// the "Updating" phase.
+/// This would seem to indicate that changes to the routing table may be seen
+/// while receiving the initial table dump. We separate our processing into
+/// "Dumping" and "Updating" phases but in reality there may be no such hard
+/// separation between the phases and thus we must share behaviour with the
+/// "Updating" phase.
 ///
-/// [^1]: [RFC 4724: Graceful Restart Mechanism for BGP, section 2: Marker for End-of-RIB](https://datatracker.ietf.org/doc/html/rfc4724#section-2)
+/// [^1]: [RFC 4724: Graceful Restart Mechanism for BGP, section 2: Marker for
+///     End-of-RIB](https://datatracker.ietf.org/doc/html/rfc4724#section-2)
 ///
-/// [^2]: [RFC 3392: Capabilities Advertisement with BGP-4](https://datatracker.ietf.org/doc/html/rfc3392)
+/// [^2]: [RFC 3392: Capabilities Advertisement with
+///     BGP-4](https://datatracker.ietf.org/doc/html/rfc3392)
 ///
-/// [^3]: [RFC 5492: Capabilities Advertisement with BGP-4](https://datatracker.ietf.org/doc/html/rfc5492)
+/// [^3]: [RFC 5492: Capabilities Advertisement with
+///     BGP-4](https://datatracker.ietf.org/doc/html/rfc5492)
 #[derive(Debug, Default)]
 pub struct Dumping {
     /// The name given by the Initiation Message for the router.
@@ -227,18 +234,28 @@ impl BmpStateDetails<Dumping> {
         update: &UpdateMessage<Bytes>,
     ) -> ControlFlow<ProcessingResult, Self> {
         if let Ok(Some(afi_safi)) = update.is_eor() {
-            if self.details.remove_pending_eor(pph, (afi_safi).try_into().unwrap()) {
-                // The last pending EOR has been removed and so this signifies the end of the initial table dump, if
-                // we're in the Dumping state, otherwise in the Updating state it signifies only that a late Peer Up
-                // (that happened during the Updating state) has finished dumping. Unfortunately EoR is not a clearly
-                // defined concept in BMP (e.g. see [1]), is it peer peer, per (S)AFI, per rib? Does advertising
-                // support for the Graceful Restart BGP capability have relevance for a BGP client, e.g. can its
-                // presence be used to assume that EoRs will be present for that peer in the BMP feed? Etc. There also
-                // seems to be varying implementations in deployed routers, whether because of deliberate behavioural
-                // differences, differing understanding or misunderstanding of RFCs, implementation bugs, etc.
+            if self
+                .details
+                .remove_pending_eor(pph, (afi_safi).try_into().unwrap())
+            {
+                // The last pending EOR has been removed and so this signifies
+                // the end of the initial table dump, if we're in the Dumping
+                // state, otherwise in the Updating state it signifies only
+                // that a late Peer Up (that happened during the Updating
+                // state) has finished dumping. Unfortunately EoR is not a
+                // clearly defined concept in BMP (e.g. see [1]), is it peer
+                // peer, per (S)AFI, per rib? Does advertising support for the
+                // Graceful Restart BGP capability have relevance for a BGP
+                // client, e.g. can its presence be used to assume that EoRs
+                // will be present for that peer in the BMP feed? Etc. There
+                // also seems to be varying implementations in deployed
+                // routers, whether because of deliberate behavioural
+                // differences, differing understanding or misunderstanding of
+                // RFCs, implementation bugs, etc.
                 //
-                // TODO: We may need some sort of heuristic to ascertain the likelihood that the initial table dump
-                // has actually completed.
+                // TODO: We may need some sort of heuristic to ascertain the
+                // likelihood that the initial table dump has actually
+                // completed.
                 //
                 // [1]: https://www.rfc-editor.org/errata/eid7133
                 let num_pending_eors = self.details.num_pending_eors();
@@ -283,7 +300,6 @@ impl BmpStateDetails<Dumping> {
 
             Self::mk_final_routing_update_result(next_state, update)
         }
-
 
         /*
         // let reason = msg
@@ -365,21 +381,23 @@ impl PeerAware for Dumping {
         ingress_register: Arc<ingress::Register>,
         bmp_ingress_id: ingress::IngressId,
     ) -> bool {
-        self.peer_states
-            .add_peer_config(
-                pph,
-                session_config,
-                eor_capable,
-                ingress_register,
-                bmp_ingress_id,
-            )
+        self.peer_states.add_peer_config(
+            pph,
+            session_config,
+            eor_capable,
+            ingress_register,
+            bmp_ingress_id,
+        )
     }
 
     fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState> {
         self.peer_states.get_peers()
     }
 
-    fn get_peer_ingress_id(&self, pph: &PerPeerHeader<Bytes>) -> Option<ingress::IngressId> {
+    fn get_peer_ingress_id(
+        &self,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> Option<ingress::IngressId> {
         self.peer_states.get_peer_ingress_id(pph)
     }
 
@@ -398,7 +416,10 @@ impl PeerAware for Dumping {
         self.peer_states.get_peer_config(pph)
     }
 
-    fn remove_peer(&mut self, pph: &PerPeerHeader<Bytes>) -> Option<PeerState> {
+    fn remove_peer(
+        &mut self,
+        pph: &PerPeerHeader<Bytes>,
+    ) -> Option<PeerState> {
         self.peer_states.remove_peer(pph)
     }
 

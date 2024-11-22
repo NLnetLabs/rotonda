@@ -4,22 +4,22 @@ use std::{ops::Deref, sync::Arc};
 use arc_swap::ArcSwap;
 use smallvec::SmallVec;
 
-//------------ FrimMap ------------------------------------------------------
+//------------ FrimMap -------------------------------------------------------
 
 /// Frequently read infrequently modified mini map.
 ///
-/// A FrimMap (Frequently Read Infrequently Modified) is a concurrent
-/// map-like data structure intended for cases where frequent concurrent
-/// reads occur but only infrequently are updates made, and is aimed at use
-/// cases where only a few entries in the map are needed (hence "mini").
+/// A FrimMap (Frequently Read Infrequently Modified) is a concurrent map-like
+/// data structure intended for cases where frequent concurrent reads occur
+/// but only infrequently are updates made, and is aimed at use cases where
+/// only a few entries in the map are needed (hence "mini").
 ///
 /// Offers fast reads at the expensive of (comparatively) costly (speed,
 /// memory) updates.
 ///
-/// The caller must assume that making modifications to the map contents
-/// may result in every key and value being cloned, so keys or values that
-/// are costly to clone should be hidden behind a cheap to clone wrapper
-/// such as Arc.
+/// The caller must assume that making modifications to the map contents may
+/// result in every key and value being cloned, so keys or values that are
+/// costly to clone should be hidden behind a cheap to clone wrapper such as
+/// Arc.
 #[derive(Debug)]
 pub struct FrimMap<K, V>
 where
@@ -69,9 +69,9 @@ where
 
 /// RAII guard required while iterating over a [FrimMap].
 ///
-/// The Guard guards access to the FrimMap concurrent data structure
-/// internals for operations such as iteration which require a reference to
-/// be held across multiple accesses to the data structure.
+/// The Guard guards access to the FrimMap concurrent data structure internals
+/// for operations such as iteration which require a reference to be held
+/// across multiple accesses to the data structure.
 pub struct IterGuard<K, V>
 where
     K: Clone + PartialEq,
@@ -95,7 +95,7 @@ where
     }
 }
 
-//------------ Iter ---------------------------------------------------------
+//------------ Iter ----------------------------------------------------------
 
 /// An iterator over the entries of a [FrimMap].
 ///
@@ -112,9 +112,10 @@ impl<'a, K, V> Iterator for Iter<'a, K, V> {
     }
 }
 
-//------------ Entry --------------------------------------------------------
+//------------ Entry ---------------------------------------------------------
 
-/// A view into a single entry in a map, which may either be vacant or occupied.
+/// A view into a single entry in a map, which may either be vacant or
+/// occupied.
 ///
 /// This enum is constructed from the entry method on FrimMap.
 pub enum Entry<'a, K, V>
@@ -149,7 +150,7 @@ where
     }
 }
 
-//------------ FrimMap ------------------------------------------------------
+//------------ FrimMap -------------------------------------------------------
 
 impl<K, V> FrimMap<K, V>
 where
@@ -198,8 +199,8 @@ where
 
     /// Inserts a key-value pair into the FrimMap.
     ///
-    /// If the FrimMap already had this key the previous entry will be replaced
-    /// by the newly inserted entry.
+    /// If the FrimMap already had this key the previous entry will be
+    /// replaced by the newly inserted entry.
     ///
     /// Copies all the key-value pairs into a new FrimMap plus the new
     /// key-value pair and sets this Frim to the new content, dropping the
@@ -256,7 +257,7 @@ where
     }
 }
 
-//------------ Tests --------------------------------------------------------
+//------------ Tests ---------------------------------------------------------
 
 #[cfg(test)]
 mod tests {

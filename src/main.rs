@@ -4,7 +4,7 @@ use futures::{
     future::{select, Either},
     pin_mut,
 };
-use log::{error, info, warn, debug};
+use log::{debug, error, info, warn};
 use rotonda::log::ExitError;
 use rotonda::manager::Manager;
 use rotonda::{
@@ -43,9 +43,8 @@ fn run_with_cmdline_args() -> Result<(), Terminate> {
     })?;
 
     // TODO: Drop privileges, get listen fd from systemd, create PID file,
-    // fork, detach from the parent process, change user and group, etc.
-    // In a word: daemonize.
-    // Prior art:
+    // fork, detach from the parent process, change user and group, etc. In a
+    // word: daemonize. Prior art:
     //   - https://github.com/NLnetLabs/routinator/blob/main/src/operation.rs#L509
     //   - https://github.com/NLnetLabs/routinator/blob/main/src/process.rs#L241
     //   - https://github.com/NLnetLabs/routinator/blob/main/src/process.rs#L363
@@ -109,7 +108,9 @@ async fn handle_signals(
                                     }
                                     Ok((_source, mut config)) => {
                                         manager.spawn(&mut config);
-                                        info!("Configuration changes applied");
+                                        info!(
+                                            "Configuration changes applied"
+                                        );
                                     }
                                 }
                             }
@@ -127,11 +128,15 @@ async fn handle_signals(
                             info!("SIGHUP signal received, re-loading roto scripts \
                             from location {:?}", rsp);
                         } else {
-                            error!("No location for roto scripts. Not reloading");
+                            error!(
+                                "No location for roto scripts. Not reloading"
+                            );
                             continue;
                         }
                         match manager.compile_roto_script(&roto_script) {
-                            Ok(_) => { info!("Done reloading roto scripts"); }
+                            Ok(_) => {
+                                info!("Done reloading roto scripts");
+                            }
                             Err(e) => {
                                 error!("Cannot reload roto scripts: {e}. Not reloading");
                             }
@@ -167,7 +172,8 @@ fn run_with_config(
         .build()
         .unwrap();
 
-    // Make the runtime the default for Tokio related functions that assume a default runtime.
+    // Make the runtime the default for Tokio related functions that assume a
+    // default runtime.
     let _guard = runtime.enter();
 
     config
@@ -190,7 +196,7 @@ fn main() {
     exit(exit_code);
 }
 
-// --- Tests ----------------------------------------------------------------------------------------------------------
+// --- Tests -----------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -977,7 +983,10 @@ mod tests {
                 manager.metrics(),
                 "num_updates_total",
                 &[("component", "global-rib")],
-                12, // 1 route + 1 vRIB query + 1 route + vRIB query + 2 routes + 2 vRIB queries + 1 withdrawal + 1 vRIB query + 1 withdrawal + 1 vRIB query
+                // 1 route + 1 vRIB query + 1 route + vRIB query + 2 routes +
+                // 2 vRIB queries + 1 withdrawal + 1 vRIB query + 1 withdrawal
+                // + 1 vRIB query
+                12,
             )
             .await;
 
@@ -995,7 +1004,8 @@ mod tests {
             //   |___/ |_| \___/|_|   |_|_\\___/ |_| \___/|_|\_|___/_/ \_\
             //                                                            
 
-            // Wait for the manager to update the link report so that it will be included in the trace log output
+            // Wait for the manager to update the link report so that it will
+            // be included in the trace log output
             while manager
                 .link_report_updated_at()
                 .duration_since(link_report_update_time)
@@ -1371,7 +1381,8 @@ mod tests {
         // on Linux/x86_64 systems it returns quickly if there are now
         // pending messages. So use `recv_deadline()` here as it meets our
         // needs on both architectures.
-        let deadline = Instant::now().checked_add(Duration::from_secs(3)).unwrap();
+        let deadline =
+            Instant::now().checked_add(Duration::from_secs(3)).unwrap();
         if let Ok(Some(notification)) = link_rx.recv_deadline(deadline) {
             dbg!(notification);
             panic!("Unexpected MQTT message received");

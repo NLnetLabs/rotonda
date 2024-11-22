@@ -4,7 +4,8 @@ use bytes::Bytes;
 use routecore::bmp::message::{InformationTlvType, Message as BmpMsg};
 
 use crate::{
-    ingress, payload::RouterId, units::bmp_tcp_in::state_machine::machine::BmpStateIdx
+    ingress, payload::RouterId,
+    units::bmp_tcp_in::state_machine::machine::BmpStateIdx,
 };
 
 //use roto::types::builtin::ingress::IngressId;
@@ -75,19 +76,27 @@ impl BmpStateDetails<Initiating> {
                     self.ingress_id,
                     ingress::IngressInfo::new()
                         .with_name(
-                            msg.information_tlvs().find(|t|
-                                t.typ() == InformationTlvType::SysName
-                            )
-                            .map(|t| String::from_utf8_lossy(t.value()).to_string())
-                            .unwrap_or("no-sysname".to_string())
+                            msg.information_tlvs()
+                                .find(|t| {
+                                    t.typ() == InformationTlvType::SysName
+                                })
+                                .map(|t| {
+                                    String::from_utf8_lossy(t.value())
+                                        .to_string()
+                                })
+                                .unwrap_or("no-sysname".to_string()),
                         )
                         .with_desc(
-                            msg.information_tlvs().find(|t|
-                                t.typ() == InformationTlvType::SysDesc
-                            )
-                            .map(|t| String::from_utf8_lossy(t.value()).to_string())
-                            .unwrap_or("no-sysdesc".to_string())
-                        )
+                            msg.information_tlvs()
+                                .find(|t| {
+                                    t.typ() == InformationTlvType::SysDesc
+                                })
+                                .map(|t| {
+                                    String::from_utf8_lossy(t.value())
+                                        .to_string()
+                                })
+                                .unwrap_or("no-sysdesc".to_string()),
+                        ),
                 );
                 let res = self.initiate(msg);
 

@@ -180,12 +180,11 @@ impl LogConfig {
 
     /// Initialize logging.
     ///
-    /// All diagnostic output of Rotonda is done via logging, never to
-    /// stderr directly. Thus, it is important to initalize logging before
-    /// doing anything else that may result in such output. This function
-    /// does exactly that. It sets a maximum log level of `warn`, leading
-    /// only printing important information, and directs all logging to
-    /// stderr.
+    /// All diagnostic output of Rotonda is done via logging, never to stderr
+    /// directly. Thus, it is important to initalize logging before doing
+    /// anything else that may result in such output. This function does
+    /// exactly that. It sets a maximum log level of `warn`, leading only
+    /// printing important information, and directs all logging to stderr.
     pub fn init_logging() -> Result<(), Terminate> {
         log::set_max_level(log::LevelFilter::Warn);
         if let Err(err) = log_reroute::init() {
@@ -203,8 +202,8 @@ impl LogConfig {
 
     /// Switches logging to the configured target.
     ///
-    /// Once the configuration has been successfully loaded, logging should
-    /// be switched to whatever the user asked for via this method.
+    /// Once the configuration has been successfully loaded, logging should be
+    /// switched to whatever the user asked for via this method.
     #[allow(unused_variables)] // for cfg(not(unix))
     pub fn switch_logging(&self, daemon: bool) -> Result<(), Terminate> {
         let logger = match self.log_target {
@@ -283,10 +282,13 @@ impl LogConfig {
 
     /// Creates and returns a fern logger.
     fn fern_logger(&self, timestamp_and_level: bool) -> fern::Dispatch {
-        // TODO: These env var controls are not changeable by the operator at runtime which may make them less useful.
-        // They also require you to already be logging at trace level which means that you also see lots of other trace
-        // logging but if you enable one of these env vars you clearly actually want to see the logging that you are
-        // enabling, not a bunch of other logging as well. So I think this needs some more thought.
+        // TODO: These env var controls are not changeable by the operator at
+        // runtime which may make them less useful. They also require you to
+        // already be logging at trace level which means that you also see
+        // lots of other trace logging but if you enable one of these env vars
+        // you clearly actually want to see the logging that you are enabling,
+        // not a bunch of other logging as well. So I think this needs some
+        // more thought.
         let mqtt_log_level = match std::env::var("ROTONDA_MQTT_LOG") {
             Ok(_) => self.log_level.0.min(LevelFilter::Trace),
             Err(_) => self.log_level.0.min(LevelFilter::Warn),
@@ -305,13 +307,17 @@ impl LogConfig {
 
         let mut res = fern::Dispatch::new();
 
-        // Don't log module paths (e.g. rotonda::xxx::yyy) for our own code modules as we the StatusLoggers
-        // take care of making it clear which unit or target instance is logging which is more useful for readers of
-        // the logs. Do log module paths for messages logged (unexpectedly if warnings or errors) from other modules,
-        // i.e. crate dependencies, as we won't know anything about where those messages come from and if they were
-        // logged without a corresponding error that we could catch with Err then we won't have any additional context
-        // from our own code about where they came from. When the main log level is set to at debug or trace, then
-        // always log module paths in order to have the greatest level of information possible available.
+        // Don't log module paths (e.g. rotonda::xxx::yyy) for our own code
+        // modules as we the StatusLoggers take care of making it clear which
+        // unit or target instance is logging which is more useful for readers
+        // of the logs. Do log module paths for messages logged (unexpectedly
+        // if warnings or errors) from other modules, i.e. crate dependencies,
+        // as we won't know anything about where those messages come from and
+        // if they were logged without a corresponding error that we could
+        // catch with Err then we won't have any additional context from our
+        // own code about where they came from. When the main log level is set
+        // to at debug or trace, then always log module paths in order to have
+        // the greatest level of information possible available.
         if timestamp_and_level {
             res = res.format(move |out, message, record| {
                 let module_path = record.module_path().unwrap_or("");
@@ -340,51 +346,58 @@ impl LogConfig {
             });
         }
 
-        // Note: The tracing::span directives below are needed to prevent dependent crates that use Tokio Tracing from
-        // accidentally violating the log levels we define here. When "there are no attributes associated with a span,
-        // then it creates a log record with the target 'tracing::span' rather than the target specified by the span's
-        // metadata" [1]. This is a problem because the Fern `level_for()` filtering mechanism filters by target, not
-        // by module [2]. To prevent this we explicitly add catch all directives for the 'tracing::span' target.
+        // Note: The tracing::span directives below are needed to prevent
+        // dependent crates that use Tokio Tracing from accidentally violating
+        // the log levels we define here. When "there are no attributes
+        // associated with a span, then it creates a log record with the
+        // target 'tracing::span' rather than the target specified by the
+        // span's metadata" [1]. This is a problem because the Fern
+        // `level_for()` filtering mechanism filters by target, not by module
+        // [2]. To prevent this we explicitly add catch all directives for the
+        // 'tracing::span' target.
         //
-        // References:
-        //   [1]: https://github.com/daboross/fern/issues/85#issuecomment-944305183
+        // References: [1]:
+        //   https://github.com/daboross/fern/issues/85#issuecomment-944305183
         //   [2]: https://github.com/daboross/fern/issues/109
         //
-        // The trigger for adding this was using rumqttd for functional testing as then the rumqttd log line shown
-        // below is immune to the `level_for("rumqttd")` directive we use and only `level_for("tracing::span")` has an
-        // effect on it. E.g. when log level is set to warn the following log line should not be seen, but it is unless
-        // we filter out 'tracing::span':
+        // The trigger for adding this was using rumqttd for functional
+        // testing as then the rumqttd log line shown below is immune to the
+        // `level_for("rumqttd")` directive we use and only
+        // `level_for("tracing::span")` has an effect on it. E.g. when log
+        // level is set to warn the following log line should not be seen, but
+        // it is unless we filter out 'tracing::span':
         //
         // [2022-12-08 13:00:06] INFO  rumqttd::router::routing: disconnect;
 
-        // Disable or limit logging from some modules which add too much noise for too little benefit for our use case.
+        // Disable or limit logging from some modules which add too much noise
+        // for too little benefit for our use case.
         res = res
             .level(self.log_level.0)
             .level_for("rustls", LevelFilter::Error)
             .level_for("rumqttd", LevelFilter::Warn)
             .level_for("tracing::span", LevelFilter::Off)
             .level_for("cranelift_codegen", LevelFilter::Warn)
-            .level_for("cranelift_jit", LevelFilter::Warn)
-            ;
+            .level_for("cranelift_jit", LevelFilter::Warn);
 
-        // Boost the log level of modules for which the operator has requested more diagnostics for.
+        // Boost the log level of modules for which the operator has requested
+        // more diagnostics for.
         res = res
             .level_for("rotonda_store", rotonda_store_log_level)
             .level_for("rumqttc", mqtt_log_level)
             .level_for("roto", roto_log_level);
 
         if debug_enabled {
-            // Don't enable too much logging for some modules even if the main log level is set to debug or trace.
+            // Don't enable too much logging for some modules even if the main
+            // log level is set to debug or trace.
             res = res
                 .level_for("tokio_reactor", LevelFilter::Info)
                 .level_for("hyper", LevelFilter::Info)
                 .level_for("reqwest", LevelFilter::Info)
                 .level_for("h2", LevelFilter::Info)
-                .level_for("mio", LevelFilter::Info)
-                ;
+                .level_for("mio", LevelFilter::Info);
 
-            // Conversely, when the main log level is at least debug, disable limitations on logging normally in place
-            // for some modules.
+            // Conversely, when the main log level is at least debug, disable
+            // limitations on logging normally in place for some modules.
             res = res
                 .level_for("rumqttd", self.log_level.0)
                 .level_for("tracing::span", self.log_level.0);

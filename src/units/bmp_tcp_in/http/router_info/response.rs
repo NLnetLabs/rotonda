@@ -7,10 +7,12 @@ use indoc::formatdoc;
 //use roto::types::builtin::SourceId;
 
 use crate::{
-    http, ingress, payload::RouterId, units::bmp_tcp_in::{
+    http, ingress,
+    payload::RouterId,
+    units::bmp_tcp_in::{
         metrics::{BmpTcpInMetrics, RouterMetrics},
         state_machine::{BmpStateMachineMetrics, PeerAware, PeerStates},
-    }
+    },
 };
 
 use super::RouterInfoApi;
@@ -179,13 +181,15 @@ impl RouterInfoApi {
 
             for pph in peer_states.get_peers() {
                 let peer_key = format!("{}", pph);
-                let prefixes_link = peer_states.get_peer_ingress_id(pph)
-                    .map(|ingress_id| 
+                let prefixes_link = peer_states
+                    .get_peer_ingress_id(pph)
+                    .map(|ingress_id| {
                         format!(
                             "<a href=\"/prefixes/{}\">prefixes</a>",
                             ingress_id
                         )
-                    ).unwrap_or("".to_string());
+                    })
+                    .unwrap_or("".to_string());
 
                 // As soon as the per-mui iterators in the store work, remove
                 // this line and actually show the hyperlinks.

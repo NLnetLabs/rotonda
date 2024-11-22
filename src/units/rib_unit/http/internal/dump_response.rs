@@ -1,6 +1,9 @@
 use hyper::{Body, Response};
 
-use crate::{payload::{RotondaPaMap, RotondaRoute}, units::rib_unit::http::PrefixesApi};
+use crate::{
+    payload::{RotondaPaMap, RotondaRoute},
+    units::rib_unit::http::PrefixesApi,
+};
 
 impl PrefixesApi {
     pub fn mk_dump_response(

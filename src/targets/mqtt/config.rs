@@ -99,7 +99,8 @@ pub struct Config {
     #[serde(default = "Config::default_topic_template")]
     pub topic_template: String,
 
-    /// How long to wait in seconds before connecting again if the connection is closed.
+    /// How long to wait in seconds before connecting again if the connection
+    /// is closed.
     #[serde_as(as = "serde_with::DurationSeconds<u64>")]
     #[serde(default = "Config::default_connect_retry_secs")]
     pub connect_retry_secs: Duration,

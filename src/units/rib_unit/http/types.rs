@@ -87,6 +87,7 @@ impl Filters {
     }
 }
 
-// A SortKey is an RFC 6901 JSON Pointer.
-// See: https://docs.rs/serde_json/latest/serde_json/value/enum.Value.html#method.pointer
+// A SortKey is an RFC 6901 JSON Pointer. See:
+// https://docs.rs/serde_json/latest/serde_json/value/
+// enum.Value.html#method.pointer
 pub type SortKey = Option<String>;

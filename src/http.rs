@@ -308,8 +308,8 @@ impl Server {
 /// A collection of HTTP resources to be served by the server.
 ///
 /// This type provides a shared collection. I.e., if a value is cloned, both
-/// clones will reference the same collection. Both will see newly
-/// added resources.
+/// clones will reference the same collection. Both will see newly added
+/// resources.
 ///
 /// Such new resources can be registered with the [`register`][Self::register]
 /// method. An HTTP request can be processed using the
@@ -573,7 +573,7 @@ impl AsyncWrite for HttpStream {
     }
 }
 
-// --- Query parameter handling ---------------------------------------------------------------------------------------
+// --- Query parameter handling ----------------------------------------------
 
 //pub type QueryParam = (String, String, AtomicBool);
 

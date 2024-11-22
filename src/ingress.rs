@@ -1,8 +1,6 @@
 use core::sync::atomic::AtomicU32;
 use std::net::IpAddr;
-use std::{
-    collections::HashMap, path::PathBuf, sync::atomic::Ordering,
-};
+use std::{collections::HashMap, path::PathBuf, sync::atomic::Ordering};
 
 use std::sync::RwLock;
 
@@ -15,8 +13,7 @@ use inetnum::asn::Asn;
 ///
 /// The ingress/connector units need to register their connections with the
 /// Register, providing additional information such as `SocketAddr`s or
-/// string-like names.
-/// Any unit/target can query the Register.
+/// string-like names. Any unit/target can query the Register.
 #[derive(Debug, Default)]
 pub struct Register {
     serial: AtomicU32,
@@ -46,7 +43,7 @@ impl Register {
         info: IngressInfo,
     ) -> Option<IngressInfo> {
         let mut lock = self.info.write().unwrap();
-       
+
         if let Some(mut old) = lock.remove(&id) {
             if info.remote_addr.is_some() {
                 old.remote_addr = info.remote_addr;
@@ -90,9 +87,7 @@ impl Register {
 pub struct IngressInfo {
     // changed to IpAddr because one of the BMP/BGP connectors did not have
     // SocketAddr for us available. Ideally we change this back to SocketAddr
-    // though.
-    //remote_addr: Option<SocketAddr>,
-
+    // though. remote_addr: Option<SocketAddr>,
     pub parent_ingress: Option<IngressId>,
     pub remote_addr: Option<IpAddr>,
     pub remote_asn: Option<Asn>,
@@ -108,31 +103,47 @@ impl IngressInfo {
     }
 
     pub fn with_parent(self, parent: IngressId) -> Self {
-        Self { parent_ingress: Some(parent), ..self }
+        Self {
+            parent_ingress: Some(parent),
+            ..self
+        }
     }
 
     pub fn with_remote_addr(self, addr: IpAddr) -> Self {
-        Self { remote_addr: Some(addr), ..self }
+        Self {
+            remote_addr: Some(addr),
+            ..self
+        }
     }
 
     pub fn with_remote_asn(self, asn: Asn) -> Self {
-        Self { remote_asn: Some(asn), ..self }
+        Self {
+            remote_asn: Some(asn),
+            ..self
+        }
     }
 
     pub fn with_filename(self, path: PathBuf) -> Self {
-        Self { filename: Some(path), ..self }
+        Self {
+            filename: Some(path),
+            ..self
+        }
     }
 
     pub fn with_name(self, name: String) -> Self {
-        Self { name: Some(name), ..self }
+        Self {
+            name: Some(name),
+            ..self
+        }
     }
 
     pub fn with_desc(self, desc: String) -> Self {
-        Self { desc: Some(desc), ..self }
+        Self {
+            desc: Some(desc),
+            ..self
+        }
     }
 }
 
 #[cfg(test)]
-mod tests {
-
-}
+mod tests {}

@@ -123,13 +123,20 @@ impl BmpStateMachineStatusReporter {
         // let n_valid_withdrawals = update_report_msg.get_n_valid_withdrawals();
         // let n_new_prefixes = update_report_msg.get_n_new_prefixes();
         // let n_stored_prefixes = update_report_msg.get_n_stored_prefixes();
-        let metrics = self.metrics.router_metrics(update_report_msg.router_id);
+        let metrics =
+            self.metrics.router_metrics(update_report_msg.router_id);
         metrics
             .num_received_prefixes
             .fetch_add(update_report_msg.n_new_prefixes, SeqCst);
-        metrics.num_stored_prefixes.store(update_report_msg.n_stored_prefixes, SeqCst);
-        metrics.num_announcements.fetch_add(update_report_msg.n_valid_announcements, SeqCst);
-        metrics.num_withdrawals.fetch_add(update_report_msg.n_valid_withdrawals, SeqCst);
+        metrics
+            .num_stored_prefixes
+            .store(update_report_msg.n_stored_prefixes, SeqCst);
+        metrics
+            .num_announcements
+            .fetch_add(update_report_msg.n_valid_announcements, SeqCst);
+        metrics
+            .num_withdrawals
+            .fetch_add(update_report_msg.n_valid_withdrawals, SeqCst);
     }
 }
 
@@ -143,7 +150,7 @@ pub struct UpdateReportMessage {
     pub n_stored_prefixes: usize,
     pub n_invalid_withdrawals: usize,
     pub last_invalid_announcement: Option<ParseError>,
-    pub last_invalid_withdrawal: Option<ParseError>
+    pub last_invalid_withdrawal: Option<ParseError>,
 }
 
 impl UpdateReportMessage {
@@ -157,7 +164,7 @@ impl UpdateReportMessage {
             n_invalid_withdrawals: 0,
             n_stored_prefixes: 0,
             last_invalid_announcement: None,
-            last_invalid_withdrawal: None
+            last_invalid_withdrawal: None,
         }
     }
 
@@ -193,10 +200,9 @@ impl UpdateReportMessage {
         self.n_stored_prefixes = n_stored;
     }
 
-    pub fn _get_n_stored_prefixes(&self) ->  usize {
+    pub fn _get_n_stored_prefixes(&self) -> usize {
         self.n_stored_prefixes
     }
-
 }
 
 impl UnitStatusReporter for BmpStateMachineStatusReporter {}

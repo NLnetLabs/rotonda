@@ -1,27 +1,40 @@
 use std::{
-    collections::{hash_set, HashMap}, fmt, hash::{BuildHasher, Hasher}, net::IpAddr, ops::Deref, sync::Arc
+    collections::{hash_set, HashMap},
+    fmt,
+    hash::{BuildHasher, Hasher},
+    net::IpAddr,
+    ops::Deref,
+    sync::Arc,
 };
 
 use chrono::{Duration, Utc};
 use hash_hasher::{HashBuildHasher, HashedSet};
-use log::{debug, error};
-//use roto::{types::{
-//    builtin::{BasicRouteToken, BuiltinTypeValue, NlriStatus, PrefixRoute, Provenance, RotondaId, RouteContext},
-//    datasources::Rib,
-//    typedef::{RibTypeDef, TypeDef},
-//    typevalue::TypeValue,
-//}, vm::FieldIndex};
-use rotonda_store::{
-    custom_alloc::UpsertReport, epoch, prelude::{multi::{PrefixStoreError, RouteStatus}, PrefixRecord}, MatchOptions, MultiThreadedStore, QueryResult
-};
 use inetnum::{addr::Prefix, asn::Asn};
-use routecore::bgp::{nlri::afisafi::{IsPrefix, Nlri}, path_attributes::PaMap, path_selection::{OrdRoute, Rfc4271, TiebreakerInfo}, types::AfiSafiType};
+use log::{debug, error};
+use rotonda_store::{
+    custom_alloc::UpsertReport,
+    epoch,
+    prelude::{
+        multi::{PrefixStoreError, RouteStatus},
+        PrefixRecord,
+    },
+    MatchOptions, MultiThreadedStore, QueryResult,
+};
+use routecore::bgp::{
+    nlri::afisafi::{IsPrefix, Nlri},
+    path_attributes::PaMap,
+    path_selection::{OrdRoute, Rfc4271, TiebreakerInfo},
+    types::AfiSafiType,
+};
 use serde::Serialize;
 
-use crate::{common::roto_new::Provenance, ingress::IngressId, payload::{RotondaPaMap, RotondaRoute, RouterId}};
+use crate::{
+    common::roto_new::Provenance,
+    ingress::IngressId,
+    payload::{RotondaPaMap, RotondaRoute, RouterId},
+};
 
-// -------- PhysicalRib -----------------------------------------------------------------------------------------------
-
+// -------- PhysicalRib ------------------------------------------------------
 
 // XXX is this actually used for something in the Store right now?
 impl rotonda_store::Meta for RotondaRoute {
@@ -37,7 +50,8 @@ impl rotonda_store::Meta for RotondaRoute {
 pub struct Rib {
     unicast: Arc<Option<MultiThreadedStore<RotondaPaMap>>>,
     multicast: Arc<Option<MultiThreadedStore<RotondaPaMap>>>,
-    other_fams: HashMap<AfiSafiType, HashMap<(IngressId, Nlri<bytes::Bytes>), PaMap>>,
+    other_fams:
+        HashMap<AfiSafiType, HashMap<(IngressId, Nlri<bytes::Bytes>), PaMap>>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -61,7 +75,6 @@ impl Rib {
         }
     }
 
-
     // XXX LH perhaps this should become a characteristic of the Unit instead
     // of the Rib. Currently, rib_unit::unit::insert_payload() is the only
     // place that calls this is_physical() and uses it for an early return.
@@ -74,19 +87,46 @@ impl Rib {
     // pub fn store() {} ? // still needed? probably going via fn get makes
     // more sense as we store multiple (all) afisafis now
 
-
-    pub fn insert(&self,
+    pub fn insert(
+        &self,
         val: &RotondaRoute,
         route_status: RouteStatus,
         provenance: Provenance,
-        ltime: u64
+        ltime: u64,
     ) -> Result<UpsertReport, String> {
-
         let res = match val {
-            RotondaRoute::Ipv4Unicast(n, ..) => self.insert_prefix(&n.prefix(), Multicast(false), val, route_status, provenance, ltime),
-            RotondaRoute::Ipv6Unicast(n, ..) => self.insert_prefix(&n.prefix(), Multicast(false), val, route_status, provenance, ltime),
-            RotondaRoute::Ipv4Multicast(n, ..) => self.insert_prefix(&n.prefix(), Multicast(true), val, route_status, provenance, ltime),
-            RotondaRoute::Ipv6Multicast(n, ..) => self.insert_prefix(&n.prefix(), Multicast(true), val, route_status, provenance, ltime),
+            RotondaRoute::Ipv4Unicast(n, ..) => self.insert_prefix(
+                &n.prefix(),
+                Multicast(false),
+                val,
+                route_status,
+                provenance,
+                ltime,
+            ),
+            RotondaRoute::Ipv6Unicast(n, ..) => self.insert_prefix(
+                &n.prefix(),
+                Multicast(false),
+                val,
+                route_status,
+                provenance,
+                ltime,
+            ),
+            RotondaRoute::Ipv4Multicast(n, ..) => self.insert_prefix(
+                &n.prefix(),
+                Multicast(true),
+                val,
+                route_status,
+                provenance,
+                ltime,
+            ),
+            RotondaRoute::Ipv6Multicast(n, ..) => self.insert_prefix(
+                &n.prefix(),
+                Multicast(true),
+                val,
+                route_status,
+                provenance,
+                ltime,
+            ),
         };
         res.map_err(|e| e.to_string())
     }
@@ -106,8 +146,8 @@ impl Rib {
             false => self.unicast.clone(),
         };
 
-
-        let store = (*arc_store).as_ref()
+        let store = (*arc_store)
+            .as_ref()
             .ok_or(PrefixStoreError::StoreNotReadyError)?;
 
         let mui = provenance.ingress_id;
@@ -120,7 +160,8 @@ impl Rib {
             // mark_mui_as_withdrawn_for_prefix . This way, we preserve the
             // last seen attributes/nexthop for this {prefix,mui} combination,
             // while setting the status to Withdrawn.
-            store.mark_mui_as_withdrawn_for_prefix(prefix, mui)
+            store
+                .mark_mui_as_withdrawn_for_prefix(prefix, mui)
                 .inspect_err(|e| {
                     error!(
                         "failed to mark {} for {} as withdrawn: {}",
@@ -131,10 +172,10 @@ impl Rib {
 
             // FIXME this is just to satisfy the function signature, but is
             // quite useless as-is.
-            return Ok(UpsertReport{
+            return Ok(UpsertReport {
                 cas_count: 0,
                 prefix_new: false,
-                mui_new: false, 
+                mui_new: false,
                 mui_count: 0,
             });
         }
@@ -143,20 +184,18 @@ impl Rib {
             mui,
             ltime,
             route_status,
-            val.rotonda_pamap().clone()
+            val.rotonda_pamap().clone(),
         );
 
         store.insert(
-            prefix,
-            pubrec,
-            None, // Option<TBI>
+            prefix, pubrec, None, // Option<TBI>
         )
     }
 
     pub fn withdraw_for_ingress(
         &self,
         ingress_id: IngressId,
-        specific_afisafi: Option<AfiSafiType>
+        specific_afisafi: Option<AfiSafiType>,
     ) {
         // This signals a withdraw-all-for-peer, because a BGP session
         // was lost or because a BMP PeerDownNotification was
@@ -198,57 +237,69 @@ impl Rib {
                 // store proper, we might need to update other data
                 // structures holding more exotic families.
 
-
                 //The store seems to lack a 'mark_mui_as_withdrawn'
                 //that handles both v4 and v6 in one go.
 
-                //if let Err(e) = self.rib.load().store().unwrap().mark_mui_as_withdrawn_v4(ingress_id) {
-                //    error!("failed to mark MUI as withdrawn for v4: {}", e)
-                //}
+                //if let Err(e) =
+                //    self.rib.load().store().unwrap().mark_mui_as_withdrawn_v4(ingress_id)
+                //{ error!("failed to mark MUI as withdrawn for v4: {}", e) }
 
-                //if let Err(e) = self.rib.load().store().unwrap().mark_mui_as_withdrawn_v6(ingress_id) {
-                //    error!("failed to mark MUI as withdrawn for v6: {}", e)
-                //}
+                //if let Err(e) =
+                //    self.rib.load().store().unwrap().mark_mui_as_withdrawn_v6(ingress_id)
+                //{ error!("failed to mark MUI as withdrawn for v6: {}", e) }
 
-                if let Err(e) = (*self.unicast).as_ref().unwrap()
+                if let Err(e) = (*self.unicast)
+                    .as_ref()
+                    .unwrap()
                     .mark_mui_as_withdrawn(ingress_id)
                 {
-                    error!("failed to mark MUI as withdrawn in unicast rib: {}", e)
+                    error!(
+                        "failed to mark MUI as withdrawn in unicast rib: {}",
+                        e
+                    )
                 }
 
-                if let Err(e) = (*self.multicast).as_ref().unwrap()
+                if let Err(e) = (*self.multicast)
+                    .as_ref()
+                    .unwrap()
                     .mark_mui_as_withdrawn(ingress_id)
                 {
                     error!("failed to mark MUI as withdrawn in multicast rib: {}", e)
                 }
 
-
                 // TODO withdraw all other afisafis as well!
-
             }
             Some(AfiSafiType::Ipv4Unicast) => {
-                if let Err(e) = (*self.unicast).as_ref().unwrap()
+                if let Err(e) = (*self.unicast)
+                    .as_ref()
+                    .unwrap()
                     .mark_mui_as_withdrawn_v4(ingress_id)
                 {
                     error!("failed to mark MUI as withdrawn for v4: {}", e)
                 }
             }
             Some(AfiSafiType::Ipv6Unicast) => {
-                if let Err(e) = (*self.unicast).as_ref().unwrap()
+                if let Err(e) = (*self.unicast)
+                    .as_ref()
+                    .unwrap()
                     .mark_mui_as_withdrawn_v6(ingress_id)
                 {
                     error!("failed to mark MUI as withdrawn for v6: {}", e)
                 }
             }
             Some(AfiSafiType::Ipv4Multicast) => {
-                if let Err(e) = (*self.multicast).as_ref().unwrap()
+                if let Err(e) = (*self.multicast)
+                    .as_ref()
+                    .unwrap()
                     .mark_mui_as_withdrawn_v4(ingress_id)
                 {
                     error!("failed to mark MUI as withdrawn for v4: {}", e)
                 }
             }
             Some(AfiSafiType::Ipv6Multicast) => {
-                if let Err(e) = (*self.multicast).as_ref().unwrap()
+                if let Err(e) = (*self.multicast)
+                    .as_ref()
+                    .unwrap()
                     .mark_mui_as_withdrawn_v6(ingress_id)
                 {
                     error!("failed to mark MUI as withdrawn for v6: {}", e)
@@ -268,8 +319,9 @@ impl Rib {
     // bend it to use this new .get().
     // Alternatively, we could create a .store::<AfiSafiType>() that returns
     // the specific store for that family, if any.
-    pub fn get(&self) -> Option<()> { todo!() }
-
+    pub fn get(&self) -> Option<()> {
+        todo!()
+    }
 
     pub fn match_prefix(
         &self,
@@ -277,7 +329,8 @@ impl Rib {
         match_options: &MatchOptions,
     ) -> Result<QueryResult<RotondaPaMap>, String> {
         let guard = &epoch::pin();
-        let store = (*self.unicast).as_ref()
+        let store = (*self.unicast)
+            .as_ref()
             .ok_or(PrefixStoreError::StoreNotReadyError.to_string())?;
         let unicast_res = store.match_prefix(prefix, match_options, guard);
         if unicast_res.prefix_meta.is_empty()
@@ -285,13 +338,15 @@ impl Rib {
             && unicast_res.more_specifics.is_none()
         {
             debug!("no result in unicast store, trying multicast");
-            let multicast_store = (*self.multicast).as_ref()
+            let multicast_store = (*self.multicast)
+                .as_ref()
                 .ok_or(PrefixStoreError::StoreNotReadyError.to_string())?;
-            let multicast_res = 
+            let multicast_res =
                 multicast_store.match_prefix(prefix, match_options, guard);
             if !(multicast_res.prefix_meta.is_empty()
                 && multicast_res.less_specifics.is_none()
-                && multicast_res.more_specifics.is_none()) {
+                && multicast_res.more_specifics.is_none())
+            {
                 return Ok(multicast_res);
             }
         }
@@ -304,15 +359,21 @@ impl Rib {
         //match_options: &MatchOptions,
     ) -> Result<Vec<PrefixRecord<RotondaPaMap>>, String> {
         let guard = &epoch::pin();
-        let store = (*self.unicast).as_ref()
+        let store = (*self.unicast)
+            .as_ref()
             .ok_or(PrefixStoreError::StoreNotReadyError.to_string())?;
         let include_withdrawals = false;
         let mut res = store
             .iter_records_for_mui_v4(ingress_id, include_withdrawals, guard)
             .collect::<Vec<_>>();
-        res.append(&mut store
-            .iter_records_for_mui_v6(ingress_id, include_withdrawals, guard)
-            .collect::<Vec<_>>()
+        res.append(
+            &mut store
+                .iter_records_for_mui_v6(
+                    ingress_id,
+                    include_withdrawals,
+                    guard,
+                )
+                .collect::<Vec<_>>(),
         );
 
         //tmp: while the per mui methods do not work yet, we can use
@@ -347,30 +408,37 @@ pub struct HashedRib {
 /*
 impl Default for HashedRib {
     fn default() -> Self {
-        // What is the key that uniquely identifies routes to be withdrawn when a BGP peering session is lost?
+        // What is the key that uniquely identifies routes to be withdrawn
+        // when a BGP peering session is lost?
         //
-        // A route is an AS path to follow from a given peer to reach a given prefix.
-        // The prefix is not part of the values stored by a RIB as a RIB can be thought of as a mapping of prefix
-        // keys to route values.
+        // A route is an AS path to follow from a given peer to reach a given
+        // prefix. The prefix is not part of the values stored by a RIB as a
+        // RIB can be thought of as a mapping of prefix keys to route values.
         //
-        // The key that uniquely identifies a route is thus, excluding prefix for a moment, the peer ID and the
-        // AS path to the prefix.
+        // The key that uniquely identifies a route is thus, excluding prefix
+        // for a moment, the peer ID and the AS path to the prefix.
         //
-        // A peer is uniquely identified by its BGP speaker IP address, but in case a BGP speaker at a given IP
-        // address establishes multiple sessions to us, IP address would not be enough to distinguish routes
-        // announced via one session vs those announced via another session. When one session goes down only its
-        // routes should be withdrawn and not those of the other sessions and so we also distinguish a peer by the
-        // ASN it represents. This allows for the scenario that a BGP speaker is configured for multiple ASNs, e.g.
+        // A peer is uniquely identified by its BGP speaker IP address, but in
+        // case a BGP speaker at a given IP address establishes multiple
+        // sessions to us, IP address would not be enough to distinguish
+        // routes announced via one session vs those announced via another
+        // session. When one session goes down only its routes should be
+        // withdrawn and not those of the other sessions and so we also
+        // distinguish a peer by the ASN it represents. This allows for the
+        // scenario that a BGP speaker is configured for multiple ASNs, e.g.
         // as part of a migration from one ASN to another.
         //
-        // TODO: Are there other values from the BGP OPEN message that we may need to consider as disinguishing one
-        // peer from another?
+        // TODO: Are there other values from the BGP OPEN message that we may
+        // need to consider as disinguishing one peer from another?
         //
-        // TODO: Add support for 'router group', for BMP the "id" of the monitored router from which peers are
-        // learned of (either the "tcp ip address:tcp port" or the BMP Initiation message sysName TLV), or for BGP
-        // a string representation of the connected peers "tcp ip address:tcp port".
+        // TODO: Add support for 'router group', for BMP the "id" of the
+        // monitored router from which peers are learned of (either the "tcp
+        // ip address:tcp port" or the BMP Initiation message sysName TLV), or
+        // for BGP a string representation of the connected peers "tcp ip
+        // address:tcp port".
         Self::new(
-            //&[BasicRouteToken::PeerIp, BasicRouteToken::PeerAsn, BasicRouteToken::AsPath],
+            //&[BasicRouteToken::PeerIp, BasicRouteToken::PeerAsn,
+            //BasicRouteToken::AsPath],
             &[BasicRouteToken::AsPath],
             true,
             //StoreEvictionPolicy::UpdateStatusOnWithdraw,
@@ -391,17 +459,17 @@ impl HashedRib {
             .iter()
             .map(|&v| vec![v as usize].into())
             .collect::<Vec<_>>();
-        Self::with_custom_type(TypeDef::PrefixRoute, key_fields, physical, /*eviction_policy*/)
+        Self::with_custom_type(TypeDef::PrefixRoute, key_fields, physical)
     }
 
     /*
     // Attempt to construct a HashedRib comprising both a PrefixRoute (like
-    // ::new() returns) and a RouteContext, packed in a TypeDef::Record.
-    // Not sure whether this makes sense at all, but adapting the `impl
+    // ::new() returns) and a RouteContext, packed in a TypeDef::Record. Not
+    // sure whether this makes sense at all, but adapting the `impl
     // RouteExtra` from the old `Route` to the new `PrefixRoute` does not make
-    // sense without a `RouteContext` somewhere.
-    // XXX using a ::Record is not the way to go, that will store the entire
-    // context for each value in the Rib.
+    // sense without a `RouteContext` somewhere. XXX using a ::Record is not
+    // the way to go, that will store the entire context for each value in the
+    // Rib.
     pub fn dont_do_this_prefix_and_context(
         key_fields: &[BasicRouteToken],
         physical: bool,
@@ -512,13 +580,13 @@ impl HashedRib {
                 // TODO increase metric
                 return Err(e);
             }
-            
+
             // FIXME this is just to satisfy the function signature, but is
             // quite useless as-is.
             return Ok(UpsertReport{
                 cas_count: 0,
                 prefix_new: false,
-                mui_new: false, 
+                mui_new: false,
                 mui_count: 0,
             });
         }
@@ -555,35 +623,49 @@ impl HashedRib {
 */
 
 /*
-// -------- RibValue --------------------------------------------------------------------------------------------------
+// -------- RibValue ---------------------------------------------------------
 
-/// The metadata value associated with a prefix in the store of a physical RIB.
+/// The metadata value associated with a prefix in the store of a physical
+/// RIB.
 ///
 /// # Design
 ///
-/// The metadata value consists of an outer Arc over a HashedSet over Arc<PreHashedTypeValue> items.
+/// The metadata value consists of an outer Arc over a HashedSet over
+/// Arc<PreHashedTypeValue> items.
 ///
 /// Points to note about this design:
 ///
-/// 1. The outer Arc is used to prevent costly deep copying of the HashSet when `Store::match_prefix()` clones the
-/// metadata value of matching prefixes into its `prefix_meta`, `less_specifics` and `more_specifics` fields.
+/// 1. The outer Arc is used to prevent costly deep copying of the HashSet
+/// when `Store::match_prefix()` clones the metadata value of matching
+/// prefixes into its `prefix_meta`, `less_specifics` and `more_specifics`
+/// fields.
 ///
-/// 2. The inner Arc is used to prevent costly deep copying of the HashSet items. To use RibValue as the metadata value
-/// type of a MultiThreadedStore it must implement the MergeUpdate trait and thus must implement `clone_merge_update()`
-/// but the `PreHashedTypeValue` inner `TypeValue` is not cheap to clone. However, items in the HashSet which need not
-/// be changed by the `MultiThreadedStore::insert()` operation (that invoked `clone_merge_update()`) need not be
-/// deeply copied, we only need to "modify" zero or more items in the HashSet that are affected by the update, where
-/// "affected" is type dependent. Note that the HashSet itself should not be modified via interior mutability in such a
-/// way that the prior metadata value is also modified by the `clone_merge_update()` call. Rather than deep copy every
-/// item stored in the HashSet just to possibly modify some of them, we can insteasd use an Arc around the HashSet items
-/// so that cloning the HashSet doesn't unnecessarily deep clone the items. For items that do have to be modified we
-/// will have to clone the value inside the Arc around the HashSet item, but for the rest we can just clone the Arc.
+/// 2. The inner Arc is used to prevent costly deep copying of the HashSet
+/// items. To use RibValue as the metadata value type of a MultiThreadedStore
+/// it must implement the MergeUpdate trait and thus must implement
+/// `clone_merge_update()` but the `PreHashedTypeValue` inner `TypeValue` is
+/// not cheap to clone. However, items in the HashSet which need not be
+/// changed by the `MultiThreadedStore::insert()` operation (that invoked
+/// `clone_merge_update()`) need not be deeply copied, we only need to
+/// "modify" zero or more items in the HashSet that are affected by the
+/// update, where "affected" is type dependent. Note that the HashSet itself
+/// should not be modified via interior mutability in such a way that the
+/// prior metadata value is also modified by the `clone_merge_update()` call.
+/// Rather than deep copy every item stored in the HashSet just to possibly
+/// modify some of them, we can insteasd use an Arc around the HashSet items
+/// so that cloning the HashSet doesn't unnecessarily deep clone the items.
+/// For items that do have to be modified we will have to clone the value
+/// inside the Arc around the HashSet item, but for the rest we can just clone
+/// the Arc.
 ///
-/// 3. A HashedSet is used instead of a HashSet because HashedSet is a handy way to construct a HashSet with a no-op
-/// hash function. We use this because the key of the items that we store will in future be determined by roto script
-/// and not hard-coded in Rust types. We therefore precompute a hash code value and store it with the actual metadata
-/// value and the Hash trait impl passes the precomputed hash code to the HashedSet hasher which uses it effectively
-/// as-is, to avoid pointlessly calculating yet another hash code as would happen with the default Hasher.
+/// 3. A HashedSet is used instead of a HashSet because HashedSet is a handy
+/// way to construct a HashSet with a no-op hash function. We use this because
+/// the key of the items that we store will in future be determined by roto
+/// script and not hard-coded in Rust types. We therefore precompute a hash
+/// code value and store it with the actual metadata value and the Hash trait
+/// impl passes the precomputed hash code to the HashedSet hasher which uses
+/// it effectively as-is, to avoid pointlessly calculating yet another hash
+/// code as would happen with the default Hasher.
 
 //#[derive(Debug, Clone, Default)]
 //pub struct RibValue {
@@ -693,7 +775,7 @@ impl RibValue {
                             // in the result collection.
                             //if route.is_withdrawn()
                             //    || !route.announced_by(withdrawing_peer) {
-                            if nlri_status == NlriStatus::Withdrawn 
+                            if nlri_status == NlriStatus::Withdrawn
                                 || !route.provenance().ingress_id != withdrawing_ingress {
                                 Arc::clone(route)
                             } else {
@@ -859,7 +941,7 @@ impl MergeUpdate for RibValue {
         } else {
             // Try to determine whether this is a withdrawal or not, even
             // though we lack the RouteContext.
-            
+
             // TODO create a metric for this situation
             log::warn!("no user_data provided for MergeUpdate, missing RouteContext");
             in_item.0.no_attributes()
@@ -959,7 +1041,7 @@ pub struct StoredValue {
     value: bytes::Bytes,
     hash: u64,
     disk_id: u64,
-    i_time: u64
+    i_time: u64,
 }
 
 // -------- PreHashedTypeValue ----------------------------------------------------------------------------------------
@@ -973,7 +1055,7 @@ pub struct PreHashedTypeValue {
     value: TypeValue,
 
     provenance: Provenance,
-    
+
     //#[serde(skip)]
     ///// The hash key as pre-computed based on the users chosen hash key fields.
     //precomputed_hash: u64,
@@ -1118,14 +1200,12 @@ mod tests {
     };
 
     use hashbrown::hash_map::DefaultHashBuilder;
+    use inetnum::{addr::Prefix, asn::Asn};
     use roto::types::{
+        builtin::{BuiltinTypeValue, NlriStatus, PrefixRoute, RotondaId},
         lazyrecord_types::BgpUpdateMessage,
-        builtin::{
-            PrefixRoute, BuiltinTypeValue, NlriStatus, RotondaId
-        },
         typevalue::TypeValue,
     };
-    use inetnum::{addr::Prefix, asn::Asn};
     use routecore::bgp::{message::SessionConfig, types::AfiSafiType};
 
     use crate::{
@@ -1137,7 +1217,7 @@ mod tests {
 
     // LH: these do not make much sense anymore with the new prefix store
     // doing all the updating/merging of entries. Adapting does not seem to be
-    // worth it, perhaps we redo some of these from scratch? 
+    // worth it, perhaps we redo some of these from scratch?
     /*
     #[test]
     fn empty_by_default() {
@@ -1437,87 +1517,86 @@ mod tests {
     }
     */
 
-
     // LH: which then obsoletes these as well
 
     /*
-    fn mk_route_announcement<T: Into<PeerId>>(
-        prefix: Prefix,
-        as_path: &str,
-        peer_id: T,
-    ) -> PrefixRoute {
-        let delta_id = (RotondaId(0), 0);
-        let announcements = Announcements::from_str(&format!(
-            "e [{as_path}] 10.0.0.1 BLACKHOLE,123:44 {}",
-            prefix
-        ))
-        .unwrap();
-        let bgp_update_bytes =
-            mk_bgp_update(&Prefixes::default(), &announcements, &[]);
-
-        // When it is processed by this unit
-        let roto_update_msg =
-            BgpUpdateMessage::new(bgp_update_bytes, SessionConfig::modern())
+        fn mk_route_announcement<T: Into<PeerId>>(
+            prefix: Prefix,
+            as_path: &str,
+            peer_id: T,
+        ) -> PrefixRoute {
+            let delta_id = (RotondaId(0), 0);
+            let announcements = Announcements::from_str(&format!(
+                "e [{as_path}] 10.0.0.1 BLACKHOLE,123:44 {}",
+                prefix
+            ))
             .unwrap();
-        let afi_safi = if prefix.is_v4() { AfiSafiType::Ipv4Unicast } else { AfiSafiType::Ipv6Unicast };
-        // let bgp_update_msg =
-        //     Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
-        let mut route = PrefixRoute::new(
-            delta_id,
-            prefix,
-            roto_update_msg,
-            afi_safi,
-            None,
-            NlriStatus::InConvergence,
-        );
+            let bgp_update_bytes =
+                mk_bgp_update(&Prefixes::default(), &announcements, &[]);
 
-        let peer_id = peer_id.into();
+            // When it is processed by this unit
+            let roto_update_msg =
+                BgpUpdateMessage::new(bgp_update_bytes, SessionConfig::modern())
+                .unwrap();
+            let afi_safi = if prefix.is_v4() { AfiSafiType::Ipv4Unicast } else { AfiSafiType::Ipv6Unicast };
+            // let bgp_update_msg =
+            //     Arc::new(BgpUpdateMessage::new(delta_id, roto_update_msg));
+            let mut route = PrefixRoute::new(
+                delta_id,
+                prefix,
+                roto_update_msg,
+                afi_safi,
+                None,
+                NlriStatus::InConvergence,
+            );
 
-        if let Some(ip) = peer_id.ip {
-            route = route.with_peer_ip(ip);
+            let peer_id = peer_id.into();
+
+            if let Some(ip) = peer_id.ip {
+                route = route.with_peer_ip(ip);
+            }
+
+            if let Some(asn) = peer_id.asn {
+                route = route.with_peer_asn(asn);
+            }
+
+            route
         }
 
-        if let Some(asn) = peer_id.asn {
-            route = route.with_peer_asn(asn);
+        fn mk_route_withdrawal(
+            prefix: Prefix,
+            peer_id: PeerId,
+        ) -> MutableBasicRoute {
+            let delta_id = (RotondaId(0), 0);
+            let bgp_update_bytes = mk_bgp_update(
+                &Prefixes::new(vec![prefix]),
+                &Announcements::None,
+                &[],
+            );
+
+            // When it is processed by this unit
+            let roto_update_msg =
+                BgpUpdateMessage::new(bgp_update_bytes, SessionConfig::modern()).unwrap();
+            let afi_safi = if prefix.is_v4() { AfiSafiType::Ipv4Unicast } else { AfiSafiType::Ipv6Unicast };
+
+            let mut route = BasicRoute::new(
+                delta_id,
+                prefix,
+                roto_update_msg,
+                afi_safi,
+                None,
+                NlriStatus::Withdrawn,
+            );
+
+            if let Some(ip) = peer_id.ip {
+                route = route.with_peer_ip(ip);
+            }
+
+            if let Some(asn) = peer_id.asn {
+                route = route.with_peer_asn(asn);
+            }
+
+            route
         }
-
-        route
-    }
-
-    fn mk_route_withdrawal(
-        prefix: Prefix,
-        peer_id: PeerId,
-    ) -> MutableBasicRoute {
-        let delta_id = (RotondaId(0), 0);
-        let bgp_update_bytes = mk_bgp_update(
-            &Prefixes::new(vec![prefix]),
-            &Announcements::None,
-            &[],
-        );
-
-        // When it is processed by this unit
-        let roto_update_msg =
-            BgpUpdateMessage::new(bgp_update_bytes, SessionConfig::modern()).unwrap();
-        let afi_safi = if prefix.is_v4() { AfiSafiType::Ipv4Unicast } else { AfiSafiType::Ipv6Unicast };
-
-        let mut route = BasicRoute::new(
-            delta_id,
-            prefix,
-            roto_update_msg,
-            afi_safi,
-            None,
-            NlriStatus::Withdrawn,
-        );
-
-        if let Some(ip) = peer_id.ip {
-            route = route.with_peer_ip(ip);
-        }
-
-        if let Some(asn) = peer_id.asn {
-            route = route.with_peer_asn(asn);
-        }
-
-        route
-    }
-*/
+    */
 }

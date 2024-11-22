@@ -8,8 +8,8 @@
 //! available. It provides access to them via the enum [`Target`] that
 //! contains all types as variants.
 //!
-//! Targets can be created from configuration via serde deserialization. They
 //! are started by spawning them into an async runtime and then just keep
+//! Targets can be created from configuration via serde deserialization. They
 //! running there.
 
 //------------ Sub-modules ---------------------------------------------------

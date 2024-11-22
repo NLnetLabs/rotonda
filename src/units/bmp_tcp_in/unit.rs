@@ -23,11 +23,21 @@ use tokio::{
 
 use crate::{
     common::{
-        frim::FrimMap, net::{
+        frim::FrimMap,
+        net::{
             StandardTcpListenerFactory, StandardTcpStream, TcpListener,
             TcpListenerFactory, TcpStreamWrapper,
-        }, roto_new::{FilterName, Provenance, RotoOutputStream, RotoScripts}, status_reporter::Chainable, unit::UnitActivity
-    }, comms::{Gate, GateStatus, Terminated}, ingress::{self, IngressId, IngressInfo}, manager::{Component, WaitPoint}, tokio::TokioTaskMetrics, tracing::Tracer, units::Unit
+        },
+        roto_new::{FilterName, Provenance, RotoOutputStream, RotoScripts},
+        status_reporter::Chainable,
+        unit::UnitActivity,
+    },
+    comms::{Gate, GateStatus, Terminated},
+    ingress::{self, IngressId, IngressInfo},
+    manager::{Component, WaitPoint},
+    tokio::TokioTaskMetrics,
+    tracing::Tracer,
+    units::Unit,
 };
 
 use super::{
@@ -83,15 +93,13 @@ impl std::fmt::Display for TracingMode {
     }
 }
 
-
-
 pub(super) type RotoFunc = roto::TypedFunc<
     (
         roto::Val<*mut RotoOutputStream>,
         roto::Val<BmpMessage<Bytes>>,
         roto::Val<Provenance>,
     ),
-    roto::Verdict<(),()>
+    roto::Verdict<(), ()>,
 >;
 
 #[serde_as]
@@ -179,7 +187,6 @@ impl BmpTcpIn {
         let roto_compiled = component.roto_compiled().clone();
         let tracer = component.tracer().clone();
 
-
         let ingress_register = component.ingresses();
 
         // Wait for other components to be, and signal to other components
@@ -245,11 +252,12 @@ trait ConfigAcceptor {
         ingress_id: ingress::IngressId,
         router_states: &Arc<
             //FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
-            FrimMap<ingress::IngressId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
+            FrimMap<
+                ingress::IngressId,
+                Arc<tokio::sync::Mutex<Option<BmpState>>>,
+            >,
         >, // Option is never None, instead Some is take()'n and replace()'d.
-        router_info:
-            //&Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
-            &Arc<FrimMap<ingress::IngressId, Arc<RouterInfo>>>,
+        router_info: &Arc<FrimMap<ingress::IngressId, Arc<RouterInfo>>>,
         ingress_register: Arc<ingress::Register>,
     );
 }
@@ -259,9 +267,12 @@ struct BmpTcpInRunner {
     listen: Arc<SocketAddr>,
     http_api_path: Arc<String>,
     gate: Gate,
-    router_states:
-        //Arc<FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>, // Option is never None, instead Some is take()'n and replace()'d.
-        Arc<FrimMap<ingress::IngressId, Arc<tokio::sync::Mutex<Option<BmpState>>>>>, // Option is never None, instead Some is take()'n and replace()'d.
+    router_states: Arc<
+        FrimMap<
+            ingress::IngressId,
+            Arc<tokio::sync::Mutex<Option<BmpState>>>,
+        >,
+    >, // Option is never None, instead Some is take()'n and replace()'d.
     //router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
     router_info: Arc<FrimMap<ingress::IngressId, Arc<RouterInfo>>>,
     bmp_metrics: Arc<BmpStateMachineMetrics>,
@@ -285,7 +296,10 @@ impl BmpTcpInRunner {
         gate: Gate,
         router_states: Arc<
             //FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
-            FrimMap<ingress::IngressId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
+            FrimMap<
+                ingress::IngressId,
+                Arc<tokio::sync::Mutex<Option<BmpState>>>,
+            >,
         >, // Option is never None, instead Some is take()'n and replace()'d.
         //router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
         router_info: Arc<FrimMap<ingress::IngressId, Arc<RouterInfo>>>,
@@ -362,10 +376,11 @@ impl BmpTcpInRunner {
         // spawning tasks to handle them.
         let status_reporter = self.status_reporter.clone();
 
-        let roto_function: Option<RotoFunc> = self.roto_compiled.clone().and_then(|c| {
-            let mut c = c.lock().unwrap();
-            c.get_function("bmp-in").ok()
-        });
+        let roto_function: Option<RotoFunc> =
+            self.roto_compiled.clone().and_then(|c| {
+                let mut c = c.lock().unwrap();
+                c.get_function("bmp-in").ok()
+            });
 
         loop {
             let listen_addr = self.listen.clone();
@@ -404,10 +419,11 @@ impl BmpTcpInRunner {
                         //let source_id = SourceId::from(client_addr);
 
                         let ingress_id = self.ingress_register.register();
-                        self.ingress_register.update_info(ingress_id,
+                        self.ingress_register.update_info(
+                            ingress_id,
                             IngressInfo::new()
-                            .with_remote_addr(client_addr.ip())
-                        ); 
+                                .with_remote_addr(client_addr.ip()),
+                        );
 
                         let state_machine = Arc::new(Mutex::new(Some(
                             self.router_connected(ingress_id),
@@ -704,19 +720,23 @@ mod tests {
         time::Duration,
     };
 
-    use tokio::{sync::Mutex, time::timeout};
     use roto::types::builtin::SourceId;
+    use tokio::{sync::Mutex, time::timeout};
 
     use crate::{
         common::{
             frim::FrimMap, net::TcpStreamWrapper,
             status_reporter::AnyStatusReporter,
-        }, comms::{Gate, GateAgent, Terminated}, ingress, tests::util::{
+        },
+        comms::{Gate, GateAgent, Terminated},
+        ingress,
+        tests::util::{
             internal::{enable_logging, get_testable_metrics_snapshot},
             net::{
                 MockTcpListener, MockTcpListenerFactory, MockTcpStreamWrapper,
             },
-        }, units::{
+        },
+        units::{
             bmp_tcp_in::{
                 metrics::BmpTcpInMetrics, router_handler::RouterHandler,
                 state_machine::BmpState,
@@ -724,7 +744,7 @@ mod tests {
                 unit::BmpTcpInRunner,
             },
             Unit,
-        }
+        },
     };
 
     use super::{BmpTcpIn, ConfigAcceptor};

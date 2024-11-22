@@ -20,8 +20,7 @@ use crate::{manager, tracing::BoundTracer};
 
 use super::frim::FrimMap;
 
-//------------ FilterName ---------------------------------------------------------------------------------------------
-
+//------------ FilterName ----------------------------------------------------
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct FilterName(ShortString);
 
@@ -74,17 +73,19 @@ impl<'a, 'de: 'a> Deserialize<'de> for FilterName {
     where
         D: serde::Deserializer<'de>,
     {
-        // This has to be a String, even though we pass a &str to ShortString::from(), because of the way that newer
-        // versions of the toml crate work. See: https://github.com/toml-rs/toml/issues/597
+        // This has to be a String, even though we pass a &str to
+        // ShortString::from(), because of the way that newer versions of the
+        // toml crate work. See: https://github.com/toml-rs/toml/issues/597
         let s: String = Deserialize::deserialize(deserializer)?;
         let filter_name = FilterName(ShortString::from(s.as_str()));
         Ok(manager::load_filter_name(filter_name))
     }
 }
 
-//------------ VM -----------------------------------------------------------------------------------------------------
+//------------ VM ------------------------------------------------------------
 
-pub type VM = VirtualMachine<Arc<[MirBlock]>, Arc<RouteContext>, Arc<[ExtDataSource]>>;
+pub type VM =
+    VirtualMachine<Arc<[MirBlock]>, Arc<RouteContext>, Arc<[ExtDataSource]>>;
 
 pub struct StatefulVM {
     /// The name of the filter this VM instance was compiled for
@@ -108,7 +109,7 @@ impl StatefulVM {
 
 pub type ThreadLocalVM = RefCell<Option<StatefulVM>>;
 
-//------------ RotoError ----------------------------------------------------------------------------------------------
+//------------ RotoError -----------------------------------------------------
 
 #[allow(clippy::enum_variant_names)]
 #[derive(Debug)]
@@ -363,9 +364,9 @@ impl RotoScripts {
         // RotoPack) in the RotoScript struct. This we only have to compile
         // once.
         let rotolos = roto::pipeline::run_string(roto_script.to_string())
-            .map_err(|err|
+            .map_err(|err| {
                 RotoError::compile_err(&origin, err.to_string().into())
-            )?;
+            })?;
 
         //if !rotolo.get_mis_compilations().is_empty() {
         //    let report = rotolo.get_mis_compilations().iter().fold(
@@ -384,7 +385,11 @@ impl RotoScripts {
 
         // Extract all the packs that are Filter(Map)s. Filter(Map)s can't
         // live in the Global scope, so these all have filter names.
-        let new_filter_maps = rotolos.iter().map(|r| r.clone().packs().0).flatten().collect::<Vec<_>>();
+        let new_filter_maps = rotolos
+            .iter()
+            .map(|r| r.clone().packs().0)
+            .flatten()
+            .collect::<Vec<_>>();
 
         // Check if any of the compiled filters have the same name as one that
         // we've already seen. If so, abort, as each Filter(Map) name must be
@@ -394,7 +399,6 @@ impl RotoScripts {
         // one file are checked by the Roto compiler, so that should already
         // have been caught earlier in this method.
         if !reload {
-            
             for filter_map in &new_filter_maps {
                 let filter_name = filter_map.get_filter_map_name();
 
@@ -406,7 +410,9 @@ impl RotoScripts {
                             in {}",
                         found.parent_script.origin
                     ));
-                    return Err(RotoError::CompileError { origin, err }.into());
+                    return Err(
+                        RotoError::CompileError { origin, err }.into()
+                    );
                 }
             }
         }
@@ -496,7 +502,8 @@ impl RotoScripts {
         self.scripts_by_filter.contains_key(filter_name)
     }
 
-    // TODO: run VM execution in a dedicated thread pool to avoid blocking Tokio
+    // TODO: run VM execution in a dedicated thread pool to avoid blocking
+    // Tokio
     pub fn exec(
         &self,
         vm_ref: &ThreadLocalVM,
@@ -516,7 +523,7 @@ impl RotoScripts {
         received: DateTime<Utc>,
         tracer: BoundTracer,
         trace_id: Option<u8>,
-        context: RouteContext
+        context: RouteContext,
     ) -> FilterResult<RotoError> {
         if let Some(trace_id) = trace_id {
             self.do_exec(
@@ -525,7 +532,7 @@ impl RotoScripts {
                 rx,
                 received,
                 Some((tracer, trace_id)),
-                context
+                context,
             )
         } else {
             self.do_exec(vm_ref, filter_name, rx, received, None, context)
@@ -541,8 +548,9 @@ impl RotoScripts {
         trace_details: Option<(BoundTracer, u8)>,
         context: RouteContext,
     ) -> FilterResult<RotoError> {
-        // Let the payload through if it is actually an output stream message as we don't filter those, we just forward them
-        // down the pipeline to a target where they can be handled, or if no roto script exists.
+        // Let the payload through if it is actually an output stream message
+        // as we don't filter those, we just forward them down the pipeline to
+        // a target where they can be handled, or if no roto script exists.
         if matches!(rx, TypeValue::OutputStreamMessage(_))
             || filter_name.is_empty()
         {
@@ -565,7 +573,8 @@ impl RotoScripts {
         }
 
         // Initialize the VM if needed.
-        let was_initialized_res = self.init_vm(vm_ref, filter_name, context.clone());
+        let was_initialized_res =
+            self.init_vm(vm_ref, filter_name, context.clone());
 
         // Don't fail on missing filters. If they are missing this is because
         // the earlier check in RotoScripts allows them to be missing because
@@ -728,7 +737,11 @@ impl RotoScripts {
         }
     }
 
-    fn build_vm(&self, filter_name: &FilterName, context: RouteContext) -> Result<VM, RotoError> {
+    fn build_vm(
+        &self,
+        filter_name: &FilterName,
+        context: RouteContext,
+    ) -> Result<VM, RotoError> {
         // Find the script that contains the named filter
         let scoped_script = self
             .scripts_by_filter
@@ -748,7 +761,7 @@ impl RotoScripts {
     }
 }
 
-//----------- Roto Filtering ------------------------------------------------------------------------------------------
+//----------- Roto Filtering -------------------------------------------------
 
 pub type FilterResult<E> = Result<ControlFlow<(), FilterOutput>, E>;
 

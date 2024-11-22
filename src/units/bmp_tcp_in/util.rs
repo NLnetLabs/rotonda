@@ -60,8 +60,7 @@ pub fn format_source_id(
     }
     */
     router_id_template
-            .replace("{sys_name}", &ingress_id.to_string())
-            .replace("{router_ip}", "IP")
-            .replace("{router_port}", "PORT")
-
+        .replace("{sys_name}", &ingress_id.to_string())
+        .replace("{router_ip}", "IP")
+        .replace("{router_port}", "PORT")
 }

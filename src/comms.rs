@@ -1845,7 +1845,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[cfg(not(tarpaulin))]
     async fn gate_link_lifecycle_test() {
-        use crate::common::roto_new::RouteContext;
+        use crate::roto_runtime::types::RouteContext;
 
         // Lifecycle of a connected gate and link:
         //

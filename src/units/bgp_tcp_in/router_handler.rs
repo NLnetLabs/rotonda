@@ -9,23 +9,8 @@ use std::sync::{Arc, Mutex};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use log::{debug, error, warn};
-// use roto::types::builtin::{
-//     BgpUpdateMessage, /*IpAddress,*/
-//     RotondaId, RouteStatus, UpdateMessage,
-// };
-//use roto::types::builtin::{
-//    /*Asn as RotoAsn,*/
-//    explode_announcements, explode_withdrawals, BuiltinTypeValue, Nlri, NlriStatus, Provenance, FreshRouteContext, RouteContext
-//};
-//use roto::types::collections::BytesRecord;
-//use roto::types::lazyrecord_types::BgpUpdateMessage;
-// use roto::types::lazyrecord_types::BgpUpdateMessage;
-//use roto::types::typevalue::TypeValue;
-//use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
 use rotonda_store::prelude::multi::RouteStatus;
-//use routecore::bgp::message::update_builder::ComposeError;
-// use routecore::bgp::message::UpdateMessage as UpdatePdu;
 use routecore::bgp::message::{Message as BgpMsg, UpdateMessage};
 use smallvec::{smallvec, SmallVec};
 use tokio::net::TcpStream;
@@ -43,11 +28,8 @@ use routecore::bgp::fsm::session::{
 
 //use roto::types::builtin::basic_route::SourceId;
 
-use crate::common::roto_new::{
-    explode_announcements, explode_withdrawals, rotonda_roto_runtime,
-    CompiledRoto, FreshRouteContext, Output, OutputStream,
-    OutputStreamMessage, Provenance, RotoOutputStream, RotoScripts,
-    RouteContext,
+use crate::roto_runtime::types::{
+    explode_announcements, explode_withdrawals, FreshRouteContext, Output, OutputStreamMessage, Provenance, RotoOutputStream,
 };
 //use crate::bgp::encode::Announcements;
 //use crate::common::roto::{FilterOutput, RotoScripts, ThreadLocalVM};
@@ -142,7 +124,7 @@ impl Processor {
         let (pdu_out_tx, _) = mpsc::channel(16);
 
         let processor = Self {
-            roto_scripts: Default::default(),
+            // roto_scripts: Default::default(),
             gate,
             unit_cfg,
             //bgp_ltime: 0,
@@ -357,7 +339,7 @@ impl Processor {
                             });
                             if !output_stream.is_empty() {
                                 let mut osms = smallvec![];
-                                use crate::common::roto_new::Output;
+                                use crate::roto_runtime::types::Output;
                                 for entry in output_stream.drain() {
                                     debug!("output stream entry {entry:?}");
                                     let osm = match entry {

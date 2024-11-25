@@ -20,7 +20,7 @@ use smallvec::SmallVec;
 use tokio::pin;
 use tokio::sync::mpsc;
 
-use crate::common::roto_new::{Provenance, RouteContext};
+use crate::roto_runtime::types::{Provenance, RouteContext};
 use crate::common::unit::UnitActivity;
 use crate::comms::{GateStatus, Terminated};
 use crate::ingress::{self, IngressInfo};

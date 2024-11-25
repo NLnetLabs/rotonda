@@ -6,17 +6,18 @@ pub mod common;
 pub mod comms;
 pub mod config;
 pub mod http;
+pub mod ingress;
 pub mod log;
 pub mod manager;
 pub mod metrics;
 pub mod payload;
+pub mod roto_runtime;
 pub mod targets;
-#[cfg(test)]
-pub mod tests;
-#[cfg(test)]
-pub use tests::util::bgp;
 pub mod tokio;
 pub mod tracing;
 pub mod units;
 
-pub mod ingress;
+#[cfg(test)]
+pub mod tests;
+#[cfg(test)]
+pub use tests::util::bgp;

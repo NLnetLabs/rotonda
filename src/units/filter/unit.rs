@@ -1,9 +1,6 @@
 use crate::{
-    common::{
-        //roto::{FilterName, RotoScripts, ThreadLocalVM},
-        roto_new::{FilterName, RotoScripts},
-        status_reporter::{AnyStatusReporter, UnitStatusReporter},
-    },
+    roto_runtime::types::{FilterName, RotoScripts},
+    common::status_reporter::{AnyStatusReporter, UnitStatusReporter},
     comms::{
         AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus,
         Terminated,
@@ -307,13 +304,7 @@ mod tests {
 
     use bytes::Bytes;
     use inetnum::asn::Asn;
-    use roto::types::builtin::SourceId;
-    use roto::types::{
-        builtin::{BuiltinTypeValue, RouteContext},
-        collections::BytesRecord,
-        lazyrecord_types::BmpMessage,
-        typevalue::TypeValue,
-    };
+    use crate::roto_runtime::types::RouteContext;
     use routecore::bmp::message::PeerType;
 
     use crate::{

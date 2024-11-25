@@ -11,8 +11,8 @@ use smallvec::{smallvec, SmallVec};
 use std::fmt;
 use uuid::Uuid;
 
-use crate::common::roto_new::RouteContext;
 use crate::ingress::{self, IngressId};
+use crate::roto_runtime::types::{OutputStreamMessage, RouteContext};
 
 // TODO: make this a reference
 pub type RouterId = String;
@@ -437,7 +437,7 @@ pub enum Update {
     ),
     UpstreamStatusChange(UpstreamStatus),
 
-    OutputStream(SmallVec<[crate::common::roto_new::OutputStreamMessage; 2]>),
+    OutputStream(SmallVec<[OutputStreamMessage; 2]>),
 }
 
 impl Update {

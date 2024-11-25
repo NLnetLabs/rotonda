@@ -4,7 +4,9 @@ use crate::common::file_io::TheFileIo;
 //use crate::common::roto::{
 //    FilterName, LoadErrorKind, RotoError, RotoScriptOrigin, RotoScripts,
 //};
-use crate::common::roto_new::{rotonda_roto_runtime, FilterName};
+use crate::roto_runtime::types::FilterName;
+use crate::roto_runtime::types::CompiledRoto;
+use crate::roto_runtime::create_runtime;
 use crate::comms::{
     DirectLink, Gate, GateAgent, GraphStatus, Link, DEF_UPDATE_QUEUE_LEN,
 };
@@ -58,7 +60,7 @@ pub struct Component {
     http_resources: http::Resources,
 
     /// A reference to the compiled Roto script.
-    roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
+    roto_compiled: Option<Arc<CompiledRoto>>,
 
     /// A reference to the Tracer
     tracer: Arc<Tracer>,
@@ -91,7 +93,7 @@ impl Component {
         http_client: HttpClient,
         metrics: metrics::Collection,
         http_resources: http::Resources,
-        roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
+        roto_compiled: Option<Arc<CompiledRoto>>,
         tracer: Arc<Tracer>,
         ingresses: Arc<ingress::Register>,
     ) -> Self {
@@ -128,7 +130,7 @@ impl Component {
 
     pub fn roto_compiled(
         &self,
-    ) -> &Option<Arc<crate::common::roto_new::CompiledRoto>> {
+    ) -> &Option<Arc<CompiledRoto>> {
         &self.roto_compiled
     }
 
@@ -600,7 +602,7 @@ pub struct Manager {
     http_resources: http::Resources,
 
     /// A reference to the compiled Roto script.
-    roto_compiled: Option<Arc<crate::common::roto_new::CompiledRoto>>,
+    roto_compiled: Option<Arc<CompiledRoto>>,
 
     graph_svg_processor: Arc<dyn ProcessRequest>,
 
@@ -902,7 +904,7 @@ impl Manager {
         let i = roto::read_files([path.to_string_lossy()])
             .map_err(|e| e.to_string())?;
         let c = i
-            .compile(rotonda_roto_runtime().unwrap(), usize::BITS / 8)
+            .compile(create_runtime().unwrap(), usize::BITS / 8)
             .map_err(|e| e.to_string())?;
 
         self.roto_compiled = Some(Arc::new(Mutex::new(c)));

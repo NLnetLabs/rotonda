@@ -2,6 +2,11 @@
 
 ## Unreleased version
 
+Bug Fixes
+
+* A non-monotonic clock measurement caused some threads to panic under some
+  conditions. Therse measurements now use monotonic clock, that can not panic.
+
 Breaking changes
 
 

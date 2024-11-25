@@ -184,7 +184,7 @@ impl BmpStateDetails<Dumping> {
     #[allow(dead_code)]
     pub fn process_msg(
         self,
-        received: DateTime<Utc>,
+        received: std::time::Instant,
         bmp_msg: BmpMsg<Bytes>,
         trace_id: Option<u8>,
     ) -> ProcessingResult {

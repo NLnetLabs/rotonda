@@ -1,4 +1,3 @@
-use chrono::{DateTime, Utc};
 use log::debug;
 use rotonda_store::QueryResult;
 
@@ -253,7 +252,7 @@ pub struct Payload {
     pub rx_value: RotondaRoute, //RouteWorkshop<N>, //was: TypeValue,
     pub context: RouteContext,
     pub trace_id: Option<u8>,
-    pub received: DateTime<Utc>,
+    pub received: std::time::Instant,
 }
 
 impl PartialEq for Payload {
@@ -276,7 +275,7 @@ impl Payload {
             context,
             // bgp_msg,
             trace_id,
-            received: Utc::now(),
+            received: std::time::Instant::now(),
         }
     }
 
@@ -284,7 +283,7 @@ impl Payload {
         rx_value: RotondaRoute,
         context: RouteContext,
         trace_id: Option<u8>,
-        received: DateTime<Utc>,
+        received: std::time::Instant,
     ) -> Self {
         Self {
             rx_value,

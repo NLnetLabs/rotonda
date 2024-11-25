@@ -675,7 +675,7 @@ where
     /// original unmodified `msg` or a modified or completely new message.
     pub fn route_monitoring<CB>(
         mut self,
-        received: DateTime<Utc>,
+        received: std::time::Instant,
         msg: RouteMonitoring<Bytes>,
         //route_status: NlriStatus,
         trace_id: Option<u8>,
@@ -841,7 +841,7 @@ where
     // multiple routes.
     pub fn extract_route_monitoring_routes(
         &mut self,
-        received: DateTime<Utc>,
+        received: std::time::Instant,
         pph: PerPeerHeader<Bytes>,
         bgp_msg: &UpdateMessage<Bytes>,
         //route_status: NlriStatus,
@@ -1122,7 +1122,7 @@ impl BmpState {
     #[allow(dead_code)]
     pub fn process_msg(
         self,
-        received: DateTime<Utc>,
+        received: std::time::Instant,
         bmp_msg: BmpMsg<Bytes>,
         trace_id: Option<u8>,
     ) -> ProcessingResult {

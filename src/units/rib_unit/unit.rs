@@ -1005,7 +1005,7 @@ where
 
         //let ingress_id = payload.context.provenance().ingrespayload.rxs_id;
 
-        let pre_insert = Utc::now();
+        let pre_insert = std::time::Instant::now();
 
         // XXX this is where we need to adapt to the new store
         // this basically translates to
@@ -1038,11 +1038,9 @@ where
         //);
         match rib.insert(&payload.rx_value, route_status, provenance, ltime) {
             Ok(report) => {
-                let post_insert = Utc::now();
-                let store_op_delay =
-                    (post_insert - pre_insert).to_std().unwrap();
-                let propagation_delay =
-                    (post_insert - payload.received).to_std().unwrap();
+                let post_insert = std::time::Instant::now();
+                let store_op_delay = pre_insert.duration_since(post_insert);
+                let propagation_delay = payload.received.duration_since(post_insert);
 
                 let change = if report.prefix_new {
                     StoreInsertionEffect::RouteAdded

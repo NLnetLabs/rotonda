@@ -212,7 +212,7 @@ impl RouterHandler {
                 }
 
                 Ok((Some(msg_buf), status, mut trace_id)) => {
-                    let received = Utc::now();
+                    let received = std::time::Instant::now();
 
                     // We want the stream reading to abort as soon as the Gate
                     // is terminated so we handle status updates to the Gate in
@@ -321,7 +321,7 @@ impl RouterHandler {
 
     async fn process_msg(
         &self,
-        received: DateTime<Utc>,
+        received: std::time::Instant,
         addr: SocketAddr,
         //source_id: SourceId,
         ingress_id: IngressId,
@@ -914,7 +914,7 @@ mod tests {
     ) -> Result<(), (Arc<String>, String)> {
         router_handler
             .process_msg(
-                Utc::now(),
+                std::time::Instant::now(),
                 "1.2.3.4:12345".parse().unwrap(),
                 0_u32.into(),
                 msg,

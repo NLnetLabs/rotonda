@@ -326,7 +326,7 @@ impl Processor {
                             );
 
                             let mut output_stream = RotoOutputStream::new();
-                            let received = Utc::now();
+                            let received = std::time::Instant::now();
 
                             let verdict = self.roto_function.as_ref().map(
                                 |roto_function|
@@ -550,7 +550,7 @@ impl Processor {
     // unit.
     async fn process_update(
         &mut self,
-        received: DateTime<Utc>,
+        received: std::time::Instant,
         bgp_msg: UpdateMessage<bytes::Bytes>,
         provenance: Provenance,
         //context: FreshRouteContext,
@@ -559,7 +559,7 @@ impl Processor {
     ) -> Result<Update, session::Error> {
         fn mk_payload(
             rr: RotondaRoute,
-            received: DateTime<Utc>,
+            received: std::time::Instant,
             //provenance: Option<Provenance>,
             //context: RouteContext,
             context: FreshRouteContext,

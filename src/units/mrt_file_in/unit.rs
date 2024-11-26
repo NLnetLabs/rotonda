@@ -199,10 +199,9 @@ impl MrtInRunner {
                                     "failed to process {}: {e}",
                                     filename.to_string_lossy()
                                 );
-                                return Err(Terminated);
                             }
                             ControlFlow::Break(_terminated) => {
-                                info!("got Termintaed in lvl2");
+                                debug!("mrt-in got Terminated");
                                 return Err(Terminated);
                             }
                         }

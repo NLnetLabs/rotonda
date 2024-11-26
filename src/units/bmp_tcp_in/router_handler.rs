@@ -464,7 +464,7 @@ impl RouterHandler {
             }
             Some(roto::Verdict::Reject(_)) => {
                 // increase metrics and continue
-                dbg!("bgp-in roto Reject");
+                debug!("bmp-in roto Reject");
                 bmp_state
             }
         };

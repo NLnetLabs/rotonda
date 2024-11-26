@@ -12,6 +12,7 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::{future::select, pin_mut, Future};
+use log::warn;
 use routecore::bmp::message::Message as BmpMessage;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
@@ -373,7 +374,11 @@ impl BmpTcpInRunner {
         let roto_function: Option<RotoFunc> =
             self.roto_compiled.clone().and_then(|c| {
                 let mut c = c.lock().unwrap();
-                c.get_function("bmp-in").ok()
+                c.get_function("bmp-in")
+                .inspect_err(|_|
+                    warn!("Loaded Roto script has no filter for bmp-in")
+                )
+                .ok()
             });
 
         loop {

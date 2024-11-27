@@ -1,10 +1,12 @@
 use std::collections::VecDeque;
 use std::future::{Future, IntoFuture};
+use std::io::Read;
 use std::ops::ControlFlow;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+use flate2::read::GzDecoder;
 use futures::future::{select, Either};
 use futures::{pin_mut, FutureExt, TryFutureExt};
 use log::{debug, error, info, warn};
@@ -86,11 +88,30 @@ impl MrtInRunner {
         filename: PathBuf,
     ) -> Result<(), MrtError> {
         info!("processing {}", filename.to_string_lossy());
+        #[allow(unused_variables)] // false positive, used in info!() below)
         let t0 = Instant::now();
 
         let file = std::fs::File::open(&filename)?;
         let mmap = unsafe { memmap2::Mmap::map(&file)? };
-        let mrt_file = MrtFile::new(&mmap[..]);
+        let mut buf = Vec::<u8>::new();
+
+        let t0 = Instant::now();
+        let mrt_file = match filename.as_path().extension()
+            .and_then(std::ffi::OsStr::to_str)
+        {
+            Some("gz") => {
+                let mut gz = GzDecoder::new(&mmap[..]);
+                gz.read_to_end(&mut buf)
+                    .map_err(|_e| MrtError::other("gz decoding failed"))?;
+                info!("decompressed {} in {}ms",
+                    &filename.to_string_lossy(),
+                    t0.elapsed().as_millis());
+                MrtFile::new(&buf[..])
+            }
+            _ => {
+                MrtFile::new(&mmap[..])
+            }
+        };
 
         let peer_index_table = mrt_file.pi()?;
         let mut ingress_map = Vec::with_capacity(peer_index_table.len());

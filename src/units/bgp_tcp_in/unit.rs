@@ -264,7 +264,11 @@ impl BgpTcpInRunner {
         let roto_function: Option<RotoFunc> =
             arc_self.roto_compiled.clone().and_then(|c| {
                 let mut c = c.lock().unwrap();
-                c.get_function("bgp-in").ok()
+                c.get_function("bgp-in")
+                .inspect_err(|_|
+                    warn!("Loaded Roto script has no filter for bgp-in")
+                )
+                .ok()
             });
 
         loop {

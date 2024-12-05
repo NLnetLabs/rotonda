@@ -4,8 +4,8 @@
 # withdrawals). To act on individual announcements or withdrawals, use the
 # 'rib-in' filter-map below.
 filter bgp-in(
-    bgp_msg: BgpMsg,
     output: Log,
+    bgp_msg: BgpMsg,
     prov: Provenance,
 ) {
 
@@ -33,8 +33,8 @@ filter bgp-in(
 # on different types as well. Helper methods are provided, e.g.
 # 'is_peer_down()' returns true if the message is a BMP PeerDownNotification.
 filter bmp-in(
-    bmp_msg: BmpMsg,
     output: Log,
+    bmp_msg: BmpMsg,
     prov: Provenance,
 ) {
     define {
@@ -75,8 +75,8 @@ filter bmp-in(
 # NLRI) can and should be done in the bmp-in/bgp-in filter-maps, as making such
 # a decision early on is more efficient.
 filter rib-in-pre(
-    route: Route,
     output: Log,
+    route: Route,
     context: RouteContext,
 ) {
 

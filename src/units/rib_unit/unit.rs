@@ -325,14 +325,24 @@ impl RibUnitRunner {
         let roto_function_pre: Option<RotoFuncPre> =
             roto_compiled.clone().and_then(|c| {
                 let mut c = c.lock().unwrap();
-                c.get_function("rib-in-pre").ok()
+                c.get_function("rib-in-pre")
+                .inspect_err(|_|
+                    warn!("Loaded Roto script has no filter for rib-in-pre")
+                )
+                .ok()
             });
 
-        let roto_function_post: Option<RotoFuncPost> = roto_compiled
-            .and_then(|c| {
-                let mut c = c.lock().unwrap();
-                c.get_function("rib-in-post").ok()
-            });
+        // The rib-in-post filter is not used yet.
+        let roto_function_post: Option<RotoFuncPost> = None;
+        //let roto_function_post: Option<RotoFuncPost> = roto_compiled
+        //    .and_then(|c| {
+        //        let mut c = c.lock().unwrap();
+        //        c.get_function("rib-in-post")
+        //        .inspect_err(|_|
+        //            warn!("Loaded Roto script has no filter for rib-in-post")
+        //        )
+        //        .ok()
+        //    });
 
         let tracer = component.tracer().clone();
 

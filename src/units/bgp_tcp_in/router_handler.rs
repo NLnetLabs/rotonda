@@ -404,7 +404,7 @@ impl Processor {
                                 }
                                 Some(roto::Verdict::Reject(_)) => {
                                     // increase metrics and continue
-                                    dbg!("bgp-in roto Reject");
+                                    debug!("bgp-in roto Reject");
                                 }
                             }
                         }

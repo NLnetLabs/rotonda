@@ -1,7 +1,7 @@
 use atomic_enum::atomic_enum;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use log::{debug, error};
+use log::{debug, error, warn};
 //use roto::types::{builtin::{explode_announcements, explode_withdrawals, BytesRecord, FreshRouteContext, NlriStatus, PeerId, PeerRibType, Provenance, RouteContext}, lazyrecord_types::BgpUpdateMessage};
 
 /// RFC 7854 BMP processing.
@@ -374,28 +374,24 @@ where
             .join("|");
 
         if sys_name.is_empty() {
-            self.mk_invalid_message_result(
-                "Invalid BMP InitiationMessage: Missing or empty sysName Information TLV",
-                None,
-                Some(Bytes::copy_from_slice(msg.as_ref())),
-            )
-        } else {
-            let sys_desc = msg
-                .information_tlvs()
-                .filter(|tlv| tlv.typ() == InformationTlvType::SysDesc)
-                .map(|tlv| String::from_utf8_lossy(tlv.value()).into_owned())
-                .collect::<Vec<_>>()
-                .join("|");
-
-            let extra = msg
-                .information_tlvs()
-                .filter(|tlv| tlv.typ() == InformationTlvType::String)
-                .map(|tlv| String::from_utf8_lossy(tlv.value()).into_owned())
-                .collect::<Vec<_>>();
-
-            self.details.set_information_tlvs(sys_name, sys_desc, extra);
-            self.mk_other_result()
+            warn!("Invalid BMP InitiationMessage: \
+                Missing or empty sysName Information TLV");
         }
+        let sys_desc = msg
+            .information_tlvs()
+            .filter(|tlv| tlv.typ() == InformationTlvType::SysDesc)
+            .map(|tlv| String::from_utf8_lossy(tlv.value()).into_owned())
+            .collect::<Vec<_>>()
+            .join("|");
+
+        let extra = msg
+            .information_tlvs()
+            .filter(|tlv| tlv.typ() == InformationTlvType::String)
+            .map(|tlv| String::from_utf8_lossy(tlv.value()).into_owned())
+            .collect::<Vec<_>>();
+
+        self.details.set_information_tlvs(sys_name, sys_desc, extra);
+        self.mk_other_result()
     }
 }
 

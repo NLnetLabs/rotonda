@@ -2,6 +2,15 @@
 
 ## Unreleased version
 
+Bug Fixes
+
+* A non-monotonic clock measurement caused some threads to panic (under
+  unknown conditions). These measurements now use a monotonic clock, that can
+  not panic.
+* The packaged filters.roto.example contained wrongly ordered parameters in its
+  filter definitions, resulting in them not being executed. The orders are fixed
+  and logging is added.
+
 Breaking changes
 
 

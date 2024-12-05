@@ -11,17 +11,18 @@ Bug Fixes
   filter definitions, resulting in them not being executed. The orders are fixed
   and logging is added.
 
-Breaking changes
-
 
 New
 
+* The MRT component can now read gzipped files. Decompression is triggered for
+  files with the '.gz' extension.
 
 Other changes
 
-
-Known limitations/issues
-
+* A zero-length `sysName` in a BMP InitiationMessage caused all subsequent
+  messages to be marked as hard fails. We now warn on such empty values but
+  proceed as usual, because the `sysName` is not crucial to the process in any
+  way.
 
 
 ## 0.2.0 'Happy Fuzzballs'

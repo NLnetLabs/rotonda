@@ -15,6 +15,7 @@
 //------------ Sub-modules ---------------------------------------------------
 //
 // These contain all the actual unit types grouped by shared functionality.
+mod file;
 mod mqtt;
 mod null;
 
@@ -33,6 +34,9 @@ use serde::Deserialize;
 #[serde(tag = "type")]
 
 pub enum Target {
+    #[serde(rename = "file-out")]
+    File(file::target::File),
+
     #[serde(rename = "mqtt-out")]
     Mqtt(mqtt::target::Mqtt),
 
@@ -49,6 +53,9 @@ impl Target {
         waitpoint: WaitPoint,
     ) -> Result<(), Terminated> {
         match self {
+            Target::File(target) => {
+                target.run(component, cmd, waitpoint).await
+            }
             Target::Mqtt(target) => {
                 target.run(component, cmd, waitpoint).await
             }
@@ -60,6 +67,7 @@ impl Target {
 
     pub fn type_name(&self) -> &'static str {
         match self {
+            Target::File(_) => "file-out",
             Target::Mqtt(_) => "mqtt-out",
             Target::Null(_) => "null-out",
         }

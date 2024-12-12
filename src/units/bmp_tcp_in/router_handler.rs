@@ -395,6 +395,13 @@ impl RouterHandler {
                             Some(ingress_id),
                         )
                     }
+                    Output::Entry(entry) => {
+                        OutputStreamMessage::entry(
+                            entry,
+                            Some(ingress_id),
+                        )
+                    }
+
                 };
                 osms.push(osm);
             }

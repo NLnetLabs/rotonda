@@ -376,7 +376,12 @@ impl Processor {
                                                 id, local,
                                                 Some(session_ingress_id),
                                             )
-
+                                        }
+                                        Output::Entry(entry) => {
+                                            OutputStreamMessage::entry(
+                                                entry,
+                                                Some(session_ingress_id),
+                                            )
                                         }
                                     };
                                     osms.push(osm);

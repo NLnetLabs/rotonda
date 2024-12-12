@@ -838,6 +838,13 @@ where
                         Output::Custom((id, local)) => {
                             OutputStreamMessage::custom(id, local, ingress_id)
                         }
+                        Output::Entry(entry) => {
+                            OutputStreamMessage::entry(
+                                entry,
+                                ingress_id,
+                            )
+                        }
+
                     };
                     osms.push(osm);
                 }

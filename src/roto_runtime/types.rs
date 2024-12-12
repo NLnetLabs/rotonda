@@ -7,10 +7,15 @@ use std::{
 
 use bytes::Bytes;
 use chrono::Utc;
+use chrono::serde::ts_microseconds;
 use inetnum::{addr::Prefix, asn::Asn};
 use log::debug;
 use rotonda_store::prelude::multi::RouteStatus;
-use routecore::bgp::{message::UpdateMessage, nlri::afisafi::Nlri};
+use routecore::bgp::{
+    message::UpdateMessage,
+    nlri::afisafi::Nlri,
+    types::AfiSafiType
+};
 use serde::Deserialize;
 
 use crate::{
@@ -86,13 +91,17 @@ pub type CompiledRoto = std::sync::Mutex<roto::Compiled>;
 #[derive(Default)]
 pub struct OutputStream<M> {
     msgs: Vec<M>,
+    entry: LogEntry,
 }
 
 pub type RotoOutputStream = OutputStream<Output>;
 
 impl<M> OutputStream<M> {
     pub fn new() -> Self {
-        Self { msgs: vec![] }
+        Self {
+            msgs: vec![],
+            entry: LogEntry::new(),
+        }
     }
 
     pub fn push(&mut self, msg: M) {
@@ -103,6 +112,15 @@ impl<M> OutputStream<M> {
     }
     pub fn is_empty(&self) -> bool {
         self.msgs.is_empty()
+    }
+
+    pub fn entry(&mut self) -> &mut LogEntry {
+        &mut self.entry
+    }
+    pub fn take_entry(&mut self) -> LogEntry {
+        let res = self.entry;
+        self.entry = LogEntry::new();
+        res
     }
 }
 
@@ -116,7 +134,7 @@ impl<M> IntoIterator for OutputStream<M> {
     }
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub enum Output {
     /// Community observed in Path Attributes.
     Community(u32),
@@ -136,6 +154,9 @@ pub enum Output {
 
     /// Variant to support user-defined log entries.
     Custom((u32, u32)),
+
+    /// Extensive, composable log entry, see [`LogEntry`].
+    Entry(LogEntry),
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -415,6 +436,41 @@ pub enum OutputStreamMessageRecord {
     Route(Option<RotondaRoute>),
     Peerdown(IpAddr, Asn),
     Custom(CustomLogEntry),
+    Entry(LogEntry),
+}
+
+impl OutputStreamMessageRecord {
+    pub fn into_timestamped(
+        self,
+        timestamp: chrono::DateTime<Utc>
+    ) -> TimestampedOSMR {
+        TimestampedOSMR {
+            timestamp: timestamp.timestamp(),
+            record: self
+        }
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct TimestampedOSMR {
+    timestamp: i64,
+    record: OutputStreamMessageRecord,
+}
+
+impl From<OutputStreamMessageRecord> for TimestampedOSMR {
+    fn from(value: OutputStreamMessageRecord) -> Self {
+        Self {
+            timestamp: Utc::now().timestamp(),
+            record: value
+        }
+    }
+}
+
+impl From<OutputStreamMessage> for TimestampedOSMR {
+    fn from(value: OutputStreamMessage) -> Self {
+        let value = value.record;
+        value.into()
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone, serde::Serialize)]
@@ -429,6 +485,68 @@ impl From<(u32, u32)> for CustomLogEntry {
             id: t.0,
             value: t.1,
         }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, serde::Serialize)]
+pub struct LogEntry {
+    #[serde(with = "ts_microseconds")]
+    pub timestamp: chrono::DateTime<Utc>,
+    pub origin_as: Option<Asn>,
+    pub peer_as: Option<Asn>,
+    pub as_path_hops: Option<usize>,
+    pub conventional_reach: usize,
+    pub conventional_unreach: usize,
+    pub mp_reach: Option<usize>,
+    pub mp_reach_afisafi: Option<AfiSafiType>,
+    pub mp_unreach: Option<usize>,
+    pub mp_unreach_afisafi: Option<AfiSafiType>,
+}
+
+use serde_with;
+#[serde_with::skip_serializing_none]
+#[derive(serde::Serialize)]
+pub struct MinimalLogEntry {
+    #[serde(with = "ts_microseconds")]
+    pub timestamp: chrono::DateTime<Utc>,
+    pub origin_as: Option<Asn>,
+    pub peer_as: Option<Asn>,
+    pub as_path_hops: Option<usize>,
+    pub conventional_reach: usize,
+    pub conventional_unreach: usize,
+    pub mp_reach: Option<usize>,
+    pub mp_reach_afisafi: Option<AfiSafiType>,
+    pub mp_unreach: Option<usize>,
+    pub mp_unreach_afisafi: Option<AfiSafiType>,
+}
+
+impl From<LogEntry> for MinimalLogEntry {
+    fn from(value: LogEntry) -> Self {
+        Self {
+            timestamp: value.timestamp,
+            origin_as: value.origin_as,
+            peer_as: value.peer_as,
+            as_path_hops: value.as_path_hops,
+            conventional_reach: value.conventional_reach,
+            conventional_unreach: value.conventional_unreach,
+            mp_reach: value.mp_reach,
+            mp_reach_afisafi: value.mp_reach_afisafi,
+            mp_unreach: value.mp_unreach,
+            mp_unreach_afisafi: value.mp_unreach_afisafi
+        }
+    }
+}
+
+
+impl LogEntry {
+    pub fn new() -> Self {
+        Self { 
+            timestamp: Utc::now(),
+            .. Default::default()
+        }
+    }
+    pub fn into_minimal(self) -> MinimalLogEntry {
+        self.into()
     }
 }
 
@@ -517,6 +635,18 @@ impl OutputStreamMessage {
         }
     }
 
+    pub fn entry(
+        entry: LogEntry,
+        ingress_id: Option<IngressId>,
+    ) -> Self {
+        Self {
+            name: MQTT_NAME.into(),
+            topic: "log_entry".into(),
+            record: OutputStreamMessageRecord::Entry(entry),
+            ingress_id,
+        }
+    }
+
     pub fn get_name(&self) -> String {
         self.name.clone()
     }
@@ -527,6 +657,10 @@ impl OutputStreamMessage {
 
     pub fn get_record(&self) -> &OutputStreamMessageRecord {
         &self.record
+    }
+
+    pub fn into_record(self) -> OutputStreamMessageRecord {
+        self.record
     }
 
     pub fn get_ingress_id(&self) -> Option<IngressId> {

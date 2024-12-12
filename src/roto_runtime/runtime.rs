@@ -15,6 +15,7 @@ use super::types::{
     InsertionInfo, Output, Provenance, RotoOutputStream, RouteContext,
 };
 use crate::payload::RotondaRoute;
+use crate::roto_runtime::types::LogEntry;
 
 pub(crate) type Log = *mut RotoOutputStream;
 
@@ -37,6 +38,13 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     )?;
     rt.register_copy_type::<InsertionInfo>(
         "Information from the RIB on an inserted route",
+    )?;
+
+    // XXX can we get away with registering only one of these, somehow?
+    rt.register_copy_type::<LogEntry>("Entry to log to file/mqtt")?;
+    rt.register_copy_type_with_name::<*mut LogEntry>(
+        "LogEntryPtr",
+        "Entry to log to file/mqtt"
     )?;
 
     // --- BGP types / methods
@@ -332,6 +340,193 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     fn log_custom(stream: *mut Log, id: u32, local: u32) {
         let stream = unsafe { &mut **stream };
         stream.push(Output::Custom((id, local)));
+    }
+
+    //------------ LogEntry --------------------------------------------------
+
+    #[roto_method(rt, Log)]
+    fn entry(stream: *mut Log) -> *mut LogEntry {
+        let stream = unsafe { &mut **stream };
+        stream.entry() as *mut _
+    } 
+
+    #[roto_method(rt, *mut LogEntry)]
+    fn origin_as(
+        entry_ptr: *mut *mut LogEntry,
+        msg: *const BmpMsg<Bytes>
+    ) -> *mut LogEntry {
+        let entry = unsafe { &mut **entry_ptr };
+        let msg = unsafe { &*msg };
+
+        if let BmpMsg::RouteMonitoring(rm) = msg {
+            if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
+                if let Some(asn) = upd.aspath().ok().flatten()
+                    .and_then(|asp| asp.origin())
+                    .and_then(|asp| asp.try_into_asn().ok()) {
+                        //entry.origin_as(asn);
+                        entry.origin_as = Some(asn);
+                }
+            }
+        }
+        unsafe {*entry_ptr}
+    }
+
+    #[roto_method(rt, *mut LogEntry)]
+    fn peer_as(
+        entry_ptr: *mut *mut LogEntry,
+        msg: *const BmpMsg<Bytes>
+    ) -> *mut LogEntry {
+        let entry = unsafe { &mut **entry_ptr };
+        let msg = unsafe { &*msg };
+        if let BmpMsg::RouteMonitoring(rm) = msg {
+            let asn = rm.per_peer_header().asn();
+            entry.peer_as = Some(asn);
+        }
+        unsafe {*entry_ptr}
+    }
+
+    #[roto_method(rt, *mut LogEntry)]
+    fn as_path_hops(
+        entry_ptr: *mut *mut LogEntry,
+        msg: *const BmpMsg<Bytes>,
+    ) -> *mut LogEntry {
+        let entry = unsafe { &mut **entry_ptr };
+        let msg = unsafe { &*msg };
+        if let BmpMsg::RouteMonitoring(rm) = msg {
+            if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
+                let cnt = upd.aspath().ok().flatten().map(|asp|
+                    asp.hops().count()
+                );
+                entry.as_path_hops = cnt;
+            }
+
+        }
+        unsafe {*entry_ptr}
+    }
+
+    #[roto_method(rt, *mut LogEntry)]
+    fn conventional_reach(
+        entry_ptr: *mut *mut LogEntry,
+        msg: *const BmpMsg<Bytes>
+    ) -> *mut LogEntry {
+        let entry = unsafe { &mut **entry_ptr };
+        let msg = unsafe { &*msg };
+        if let BmpMsg::RouteMonitoring(rm) = msg {
+            if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
+                let cnt = upd.conventional_announcements()
+                    .ok()
+                    .map(|iter| iter.count())
+                    .unwrap_or(0);
+                entry.conventional_reach = cnt;
+            }
+
+        }
+        unsafe {*entry_ptr}
+    }
+
+    #[roto_method(rt, *mut LogEntry)]
+    fn conventional_unreach(
+        entry_ptr: *mut *mut LogEntry,
+        msg: *const BmpMsg<Bytes>
+    ) -> *mut LogEntry {
+        let entry = unsafe { &mut **entry_ptr };
+        let msg = unsafe { &*msg };
+        if let BmpMsg::RouteMonitoring(rm) = msg {
+            if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
+                let cnt = upd.conventional_withdrawals()
+                    .ok()
+                    .map(|iter| iter.count())
+                    .unwrap_or(0);
+                entry.conventional_unreach = cnt;
+            }
+
+        }
+        unsafe {*entry_ptr}
+    }
+
+    #[roto_method(rt, *mut LogEntry)]
+    fn mp_reach(
+        entry_ptr: *mut *mut LogEntry,
+        msg: *const BmpMsg<Bytes>
+    ) -> *mut LogEntry {
+        let entry = unsafe { &mut **entry_ptr };
+        let msg = unsafe { &*msg };
+        if let BmpMsg::RouteMonitoring(rm) = msg {
+            if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
+                if let Some(iter) = upd.mp_announcements().ok().flatten() {
+                    entry.mp_reach_afisafi = Some(iter.afi_safi());
+                    entry.mp_reach = Some(iter.count());
+                }
+            }
+        }
+        unsafe {*entry_ptr}
+    }
+
+    #[roto_method(rt, *mut LogEntry)]
+    fn mp_unreach(
+        entry_ptr: *mut *mut LogEntry,
+        msg: *const BmpMsg<Bytes>
+    ) -> *mut LogEntry {
+        let entry = unsafe { &mut **entry_ptr };
+        let msg = unsafe { &*msg };
+        if let BmpMsg::RouteMonitoring(rm) = msg {
+            if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
+                if let Some(iter) = upd.mp_withdrawals().ok().flatten() {
+                    entry.mp_unreach_afisafi = Some(iter.afi_safi());
+                    entry.mp_unreach = Some(iter.count());
+                }
+            }
+        }
+        unsafe {*entry_ptr}
+    }
+
+    #[roto_method(rt, *mut LogEntry)]
+    fn log_all(
+        entry_ptr: *mut *mut LogEntry,
+        msg: *const BmpMsg<Bytes>
+    ) -> *mut LogEntry {
+        let entry = unsafe { &mut **entry_ptr };
+        let msg = unsafe { &*msg };
+
+        if let BmpMsg::RouteMonitoring(rm) = msg {
+            let asn = rm.per_peer_header().asn();
+            entry.peer_as = Some(asn);
+            if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
+                if let Some(asp) = upd.aspath().ok().flatten() {
+                    entry.as_path_hops = Some(asp.hops().count());
+                    entry.origin_as = asp.hops().last()
+                        .and_then(|h| (h).try_into_asn().ok());
+                }
+                entry.conventional_reach = upd.conventional_announcements()
+                    .ok()
+                    .map(|iter| iter.count())
+                    .unwrap_or(0);
+                
+                entry.conventional_unreach = upd.conventional_withdrawals()
+                    .ok()
+                    .map(|iter| iter.count())
+                    .unwrap_or(0);
+
+                if let Some(iter) = upd.mp_announcements().ok().flatten() {
+                    entry.mp_reach_afisafi = Some(iter.afi_safi());
+                    entry.mp_reach = Some(iter.count());
+                }
+
+                if let Some(iter) = upd.mp_withdrawals().ok().flatten() {
+                    entry.mp_unreach_afisafi = Some(iter.afi_safi());
+                    entry.mp_unreach = Some(iter.count());
+                }
+            }
+        }
+        unsafe {*entry_ptr}
+    }
+
+
+    #[roto_method(rt, Log)]
+    fn write_entry(stream: *mut Log) {
+        let stream = unsafe { &mut **stream };
+        let entry = stream.take_entry();
+        stream.push(Output::Entry(entry));
     }
 
     // --- InsertionInfo methods

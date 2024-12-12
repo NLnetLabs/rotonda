@@ -37,7 +37,7 @@ log                = "0.4"
 
 [dependencies]
 arc-swap           = "1.6"
-chrono             = "0.4"
+chrono             = { version = "0.4", features = ["serde"] }
 clap               = { version = "4.4", features = ["cargo"] }
 crossbeam-utils    = "0.8"
 fern               = "0.6"

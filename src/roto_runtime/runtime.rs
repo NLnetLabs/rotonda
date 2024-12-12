@@ -124,6 +124,22 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         has_attribute(msg, to_match)
     }
 
+    #[roto_method(rt, BgpUpdateMessage<Bytes>, announcements_count)]
+    fn bgp_announcements_count(
+        msg: *const BgpUpdateMessage<Bytes>,
+    ) -> u32 {
+        let msg = unsafe { &*msg };
+        announcements_count(msg)
+    }
+
+    #[roto_method(rt, BgpUpdateMessage<Bytes>, withdrawals_count)]
+    fn bgp_withdrawals_count(
+        msg: *const BgpUpdateMessage<Bytes>,
+    ) -> u32 {
+        let msg = unsafe { &*msg };
+        withdrawals_count(msg)
+    }
+
     // --- BMP types / methods
     rt.register_clone_type_with_name::<BmpMsg<Bytes>>(
         "BmpMsg",
@@ -149,6 +165,12 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         asn == asn_in_msg
     }
 
+    #[roto_method(rt, BmpMsg<Bytes>)] 
+    fn is_route_monitoring(msg: *const BmpMsg<Bytes>) -> bool {
+        let msg = unsafe { &*msg };
+        matches!(msg, BmpMsg::RouteMonitoring(..))
+    }
+
     //rt.register_method::<BmpMsg<Bytes>, _, _>("is_peer_down",
     //is_peer_down)?;
     #[roto_method(rt, BmpMsg<Bytes>)]
@@ -167,7 +189,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
             if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                 upd
             } else {
-                // log error
+                // log error?
                 return false;
             }
         } else {
@@ -185,7 +207,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
             if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                 upd
             } else {
-                // log error
+                // log error?
                 return false;
             }
         } else {
@@ -232,6 +254,38 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         };
 
         has_attribute(&update, to_match)
+    }
+
+    #[roto_method(rt, BmpMsg<Bytes>, announcements_count)]
+    fn bmp_announcements_count(
+        msg: *const BmpMsg<Bytes>,
+    ) -> u32 {
+        let msg = unsafe { &*msg };
+        if let BmpMsg::RouteMonitoring(rm) = msg {
+            if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
+                return announcements_count(&upd);
+            } else {
+                // log error
+                return 0;
+            }
+        };
+        0
+    }
+
+    #[roto_method(rt, BmpMsg<Bytes>, withdrawals_count)]
+    fn bmp_withdrawals_count(
+        msg: *const BmpMsg<Bytes>,
+    ) -> u32 {
+        let msg = unsafe { &*msg };
+        if let BmpMsg::RouteMonitoring(rm) = msg {
+            if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
+                return withdrawals_count(&upd);
+            } else {
+                // log error
+                return 0;
+            }
+        };
+        0
     }
 
     // --- Output / logging / 'south'-wards artifacts methods
@@ -332,5 +386,25 @@ fn aspath_origin(
         aspath.origin() == Some(to_match.into())
     } else {
         false
+    }
+}
+
+fn announcements_count(
+    bgp_update: &BgpUpdateMessage<Bytes>,
+) -> u32 {
+    if let Ok(iter) = bgp_update.announcements() {
+        iter.count().try_into().unwrap_or(u32::MAX)
+    } else {
+        0
+    }
+}
+
+fn withdrawals_count(
+    bgp_update: &BgpUpdateMessage<Bytes>,
+) -> u32 {
+    if let Ok(iter) = bgp_update.withdrawals() {
+        iter.count().try_into().unwrap_or(u32::MAX)
+    } else {
+        0
     }
 }

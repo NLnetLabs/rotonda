@@ -348,6 +348,29 @@ impl RouterHandler {
             msg.common_header().msg_type().into(),
         );
 
+
+        // overwrite BMP-level provenance with BGP-level info, if any
+        let pph = match &msg {
+            Message::RouteMonitoring(msg) => Some(msg.per_peer_header()),
+            Message::StatisticsReport(msg) => Some(msg.per_peer_header()),
+            Message::PeerDownNotification(msg) => Some(msg.per_peer_header()),
+            Message::PeerUpNotification(msg) => Some(msg.per_peer_header()),
+            Message::InitiationMessage(..) => None,
+            Message::TerminationMessage(..) => None,
+            Message::RouteMirroring(msg) => Some(msg.per_peer_header()),
+        };
+        let provenance = if let Some(pph) = pph {
+            Provenance {
+                peer_ip: pph.address(),
+                peer_asn: pph.asn(),
+                peer_rib_type: (pph.is_post_policy() , pph.adj_rib_type()).into(),
+                //peer_distuingisher: pph.distinguisher(),
+                ..provenance
+            }
+        } else {
+            provenance
+        };
+
         let mut output_stream = RotoOutputStream::new();
         let mut ctx = Ctx::new(&mut output_stream);
         let verdict = self.roto_function.as_ref().map(|roto_function| {

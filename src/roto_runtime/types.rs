@@ -2,7 +2,7 @@ use core::fmt;
 use std::{
     collections::{HashMap, HashSet},
     net::IpAddr,
-    path::PathBuf,
+    path::PathBuf, sync::Arc,
 };
 
 use bytes::Bytes;
@@ -118,9 +118,11 @@ impl<M> OutputStream<M> {
         &mut self.entry
     }
     pub fn take_entry(&mut self) -> LogEntry {
-        let res = self.entry;
-        self.entry = LogEntry::new();
-        res
+        std::mem::take(&mut self.entry)
+    }
+
+    pub fn print(&self, msg: impl AsRef<str>) {
+        eprintln!("roto output: {}", msg.as_ref());
     }
 }
 
@@ -488,7 +490,7 @@ impl From<(u32, u32)> for CustomLogEntry {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, Eq, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize)]
 pub struct LogEntry {
     #[serde(with = "ts_microseconds")]
     pub timestamp: chrono::DateTime<Utc>,
@@ -501,6 +503,7 @@ pub struct LogEntry {
     pub mp_reach_afisafi: Option<AfiSafiType>,
     pub mp_unreach: Option<usize>,
     pub mp_unreach_afisafi: Option<AfiSafiType>,
+    pub custom: Option<String>,
 }
 
 use serde_with;

@@ -37,6 +37,7 @@ use crate::roto_runtime::types::{
 use crate::comms::{Gate, GateStatus, Terminated};
 use crate::ingress;
 use crate::payload::{Payload, RotondaRoute, Update};
+use crate::roto_runtime::Ctx;
 use crate::units::bgp_tcp_in::status_reporter::BgpTcpInStatusReporter;
 use crate::units::Unit;
 
@@ -326,13 +327,15 @@ impl Processor {
                             );
 
                             let mut output_stream = RotoOutputStream::new();
+                            let mut ctx = Ctx::new(&mut output_stream);
                             let received = std::time::Instant::now();
 
                             let verdict = self.roto_function.as_ref().map(
                                 |roto_function|
                             {
                                 roto_function.call(
-                                    roto::Val(&mut output_stream),
+                                    &mut ctx,
+                                    //roto::Val(&mut output_stream),
                                     roto::Val(bgp_msg.clone()),
                                     roto::Val(provenance),
                                     )

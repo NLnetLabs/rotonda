@@ -23,6 +23,7 @@ use crate::roto_runtime::types::{
 
 use crate::ingress::{self, IngressId};
 use crate::payload::RouterId;
+use crate::roto_runtime::Ctx;
 use crate::tracing::Tracer;
 use crate::{
     comms::{Gate, GateStatus},
@@ -348,9 +349,11 @@ impl RouterHandler {
         );
 
         let mut output_stream = RotoOutputStream::new();
+        let mut ctx = Ctx::new(&mut output_stream);
         let verdict = self.roto_function.as_ref().map(|roto_function| {
             roto_function.call(
-                roto::Val(&mut output_stream),
+                &mut ctx,
+                //roto::Val(&mut output_stream),
                 roto::Val(msg.clone()),
                 roto::Val(provenance),
             )

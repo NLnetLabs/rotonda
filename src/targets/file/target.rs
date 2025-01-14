@@ -15,7 +15,7 @@ use tokio::sync::mpsc;
 use crate::comms::{Link, Terminated};
 use crate::ingress;
 use crate::payload::Update;
-use crate::roto_runtime::types::OutputStreamMessageRecord;
+use crate::roto_runtime::types::{LogEntry, OutputStreamMessageRecord};
 use crate::targets::Component;
 use crate::targets::TargetCommand;
 use crate::targets::WaitPoint;
@@ -131,7 +131,6 @@ impl FileRunner {
                                 //);
                             }
                             TargetCommand::Terminate => {
-                                //return Err(Terminated)
                                 break
                             }
                         }
@@ -152,29 +151,36 @@ impl FileRunner {
                             for m in msgs {
                                 let m = m.into_record();
                                 if let Some(dst) = self.target_file.as_mut() {
-                                    match self.config.format {
-                                        Format::Csv => {
-                                            let mut wrt = csv::WriterBuilder::new().has_headers(false).from_writer(vec![]);
-                                            wrt.serialize(m).unwrap();
-                                            dst.write_all(&wrt.into_inner().unwrap()).await.unwrap();
+                                    if let OutputStreamMessageRecord::Entry(e) = m {
+                                        if let Some(custom_str) = e.custom {
+                                            dst.write_all(custom_str.as_ref()).await.unwrap();
+                                            dst.write_all(b"\n").await.unwrap();
                                         }
-                                        Format::Json => {
-                                            if let Ok(bytes) = serde_json::to_vec(&m) {
-                                                dst.write_all(&bytes).await.unwrap();
-                                                dst.write_all(b"\n").await.unwrap();
+                                    } else {
+                                        match self.config.format {
+                                            Format::Csv => {
+                                                let mut wrt = csv::WriterBuilder::new().has_headers(false).from_writer(vec![]);
+                                                wrt.serialize(m).unwrap();
+                                                dst.write_all(&wrt.into_inner().unwrap()).await.unwrap();
                                             }
-                                        }
-                                        Format::JsonMin => {
-                                            if let OutputStreamMessageRecord::Entry(e) = m {
-                                                if let Ok(bytes) = serde_json::to_vec(&e.into_minimal()) {
-                                                    dst.write_all(&bytes).await.unwrap();
-                                                    dst.write_all(b"\n").await.unwrap();
-                                                }
-                                            } else {
-                                                // same as Json case
+                                            Format::Json => {
                                                 if let Ok(bytes) = serde_json::to_vec(&m) {
                                                     dst.write_all(&bytes).await.unwrap();
                                                     dst.write_all(b"\n").await.unwrap();
+                                                }
+                                            }
+                                            Format::JsonMin => {
+                                                if let OutputStreamMessageRecord::Entry(e) = m {
+                                                    if let Ok(bytes) = serde_json::to_vec(&e.into_minimal()) {
+                                                        dst.write_all(&bytes).await.unwrap();
+                                                        dst.write_all(b"\n").await.unwrap();
+                                                    }
+                                                } else {
+                                                    // same as Json case
+                                                    if let Ok(bytes) = serde_json::to_vec(&m) {
+                                                        dst.write_all(&bytes).await.unwrap();
+                                                        dst.write_all(b"\n").await.unwrap();
+                                                    }
                                                 }
                                             }
                                         }

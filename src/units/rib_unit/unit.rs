@@ -7,7 +7,7 @@ use crate::{
         Terminated, TriggerData,
     }, ingress, manager::{Component, WaitPoint}, payload::{
         Payload, RotondaPaMap, RotondaRoute, RouterId, Update, UpstreamStatus,
-    }, roto_runtime::{self, types::{FilterName, InsertionInfo, Output, OutputStreamMessage, RotoOutputStream, RouteContext}}, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::Unit
+    }, roto_runtime::{self, types::{FilterName, InsertionInfo, Output, OutputStreamMessage, RotoOutputStream, RouteContext}, Ctx}, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::Unit
 };
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
@@ -47,17 +47,19 @@ thread_local!(
 );
 
 type RotoFuncPre = roto::TypedFunc<
+    Ctx,
     (
-        roto::Val<roto_runtime::Log>,
+        //roto::Val<roto_runtime::Log>,
         roto::Val<RotondaRoute>,
-        roto::Val<RouteContext>,
+        //roto::Val<RouteContext>,
     ),
     roto::Verdict<(), ()>,
 >;
 
 type RotoFuncPost = roto::TypedFunc<
+    Ctx,
     (
-        roto::Val<roto_runtime::Log>,
+        //roto::Val<roto_runtime::Log>,
         roto::Val<RotondaRoute>,
         roto::Val<InsertionInfo>,
     ),
@@ -779,6 +781,7 @@ where
         let mut res = SmallVec::<[Payload; 8]>::new();
 
         let mut output_stream = RotoOutputStream::new();
+        let mut ctx = Ctx::new(&mut output_stream);
 
         for p in payload {
             let ingress_id = match &p.context {
@@ -788,9 +791,10 @@ where
             };
             if let Some(ref roto_function) = self.roto_function_pre {
                 match roto_function.call(
-                    roto::Val(&mut output_stream),
+                    &mut ctx,
+                    //roto::Val(&mut output_stream),
                     roto::Val(p.rx_value.clone()),
-                    roto::Val(p.context.clone()),
+                    //roto::Val(p.context.clone()),
                 ) {
                     roto::Verdict::Accept(_) => {
                         self.insert_payload(&p);

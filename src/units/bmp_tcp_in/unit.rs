@@ -31,7 +31,7 @@ use crate::{
         },
         status_reporter::Chainable,
         unit::UnitActivity,
-    }, comms::{Gate, GateStatus, Terminated}, ingress::{self, IngressId, IngressInfo}, manager::{Component, WaitPoint}, roto_runtime::types::{CompiledRoto, FilterName, Provenance, RotoOutputStream, RotoScripts}, tokio::TokioTaskMetrics, tracing::Tracer, units::Unit
+    }, comms::{Gate, GateStatus, Terminated}, ingress::{self, IngressId, IngressInfo}, manager::{Component, WaitPoint}, roto_runtime::{types::{CompiledRoto, FilterName, Provenance, RotoOutputStream, RotoScripts}, Ctx}, tokio::TokioTaskMetrics, tracing::Tracer, units::Unit
 };
 
 use super::{
@@ -88,8 +88,9 @@ impl std::fmt::Display for TracingMode {
 }
 
 pub(super) type RotoFunc = roto::TypedFunc<
+    Ctx,
     (
-        roto::Val<*mut RotoOutputStream>,
+        //roto::Val<*mut RotoOutputStream>,
         roto::Val<BmpMessage<Bytes>>,
         roto::Val<Provenance>,
     ),

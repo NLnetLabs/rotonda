@@ -18,25 +18,25 @@ use inetnum::asn::Asn;
 pub struct Register {
     serial: AtomicU32,
     info: RwLock<HashMap<IngressId, IngressInfo>>,
-    //write_lock: Mutex<()>,
 }
 
 pub type IngressId = u32;
 
 impl Register {
+    /// Create a new register
     pub(crate) fn new() -> Self {
         Self {
             serial: 1.into(),
-            //info: ArcSwap::from_pointee(HashMap::new()),
             info: RwLock::new(HashMap::new()),
-            //WRITE_lock: Mutex::new(()),
         }
     }
 
+    /// Request a new, unique [`IngressId`]
     pub(crate) fn register(&self) -> IngressId {
         self.serial.fetch_add(1, Ordering::Relaxed)
     }
 
+    /// Change the info related to an [`IngressId`]
     pub(crate) fn update_info(
         &self,
         id: IngressId,
@@ -66,10 +66,17 @@ impl Register {
         }
     }
 
+    /// Retrieve the information for the given [`IngressId`]
     pub fn get(&self, id: IngressId) -> Option<IngressInfo> {
         self.info.read().unwrap().get(&id).cloned()
     }
 
+    /// Find all [`IngressId`]s that are children of the given `parent`
+    ///
+    /// This is used in cases where for example a BMP session (the parent) is
+    /// terminated, and all route information that was learned for that
+    /// session (in one or multiple monitored BGP sessions, the children) need
+    /// to be withdrawn.
     pub fn ids_for_parent(&self, parent: IngressId) -> Vec<IngressId> {
         let mut res = Vec::new();
         for (id, info) in self.info.read().unwrap().iter() {
@@ -81,6 +88,13 @@ impl Register {
     }
 }
 
+/// Information pertaining to an [`IngressId`]
+///
+/// The `IngressInfo` struct is quite broad and generic in nature, featuring
+/// fields that might not make sense in all use cases. Therefore, everything
+/// is wrapped as an `Option`, giving the user (mostly connector/ingress
+/// components within Rotonda) the flexibilty to fill in what makes sense in
+/// their specific case.
 #[derive(Clone, Debug, Default)]
 #[serde_with::skip_serializing_none]
 #[derive(serde::Serialize)]
@@ -103,47 +117,32 @@ impl IngressInfo {
     }
 
     pub fn with_parent(self, parent: IngressId) -> Self {
-        Self {
-            parent_ingress: Some(parent),
-            ..self
-        }
+        Self { parent_ingress: Some(parent), ..self }
     }
 
     pub fn with_remote_addr(self, addr: IpAddr) -> Self {
-        Self {
-            remote_addr: Some(addr),
-            ..self
-        }
+        Self { remote_addr: Some(addr), ..self }
     }
 
     pub fn with_remote_asn(self, asn: Asn) -> Self {
-        Self {
-            remote_asn: Some(asn),
-            ..self
-        }
+        Self { remote_asn: Some(asn), ..self }
     }
 
     pub fn with_filename(self, path: PathBuf) -> Self {
-        Self {
-            filename: Some(path),
-            ..self
-        }
+        Self { filename: Some(path), ..self }
     }
 
     pub fn with_name(self, name: String) -> Self {
-        Self {
-            name: Some(name),
-            ..self
-        }
+        Self { name: Some(name), ..self }
     }
 
     pub fn with_desc(self, desc: String) -> Self {
-        Self {
-            desc: Some(desc),
-            ..self
-        }
+        Self { desc: Some(desc), ..self }
     }
 }
 
 #[cfg(test)]
-mod tests {}
+mod tests {
+
+
+}

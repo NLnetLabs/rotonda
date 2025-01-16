@@ -30,7 +30,7 @@ Roadmap
 - 💤 Create experimental global registry
 - 💤 Snapshot/restore functionality
 - 💤 RIB diff functionality
-- 💤 Create experimental distributed Rotondas
+- 💤 Create experimental distributed Rotondas (Sharding)
 
 
 ## `Roto language`
@@ -72,6 +72,11 @@ Roadmap
 
 - 🦀 On-disk storage integration
 - 🦀 Optimizations: better hashing, cache padding, etc.
+
+### LATER RELEASES
+
+- 💤 Query Plans
+- 💤 Indexing (dynamic and static)
 
 ## `Rotoro`
 

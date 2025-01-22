@@ -6,6 +6,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+use bzip2::bufread::BzDecoder;
 use flate2::read::GzDecoder;
 use futures::future::{select, Either};
 use futures::{pin_mut, FutureExt, TryFutureExt};
@@ -271,6 +272,15 @@ impl MrtInRunner {
                 let mut gz = GzDecoder::new(&mmap[..]);
                 gz.read_to_end(&mut buf)
                     .map_err(|_e| MrtError::other("gz decoding failed"))?;
+                info!("decompressed {} in {}ms",
+                    &filename.to_string_lossy(),
+                    t0.elapsed().as_millis());
+                MrtFile::new(&buf[..])
+            }
+            Some("bz2") => {
+                let mut bz2 = BzDecoder::new(&mmap[..]);
+                bz2.read_to_end(&mut buf)
+                    .map_err(|_e| MrtError::other("bz2 decoding failed"))?;
                 info!("decompressed {} in {}ms",
                     &filename.to_string_lossy(),
                     t0.elapsed().as_millis());

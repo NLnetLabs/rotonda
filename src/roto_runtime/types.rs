@@ -715,7 +715,7 @@ impl<O> TryFrom<(Nlri<O>, RotondaPaMap)> for RotondaRoute {
 }
 
 pub(crate) fn explode_announcements(
-    bgp_update: &UpdateMessage<Bytes>,
+    bgp_update: &UpdateMessage<impl routecore::Octets>,
 ) -> Result<Vec<RotondaRoute>, routecore::bgp::ParseError> {
     let mut res = vec![];
 
@@ -734,7 +734,7 @@ pub(crate) fn explode_announcements(
 }
 
 pub(crate) fn explode_withdrawals(
-    bgp_update: &UpdateMessage<Bytes>,
+    bgp_update: &UpdateMessage<impl routecore::Octets>,
 ) -> Result<Vec<RotondaRoute>, routecore::bgp::ParseError> {
     let mut res = vec![];
 

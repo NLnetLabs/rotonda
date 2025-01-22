@@ -11,18 +11,22 @@ use futures::future::{select, Either};
 use futures::{pin_mut, FutureExt, TryFutureExt};
 use log::{debug, error, info, warn};
 use rand::seq::SliceRandom;
-use routecore::bgp::message::PduParseInfo;
+use rotonda_store::prelude::multi::RouteStatus;
+use routecore::bgp::fsm::state_machine::State;
+use routecore::bgp::message::{Message as BgpMsg, PduParseInfo};
 use routecore::bgp::nlri::afisafi::{Ipv4UnicastNlri, Nlri};
 use routecore::bgp::types::AfiSafiType;
 use routecore::bgp::workshop::route::RouteWorkshop;
 use routecore::bgp::ParseError;
 use routecore::mrt::MrtFile;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
 use tokio::pin;
 use tokio::sync::mpsc;
+use tokio::task::JoinSet;
 
-use crate::roto_runtime::types::{Provenance, RouteContext};
+use crate::roto_runtime::types::{explode_announcements, explode_withdrawals, FreshRouteContext, MrtContext, Provenance, RouteContext};
 use crate::common::unit::UnitActivity;
 use crate::comms::{GateStatus, Terminated};
 use crate::ingress::{self, IngressInfo};
@@ -32,7 +36,36 @@ use crate::units::{Gate, Unit};
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct MrtFileIn {
-    pub filename: PathBuf,
+    pub filename: OneOrManyPaths,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+#[serde(untagged)]
+enum OneOrManyPaths {
+    One(PathBuf),
+    Many(Vec<PathBuf>),
+}
+pub enum PathsIterator<'a> {
+    One(Option<PathBuf>),
+    Many(std::slice::Iter<'a, PathBuf>)
+}
+impl Iterator for PathsIterator<'_> {
+    type Item = PathBuf;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self {
+            PathsIterator::One(ref mut p) => p.take(),
+            PathsIterator::Many(ref mut iter) => iter.next().cloned(),
+        }
+    }
+}
+impl OneOrManyPaths {
+    pub fn iter(&self) -> PathsIterator {
+        match self {
+            OneOrManyPaths::One(p) => PathsIterator::One(Some(p.clone())),
+            OneOrManyPaths::Many(m) => PathsIterator::Many(m.iter()),
+        }
+    }
 }
 
 pub struct MrtInRunner {
@@ -43,7 +76,7 @@ pub struct MrtInRunner {
     // files to process
     queue_tx: mpsc::Sender<PathBuf>,
     processing: Option<PathBuf>,
-    processed: Vec<PathBuf>,
+    processed: Vec<(PathBuf, String)>,
 }
 
 impl MrtFileIn {
@@ -56,10 +89,12 @@ impl MrtFileIn {
         gate.process_until(waitpoint.ready()).await?;
         waitpoint.running().await;
 
-        let (tx, rx) = mpsc::channel(10);
+        let (tx, rx) = mpsc::channel(1024);
 
         let ingresses = component.ingresses().clone();
-        let _ = tx.send(self.filename.clone()).await;
+        for f in self.filename.iter() {
+            let _ = tx.send(f).await;
+        }
 
         MrtInRunner::new(self, gate, ingresses, tx).run(rx).await
     }
@@ -82,12 +117,145 @@ impl MrtInRunner {
         }
     }
 
+    async fn process_state_change(
+        gate: &Gate,
+        ingresses: &Arc<ingress::Register>,
+        sc: routecore::mrt::StateChangeAs4
+    ) {
+        match (sc.old_state(), sc.new_state()){
+            (x, y) if x == y => {
+                warn!("State Change to same state {}, ignoring",
+                    x
+                )
+            }
+            (State::Established, State::Idle) => {
+                if let Some((ingress_id, _info)) = ingresses.find_existing(
+                    IngressInfo::new()
+                    .with_remote_addr(sc.peer_addr())
+                    .with_remote_asn(sc.peer_asn())
+                ) {
+                    let update = Update::Withdraw(ingress_id, None);
+                    gate.update_data(update).await;
+                    eprintln!("Withdraw for {ingress_id} sent");
+                }
+                else {
+                    debug!("No IngressInfo for {} {} going Established -> Idle",
+                        sc.peer_asn(),
+                        sc.peer_addr()
+                    );
+                }
+            }
+            (_,_) => {
+                warn!("unhandled State Change: {} -> {}",
+                    sc.old_state(), sc.new_state()
+                )
+            }
+        }
+    }
+
+
+    async fn process_message(
+        gate: &Gate,
+        ingresses: &Arc<ingress::Register>,
+        msg: routecore::mrt::MessageAs4<'_, &[u8]>,
+    ) -> Result<(usize, usize), MrtError> {
+        let bgp_msg = match msg.bgp_msg() {
+            Ok(msg) => msg,
+            Err(e) => {
+                error!("{e}");
+                return Ok((0, 0));
+            }
+        };
+        let mut announcements_sent = 0;
+        let mut withdrawals_sent = 0;
+
+        match bgp_msg {
+            BgpMsg::Update(upd) => {
+                let received = std::time::Instant::now();
+                let mut payloads = SmallVec::new();
+                let rr_reach = explode_announcements(&upd)?;
+                let rr_unreach = explode_withdrawals(&upd)?;
+
+                announcements_sent += rr_reach.len();
+                withdrawals_sent += rr_unreach.len();
+
+                let ingress_id = if let Some((id, _info)) =
+                    ingresses.find_existing(
+                        IngressInfo::new()
+                        .with_remote_addr(msg.peer_addr())
+                        .with_remote_asn(msg.peer_asn())
+                    )
+                {
+                    //eprintln!("got ingressinfo: {_info:?}");
+                    id
+                } else {
+                    warn!("no ingress info found");
+                    0
+
+                };
+                let provenance = Provenance::for_bgp(
+                    ingress_id,
+                    msg.peer_addr(),
+                    msg.peer_asn(),
+                );
+
+                // or do we need a RouteContext::Fresh here?
+                let context = MrtContext {
+                    status: RouteStatus::Active,
+                    provenance
+                };
+
+                payloads.extend(
+                    rr_reach.into_iter().map(|rr|
+                        Payload::with_received(
+                            rr,
+                            RouteContext::Mrt(context.clone()),
+                            None,
+                            received,
+                        )
+                    ));
+
+                let context = MrtContext {
+                    status: RouteStatus::Withdrawn,
+                    ..context
+                };
+
+                payloads.extend(rr_unreach.into_iter().map(|rr|
+                        Payload::with_received(
+                            rr,
+                            RouteContext::Mrt(context.clone()),
+                            None,
+                            received
+                        )
+                ));
+                let update = payloads.into();
+                gate.update_data(update).await;
+            }
+            BgpMsg::Open(_open_message) => {
+                dbg!("TODO handle(?) open_message guess there is one in the legacy asn16 messages");
+            }
+            BgpMsg::Notification(_notification_message) =>{
+                dbg!("TODO handle(?) notification_message guess there is one in the legacy asn16 messages");
+            }
+            BgpMsg::Keepalive(_keepalive_message) => {
+                dbg!("TODO handle(?) keepalive_message guess there is one in the legacy asn16 messages");
+            }
+            BgpMsg::RouteRefresh(route_refresh_message) => {
+                dbg!("TODO handle(?) route_refresh_message guess there is one in the legacy asn16 messages");
+            }
+        }
+        Ok((announcements_sent, withdrawals_sent))
+    }
+
     async fn process_file(
         gate: Gate,
         ingresses: Arc<ingress::Register>,
         filename: PathBuf,
     ) -> Result<(), MrtError> {
-        info!("processing {}", filename.to_string_lossy());
+        info!("processing {} on thread {:?}",
+            filename.to_string_lossy(),
+            std::thread::current().id()
+        );
         #[allow(unused_variables)] // false positive, used in info!() below)
         let t0 = Instant::now();
 
@@ -113,70 +281,198 @@ impl MrtInRunner {
             }
         };
 
-        let peer_index_table = mrt_file.pi()?;
-        let mut ingress_map = Vec::with_capacity(peer_index_table.len());
-        for peer_entry in &peer_index_table[..] {
-            let id = ingresses.register();
-            ingresses.update_info(
-                id,
-                IngressInfo::new()
-                    .with_remote_addr(peer_entry.addr)
-                    .with_remote_asn(peer_entry.asn)
-                    .with_filename(filename.clone()),
-            );
-            ingress_map.push(id);
-        }
-
-        let rib_entries = mrt_file.rib_entries()?;
-
         let mut routes_sent = 0;
 
-        for (afisafi, peer_id, peer_entry, prefix, raw_attr) in rib_entries {
-            let rr = match afisafi {
-                AfiSafiType::Ipv4Unicast => {
-                    RotondaRoute::Ipv4Unicast(
-                        prefix.try_into().map_err(MrtError::other)?,
-                        RotondaPaMap(routecore::bgp::path_attributes::OwnedPathAttributes::new(PduParseInfo::modern(), raw_attr))
-                    )
-                }
-                AfiSafiType::Ipv6Unicast => {
-                    RotondaRoute::Ipv6Unicast(
-                        prefix.try_into().map_err(MrtError::other)?,
-                        RotondaPaMap(routecore::bgp::path_attributes::OwnedPathAttributes::new(PduParseInfo::modern(), raw_attr))
-                    )
-                }
-                AfiSafiType::Ipv4Multicast |
-                AfiSafiType::Ipv4MplsUnicast |
-                AfiSafiType::Ipv4MplsVpnUnicast |
-                AfiSafiType::Ipv4RouteTarget |
-                AfiSafiType::Ipv4FlowSpec |
-                AfiSafiType::Ipv6Multicast |
-                AfiSafiType::Ipv6MplsUnicast |
-                AfiSafiType::Ipv6MplsVpnUnicast |
-                AfiSafiType::Ipv6FlowSpec |
-                AfiSafiType::L2VpnVpls |
-                AfiSafiType::L2VpnEvpn |
-                AfiSafiType::Unsupported(_, _) => {
-                    debug!("unsupported AFI/SAFI {}, skipping", afisafi);
-                    continue
-                }
-            };
-            let provenance = Provenance::for_bgp(
-                ingress_map[usize::from(peer_id)],
-                peer_entry.addr,
-                peer_entry.asn,
+        // --- Dump part (RIB entries)
+        //
+        if let Ok(peer_index_table) = mrt_file.pi() {
+            eprintln!("found peer index table of len {} in {}",
+                peer_index_table.len(),
+                filename.to_string_lossy()
             );
-            let ctx = RouteContext::for_mrt_dump(provenance);
-            let update = Update::Single(Payload::new(rr, ctx, None));
+            let mut ingress_map = Vec::with_capacity(peer_index_table.len());
+            for peer_entry in &peer_index_table[..] {
+                let id = ingresses.register();
+                ingresses.update_info(
+                    id,
+                    IngressInfo::new()
+                        .with_remote_addr(peer_entry.addr)
+                        .with_remote_asn(peer_entry.asn)
+                        .with_filename(filename.clone()),
+                );
+                ingress_map.push(id);
+            }
 
-            gate.update_data(update).await;
-            routes_sent += 1;
+
+            let rib_entries = mrt_file.rib_entries()?;
+            for (afisafi, peer_id, peer_entry, prefix, raw_attr) in rib_entries {
+                let rr = match afisafi {
+                    AfiSafiType::Ipv4Unicast => {
+                        RotondaRoute::Ipv4Unicast(
+                            prefix.try_into().map_err(MrtError::other)?,
+                            RotondaPaMap(routecore::bgp::path_attributes::OwnedPathAttributes::new(PduParseInfo::modern(), raw_attr))
+                        )
+                    }
+                    AfiSafiType::Ipv6Unicast => {
+                        RotondaRoute::Ipv6Unicast(
+                            prefix.try_into().map_err(MrtError::other)?,
+                            RotondaPaMap(routecore::bgp::path_attributes::OwnedPathAttributes::new(PduParseInfo::modern(), raw_attr))
+                        )
+                    }
+                    AfiSafiType::Ipv4Multicast |
+                    AfiSafiType::Ipv4MplsUnicast |
+                    AfiSafiType::Ipv4MplsVpnUnicast |
+                    AfiSafiType::Ipv4RouteTarget |
+                    AfiSafiType::Ipv4FlowSpec |
+                    AfiSafiType::Ipv6Multicast |
+                    AfiSafiType::Ipv6MplsUnicast |
+                    AfiSafiType::Ipv6MplsVpnUnicast |
+                    AfiSafiType::Ipv6FlowSpec |
+                    AfiSafiType::L2VpnVpls |
+                    AfiSafiType::L2VpnEvpn |
+                    AfiSafiType::Unsupported(_, _) => {
+                        debug!("unsupported AFI/SAFI {}, skipping", afisafi);
+                        continue
+                    }
+                };
+                let provenance = Provenance::for_bgp(
+                    ingress_map[usize::from(peer_id)],
+                    peer_entry.addr,
+                    peer_entry.asn,
+                );
+                let ctx = RouteContext::for_mrt_dump(provenance);
+                let update = Update::Single(Payload::new(rr, ctx, None));
+
+                gate.update_data(update).await;
+                
+                if routes_sent % 1_000_000 == 0 {
+                    //eprintln!("gonna sleep {routes_sent}");
+                    tokio::time::sleep(std::time::Duration::from_micros(1)).await;
+                }
+                routes_sent += 1;
+            }
         }
 
+        // --- Messages part (update file)
+
+        use routecore::mrt::Bgp4Mp;
+
+        let mut announcements_sent = 0;
+        let mut withdrawals_sent = 0;
+
+        eprintln!("pre .messages iter, ingress register:\n{}", ingresses.overview());
+        for msg in mrt_file.messages() {
+            match msg {
+                Bgp4Mp::StateChange(sc) => {
+                    MrtInRunner::process_state_change(&gate, &ingresses, sc.into()).await;
+                }
+                Bgp4Mp::StateChangeAs4(sc) => {
+                    MrtInRunner::process_state_change(&gate, &ingresses, sc).await;
+                }
+                Bgp4Mp::Message(msg) => {
+                    let (reach, unreach) = MrtInRunner::process_message(&gate, &ingresses, msg.into()).await?; 
+                    announcements_sent += reach;
+                    withdrawals_sent += unreach;
+                    
+                }
+                Bgp4Mp::MessageAs4(msg) => {
+                    let (reach, unreach) = MrtInRunner::process_message(&gate, &ingresses, msg).await?;
+                    announcements_sent += reach;
+                    withdrawals_sent += unreach;
+                    /*
+                    let received = std::time::Instant::now();
+                    let bgp_msg = match message_as4.bgp_msg() {
+                        Ok(msg) => msg,
+                        Err(e) => {
+                            error!("{e}");
+                            continue;
+                        }
+                    };
+                    match bgp_msg {
+                        BgpMsg::Update(upd) => {
+                            let mut payloads = SmallVec::new();
+                            let rr_reach = explode_announcements(&upd)?;
+                            let rr_unreach = explode_withdrawals(&upd)?;
+
+                            announcements_sent += rr_reach.len();
+                            withdrawals_sent += rr_unreach.len();
+
+                            let ingress_id = if let Some((id, _info)) =
+                                ingresses.find_existing(
+                                    IngressInfo::new()
+                                    .with_remote_addr(message_as4.peer_addr())
+                                    .with_remote_asn(message_as4.peer_asn())
+                                    )
+                            {
+                                //eprintln!("got ingressinfo: {_info:?}");
+                                id
+                            } else {
+                                warn!("no ingress info found");
+                                0
+
+                            };
+                            let provenance = Provenance::for_bgp(
+                                ingress_id,
+                                message_as4.peer_addr(),
+                                message_as4.peer_asn(),
+                            );
+                                
+                            // or do we need a RouteContext::Fresh here?
+                            let context = MrtContext {
+                                status: RouteStatus::Active,
+                                provenance
+                            };
+
+                            payloads.extend(
+                                rr_reach.into_iter().map(|rr|
+                                    Payload::with_received(
+                                        rr,
+                                        RouteContext::Mrt(context.clone()),
+                                        None,
+                                        received,
+                                    )
+                            ));
+
+                            let context = MrtContext {
+                                status: RouteStatus::Withdrawn,
+                                ..context
+                            };
+
+                            payloads.extend(rr_unreach.into_iter().map(|rr|
+                                Payload::with_received(
+                                    rr,
+                                    RouteContext::Mrt(context.clone()),
+                                    None,
+                                    received
+                                )
+                            ));
+                            let update = payloads.into();
+                            gate.update_data(update).await;
+                        }
+                        BgpMsg::Open(open_message) => todo!(),
+                        BgpMsg::Notification(notification_message) => todo!(),
+                        BgpMsg::Keepalive(_keepalive_message) => {
+                            // nothing to do
+                        }
+                        BgpMsg::RouteRefresh(route_refresh_message) => todo!(),
+                    }
+
+
+                    //let update = Update::Single(Payload::new(..));
+                    //gate.update_data(update).await;
+                    
+                */
+                }
+            }
+        }
+
+
         info!(
-            "mrt-in: done processing {}, emitted {} routes in {}s",
+            "mrt-in: done processing {}, emitted {} routes, {} announcements, {} withdrawals in {}s",
             filename.to_string_lossy(),
             routes_sent,
+            announcements_sent,
+            withdrawals_sent,
             t0.elapsed().as_secs()
         );
 
@@ -187,53 +483,125 @@ impl MrtInRunner {
         mut self,
         mut queue: mpsc::Receiver<PathBuf>,
     ) -> Result<(), Terminated> {
-        loop {
-            let until_fut = queue.recv().then(|o| async {
-                o.ok_or(std::io::Error::other("MRT queue closed"))
-            });
 
-            match self.process_until(until_fut).await {
-                ControlFlow::Continue(c) => match c {
-                    Ok(ref filename) => {
-                        self.processing = Some(filename.clone());
-                        let gate = self.gate.clone();
-                        let ingresses = self.ingresses.clone();
-                        let r = self
-                            .process_until(
-                                Self::process_file(
-                                    gate,
-                                    ingresses,
-                                    filename.clone(),
-                                )
-                                .map_err(Into::into),
-                            )
-                            .await;
-                        match r {
-                            ControlFlow::Continue(Ok(..)) => {
-                                if let Some(filename) = self.processing.take()
-                                {
-                                    self.processed.push(filename)
-                                }
-                            }
-                            ControlFlow::Continue(Err(e)) => {
-                                error!(
-                                    "failed to process {}: {e}",
-                                    filename.to_string_lossy()
-                                );
-                            }
-                            ControlFlow::Break(_terminated) => {
-                                debug!("mrt-in got Terminated");
-                                return Err(Terminated);
-                            }
-                        }
+        let gate = self.gate.clone();
+        let ingresses = self.ingresses.clone();
+        let (results_tx, mut results_rx) = mpsc::unbounded_channel();
+        //let (handles_tx, mut handles_rx) = mpsc::unbounded_channel();
+
+        tokio::spawn(async move {
+            while let Some(p) = queue.recv().await {
+                let gate = gate.clone();
+                let ingresses = ingresses.clone();
+                let results_tx = results_tx.clone();
+                // concurrent:
+                /*
+                let handle = tokio::spawn(async move {
+                    let r = Self::process_file(
+                        gate,
+                        ingresses,
+                        p.clone()
+                    ).await.map(|_| p);
+                    results_tx.send(r)
+                });
+                let _ = handles_tx.send(handle);
+                */
+
+                // sequential:
+                
+                let r = Self::process_file(
+                    gate,
+                    ingresses,
+                    p.clone()
+                ).await.map(|_| p);
+                let _ = results_tx.send(r);
+            };
+        });
+
+        loop {
+            let f = results_rx.recv().map(Ok);
+            match self.process_until(f).await {
+                ControlFlow::Continue(Ok(r)) => {
+                    if let Some(Ok(p)) = r {
+
+                        let filename = p.to_string_lossy();
+                        let mut hasher = Sha256::new();
+                        let mut file = std::fs::File::open(&p).unwrap();
+
+                        let t0 = Instant::now();
+                        let _bytes_written = std::io::copy(&mut file, &mut hasher).unwrap();
+                        let hash_bytes = hasher.finalize();
+                        let hash_str = format!("{:x}", hash_bytes);
+                        info!(
+                            "processed {}, sha256: {}",
+                            filename, &hash_str
+                        );
+                        self.processed.push((p, hash_str));
                     }
-                    Err(e) => error!("{e}"),
-                },
+                }
+                ControlFlow::Continue(Err(e)) => {
+                    eprintln!("error: {e}");
+                }
                 ControlFlow::Break(_) => {
                     info!("terminating unit, processed {:?}", self.processed);
+                    /* commented out while doing the sequential approach vs
+                     * concurrent
+                    while let Ok(Some(h)) = tokio::time::timeout(std::time::Duration::from_millis(100), handles_rx.recv()).await {
+                        info!("aborting spawned task");
+                        h.abort();
+                    }
+                    */
+                    info!("timed out");
                     return Err(Terminated);
                 }
             }
+
+            //let until_fut = queue.recv().then(|o| async {
+            //    o.ok_or(std::io::Error::other("MRT queue closed"))
+            //});
+
+            //match self.process_until(until_fut).await {
+            //    ControlFlow::Continue(c) => match c {
+            //        Ok(ref filename) => {
+            //            self.processing = Some(filename.clone());
+            //            let gate = self.gate.clone();
+            //            let ingresses = self.ingresses.clone();
+            //            let r = self
+            //                .process_until(
+            //                    Self::process_file(
+            //                        gate,
+            //                        ingresses,
+            //                        filename.clone(),
+            //                    )
+            //                    .map_err(Into::into),
+            //                )
+            //                .await;
+            //            match r {
+            //                ControlFlow::Continue(Ok(..)) => {
+            //                    if let Some(filename) = self.processing.take()
+            //                    {
+            //                        self.processed.push(filename)
+            //                    }
+            //                }
+            //                ControlFlow::Continue(Err(e)) => {
+            //                    error!(
+            //                        "failed to process {}: {e}",
+            //                        filename.to_string_lossy()
+            //                    );
+            //                }
+            //                ControlFlow::Break(_terminated) => {
+            //                    debug!("mrt-in got Terminated");
+            //                    return Err(Terminated);
+            //                }
+            //            }
+            //        }
+            //        Err(e) => error!("{e}"),
+            //    },
+            //    ControlFlow::Break(_) => {
+            //        info!("terminating unit, processed {:?}", self.processed);
+            //        return Err(Terminated);
+            //    }
+            //}
         }
     }
 
@@ -263,6 +631,7 @@ impl MrtInRunner {
                                     ..
                                 }),
                         } => {
+                            /*
                             if new_filename != self.config.filename {
                                 info!("Reloading mrt-in, processing new file {}", &new_filename.to_string_lossy());
                                 if let Err(e) = self
@@ -278,6 +647,7 @@ impl MrtInRunner {
                                 }
                                 //self.config.file
                             }
+                            */
                         }
                         GateStatus::Reconfiguring { .. } => {
                             // reconfiguring for other unit types, ignore

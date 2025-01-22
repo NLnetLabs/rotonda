@@ -31,6 +31,19 @@ impl Register {
         }
     }
 
+    pub fn overview(&self) -> String {
+        let lock = self.info.read().unwrap();
+        let mut res = String::new();
+        for (id, info) in lock.iter() {
+            res.push_str(&format!(
+                "{id:02} {}\t\t{}\n",
+                info.remote_asn.map(|a|a.to_string()).unwrap_or("".to_string()),
+                info.remote_addr.map(|a|a.to_string()).unwrap_or("".to_string()),
+            ));
+        }
+        res
+    }
+
     /// Request a new, unique [`IngressId`]
     pub(crate) fn register(&self) -> IngressId {
         self.serial.fetch_add(1, Ordering::Relaxed)
@@ -85,6 +98,35 @@ impl Register {
             }
         }
         res
+    }
+
+    // find_existing methods:
+    // cases to cover:
+    //  * match MRT update messages (to ingresses from bdumps):
+    //    * from bdump, we have:
+    //      * filename, remote addr, remote_asn
+    //
+    //  * match reconnecting BMP session:
+    //      * previous BMP session had ingress_id + remote_addr
+    //      * child BGP sessions had their own ingress_id + parent_id + remote
+    //      addr + remote asn
+    //  * match BGP flap:
+    //     * previous had ingress_id + fake name + remote addr + remote asn
+    //
+    //
+    //  do we need to register the unit name (e.g. bmp-in, mrt-in) as well?
+
+    /// Search existing [`IngressId`] only comparing remote addr and asn
+    pub fn find_existing(&self, query: IngressInfo) -> Option<(IngressId, IngressInfo)> {
+        let lock = self.info.read().unwrap();
+        for (id, info) in lock.iter() {
+            if info.remote_addr.is_some() && info.remote_asn.is_some()
+                && info.remote_asn == query.remote_asn
+                && info.remote_addr == query.remote_addr {
+                    return Some((*id, info.clone()))
+            }
+        }
+        None
     }
 }
 

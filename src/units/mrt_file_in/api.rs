@@ -16,16 +16,19 @@ use crate::http::{
 
 pub struct Processor {
     http_api_path: Arc<String>,
+    update_path: Option<PathBuf>,
     queue_tx: Sender<super::unit::QueueEntry>,
 }
 
 impl Processor {
     pub fn new(
         http_api_path: Arc<String>,
+    update_path: Option<PathBuf>,
         queue_tx: Sender<super::unit::QueueEntry>,
     ) -> Self {
         Self {
             http_api_path,
+            update_path,
             queue_tx,
         }
     }
@@ -57,6 +60,27 @@ impl ProcessRequest for Processor {
 }
 impl Processor {
     async fn queue(&self, request: &Request<Body>) -> Option<Response<Body>> {
+
+        let update_dir = if let Some(ref path) = self.update_path {
+            match Path::new(path).canonicalize() {
+                Ok(path) => path,
+                Err(e) => {
+                    return Some(err(format!(
+                                "configured mrt-file-in update_path {} \
+                            invalid: {}",
+                            path.to_string_lossy(),
+                            e
+                    )))
+                }
+            }
+        } else {
+            return Some(
+                err("queueing updates requires 'update_path' in the \
+                    configuration of this mrt-file-in unit")
+            )
+        };
+
+
         let params = extract_params(request);
         let filename = match get_param(&params, "file") {
             Some(MatchedParam::Exact(file)) => file,
@@ -72,7 +96,6 @@ impl Processor {
             return Some(err("not relative"));
         }
 
-        let update_dir = Path::new("test-data/").canonicalize().unwrap(); // TODO make conigurable
         let mut full_path: PathBuf = update_dir.clone();
         
         full_path.push(filename);
@@ -85,12 +108,18 @@ impl Processor {
             }
             Err(e) => {
                 return Some(
-                    err(format!("file does not exist or path invalid: {}", e))
+                    err(format!("file {} does not exist or path invalid: {}",
+                            full_path.to_string_lossy(),
+                            e
+                    ))
                 );
             }
         };
         if !full_path.ancestors().any(|a| a == update_dir) {
-            return Some(err("file not under configured directory"));
+            return Some(err(format!(
+                        "file not under configured directory {}",
+                        update_dir.to_string_lossy()
+            )));
         }
 
 

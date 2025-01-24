@@ -40,11 +40,12 @@ use super::api;
 #[derive(Clone, Debug, Deserialize)]
 pub struct MrtFileIn {
     pub filename: OneOrManyPaths,
+    pub update_path: Option<PathBuf>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)]
-enum OneOrManyPaths {
+pub enum OneOrManyPaths {
     One(PathBuf),
     Many(Vec<PathBuf>),
 }
@@ -110,6 +111,7 @@ impl MrtFileIn {
         let api_processor = Arc::new(
             api::Processor::new(
                 endpoint_path.clone(),
+                self.update_path.clone(),
                 queue_tx.clone(),
                 )
             );

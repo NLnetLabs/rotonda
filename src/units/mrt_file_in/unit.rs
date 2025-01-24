@@ -76,8 +76,6 @@ pub struct MrtInRunner {
     config: MrtFileIn,
     gate: Gate,
     ingresses: Arc<ingress::Register>,
-    // TODO register an HTTP endpoint using this sender to queue additional
-    // files to process
     queue_tx: mpsc::Sender<QueueEntry>,
     processing: Option<PathBuf>,
     processed: Vec<(PathBuf, String)>,
@@ -211,14 +209,19 @@ impl MrtInRunner {
                         .with_remote_asn(msg.peer_asn())
                     )
                 {
-                    //eprintln!("got ingressinfo: {_info:?}");
                     id
                 } else {
-                    warn!("no ingress info found");
-                    // TODO register based on msg
-                    0
-
+                    let new_id = ingresses.register();
+                    ingresses.update_info(
+                        new_id,
+                        IngressInfo::new()
+                            .with_remote_addr(msg.peer_addr())
+                            .with_remote_asn(msg.peer_asn())
+                    );
+                    warn!("no ingress info found, regged {new_id}");
+                    new_id
                 };
+
                 let provenance = Provenance::for_bgp(
                     ingress_id,
                     msg.peer_addr(),

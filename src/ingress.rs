@@ -133,13 +133,6 @@ impl Register {
         }
         None
     }
-                && info.remote_asn == query.remote_asn
-                && info.remote_addr == query.remote_addr {
-                    return Some((*id, info.clone()))
-            }
-        }
-        None
-    }
 }
 
 /// Information pertaining to an [`IngressId`]

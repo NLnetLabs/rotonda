@@ -397,6 +397,7 @@ impl MrtInRunner {
         let mut withdrawals_sent = 0;
 
         //eprintln!("pre .messages iter, ingress register:\n{}", ingresses.overview());
+        let mut messages_processed = 0;
         for msg in mrt_file.messages() {
             match msg {
                 Bgp4Mp::StateChange(sc) => {
@@ -415,6 +416,7 @@ impl MrtInRunner {
                     let (reach, unreach) = MrtInRunner::process_message(&gate, &ingresses, msg).await?;
                     announcements_sent += reach;
                     withdrawals_sent += unreach;
+                    messages_processed += 1;
                     /*
                     let received = std::time::Instant::now();
                     let bgp_msg = match message_as4.bgp_msg() {
@@ -499,6 +501,12 @@ impl MrtInRunner {
                     
                 */
                 }
+            }
+
+            // Allow other async tasks to have a go by introducing an
+            // `await` every N entries:
+            if messages_processed % 100_000 == 0 {
+                tokio::time::sleep(std::time::Duration::from_micros(1)).await;
             }
         }
 

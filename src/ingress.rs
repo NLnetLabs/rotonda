@@ -116,11 +116,23 @@ impl Register {
     //
     //  do we need to register the unit name (e.g. bmp-in, mrt-in) as well?
 
-    /// Search existing [`IngressId`] only comparing remote addr and asn
-    pub fn find_existing(&self, query: IngressInfo) -> Option<(IngressId, IngressInfo)> {
+    /// Search existing [`IngressId`] comparing parent, remote addr and asn
+    pub fn find_existing(&self, query: &IngressInfo) -> Option<(IngressId, IngressInfo)> {
         let lock = self.info.read().unwrap();
         for (id, info) in lock.iter() {
-            if info.remote_addr.is_some() && info.remote_asn.is_some()
+            if info.parent_ingress.is_some()
+                && info.remote_addr.is_some()
+                && info.remote_asn.is_some()
+
+                && info.parent_ingress == query.parent_ingress
+                && info.remote_asn == query.remote_asn
+                && info.remote_addr == query.remote_addr
+            {
+                    return Some((*id, info.clone()))
+            }
+        }
+        None
+    }
                 && info.remote_asn == query.remote_asn
                 && info.remote_addr == query.remote_addr {
                     return Some((*id, info.clone()))
@@ -141,6 +153,7 @@ impl Register {
 #[serde_with::skip_serializing_none]
 #[derive(serde::Serialize)]
 pub struct IngressInfo {
+    pub unit_name: Option<String>,
     // changed to IpAddr because one of the BMP/BGP connectors did not have
     // SocketAddr for us available. Ideally we change this back to SocketAddr
     // though. remote_addr: Option<SocketAddr>,
@@ -156,6 +169,10 @@ pub struct IngressInfo {
 impl IngressInfo {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_unit_name(self, unit_name: impl Into<String>) -> Self {
+        Self { unit_name: Some(unit_name.into()), ..self }
     }
 
     pub fn with_parent(self, parent: IngressId) -> Self {
@@ -174,12 +191,12 @@ impl IngressInfo {
         Self { filename: Some(path), ..self }
     }
 
-    pub fn with_name(self, name: String) -> Self {
-        Self { name: Some(name), ..self }
+    pub fn with_name(self, name: impl Into<String>) -> Self {
+        Self { name: Some(name.into()), ..self }
     }
 
-    pub fn with_desc(self, desc: String) -> Self {
-        Self { desc: Some(desc), ..self }
+    pub fn with_desc(self, desc: impl Into<String>) -> Self {
+        Self { desc: Some(desc.into()), ..self }
     }
 }
 

@@ -76,6 +76,7 @@ pub struct MrtInRunner {
     config: MrtFileIn,
     gate: Gate,
     ingresses: Arc<ingress::Register>,
+    parent_id: IngressId,
     queue_tx: mpsc::Sender<QueueEntry>,
     processing: Option<PathBuf>,
     processed: Vec<(PathBuf, String)>,
@@ -100,7 +101,16 @@ impl MrtFileIn {
 
         let (queue_tx, queue_rx) = mpsc::channel::<QueueEntry>(1024);
 
+
         let ingresses = component.ingresses().clone();
+        let parent_id = ingresses.register();
+        let _ = ingresses.update_info(parent_id,
+            IngressInfo::new()
+                .with_unit_name(component.name().as_ref())
+                .with_desc("mrt-file-in unit")
+        );
+
+
         for f in self.filename.iter() {
             let _ = queue_tx.send((f, None)).await;
         }
@@ -119,7 +129,8 @@ impl MrtFileIn {
             &endpoint_path,
         );
 
-        MrtInRunner::new(self, gate, ingresses, queue_tx).run(queue_rx).await
+
+        MrtInRunner::new(self, gate, ingresses, parent_id, queue_tx).run(queue_rx).await
     }
 }
 
@@ -128,12 +139,14 @@ impl MrtInRunner {
         mrtin: MrtFileIn,
         gate: Gate,
         ingresses: Arc<ingress::Register>,
+        parent_id: IngressId,
         queue_tx: mpsc::Sender<QueueEntry>,
     ) -> Self {
         Self {
             gate,
             config: mrtin,
             ingresses,
+            parent_id,
             queue_tx,
             processing: None,
             processed: vec![],
@@ -153,7 +166,7 @@ impl MrtInRunner {
             }
             (State::Established, State::Idle) => {
                 if let Some((ingress_id, _info)) = ingresses.find_existing(
-                    IngressInfo::new()
+                    &IngressInfo::new()
                     .with_remote_addr(sc.peer_addr())
                     .with_remote_asn(sc.peer_asn())
                 ) {
@@ -180,6 +193,7 @@ impl MrtInRunner {
     async fn process_message(
         gate: &Gate,
         ingresses: &Arc<ingress::Register>,
+        parent_id: IngressId,
         msg: routecore::mrt::MessageAs4<'_, &[u8]>,
     ) -> Result<(usize, usize), MrtError> {
         let bgp_msg = match msg.bgp_msg() {
@@ -202,21 +216,21 @@ impl MrtInRunner {
                 announcements_sent += rr_reach.len();
                 withdrawals_sent += rr_unreach.len();
 
-                let ingress_id = if let Some((id, _info)) =
-                    ingresses.find_existing(
-                        IngressInfo::new()
+                let ingress_query = IngressInfo::new()
+                        .with_parent(parent_id)
                         .with_remote_addr(msg.peer_addr())
                         .with_remote_asn(msg.peer_asn())
-                    )
+                ;
+
+                let ingress_id = if let Some((id, _info)) =
+                    ingresses.find_existing(&ingress_query)
                 {
                     id
                 } else {
                     let new_id = ingresses.register();
                     ingresses.update_info(
                         new_id,
-                        IngressInfo::new()
-                            .with_remote_addr(msg.peer_addr())
-                            .with_remote_asn(msg.peer_asn())
+                        ingress_query
                     );
                     warn!("no ingress info found, regged {new_id}");
                     new_id
@@ -279,6 +293,7 @@ impl MrtInRunner {
     async fn process_file(
         gate: Gate,
         ingresses: Arc<ingress::Register>,
+        parent_id: IngressId,
         filename: PathBuf,
     ) -> Result<(), MrtError> {
         info!("processing {} on thread {:?}",
@@ -337,6 +352,7 @@ impl MrtInRunner {
                 ingresses.update_info(
                     id,
                     IngressInfo::new()
+                        .with_parent(parent_id)
                         .with_remote_addr(peer_entry.addr)
                         .with_remote_asn(peer_entry.asn)
                         .with_filename(filename.clone()),
@@ -413,13 +429,13 @@ impl MrtInRunner {
                     MrtInRunner::process_state_change(&gate, &ingresses, sc).await;
                 }
                 Bgp4Mp::Message(msg) => {
-                    let (reach, unreach) = MrtInRunner::process_message(&gate, &ingresses, msg.into()).await?; 
+                    let (reach, unreach) = MrtInRunner::process_message(&gate, &ingresses, parent_id, msg.into()).await?; 
                     announcements_sent += reach;
                     withdrawals_sent += unreach;
                     
                 }
                 Bgp4Mp::MessageAs4(msg) => {
-                    let (reach, unreach) = MrtInRunner::process_message(&gate, &ingresses, msg).await?;
+                    let (reach, unreach) = MrtInRunner::process_message(&gate, &ingresses, parent_id, msg).await?;
                     announcements_sent += reach;
                     withdrawals_sent += unreach;
                     messages_processed += 1;
@@ -479,6 +495,7 @@ impl MrtInRunner {
                 let r = Self::process_file(
                     gate,
                     ingresses,
+                    self.parent_id,
                     p.clone()
                 ).await.map(|_| p).inspect_err(|e| error!("process_file failed: {e}"));
                 if let Err(e) = results_tx.send(r) {

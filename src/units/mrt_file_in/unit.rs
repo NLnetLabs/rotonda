@@ -147,7 +147,7 @@ impl MrtInRunner {
                 }
             }
             (_,_) => {
-                warn!("unhandled State Change: {} -> {}",
+                debug!("State Change: {} -> {} in MRT, not doing anything",
                     sc.old_state(), sc.new_state()
                 )
             }
@@ -233,16 +233,16 @@ impl MrtInRunner {
                 gate.update_data(update).await;
             }
             BgpMsg::Open(_open_message) => {
-                dbg!("TODO handle(?) open_message guess there is one in the legacy asn16 messages");
+                warn!("BGP OPEN in MRT, skipping");
             }
             BgpMsg::Notification(_notification_message) =>{
-                dbg!("TODO handle(?) notification_message guess there is one in the legacy asn16 messages");
+                debug!("BGP NOTIFICATION in MRT, skipping");
             }
             BgpMsg::Keepalive(_keepalive_message) => {
-                dbg!("TODO handle(?) keepalive_message guess there is one in the legacy asn16 messages");
+                debug!("BGP KEEPALIVE in MRT, skipping");
             }
-            BgpMsg::RouteRefresh(route_refresh_message) => {
-                dbg!("TODO handle(?) route_refresh_message guess there is one in the legacy asn16 messages");
+            BgpMsg::RouteRefresh(_route_refresh_message) => {
+                debug!("BGP ROUTEREFRESH in MRT, skipping");
             }
         }
         Ok((announcements_sent, withdrawals_sent))
@@ -280,7 +280,10 @@ impl MrtInRunner {
             Some("bz2") => {
                 let mut bz2 = BzDecoder::new(&mmap[..]);
                 bz2.read_to_end(&mut buf)
-                    .map_err(|_e| MrtError::other("bz2 decoding failed"))?;
+                    .map_err(|e| {
+                        error!("bz2 error: {e}");
+                        MrtError::other("bz2 decoding failed")
+                    })?;
                 info!("decompressed {} in {}ms",
                     &filename.to_string_lossy(),
                     t0.elapsed().as_millis());
@@ -355,8 +358,9 @@ impl MrtInRunner {
 
                 gate.update_data(update).await;
                 
-                if routes_sent % 1_000_000 == 0 {
-                    //eprintln!("gonna sleep {routes_sent}");
+                // Allow other async tasks to have a go by introducing an
+                // `await` every N entries:
+                if routes_sent % 100_000 == 0 {
                     tokio::time::sleep(std::time::Duration::from_micros(1)).await;
                 }
                 routes_sent += 1;
@@ -523,8 +527,10 @@ impl MrtInRunner {
                     gate,
                     ingresses,
                     p.clone()
-                ).await.map(|_| p);
-                let _ = results_tx.send(r);
+                ).await.map(|_| p).inspect_err(|e| error!("process_file failed: {e}"));
+                if let Err(e) = results_tx.send(r) {
+                    error!("failed to send result of file {e}")
+                }
             };
         });
 

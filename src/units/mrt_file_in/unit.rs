@@ -35,6 +35,8 @@ use crate::manager::{Component, WaitPoint};
 use crate::payload::{Payload, RotondaPaMap, RotondaRoute, Update};
 use crate::units::{Gate, Unit};
 
+use super::api;
+
 #[derive(Clone, Debug, Deserialize)]
 pub struct MrtFileIn {
     pub filename: OneOrManyPaths,
@@ -83,21 +85,34 @@ pub struct MrtInRunner {
 impl MrtFileIn {
     pub async fn run(
         self,
-        component: Component,
+        mut component: Component,
         gate: Gate,
         mut waitpoint: WaitPoint,
     ) -> Result<(), crate::comms::Terminated> {
         gate.process_until(waitpoint.ready()).await?;
         waitpoint.running().await;
 
-        let (tx, rx) = mpsc::channel(1024);
+        let (queue_tx, queue_rx) = mpsc::channel(1024);
 
         let ingresses = component.ingresses().clone();
         for f in self.filename.iter() {
-            let _ = tx.send(f).await;
+            let _ = queue_tx.send(f).await;
         }
 
-        MrtInRunner::new(self, gate, ingresses, tx).run(rx).await
+        let endpoint_path = Arc::new(format!("/mrt/{}/", component.name()));
+        let api_processor = Arc::new(
+            api::Processor::new(
+                endpoint_path.clone(),
+                queue_tx.clone(),
+                )
+            );
+
+        component.register_http_resource(
+            api_processor.clone(),
+            &endpoint_path,
+        );
+
+        MrtInRunner::new(self, gate, ingresses, queue_tx).run(queue_rx).await
     }
 }
 
@@ -374,7 +389,7 @@ impl MrtInRunner {
         let mut announcements_sent = 0;
         let mut withdrawals_sent = 0;
 
-        eprintln!("pre .messages iter, ingress register:\n{}", ingresses.overview());
+        //eprintln!("pre .messages iter, ingress register:\n{}", ingresses.overview());
         for msg in mrt_file.messages() {
             match msg {
                 Bgp4Mp::StateChange(sc) => {

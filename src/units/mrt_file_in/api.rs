@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use hyper::{Body, Method, Request, Response};
 use log::debug;
 use tokio::sync::mpsc::Sender;
+use tokio::sync::oneshot;
 
 use crate::http::{
     extract_params, get_param, MatchedParam, PercentDecodedPath, ProcessRequest, QueryParams
@@ -13,13 +14,13 @@ use crate::http::{
 
 pub struct Processor {
     http_api_path: Arc<String>,
-    queue_tx: Sender<PathBuf>,
+    queue_tx: Sender<super::unit::QueueEntry>,
 }
 
 impl Processor {
     pub fn new(
         http_api_path: Arc<String>,
-        queue_tx: Sender<PathBuf>,
+        queue_tx: Sender<super::unit::QueueEntry>,
     ) -> Self {
         Self {
             http_api_path,
@@ -92,14 +93,27 @@ impl Processor {
             return Some(err("file not under configured directory"));
         }
 
-        debug!("queueing {}", &full_path.to_string_lossy());
-        let _ = self.queue_tx.send(full_path.clone()).await;
 
-        Some(Response::builder()
-            .status(hyper::StatusCode::OK)
-            .header("Content-Type", "text/plain")
-            .body(format!("queued {} for processing", full_path.to_string_lossy()).into())
-            .unwrap())
+        let (tx, rx) = oneshot::channel::<Result<String, String>>();
+
+        debug!("queueing {}", &full_path.to_string_lossy());
+        let _ = self.queue_tx.send((
+                full_path.clone(),
+                Some(tx)
+        )).await;
+
+        match rx.await {
+            Ok(Ok(m)) => {
+                Some(Response::builder()
+                    .status(hyper::StatusCode::OK)
+                    .header("Content-Type", "text/plain")
+                    //.body(format!("queued {} for processing", full_path.to_string_lossy()).into())
+                    .body(format!("processed {}: {m}", full_path.to_string_lossy()).into())
+                    .unwrap())
+            }
+            Ok(Err(e)) => Some(err(e)),
+            Err(e) => Some(err(e.to_string())),
+        }
     }
 }
 

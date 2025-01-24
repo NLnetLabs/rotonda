@@ -24,7 +24,7 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use smallvec::SmallVec;
 use tokio::pin;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinSet;
 
 use crate::roto_runtime::types::{explode_announcements, explode_withdrawals, FreshRouteContext, MrtContext, Provenance, RouteContext};
@@ -77,10 +77,17 @@ pub struct MrtInRunner {
     ingresses: Arc<ingress::Register>,
     // TODO register an HTTP endpoint using this sender to queue additional
     // files to process
-    queue_tx: mpsc::Sender<PathBuf>,
+    queue_tx: mpsc::Sender<QueueEntry>,
     processing: Option<PathBuf>,
     processed: Vec<(PathBuf, String)>,
 }
+
+pub type QueueEntry = (
+    // the file to be queued
+    PathBuf,
+    // optional response to the enqueuer
+    Option<oneshot::Sender<Result<String, String>>> 
+);
 
 impl MrtFileIn {
     pub async fn run(
@@ -92,11 +99,11 @@ impl MrtFileIn {
         gate.process_until(waitpoint.ready()).await?;
         waitpoint.running().await;
 
-        let (queue_tx, queue_rx) = mpsc::channel(1024);
+        let (queue_tx, queue_rx) = mpsc::channel::<QueueEntry>(1024);
 
         let ingresses = component.ingresses().clone();
         for f in self.filename.iter() {
-            let _ = queue_tx.send(f).await;
+            let _ = queue_tx.send((f, None)).await;
         }
 
         let endpoint_path = Arc::new(format!("/mrt/{}/", component.name()));
@@ -121,7 +128,7 @@ impl MrtInRunner {
         mrtin: MrtFileIn,
         gate: Gate,
         ingresses: Arc<ingress::Register>,
-        queue_tx: mpsc::Sender<PathBuf>,
+        queue_tx: mpsc::Sender<QueueEntry>,
     ) -> Self {
         Self {
             gate,
@@ -510,7 +517,7 @@ impl MrtInRunner {
 
     async fn run(
         mut self,
-        mut queue: mpsc::Receiver<PathBuf>,
+        mut queue: mpsc::Receiver<QueueEntry>,
     ) -> Result<(), Terminated> {
 
         let gate = self.gate.clone();
@@ -519,7 +526,7 @@ impl MrtInRunner {
         //let (handles_tx, mut handles_rx) = mpsc::unbounded_channel();
 
         tokio::spawn(async move {
-            while let Some(p) = queue.recv().await {
+            while let Some((p, enqueuer_tx)) = queue.recv().await {
                 let gate = gate.clone();
                 let ingresses = ingresses.clone();
                 let results_tx = results_tx.clone();
@@ -545,6 +552,9 @@ impl MrtInRunner {
                 ).await.map(|_| p).inspect_err(|e| error!("process_file failed: {e}"));
                 if let Err(e) = results_tx.send(r) {
                     error!("failed to send result of file {e}")
+                }
+                if let Some(tx) = enqueuer_tx {
+                    let _ = tx.send(Ok("OK!".into()));
                 }
             };
         });

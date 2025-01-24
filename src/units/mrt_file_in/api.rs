@@ -39,7 +39,6 @@ impl ProcessRequest for Processor {
         request: &Request<Body>,
     ) -> Option<Response<Body>> {
         let req_path = request.uri().decoded_path();
-        dbg!(request);
         if request.method() != Method::GET {
             return None;
         }
@@ -59,7 +58,6 @@ impl ProcessRequest for Processor {
 impl Processor {
     async fn queue(&self, request: &Request<Body>) -> Option<Response<Body>> {
         let params = extract_params(request);
-        dbg!(&params);
         let filename = match get_param(&params, "file") {
             Some(MatchedParam::Exact(file)) => file,
             Some(MatchedParam::Family(..)) |

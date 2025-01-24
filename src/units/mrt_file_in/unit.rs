@@ -213,6 +213,7 @@ impl MrtInRunner {
                     id
                 } else {
                     warn!("no ingress info found");
+                    // TODO register based on msg
                     0
 
                 };
@@ -417,89 +418,6 @@ impl MrtInRunner {
                     announcements_sent += reach;
                     withdrawals_sent += unreach;
                     messages_processed += 1;
-                    /*
-                    let received = std::time::Instant::now();
-                    let bgp_msg = match message_as4.bgp_msg() {
-                        Ok(msg) => msg,
-                        Err(e) => {
-                            error!("{e}");
-                            continue;
-                        }
-                    };
-                    match bgp_msg {
-                        BgpMsg::Update(upd) => {
-                            let mut payloads = SmallVec::new();
-                            let rr_reach = explode_announcements(&upd)?;
-                            let rr_unreach = explode_withdrawals(&upd)?;
-
-                            announcements_sent += rr_reach.len();
-                            withdrawals_sent += rr_unreach.len();
-
-                            let ingress_id = if let Some((id, _info)) =
-                                ingresses.find_existing(
-                                    IngressInfo::new()
-                                    .with_remote_addr(message_as4.peer_addr())
-                                    .with_remote_asn(message_as4.peer_asn())
-                                    )
-                            {
-                                //eprintln!("got ingressinfo: {_info:?}");
-                                id
-                            } else {
-                                warn!("no ingress info found");
-                                0
-
-                            };
-                            let provenance = Provenance::for_bgp(
-                                ingress_id,
-                                message_as4.peer_addr(),
-                                message_as4.peer_asn(),
-                            );
-                                
-                            // or do we need a RouteContext::Fresh here?
-                            let context = MrtContext {
-                                status: RouteStatus::Active,
-                                provenance
-                            };
-
-                            payloads.extend(
-                                rr_reach.into_iter().map(|rr|
-                                    Payload::with_received(
-                                        rr,
-                                        RouteContext::Mrt(context.clone()),
-                                        None,
-                                        received,
-                                    )
-                            ));
-
-                            let context = MrtContext {
-                                status: RouteStatus::Withdrawn,
-                                ..context
-                            };
-
-                            payloads.extend(rr_unreach.into_iter().map(|rr|
-                                Payload::with_received(
-                                    rr,
-                                    RouteContext::Mrt(context.clone()),
-                                    None,
-                                    received
-                                )
-                            ));
-                            let update = payloads.into();
-                            gate.update_data(update).await;
-                        }
-                        BgpMsg::Open(open_message) => todo!(),
-                        BgpMsg::Notification(notification_message) => todo!(),
-                        BgpMsg::Keepalive(_keepalive_message) => {
-                            // nothing to do
-                        }
-                        BgpMsg::RouteRefresh(route_refresh_message) => todo!(),
-                    }
-
-
-                    //let update = Update::Single(Payload::new(..));
-                    //gate.update_data(update).await;
-                    
-                */
                 }
             }
 
@@ -604,53 +522,6 @@ impl MrtInRunner {
                     return Err(Terminated);
                 }
             }
-
-            //let until_fut = queue.recv().then(|o| async {
-            //    o.ok_or(std::io::Error::other("MRT queue closed"))
-            //});
-
-            //match self.process_until(until_fut).await {
-            //    ControlFlow::Continue(c) => match c {
-            //        Ok(ref filename) => {
-            //            self.processing = Some(filename.clone());
-            //            let gate = self.gate.clone();
-            //            let ingresses = self.ingresses.clone();
-            //            let r = self
-            //                .process_until(
-            //                    Self::process_file(
-            //                        gate,
-            //                        ingresses,
-            //                        filename.clone(),
-            //                    )
-            //                    .map_err(Into::into),
-            //                )
-            //                .await;
-            //            match r {
-            //                ControlFlow::Continue(Ok(..)) => {
-            //                    if let Some(filename) = self.processing.take()
-            //                    {
-            //                        self.processed.push(filename)
-            //                    }
-            //                }
-            //                ControlFlow::Continue(Err(e)) => {
-            //                    error!(
-            //                        "failed to process {}: {e}",
-            //                        filename.to_string_lossy()
-            //                    );
-            //                }
-            //                ControlFlow::Break(_terminated) => {
-            //                    debug!("mrt-in got Terminated");
-            //                    return Err(Terminated);
-            //                }
-            //            }
-            //        }
-            //        Err(e) => error!("{e}"),
-            //    },
-            //    ControlFlow::Break(_) => {
-            //        info!("terminating unit, processed {:?}", self.processed);
-            //        return Err(Terminated);
-            //    }
-            //}
         }
     }
 

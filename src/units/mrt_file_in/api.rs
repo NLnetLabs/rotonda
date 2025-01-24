@@ -1,4 +1,5 @@
 use std::path::Path;
+use std::time::Duration;
 use std::{ops::Deref, path::PathBuf};
 use std::sync::Arc;
 
@@ -7,6 +8,7 @@ use hyper::{Body, Method, Request, Response};
 use log::debug;
 use tokio::sync::mpsc::Sender;
 use tokio::sync::oneshot;
+use tokio::time::timeout;
 
 use crate::http::{
     extract_params, get_param, MatchedParam, PercentDecodedPath, ProcessRequest, QueryParams
@@ -102,12 +104,27 @@ impl Processor {
                 Some(tx)
         )).await;
 
-        match rx.await {
+        let processing_res = match timeout(Duration::from_secs(5), rx).await {
+            Err(_) => {
+                //nothing wrong per se, processing still ongoing:
+                return Some(Response::builder()
+                    .status(hyper::StatusCode::OK)
+                    .header("Content-Type", "text/plain")
+                    .body(format!(
+                            "queued {} for processing",
+                            full_path.to_string_lossy()
+                    ).into())
+                    .unwrap()
+                )
+            }
+            Ok(processing_res) => processing_res,
+        };
+
+        match processing_res {
             Ok(Ok(m)) => {
                 Some(Response::builder()
                     .status(hyper::StatusCode::OK)
                     .header("Content-Type", "text/plain")
-                    //.body(format!("queued {} for processing", full_path.to_string_lossy()).into())
                     .body(format!("processed {}: {m}", full_path.to_string_lossy()).into())
                     .unwrap())
             }

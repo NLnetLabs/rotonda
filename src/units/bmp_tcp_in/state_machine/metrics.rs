@@ -131,7 +131,6 @@ impl BmpStateMachineMetrics {
 pub struct RouterBmpMetrics {
     pub bmp_state_machine_state: Arc<AtomicBmpStateIdx>,
     pub num_received_prefixes: Arc<AtomicUsize>,
-    pub num_stored_prefixes: Arc<AtomicUsize>,
     pub num_bmp_route_monitoring_msgs_with_unknown_peer: Arc<AtomicUsize>,
     pub num_bgp_updates_reparsed_due_to_incorrect_header_flags:
         Arc<AtomicUsize>,
@@ -160,12 +159,6 @@ impl BmpStateMachineMetrics {
     const NUM_RECEIVED_PREFIXES_METRIC: Metric = Metric::new(
         "bmp_state_num_received_prefixes",
         "the number of prefixes received from this router",
-        MetricType::Gauge,
-        MetricUnit::Total,
-    );
-    const NUM_STORED_PREFIXES_METRIC: Metric = Metric::new(
-        "bmp_state_num_stored_prefixes",
-        "the number of prefixes stored for this router",
         MetricType::Gauge,
         MetricUnit::Total,
     );
@@ -248,13 +241,6 @@ impl metrics::Source for BmpStateMachineMetrics {
                 router_id,
                 Self::NUM_RECEIVED_PREFIXES_METRIC,
                 metrics.num_received_prefixes.load(SeqCst),
-            );
-            append_per_router_metric(
-                unit_name,
-                target,
-                router_id,
-                Self::NUM_STORED_PREFIXES_METRIC,
-                metrics.num_stored_prefixes.load(SeqCst),
             );
             append_per_router_metric(
                 unit_name,

@@ -140,6 +140,7 @@ impl RibUnitStatusReporter {
 
             StoreInsertionEffect::RouteAdded => {
                 self.metrics.num_routes_announced.fetch_add(1, SeqCst);
+                self.metrics.num_unique_prefixes.fetch_add(1, SeqCst);
                 self.metrics.num_items.fetch_add(1, SeqCst);
             }
 

@@ -782,13 +782,6 @@ where
                             }
                         }
 
-                        update_report_msg.set_n_stored_prefixes(
-                            saved_self
-                                .details
-                                .get_announced_prefixes(&pph)
-                                .map(|ap| ap.len())
-                                .unwrap_or(0),
-                        );
                         saved_self
                             .status_reporter
                             .routing_update(update_report_msg);
@@ -909,6 +902,14 @@ where
             })
         );
         */
+
+        if rr_reach.len() > 0 {
+            update_report_msg.inc_valid_announcements();
+            update_report_msg.n_new_prefixes = rr_reach.len();
+        }
+        if rr_unreach.len() > 0 {
+            update_report_msg.inc_valid_withdrawals();
+        }
 
         payloads.extend(
             //rws.into_iter().map(|rws| mk_payload(rws, received, context.clone()))

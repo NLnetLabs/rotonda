@@ -129,9 +129,6 @@ impl BmpStateMachineStatusReporter {
             .num_received_prefixes
             .fetch_add(update_report_msg.n_new_prefixes, SeqCst);
         metrics
-            .num_stored_prefixes
-            .store(update_report_msg.n_stored_prefixes, SeqCst);
-        metrics
             .num_announcements
             .fetch_add(update_report_msg.n_valid_announcements, SeqCst);
         metrics

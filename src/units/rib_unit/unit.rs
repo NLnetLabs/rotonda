@@ -18,7 +18,7 @@ use hash_hasher::{HashBuildHasher, HashedSet};
 use log::{debug, error, info, log_enabled, trace, warn};
 use non_empty_vec::NonEmpty;
 use rotonda_store::{
-    custom_alloc::UpsertReport, prelude::multi::PrefixStoreError,
+    custom_alloc::UpsertReport, prelude::multi::{PrefixStoreError, RouteStatus},
     QueryResult, RecordSet,
 };
 
@@ -423,8 +423,8 @@ impl RibUnitRunner {
             _process_metrics,
             rib_merge_update_stats,
             tracer,
-            roto_function_pre: todo!(),
-            roto_function_post: todo!(),
+            roto_function_pre: None,
+            roto_function_post: None,
         };
 
         (runner, gate_agent)
@@ -1077,6 +1077,16 @@ where
                     report.cas_count.try_into().unwrap_or(u32::MAX),
                     change,
                 );
+                if route_status == RouteStatus::Withdrawn {
+                    self.status_reporter.insert_ok(
+                    provenance.ingress_id,
+                    store_op_delay,
+                    propagation_delay,
+                    //num_retries,
+                    report.cas_count.try_into().unwrap_or(u32::MAX),
+                    StoreInsertionEffect::RoutesWithdrawn(1)
+                    );
+                }
 
                 // XXX re-introduce sometime later
                 //if let Some(ref roto_function) = self.roto_function_post {

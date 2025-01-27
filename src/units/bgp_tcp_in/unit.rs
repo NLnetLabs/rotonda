@@ -235,7 +235,7 @@ impl BgpTcpInRunner {
             status_reporter: Default::default(),
             live_sessions: Arc::new(Mutex::new(HashMap::new())),
             ingresses: Arc::new(ingress::Register::default()),
-            roto_compiled: todo!(),
+            roto_compiled: None,
         };
 
         (runner, gate_agent)

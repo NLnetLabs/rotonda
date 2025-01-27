@@ -837,9 +837,6 @@ where
         _trace_id: Option<u8>,
     ) -> Result<(SmallVec<[Payload; 8]>, UpdateReportMessage), session::Error>
     {
-        // XXX do we still need to track the prefixes here, now that
-        // withdrawals are handled by the store itself?
-        //let mut nlri_set = BTreeSet::new();
         let rr_reach = explode_announcements(bgp_msg)?;
         let rr_unreach = explode_withdrawals(bgp_msg)?;
 
@@ -853,7 +850,6 @@ where
         };
 
         let mut payloads = SmallVec::new();
-        // TODO fill in  this thing
         let mut update_report_msg =
             UpdateReportMessage::new(self.router_id.clone());
 
@@ -904,12 +900,12 @@ where
         */
 
         if rr_reach.len() > 0 {
-            update_report_msg.inc_valid_announcements();
+            //update_report_msg.inc_valid_announcements();
             update_report_msg.n_new_prefixes = rr_reach.len();
         }
-        if rr_unreach.len() > 0 {
-            update_report_msg.inc_valid_withdrawals();
-        }
+        //if rr_unreach.len() > 0 {
+        //    update_report_msg.inc_valid_withdrawals();
+        //}
 
         payloads.extend(
             //rws.into_iter().map(|rws| mk_payload(rws, received, context.clone()))

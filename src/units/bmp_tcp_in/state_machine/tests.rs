@@ -80,7 +80,7 @@ fn terminate() {
     let processor = res.next_state;
     assert_metrics(
         &processor,
-        ("Terminated", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+        ("Terminated", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
     );
     //                  ^ 1 connected router
 }
@@ -116,10 +116,10 @@ fn statistics_report() {
     let processor = res.next_state;
     assert_metrics(
         &processor,
-        ("Dumping", [1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]),
+        ("Dumping", [1, 0, 0, 0, 0, 0, 1, 0, 0, 0]),
     );
     //               ^ 1 connected router
-    //                                    ^ 1 up peer
+    //                                 ^ 1 up peer
 }
 
 #[test]
@@ -157,10 +157,10 @@ fn peer_up_with_eor_capable_peer() {
     let processor = res.next_state;
     assert_metrics(
         &processor,
-        ("Dumping", [1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0]),
+        ("Dumping", [1, 0, 0, 0, 0, 0, 1, 0, 1, 0]),
     );
     //               ^ 1 connected router
-    //                                    ^ 1 up peer
+    //                                 ^ 1 up peer
     //              and the peer is EoR capable ^
 }
 
@@ -207,7 +207,7 @@ fn duplicate_peer_up() {
     let processor = res.next_state;
     assert_metrics(
         &processor,
-        ("Dumping", [1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0]),
+        ("Dumping", [1, 0, 0, 0, 1, 0, 1, 0, 0, 0]),
         //           ^ 1 connected router
         //                                   ^ 1 peer up
         //                       ^ 1 unprocessable BMP message
@@ -260,46 +260,53 @@ fn peer_up_route_monitoring_peer_down() {
     // Check the metrics
     assert_metrics(
         &processor,
-        ("Dumping", [1, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0]),
+        ("Dumping", [1, 0, 0, 0, 0, 0, 2, 0, 0, 0]),
     );
     //               ^ 1 connected router
-    //                                    ^ 2 up peers
+    //                                 ^ 2 up peers
 
     // When the state machine processes a peer down notification for a peer that announced no routes
     let res = processor.process_msg(Instant::now(), peer_down_msg_1_buf, None);
 
     // Then the state should remain unchanged
-    // And there should not be a routing update
     assert!(matches!(res.next_state, BmpState::Dumping(_)));
-    assert!(matches!(res.message_type, MessageType::Other));
+    // Because the BMP unit does not keep track of what was announced by every
+    // peer, it always sends out a withdraw-all (in forms of a RoutingUpdate)
+    // to the East.
+    assert!(matches!(res.message_type, MessageType::RoutingUpdate { .. }));
     let processor = res.next_state;
 
     // Check the metrics
     assert_metrics(
         &processor,
-        ("Dumping", [1, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0]),
+        ("Dumping", [1, 0, 0, 0, 0, 0, 1, 0, 0, 0]),
     );
-    //                                    ^ now only 1 peer up
+    //                                 ^ now only 1 peer up
 
     // When the state machine processes a couple of route announcements
     let processor = processor
-        .process_msg(Instant::now(), route_mon_msg_buf, None)
+        .process_msg(Instant::now(), route_mon_msg_buf.clone(), None)
         .next_state;
-    let res = processor.process_msg(Instant::now(), ipv6_route_mon_msg_buf, None);
+    
+    let res = processor.process_msg(Instant::now(), route_mon_msg_buf, None);
 
     // Then the state should remain unchanged
     // And the number of announced prefixes should increase by 2
     assert!(matches!(res.next_state, BmpState::Dumping(_)));
-    assert_eq!(get_announced_prefix_count(&res.next_state, &real_pph_2), 2);
+
+    // BMP itself does not store the prefixes anymore, so ignore
+    // get_announced_prefix_count:
+    //assert_eq!(get_announced_prefix_count(&res.next_state, &real_pph_2), 2);
+    
     let processor = res.next_state;
 
     // Check the metrics
     assert_metrics(
         &processor,
-        ("Dumping", [1, 2, 0, 0, 0, 2, 2, 1, 0, 0, 0]),
+        ("Dumping", [1, 2, 0, 0, 0, 2, /*2,*/ 1, 0, 0, 0]),
     );
     //                  ^ 2 routes announced
-    //                              ^ for 2 prefixes
+    //                                 /*^ for 2 prefixes*/
     //       both of which were stored ^
 
     // And when one of the routes is withdrawn
@@ -310,17 +317,18 @@ fn peer_up_route_monitoring_peer_down() {
     );
 
     // Then the state should remain unchanged
-    // And the number of announced prefixes should decrease by 1
+    // And the number of announced prefixes should decrease by 1, but this is
+    // not tracked anymore by the BMP unit.
     assert!(matches!(res.next_state, BmpState::Dumping(_)));
-    assert_eq!(get_announced_prefix_count(&res.next_state, &real_pph_2), 1);
+    //assert_eq!(get_announced_prefix_count(&res.next_state, &real_pph_2), 1);
     let processor = res.next_state;
 
     // Check the metrics
     assert_metrics(
         &processor,
-        ("Dumping", [1, 2, 0, 0, 0, 2, 1, 1, 0, 0, 1]),
+        ("Dumping", [1, 2, 0, 0, 0, 2, /*1,*/ 1, 0, 0, 1]),
     );
-    //                              one withdrawal ^
+    //                                  one withdrawal ^
     // and now only 1 prefix is stored ^
 
     // Unless it is a not-before-announced/already-withdrawn route
@@ -328,15 +336,15 @@ fn peer_up_route_monitoring_peer_down() {
 
     // Then the number of announced prefixes should remain unchanged
     assert!(matches!(res.next_state, BmpState::Dumping(_)));
-    assert_eq!(get_announced_prefix_count(&res.next_state, &real_pph_2), 1);
+    //assert_eq!(get_announced_prefix_count(&res.next_state, &real_pph_2), 1);
     let processor = res.next_state;
 
     // Check the metrics
     assert_metrics(
         &processor,
-        ("Dumping", [1, 2, 0, 0, 0, 2, 1, 1, 0, 0, 2]),
+        ("Dumping", [1, 2, 0, 0, 0, 2, /*1,*/ 1, 0, 0, 2]),
     );
-    //                          another withdrawal ^
+    //                              another withdrawal ^
 
     // And when a peer down notification for the other peer is received
     let res = processor.process_msg(Instant::now(), peer_down_msg_2_buf, None);
@@ -350,47 +358,7 @@ fn peer_up_route_monitoring_peer_down() {
         MessageType::RoutingUpdate { .. }
     ));
     if let MessageType::RoutingUpdate { update } = res.message_type {
-        assert!(matches!(update, Update::Bulk(_)));
-        todo!() // the line above will panic for now anyway
-                /*
-                if let Update::Bulk(mut bulk) = update {
-                    assert_eq!(bulk.len(), 1);
-
-                    // Verify that the update fits inline into the SmallVec without spilling on to the heap.
-                    assert!(!bulk.spilled());
-
-                    let pfx = Prefix::from_str("2001:2000:3080:e9c::2/128").unwrap();
-                    let mut expected_roto_prefixes: Vec<TypeValue> = vec![pfx.into()];
-                    for Payload {rx_value: value,..} in bulk.drain(..) {
-                        if let TypeValue::Builtin(BuiltinTypeValue::PrefixRoute(route)) =
-                            value
-                        {
-                            // let materialized_route = MaterializedRoute2::from(route);
-                            // let pa = route.0.attributes();
-                            let found_pfx = route.prefix(); //.into();
-                            //let position = expected_roto_prefixes
-                            //    .iter()
-                            //    .position(|pfx| pfx == found_pfx)
-                            //    .unwrap();
-                            expected_roto_prefixes.remove(position);
-
-                            //assert_eq!(
-                            //    route.0.status,
-                            //    NlriStatus::Withdrawn
-                            //);
-                            // If the attributes are empty, this likely is a
-                            // withdrawal.
-                            // XXX but, we will never get here because we do not send
-                            // out Update::Bulk for this anymore, but
-                            // Update::Withdraw(Bulk)
-                            assert!(route.attributes().is_empty());
-                        } else {
-                            panic!("Expected TypeValue::Builtin(BuiltinTypeValue::Route(_)");
-                        }
-                    }
-                    assert!(expected_roto_prefixes.is_empty());
-                }
-                */
+        assert!(matches!(update, Update::Withdraw(1, None)));
     } else {
         unreachable!();
     }
@@ -406,7 +374,7 @@ fn peer_up_route_monitoring_peer_down() {
     // Check the metrics
     assert_metrics(
         &processor,
-        ("Dumping", [1, 2, 0, 0, 0, 2, 0, 0, 0, 0, 2]),
+        ("Dumping", [1, 2, 0, 0, 0, 2, 0, 0, 0, 2]),
     );
     //                                    ^ all peers are down
 }
@@ -443,7 +411,7 @@ fn peer_down_without_peer_up() {
     let processor = res.next_state;
     assert_metrics(
         &processor,
-        ("Dumping", [1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0]),
+        ("Dumping", [1, 0, 0, 0, 1, 0, 0, 0, 0, 0]),
     );
     //               ^ 1 connected router
     //                           ^ 1 unprocessable BMP message
@@ -508,7 +476,7 @@ fn peer_up_different_peer_down() {
     let processor = res.next_state;
     assert_metrics(
         &processor,
-        ("Dumping", [1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0]),
+        ("Dumping", [1, 0, 0, 0, 1, 0, 1, 0, 0, 0]),
     );
     //               ^ 1 connected router
     //                                    ^ 1 up peer
@@ -788,11 +756,11 @@ fn end_of_rib_ipv4_for_a_single_peer() {
     let processor = res.next_state;
     assert_metrics(
         &processor,
-        ("Dumping", [1, 0, 0, 0, 0, 0, 0, 1, 0, 1, 0]),
+        ("Dumping", [1, 0, 0, 0, 0, 0, 1, 0, 1, 0]),
     );
     //               ^ 1 connected router
-    //                                    ^ 1 up peer
-    //              and the peer is EoR capable ^
+    //                                 ^ 1 up peer
+    //           and the peer is EoR capable ^
 
     // And when a route announcement is received
     let res = processor.process_msg(Instant::now(), route_mon_msg_buf, None);
@@ -811,11 +779,11 @@ fn end_of_rib_ipv4_for_a_single_peer() {
     let processor = res.next_state;
     assert_metrics(
         &processor,
-        ("Dumping", [1, 1, 0, 0, 0, 1, 1, 1, 1, 1, 0]),
+        ("Dumping", [1, 1, 0, 0, 0, 1, /*1,*/ 1, 1, 1, 0]),
     );
     //                  ^ 1 announcement was received
     //        1 prefix was received ^
-    //         and 1 prefix was stored ^
+    //         /*and 1 prefix was stored ^*/
     //         and one peer has pending EoRs ^
 
     // And when an EoR is received
@@ -836,7 +804,7 @@ fn end_of_rib_ipv4_for_a_single_peer() {
     let processor = res.next_state;
     assert_metrics(
         &processor,
-        ("Updating", [1, 1, 0, 0, 0, 1, 1, 1, 0, 1, 0]),
+        ("Updating", [1, 1, 0, 0, 0, 1, /*1,*/ 1, 0, 1, 0]),
     );
     //    ^ The phase changed
     //         And no peers have pending EoRs ^
@@ -869,7 +837,7 @@ fn route_monitoring_from_unknown_peer() {
     let processor = res.next_state;
     assert_metrics(
         &processor,
-        ("Dumping", [1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0]),
+        ("Dumping", [1, 0, 0, 1, 1, 0, 0, 0, 0, 0]),
     );
     //                  ^ 0 announcements because the msg was rejected!
     //                        ^ 1 BGP UPDATE was from an unknown peer
@@ -948,7 +916,7 @@ fn route_monitoring_invalid_message() {
     let processor = res.next_state;
     assert_metrics(
         &processor,
-        ("Dumping", [1, 0, 0, 0, 1, 0, 0, 1, 0, 0, 0]),
+        ("Dumping", [1, 0, 0, 0, 1, 0, 1, 0, 0, 0]),
     );
     //               ^ 1 connected router
     //                  ^ 0 announcements because the msg was rejected!
@@ -1247,7 +1215,8 @@ fn mk_test_processor() -> BmpState {
     BmpState::new(
         //SourceId::SocketAddr(addr),
         ingress_id, 
-        Arc::new("test-router".to_string()),
+        //Arc::new("test-router".to_string()),
+        Arc::new(ingress_id.to_string()),
         status_reporter,
         bmp_state_machine_metrics,
         Arc::default(),
@@ -1306,9 +1275,9 @@ fn mk_route_monitoring_msg_with_details(
 #[rustfmt::skip]
 fn query_metrics(
     metrics: &Arc<dyn crate::metrics::Source>,
-) -> (String, [usize; 11]) {
+) -> (String, [usize; 10]) {
     let metrics = get_testable_metrics_snapshot(metrics);
-    let label = ("router", "test-router");
+    let label = ("router", "1");
     (
         metrics.with_label::<String>("bmp_state_machine_state", label),
         [
@@ -1318,7 +1287,7 @@ fn query_metrics(
             metrics.with_label::<usize>("bmp_state_num_bmp_route_monitoring_msgs_with_unknown_peer", label),
             metrics.with_label::<usize>("bmp_state_num_unprocessable_bmp_messages", label),
             metrics.with_label::<usize>("bmp_state_num_received_prefixes", label),
-            metrics.with_label::<usize>("bmp_state_num_stored_prefixes", label),
+            //metrics.with_label::<usize>("bmp_state_num_stored_prefixes", label),
             metrics.with_label::<usize>("bmp_state_num_up_peers", label),
             metrics.with_label::<usize>("bmp_state_num_up_peers_with_pending_eors", label),
             metrics.with_label::<usize>("bmp_state_num_up_peers_eor_capable", label),
@@ -1327,7 +1296,7 @@ fn query_metrics(
     )
 }
 
-fn assert_metrics(processor: &BmpState, expected: (&str, [usize; 11])) {
+fn assert_metrics(processor: &BmpState, expected: (&str, [usize; 10])) {
     let metrics = processor.status_reporter().unwrap().metrics().unwrap();
     let actual = query_metrics(&metrics);
     let mut expected = (expected.0.to_string(), expected.1);

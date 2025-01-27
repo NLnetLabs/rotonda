@@ -1845,7 +1845,11 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[cfg(not(tarpaulin))]
     async fn gate_link_lifecycle_test() {
-        use crate::roto_runtime::types::RouteContext;
+        use std::str::FromStr;
+
+        use routecore::bgp::{message::PduParseInfo, nlri::afisafi::Ipv4UnicastNlri, path_attributes::OwnedPathAttributes};
+
+        use crate::{payload::{RotondaPaMap, RotondaRoute}, roto_runtime::types::RouteContext};
 
         // Lifecycle of a connected gate and link:
         //
@@ -1912,7 +1916,19 @@ mod tests {
         //     │                    Err(UnitStatus::Gone) │      None │
         //     │◀╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌│◀╌╌╌╌╌╌╌╌╌╌┘
         fn mk_test_payload() -> Payload {
-            Payload::new(18_u8, RouteContext::for_reprocessing(), None)
+            Payload::new(
+                RotondaRoute::Ipv4Unicast(
+                    Ipv4UnicastNlri::from_str("1.2.3.0/24").unwrap(),
+                    RotondaPaMap(
+                        OwnedPathAttributes::new(
+                            PduParseInfo::modern(),
+                            vec![]
+                        )
+                    )
+                ),
+                RouteContext::for_reprocessing(),
+                None
+            )
         }
 
         eprintln!("STARTING");

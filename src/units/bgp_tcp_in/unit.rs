@@ -610,6 +610,8 @@ mod tests {
         }
     };
 
+    use super::RotoFunc;
+
     #[tokio::test(flavor = "multi_thread")]
     #[cfg(not(tarpaulin))]
     async fn listener_bound_count_metric_should_work() {
@@ -769,7 +771,8 @@ mod tests {
     impl ConfigAcceptor for NoOpConfigAcceptor {
         fn accept_config(
             _child_name: String,
-            _roto_scripts: &RotoScripts,
+            //_roto_scripts: &RotoScripts,
+            _roto_function: Option<RotoFunc>,
             _gate: &Gate,
             _bgp: &BgpTcpIn,
             _tcp_stream: impl TcpStreamWrapper,

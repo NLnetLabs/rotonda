@@ -278,8 +278,8 @@ mod tests {
     }
 
     fn mk_test_processor() -> BmpStateDetails<Initiating> {
-        let router_addr = "127.0.0.1:1818".parse().unwrap();
-        let source_id = ingress::IngressId::SocketAddr(router_addr);
+        //let router_addr = "127.0.0.1:1818".parse().unwrap();
+        let source_id = 12; //ingress::IngressId::SocketAddr(router_addr);
         let router_id = Arc::new(TEST_ROUTER_ID.to_string());
         BmpStateDetails::<Initiating>::new(
             source_id,

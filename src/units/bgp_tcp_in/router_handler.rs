@@ -126,6 +126,7 @@ impl Processor {
 
         let processor = Self {
             // roto_scripts: Default::default(),
+            roto_function: None,
             gate,
             unit_cfg,
             //bgp_ltime: 0,

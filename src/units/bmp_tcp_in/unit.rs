@@ -1109,7 +1109,8 @@ mod tests {
             _router_handler: RouterHandler,
             _tcp_stream: impl TcpStreamWrapper,
             _router_addr: SocketAddr,
-            _source_id: &IngressId,
+            //_source_id: &IngressId,
+            _ingress_id: IngressId,
             _router_states: &Arc<
                 FrimMap<IngressId, Arc<Mutex<Option<BmpState>>>>,
             >, // Option is never None, instead Some is take()'n and replace()'d.

@@ -28,7 +28,7 @@ use tokio::{
 };
 
 use crate::{
-    comms::{DirectUpdate, Terminated}, ingress::IngressId, manager::TargetCommand, metrics::Target, payload::Payload, roto_runtime::types::{LogEntry, OutputStreamMessage}, targets::{mqtt::config::ClientId, Target::Mqtt}, tests::util::{
+    comms::{DirectUpdate, Terminated}, ingress::IngressId, manager::TargetCommand, metrics::Target, payload::{Payload, Update}, roto_runtime::types::{LogEntry, OutputStreamMessage, RouteContext}, targets::{mqtt::config::ClientId, Target::Mqtt}, tests::util::{
         assert_json_eq,
         internal::{enable_logging, get_testable_metrics_snapshot},
     }
@@ -90,7 +90,8 @@ fn generate_correct_json_for_publishing_from_output_stream_roto_type_value() {
     let (runner, _) = mk_mqtt_runner();
 
     // And a payload that should be published
-    let output_stream = Arc::new(mk_roto_output_stream_payload());
+    //let output_stream = Arc::new(mk_roto_output_stream_payload());
+    let output_stream = mk_roto_output_stream_payload();
 
     // Then the candidate should be selected for publication
     let SenderMsg { content, topic, .. } =
@@ -175,13 +176,17 @@ async fn publish_msg() {
     .await;
 
     let test_output_stream_message = mk_roto_output_stream_payload();
-    let mut output_stream_queue = OutputStreamQueue::new();
-    output_stream_queue.push(test_output_stream_message.clone());
-    let payload = Payload::from_output_stream_queue(
-        output_stream_queue,
-        RouteContext::for_reprocessing(),
-        None,
-    );
+    //let mut output_stream_queue = OutputStreamQueue::new();
+    //output_stream_queue.push(test_output_stream_message.clone());
+    //let payload = Payload::from_output_stream_queue(
+    //    output_stream_queue,
+    //    RouteContext::for_reprocessing(),
+    //    None,
+    //);
+
+    let payload = Update::OutputStream(smallvec::smallvec![test_output_stream_message]);
+
+
     runner.direct_update(payload.into()).await;
 
     assert_metric(

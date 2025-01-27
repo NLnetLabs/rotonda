@@ -86,6 +86,23 @@ impl Rib {
 
     // pub fn store() {} ? // still needed? probably going via fn get makes
     // more sense as we store multiple (all) afisafis now
+    //
+    pub fn store(
+        &self,
+    ) -> Result<&MultiThreadedStore<RotondaPaMap>, PrefixStoreError> {
+        if let Some(rib) = self.unicast.as_ref() {
+            Ok(rib)
+        }
+        else {
+            Err(PrefixStoreError::StoreNotReadyError)
+        }
+
+        //Ok(&self.unicast)
+        //self.unicast
+        //    .as_ref()
+        //    .map(|rib| &rib.as_ref)
+        //    .ok_or(PrefixStoreError::StoreNotReadyError)
+    }
 
     pub fn insert(
         &self,
@@ -1201,11 +1218,11 @@ mod tests {
 
     use hashbrown::hash_map::DefaultHashBuilder;
     use inetnum::{addr::Prefix, asn::Asn};
-    use roto::types::{
-        builtin::{BuiltinTypeValue, NlriStatus, PrefixRoute, RotondaId},
-        lazyrecord_types::BgpUpdateMessage,
-        typevalue::TypeValue,
-    };
+    //use roto::types::{
+    //    builtin::{BuiltinTypeValue, NlriStatus, PrefixRoute, RotondaId},
+    //    lazyrecord_types::BgpUpdateMessage,
+    //    typevalue::TypeValue,
+    //};
     use routecore::bgp::{message::SessionConfig, types::AfiSafiType};
 
     use crate::{

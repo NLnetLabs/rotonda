@@ -480,7 +480,7 @@ impl RibUnitRunner {
     }
 
     #[cfg(test)]
-    pub(super) fn rib(&self) -> Arc<HashedRib> {
+    pub(super) fn rib(&self) -> Arc<Rib> {
         self.rib.load().clone()
     }
 

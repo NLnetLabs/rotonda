@@ -1,4 +1,5 @@
 use crate::common::status_reporter::AnyStatusReporter;
+use crate::roto_runtime::types::{explode_announcements, explode_withdrawals, RouteContext};
 use crate::tests::util::internal::{
     get_testable_metrics_snapshot, MOCK_ROUTER_ID,
 };
@@ -14,16 +15,16 @@ use crate::{
 use chrono::Utc;
 use futures::future::join_all;
 use inetnum::{addr::Prefix, asn::Asn};
-use roto::types::builtin::{PrefixRoute, RouteContext};
-use roto::types::{
-    builtin::{
-        BuiltinTypeValue,
-        RotondaId,
-        //BgpUpdateMessage,
-        //RouteStatus, UpdateMessage,
-    },
-    typevalue::TypeValue,
-};
+//use roto::types::builtin::{PrefixRoute, RouteContext};
+//use roto::types::{
+//    builtin::{
+//        BuiltinTypeValue,
+//        RotondaId,
+//        //BgpUpdateMessage,
+//        //RouteStatus, UpdateMessage,
+//    },
+//    typevalue::TypeValue,
+//};
 use rotonda_store::prelude::multi::{PrefixStoreError, RouteStatus};
 use rotonda_store::{epoch, MatchOptions, MatchType};
 use routecore::bgp::communities::Wellknown;
@@ -661,7 +662,7 @@ fn mk_route_update_with_communities(
     announced_as_path_str: Option<&str>,
     communities: Option<&str>,
 ) -> Update {
-    let _delta_id = (RotondaId(0), 0);
+    //let _delta_id = (RotondaId(0), 0);
     let ann;
     let wit;
     //let _route_status;
@@ -688,14 +689,14 @@ fn mk_route_update_with_communities(
         &SessionConfig::modern(),
     )
     .unwrap();
-    let rws = roto::types::builtin::explode_announcements(
+    let rws = explode_announcements(
         &roto_update_msg,
-        &mut BTreeSet::new(),
+        //&mut BTreeSet::new(),
     )
     .unwrap();
-    let wdws = roto::types::builtin::explode_withdrawals(
+    let wdws = explode_withdrawals(
         &roto_update_msg,
-        &mut BTreeSet::new(),
+        //&mut BTreeSet::new(),
     )
     .unwrap();
 

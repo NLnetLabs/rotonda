@@ -4,24 +4,21 @@ use arc_swap::ArcSwap;
 use assert_json_diff::{assert_json_matches_no_panic, CompareMode, Config};
 use hyper::{body::Bytes, Body, Request, StatusCode};
 use inetnum::{addr::Prefix, asn::Asn};
-use roto::types::{
-    builtin::{
-        BuiltinTypeValue, NlriStatus, PrefixRoute, Provenance, RotondaId,
-    },
-    collections::BytesRecord,
-    lazyrecord_types::BgpUpdateMessage,
-    typevalue::TypeValue,
-};
+//use roto::types::{
+//    builtin::{
+//        BuiltinTypeValue, NlriStatus, PrefixRoute, Provenance, RotondaId,
+//    },
+//    collections::BytesRecord,
+//    lazyrecord_types::BgpUpdateMessage,
+//    typevalue::TypeValue,
+//};
 
+use rotonda_store::prelude::multi::RouteStatus;
 use routecore::bgp::{
     communities::{
         Community, ExtendedCommunity, LargeCommunity, ParseError,
         StandardCommunity, Wellknown,
-    },
-    message::{SessionConfig, UpdateMessage},
-    nlri::afisafi::Ipv4UnicastNlri,
-    types::AfiSafiType,
-    workshop::route::RouteWorkshop,
+    }, message::{PduParseInfo, SessionConfig, UpdateMessage}, nlri::afisafi::Ipv4UnicastNlri, path_attributes::OwnedPathAttributes, types::AfiSafiType, workshop::route::RouteWorkshop
 };
 use serde_json::{json, Value};
 
@@ -29,17 +26,13 @@ use crate::{
     bgp::{
         encode::{mk_bgp_update, Announcements, Prefixes},
         raw::communities::{extended::*, large::*, standard::*},
-    },
-    common::{frim::FrimMap, json::EasilyExtendedJSONObject},
-    http::ProcessRequest,
-    ingress,
-    units::{
+    }, common::{frim::FrimMap, json::EasilyExtendedJSONObject}, http::ProcessRequest, ingress, payload::{RotondaPaMap, RotondaRoute}, roto_runtime::types::Provenance, units::{
         rib_unit::{
-            rib::HashedRib,
-            unit::{MoreSpecifics, QueryLimits},
+            //rib::HashedRib,
+            rib::Rib, unit::{MoreSpecifics, QueryLimits}
         },
         RibType,
-    },
+    }
 };
 
 use super::PrefixesApi;
@@ -473,7 +466,7 @@ async fn exact_match_ipv4_with_large_communities() {
 #[tokio::test]
 async fn select_and_discard() {
     fn insert_announcement_helper<C: Into<Community>>(
-        rib: Arc<ArcSwap<HashedRib>>,
+        rib: Arc<ArcSwap<Rib>>,
         router_n: u8,
         as_path: &[u32],
         community: Option<C>,
@@ -693,7 +686,7 @@ async fn select_and_discard() {
 /// --- Helper functions ------------------------------------------------------------------------------------------
 
 async fn do_query(
-    rib: Arc<ArcSwap<HashedRib>>,
+    rib: Arc<ArcSwap<Rib>>,
     query: &str,
     expected_status_code: StatusCode,
     expected_body: Option<Value>,
@@ -758,7 +751,7 @@ async fn do_query(
 }
 
 async fn assert_query_eq(
-    rib: Arc<ArcSwap<HashedRib>>,
+    rib: Arc<ArcSwap<Rib>>,
     query: &str,
     expected_status_code: StatusCode,
     expected_body: Option<Value>,
@@ -782,19 +775,19 @@ async fn assert_query_eq(
     }
 }
 
-fn mk_rib() -> Arc<ArcSwap<HashedRib>> {
-    let physical_rib = HashedRib::default();
+fn mk_rib() -> Arc<ArcSwap<Rib>> {
+    let physical_rib = Rib::default();
     Arc::new(ArcSwap::from_pointee(physical_rib))
 }
 
 fn insert_routes(
-    rib: Arc<ArcSwap<HashedRib>>,
+    rib: Arc<ArcSwap<Rib>>,
     n: u8,
     announcements: Announcements,
 ) {
     let bgp_update_bytes =
         mk_bgp_update(&Prefixes::default(), &announcements, &[]);
-    let delta_id = (RotondaId(0), 0); // TODO
+    //let delta_id = (RotondaId(0), 0); // TODO
     if let Announcements::Some {
         origin: _,
         as_path: _,
@@ -803,23 +796,23 @@ fn insert_routes(
         prefixes,
     } = announcements
     {
-        let roto_update_msg = BytesRecord::<BgpUpdateMessage>::new(
-            bgp_update_bytes.clone(),
-            SessionConfig::modern(),
-        )
-        .unwrap();
+        //let roto_update_msg = BytesRecord::<BgpUpdateMessage>::new(
+        //    bgp_update_bytes.clone(),
+        //    SessionConfig::modern(),
+        //)
+        //.unwrap();
 
         let loaded_rib = rib.load();
+        let pa_map = RotondaPaMap(OwnedPathAttributes::new(PduParseInfo::modern(), vec![]));
         for p in prefixes.iter() {
             if p.is_v4() {
                 loaded_rib
                     .insert(
-                        p,
-                        RouteWorkshop::new(
+                        &RotondaRoute::Ipv4Unicast(
                             Ipv4UnicastNlri::try_from(*p).unwrap(),
-                        )
-                        .into(),
-                        NlriStatus::InConvergence,
+                            pa_map.clone()
+                        ),
+                        RouteStatus::Active,
                         Provenance::for_bgp(
                             0,
                             format!("192.168.0.{n}").parse().unwrap(), //peer_ip,
@@ -883,7 +876,7 @@ fn insert_routes(
 }
 
 fn insert_announcement(
-    rib: Arc<ArcSwap<HashedRib>>,
+    rib: Arc<ArcSwap<Rib>>,
     prefix_str: &str,
     n: u8,
 ) {
@@ -906,7 +899,7 @@ fn get_localhost_next_hop_for_prefix(prefix_str: &str) -> (&str, bool) {
 }
 
 fn insert_announcement_full<C: Into<Community> + Copy>(
-    rib: Arc<ArcSwap<HashedRib>>,
+    rib: Arc<ArcSwap<Rib>>,
     prefix: &str,
     n: u8,
     as_path: &[u32],

@@ -50,7 +50,7 @@ use super::peer_config::{CombinedConfig, PeerConfigs};
 
 //----------- BgpTcpIn -------------------------------------------------------
 
-pub(super) type RotoFunc = roto::TypedFunc<
+pub(crate) type RotoFunc = roto::TypedFunc<
     crate::roto_runtime::Ctx,
     (
         //roto::Val<*mut RotoOutputStream>,

@@ -21,10 +21,10 @@
 //
 // These contain all the actual unit types grouped by shared functionality.
 pub(crate) mod bgp_tcp_in;
-mod bmp_tcp_in;
+pub(crate) mod bmp_tcp_in;
 mod filter;
 mod mrt_file_in;
-mod rib_unit;
+pub(crate) mod rib_unit;
 pub use bmp_tcp_in::unit::TracingMode;
 pub use rib_unit::{
     unit::{RibType, RibUnit},

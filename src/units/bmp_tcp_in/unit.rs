@@ -87,7 +87,7 @@ impl std::fmt::Display for TracingMode {
     }
 }
 
-pub(super) type RotoFunc = roto::TypedFunc<
+pub(crate) type RotoFunc = roto::TypedFunc<
     Ctx,
     (
         //roto::Val<*mut RotoOutputStream>,

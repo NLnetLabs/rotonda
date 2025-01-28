@@ -46,7 +46,7 @@ thread_local!(
     static STATS_COUNTER: RefCell<u64> = RefCell::new(0);
 );
 
-type RotoFuncPre = roto::TypedFunc<
+pub(crate) type RotoFuncPre = roto::TypedFunc<
     Ctx,
     (
         //roto::Val<roto_runtime::Log>,

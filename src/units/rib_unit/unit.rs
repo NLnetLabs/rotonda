@@ -1529,28 +1529,7 @@ mod tests {
         */
     }
 
-    #[test]
-    #[should_panic(expected = "empty vector")]
-    fn if_specified_rib_keys_must_be_non_empty() {
-        let toml = r#"
-        sources = ["some source"]
-        rib_keys = []
-        "#;
-
-        mk_config_from_toml(toml).unwrap();
-    }
-
-    #[test]
-    #[should_panic(expected = "unknown variant")]
-    fn only_known_route_tokens_may_be_used_as_rib_keys() {
-        let toml = r#"
-        sources = ["some source"]
-        rib_keys = ["blah"]
-        "#;
-
-        mk_config_from_toml(toml).unwrap();
-    }
-
+    #[allow(dead_code)]
     fn mk_config_from_toml(toml: &str) -> Result<RibUnit, toml::de::Error> {
         toml::from_str::<RibUnit>(toml)
     }

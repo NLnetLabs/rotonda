@@ -1120,9 +1120,10 @@ mod tests {
         use crate::units::bmp_tcp_in::unit::RotoFunc as BmpInFunc;
         use crate::units::rib_unit::unit::RotoFuncPre as RibInPreFunc;
 
-        let roto_script = "etc/filters.roto";
+        let roto_script = "etc/examples/filters.roto.example";
         let i = roto::read_files([roto_script]).unwrap();
-        let mut c = i.compile(create_runtime().unwrap(), usize::BITS / 8).unwrap();
+        let mut c = i.compile(create_runtime().unwrap(), usize::BITS / 8)
+            .inspect_err(|e| eprintln!("{e}")).unwrap();
         let _: BgpInFunc = c.get_function("bgp-in").unwrap();
         let _: BmpInFunc = c.get_function("bmp-in").unwrap();
         let _: RibInPreFunc = c.get_function("rib-in-pre").unwrap();

@@ -177,15 +177,14 @@ impl Rib {
             // mark_mui_as_withdrawn_for_prefix . This way, we preserve the
             // last seen attributes/nexthop for this {prefix,mui} combination,
             // while setting the status to Withdrawn.
-            store
-                .mark_mui_as_withdrawn_for_prefix(prefix, mui)
-                .inspect_err(|e| {
-                    error!(
-                        "failed to mark {} for {} as withdrawn: {}",
-                        prefix, mui, e
-                    );
-                    // TODO increase metric
-                })?;
+            store.mark_mui_as_withdrawn_for_prefix(prefix, mui)?;
+                //.inspect_err(|e| {
+                //    error!(
+                //        "failed to mark {} for {} as withdrawn: {}",
+                //        prefix, mui, e
+                //    );
+                //    // TODO increase metric
+                //})?;
 
             // FIXME this is just to satisfy the function signature, but is
             // quite useless as-is.

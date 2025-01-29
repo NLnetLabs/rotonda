@@ -47,7 +47,7 @@ impl RibUnitStatusReporter {
     }
 
     pub fn insert_failed<P: Display, E: Display>(&self, pfx: P, err: E) {
-        sr_log!(error: self, "Failed to insert prefix {}: {}", pfx, err);
+        sr_log!(error: self, "Failed to upsert prefix {}: {}", pfx, err);
         self.metrics.num_insert_hard_failures.fetch_add(1, SeqCst);
     }
 

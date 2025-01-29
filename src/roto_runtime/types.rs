@@ -413,8 +413,8 @@ impl From<(bool, routecore::bmp::message::RibType)> for PeerRibType {
                     PeerRibType::OutPre
                 }
             }
-            routecore::bmp::message::RibType::Unimplemented(_) => {
-                PeerRibType::OutPost
+            routecore::bmp::message::RibType::LocRib => {
+                PeerRibType::Loc
             }
         }
     }

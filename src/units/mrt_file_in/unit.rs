@@ -30,7 +30,7 @@ use tokio::task::JoinSet;
 use crate::roto_runtime::types::{explode_announcements, explode_withdrawals, FreshRouteContext, MrtContext, Provenance, RouteContext};
 use crate::common::unit::UnitActivity;
 use crate::comms::{GateStatus, Terminated};
-use crate::ingress::{self, IngressInfo};
+use crate::ingress::{self, IngressId, IngressInfo};
 use crate::manager::{Component, WaitPoint};
 use crate::payload::{Payload, RotondaPaMap, RotondaRoute, Update};
 use crate::units::{Gate, Unit};
@@ -165,7 +165,7 @@ impl MrtInRunner {
                 )
             }
             (State::Established, State::Idle) => {
-                if let Some((ingress_id, _info)) = ingresses.find_existing(
+                if let Some((ingress_id, _info)) = ingresses.find_existing_peer(
                     &IngressInfo::new()
                     .with_remote_addr(sc.peer_addr())
                     .with_remote_asn(sc.peer_asn())
@@ -223,7 +223,7 @@ impl MrtInRunner {
                 ;
 
                 let ingress_id = if let Some((id, _info)) =
-                    ingresses.find_existing(&ingress_query)
+                    ingresses.find_existing_peer(&ingress_query)
                 {
                     id
                 } else {

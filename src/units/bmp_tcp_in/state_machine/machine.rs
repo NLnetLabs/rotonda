@@ -1217,15 +1217,19 @@ impl PeerAware for PeerStates {
     ) -> bool {
         let mut added = false;
 
-        let peer_ingress_id = ingress_register.register();
-
-        ingress_register.update_info(
-            peer_ingress_id,
-            ingress::IngressInfo::new()
-                .with_parent(bmp_ingress_id)
-                .with_remote_addr(pph.address())
-                .with_remote_asn(pph.asn()),
-        );
+        let query_ingress =  ingress::IngressInfo::new()
+            .with_parent(bmp_ingress_id)
+            .with_remote_addr(pph.address())
+            .with_remote_asn(pph.asn())
+            .with_rib_type(pph.rib_type())
+        ;
+        let peer_ingress_id;
+        if let Some((ingress_id, _ingress_info)) = ingress_register.find_existing_peer(&query_ingress) {
+            peer_ingress_id = ingress_id;
+        } else {
+            peer_ingress_id = ingress_register.register();
+            ingress_register.update_info(peer_ingress_id, query_ingress);
+        }
 
         let _ = self.0.entry(pph.clone()).or_insert_with(|| {
             added = true;
@@ -1240,7 +1244,7 @@ impl PeerAware for PeerStates {
                         .distinguisher()
                         .try_into()
                         .unwrap(),
-                    peer_rib_type: u8::from(pph.peer_type()).into(),
+                    peer_rib_type: pph.rib_type(),
                     peer_id: PeerId::new(pph.address(), pph.asn()),
                 },
                 ingress_id: peer_ingress_id,
@@ -1270,7 +1274,7 @@ impl PeerAware for PeerStates {
             peer_state.peer_details = PeerDetails {
                 peer_bgp_id: pph.bgp_id(),
                 peer_distinguisher: pph.distinguisher().try_into().unwrap(),
-                peer_rib_type: u8::from(pph.peer_type()).into(),
+                peer_rib_type: pph.rib_type(),
                 peer_id: PeerId::new(pph.address(), pph.asn()),
             };
             true

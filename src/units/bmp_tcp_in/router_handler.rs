@@ -166,10 +166,8 @@ impl RouterHandler {
         //let mut connection_id =  hash32::FnvHasher::default();
         //source_id.hash(&mut connection_id);
 
-        let router_ingress_id = ingress_register.register();
-
         let provenance = Provenance::for_bmp(
-            router_ingress_id,
+            ingress_id,
             // peer_ip: we are not diving into the BMP message to see if this
             // is a RouteMonitoring msg, just set to BMP IP and overwrite
             // later if necessary

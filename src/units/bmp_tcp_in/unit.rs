@@ -382,6 +382,7 @@ impl BmpTcpInRunner {
                 .ok()
             });
 
+        let unit_ingress_id = self.ingress_register.register();
         loop {
             let listen_addr = self.listen.clone();
 
@@ -418,27 +419,32 @@ impl BmpTcpInRunner {
                     ControlFlow::Continue(Ok((tcp_stream, client_addr))) => {
                         //let source_id = SourceId::from(client_addr);
 
-                        let ingress_id = self.ingress_register.register();
-                        self.ingress_register.update_info(
-                            ingress_id,
-                            IngressInfo::new()
-                                .with_remote_addr(client_addr.ip()),
-                        );
+                        let query_ingress = IngressInfo::new()
+                            .with_parent(unit_ingress_id)
+                            .with_remote_addr(client_addr.ip())
+                        ;
+                        let router_ingress_id;
+                        if let Some((ingress_id, _ingress_info)) = self.ingress_register.find_existing_bmp_router(&query_ingress) {
+                            router_ingress_id = ingress_id;
+                        } else {
+                            router_ingress_id = self.ingress_register.register();
+                            self.ingress_register.update_info(router_ingress_id, query_ingress);
+                        }
 
                         let state_machine = Arc::new(Mutex::new(Some(
-                            self.router_connected(ingress_id),
+                            self.router_connected(router_ingress_id),
                         )));
 
                         let last_msg_at = {
                             let weak_ref = Arc::downgrade(&state_machine);
                             self.setup_router_specific_api_endpoint(
-                                weak_ref, ingress_id,
+                                weak_ref, router_ingress_id,
                             )
                             .await
                         };
 
                         self.router_states
-                            .insert(ingress_id, state_machine.clone());
+                            .insert(router_ingress_id, state_machine.clone());
 
                         status_reporter
                             .listener_connection_accepted(client_addr);
@@ -480,8 +486,9 @@ impl BmpTcpInRunner {
                             router_handler,
                             tcp_stream,
                             client_addr,
+
                             //&source_id,
-                            ingress_id,
+                            router_ingress_id,
                             &self.router_states,
                             &self.router_info,
                             self.ingress_register.clone(),

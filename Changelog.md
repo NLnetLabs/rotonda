@@ -6,14 +6,18 @@ Released 2025-01-30.
 
 Breaking changes
 
-* In the embedded `roto` the _define_ and _apply_ blocks are gone. They
-  are both replaced by _let_ statements.
+* In the embedded `roto` the _define_ and _apply_ blocks are gone. Users can
+  now define variables and functions throughout the script.
 * Arguments to filter-maps in `roto` have changed: some of them are now
-  implicit. Look into the bundled examples in `etc/examples` for more details.
+  implicit.
+
+  See the bundled example in `etc/examples` for more details.
 
 
 New
 
+* In the `roto` language users can now assign variables and functions through
+   the use of `let` statements anywhere in a `roto` script.
 * In `roto`, in addition to the breaking changes, there now is support for
   constants and strings. This enables, amongst other things, customizable
   logging. 

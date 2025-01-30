@@ -131,8 +131,8 @@ impl RouterInfoApi {
         let num_unusable_bgp_updates: usize = router_bmp_metrics
             .num_unprocessable_bmp_messages
             .load(SeqCst);
-        let num_prefixes: usize =
-            router_bmp_metrics.num_stored_prefixes.load(SeqCst);
+        //let num_prefixes: usize =
+        //    router_bmp_metrics.num_stored_prefixes.load(SeqCst);
         let num_announce: usize =
             router_bmp_metrics.num_announcements.load(SeqCst);
         let num_withdraw: usize =
@@ -266,7 +266,6 @@ impl RouterInfoApi {
                 BGP UPDATEs:
                     Soft Fail: {num_retried_bgp_updates}
                     Hard Fail: {num_unusable_bgp_updates}
-                Prefixes     : {num_prefixes}
                 Announce     : {num_announce}
                 Withdraw     : {num_withdraw}
                 Peers Up     : {num_peers_up}

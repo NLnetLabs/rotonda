@@ -70,7 +70,7 @@ pub(super) struct MqttRunner<C> {
     component: Component,
     config: Arc<ArcSwap<Config>>,
     client: Arc<ArcSwapOption<C>>,
-    pub_q_tx: Option<mpsc::Sender<SenderMsg>>,
+    pub_q_tx: Option<mpsc::UnboundedSender<SenderMsg>>,
     status_reporter: Arc<MqttStatusReporter>,
     ingresses: Arc<ingress::Register>,
 }
@@ -109,12 +109,15 @@ where
         let status_reporter =
             Arc::new(MqttStatusReporter::new("mock", metrics));
 
+        let ingresses = Arc::new(ingress::Register::new());
+
         let res = Self {
             component: Default::default(),
             config,
             client: Default::default(),
             pub_q_tx,
             status_reporter: status_reporter.clone(),
+            ingresses,
         };
 
         (res, status_reporter)
@@ -135,7 +138,7 @@ where
         let component = &mut self.component;
         let _unit_name = component.name().clone();
 
-        let (pub_q_tx, pub_q_rx) = mpsc::channel(10);
+        let (pub_q_tx, pub_q_rx) = mpsc::unbounded_channel();
         self.pub_q_tx = Some(pub_q_tx);
 
         let arc_self = Arc::new(self);
@@ -160,7 +163,7 @@ where
         self: &Arc<Self>,
         mut sources: Option<NonEmpty<DirectLink>>,
         mut cmd_rx: mpsc::Receiver<TargetCommand>,
-        mut pub_q_rx: mpsc::Receiver<SenderMsg>,
+        mut pub_q_rx: mpsc::UnboundedReceiver<SenderMsg>,
     ) -> Result<(), Terminated>
     where
         <F as ConnectionFactory>::EventLoopType: 'static,
@@ -189,7 +192,7 @@ where
         mut connection: Connection<C>,
         sources: &mut Option<NonEmpty<DirectLink>>,
         cmd_rx: &mut mpsc::Receiver<TargetCommand>,
-        pub_q_rx: &mut mpsc::Receiver<SenderMsg>,
+        pub_q_rx: &mut mpsc::UnboundedReceiver<SenderMsg>,
     ) -> Result<(), Terminated> {
         while connection.active() {
             tokio::select! {
@@ -473,7 +476,7 @@ where
                     if let Some(msg) = self.output_stream_message_to_msg(osm)
                     {
                         if let Err(err) =
-                            self.pub_q_tx.as_ref().unwrap().send(msg).await
+                            self.pub_q_tx.as_ref().unwrap().send(msg)//.await
                         {
                             error!("failed to send MQTT message: {err}");
                         }

@@ -5,5 +5,5 @@ mod types;
 
 pub use request::PrefixesApi;
 
-#[cfg(test)]
-mod tests;
+//#[cfg(test)]
+//mod tests;

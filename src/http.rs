@@ -577,6 +577,7 @@ impl AsyncWrite for HttpStream {
 
 //pub type QueryParam = (String, String, AtomicBool);
 
+#[derive(Debug)]
 pub struct QueryParam {
     name: String,
     value: String,

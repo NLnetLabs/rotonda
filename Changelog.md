@@ -12,6 +12,8 @@ Bug Fixes
 
 Other changes
 
+* We no longed build binary packages for Debian 9 "Stretch" and Ubuntu 16.04
+  LTS "Xenial Xerus".
 
 ## 0.2.1
 

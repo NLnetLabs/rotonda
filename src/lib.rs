@@ -17,7 +17,5 @@ pub mod tokio;
 pub mod tracing;
 pub mod units;
 
-#[cfg(test)]
 pub mod tests;
-#[cfg(test)]
 pub use tests::util::bgp;

@@ -7,7 +7,7 @@ use crate::{
         Terminated, TriggerData,
     }, ingress, manager::{Component, WaitPoint}, payload::{
         Payload, RotondaPaMap, RotondaRoute, RouterId, Update, UpstreamStatus,
-    }, roto_runtime::{self, types::{FilterName, InsertionInfo, Output, OutputStreamMessage, RotoOutputStream, RouteContext}}, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::Unit
+    }, roto_runtime::{self, types::{FilterName, InsertionInfo, Output, OutputStreamMessage, RotoOutputStream, RouteContext}, Ctx}, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::Unit
 };
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
@@ -18,7 +18,7 @@ use hash_hasher::{HashBuildHasher, HashedSet};
 use log::{debug, error, info, log_enabled, trace, warn};
 use non_empty_vec::NonEmpty;
 use rotonda_store::{
-    custom_alloc::UpsertReport, prelude::multi::PrefixStoreError,
+    custom_alloc::UpsertReport, prelude::multi::{PrefixStoreError, RouteStatus},
     QueryResult, RecordSet,
 };
 
@@ -46,18 +46,20 @@ thread_local!(
     static STATS_COUNTER: RefCell<u64> = RefCell::new(0);
 );
 
-type RotoFuncPre = roto::TypedFunc<
+pub(crate) type RotoFuncPre = roto::TypedFunc<
+    Ctx,
     (
-        roto::Val<roto_runtime::Log>,
+        //roto::Val<roto_runtime::Log>,
         roto::Val<RotondaRoute>,
-        roto::Val<RouteContext>,
+        //roto::Val<RouteContext>,
     ),
     roto::Verdict<(), ()>,
 >;
 
 type RotoFuncPost = roto::TypedFunc<
+    Ctx,
     (
-        roto::Val<roto_runtime::Log>,
+        //roto::Val<roto_runtime::Log>,
         roto::Val<RotondaRoute>,
         roto::Val<InsertionInfo>,
     ),
@@ -421,8 +423,8 @@ impl RibUnitRunner {
             _process_metrics,
             rib_merge_update_stats,
             tracer,
-            roto_function_pre: todo!(),
-            roto_function_post: todo!(),
+            roto_function_pre: None,
+            roto_function_post: None,
         };
 
         (runner, gate_agent)
@@ -478,7 +480,7 @@ impl RibUnitRunner {
     }
 
     #[cfg(test)]
-    pub(super) fn rib(&self) -> Arc<HashedRib> {
+    pub(super) fn rib(&self) -> Arc<Rib> {
         self.rib.load().clone()
     }
 
@@ -779,6 +781,7 @@ where
         let mut res = SmallVec::<[Payload; 8]>::new();
 
         let mut output_stream = RotoOutputStream::new();
+        let mut ctx = Ctx::new(&mut output_stream);
 
         for p in payload {
             let ingress_id = match &p.context {
@@ -788,9 +791,10 @@ where
             };
             if let Some(ref roto_function) = self.roto_function_pre {
                 match roto_function.call(
-                    roto::Val(&mut output_stream),
+                    &mut ctx,
+                    //roto::Val(&mut output_stream),
                     roto::Val(p.rx_value.clone()),
-                    roto::Val(p.context.clone()),
+                    //roto::Val(p.context.clone()),
                 ) {
                     roto::Verdict::Accept(_) => {
                         self.insert_payload(&p);
@@ -838,6 +842,13 @@ where
                         Output::Custom((id, local)) => {
                             OutputStreamMessage::custom(id, local, ingress_id)
                         }
+                        Output::Entry(entry) => {
+                            OutputStreamMessage::entry(
+                                entry,
+                                ingress_id,
+                            )
+                        }
+
                     };
                     osms.push(osm);
                 }
@@ -1066,6 +1077,16 @@ where
                     report.cas_count.try_into().unwrap_or(u32::MAX),
                     change,
                 );
+                if route_status == RouteStatus::Withdrawn {
+                    self.status_reporter.insert_ok(
+                    provenance.ingress_id,
+                    store_op_delay,
+                    propagation_delay,
+                    //num_retries,
+                    report.cas_count.try_into().unwrap_or(u32::MAX),
+                    StoreInsertionEffect::RoutesWithdrawn(1)
+                    );
+                }
 
                 // XXX re-introduce sometime later
                 //if let Some(ref roto_function) = self.roto_function_post {
@@ -1508,28 +1529,7 @@ mod tests {
         */
     }
 
-    #[test]
-    #[should_panic(expected = "empty vector")]
-    fn if_specified_rib_keys_must_be_non_empty() {
-        let toml = r#"
-        sources = ["some source"]
-        rib_keys = []
-        "#;
-
-        mk_config_from_toml(toml).unwrap();
-    }
-
-    #[test]
-    #[should_panic(expected = "unknown variant")]
-    fn only_known_route_tokens_may_be_used_as_rib_keys() {
-        let toml = r#"
-        sources = ["some source"]
-        rib_keys = ["blah"]
-        "#;
-
-        mk_config_from_toml(toml).unwrap();
-    }
-
+    #[allow(dead_code)]
     fn mk_config_from_toml(toml: &str) -> Result<RibUnit, toml::de::Error> {
         toml::from_str::<RibUnit>(toml)
     }

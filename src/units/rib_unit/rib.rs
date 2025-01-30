@@ -86,6 +86,23 @@ impl Rib {
 
     // pub fn store() {} ? // still needed? probably going via fn get makes
     // more sense as we store multiple (all) afisafis now
+    //
+    pub fn store(
+        &self,
+    ) -> Result<&MultiThreadedStore<RotondaPaMap>, PrefixStoreError> {
+        if let Some(rib) = self.unicast.as_ref() {
+            Ok(rib)
+        }
+        else {
+            Err(PrefixStoreError::StoreNotReadyError)
+        }
+
+        //Ok(&self.unicast)
+        //self.unicast
+        //    .as_ref()
+        //    .map(|rib| &rib.as_ref)
+        //    .ok_or(PrefixStoreError::StoreNotReadyError)
+    }
 
     pub fn insert(
         &self,
@@ -160,15 +177,14 @@ impl Rib {
             // mark_mui_as_withdrawn_for_prefix . This way, we preserve the
             // last seen attributes/nexthop for this {prefix,mui} combination,
             // while setting the status to Withdrawn.
-            store
-                .mark_mui_as_withdrawn_for_prefix(prefix, mui)
-                .inspect_err(|e| {
-                    error!(
-                        "failed to mark {} for {} as withdrawn: {}",
-                        prefix, mui, e
-                    );
-                    // TODO increase metric
-                })?;
+            store.mark_mui_as_withdrawn_for_prefix(prefix, mui)?;
+                //.inspect_err(|e| {
+                //    error!(
+                //        "failed to mark {} for {} as withdrawn: {}",
+                //        prefix, mui, e
+                //    );
+                //    // TODO increase metric
+                //})?;
 
             // FIXME this is just to satisfy the function signature, but is
             // quite useless as-is.
@@ -1201,11 +1217,11 @@ mod tests {
 
     use hashbrown::hash_map::DefaultHashBuilder;
     use inetnum::{addr::Prefix, asn::Asn};
-    use roto::types::{
-        builtin::{BuiltinTypeValue, NlriStatus, PrefixRoute, RotondaId},
-        lazyrecord_types::BgpUpdateMessage,
-        typevalue::TypeValue,
-    };
+    //use roto::types::{
+    //    builtin::{BuiltinTypeValue, NlriStatus, PrefixRoute, RotondaId},
+    //    lazyrecord_types::BgpUpdateMessage,
+    //    typevalue::TypeValue,
+    //};
     use routecore::bgp::{message::SessionConfig, types::AfiSafiType};
 
     use crate::{

@@ -493,11 +493,11 @@ impl PrefixesApi {
 mod test {
     use std::str::FromStr;
 
-    use roto::types::{
-        builtin::{NlriStatus, PrefixRoute, Provenance, RotondaId},
-        collections::BytesRecord,
-        lazyrecord_types::BgpUpdateMessage,
-    };
+    //use roto::types::{
+    //    builtin::{NlriStatus, PrefixRoute, Provenance, RotondaId},
+    //    collections::BytesRecord,
+    //    lazyrecord_types::BgpUpdateMessage,
+    //};
     use routecore::bgp::{message::SessionConfig, types::AfiSafiType};
 
     use crate::bgp::encode::{mk_bgp_update, Announcements, Prefixes};

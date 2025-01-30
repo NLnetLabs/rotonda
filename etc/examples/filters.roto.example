@@ -1,7 +1,7 @@
 # The bgp-in filter works on incoming BGP UPDATE messages.
 #
 # One such message can contain multiple NLRI, thus multiple announcements or
-# withdrawals). To act on individual announcements or withdrawals, use the
+# withdrawals. To act on individual announcements or withdrawals, use the
 # 'rib-in' filter-map below.
 filter bgp-in(
     bgp_msg: BgpMsg,
@@ -38,6 +38,7 @@ filter bmp-in(
     if bmp_msg.is_peer_down() {
         output.log_peer_down()
     }
+
     if bmp_msg.is_ibgp(my_asn) {
         reject
     } else {
@@ -58,7 +59,7 @@ filter bmp-in(
 # RouteMonitoring message in the bmp-in filter-map, the rib-in filter works on
 # individual announcements and withdrawals, typed Route.
 #
-# This enanbles for fine-grained, per announcement filtering and logging, and
+# This enables for fine-grained, per announcement filtering and logging, and
 # allows comparing of and acting on the actual NLRI (most often, the prefix).
 #
 # Filtering purely based on values of attributes (regardless of the individual

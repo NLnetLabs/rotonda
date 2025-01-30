@@ -27,6 +27,7 @@ use tokio::pin;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinSet;
 
+use crate::config::ConfigPath;
 use crate::roto_runtime::types::{explode_announcements, explode_withdrawals, FreshRouteContext, MrtContext, Provenance, RouteContext};
 use crate::common::unit::UnitActivity;
 use crate::comms::{GateStatus, Terminated};
@@ -40,18 +41,18 @@ use super::api;
 #[derive(Clone, Debug, Deserialize)]
 pub struct MrtFileIn {
     pub filename: OneOrManyPaths,
-    pub update_path: Option<PathBuf>,
+    pub update_path: Option<ConfigPath>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(untagged)]
 pub enum OneOrManyPaths {
-    One(PathBuf),
-    Many(Vec<PathBuf>),
+    One(ConfigPath),
+    Many(Vec<ConfigPath>),
 }
 pub enum PathsIterator<'a> {
     One(Option<PathBuf>),
-    Many(std::slice::Iter<'a, PathBuf>)
+    Many(std::slice::Iter<'a, ConfigPath>)
 }
 impl Iterator for PathsIterator<'_> {
     type Item = PathBuf;
@@ -59,14 +60,18 @@ impl Iterator for PathsIterator<'_> {
     fn next(&mut self) -> Option<Self::Item> {
         match self {
             PathsIterator::One(ref mut p) => p.take(),
-            PathsIterator::Many(ref mut iter) => iter.next().cloned(),
+            PathsIterator::Many(ref mut iter) => {
+                iter.next().cloned().map(Into::into)
+            }
         }
     }
 }
 impl OneOrManyPaths {
     pub fn iter(&self) -> PathsIterator {
         match self {
-            OneOrManyPaths::One(p) => PathsIterator::One(Some(p.clone())),
+            OneOrManyPaths::One(p) => {
+                PathsIterator::One(Some(p.clone().into()))
+            }
             OneOrManyPaths::Many(m) => PathsIterator::Many(m.iter()),
         }
     }
@@ -119,7 +124,7 @@ impl MrtFileIn {
         let api_processor = Arc::new(
             api::Processor::new(
                 endpoint_path.clone(),
-                self.update_path.clone(),
+                self.update_path.clone().map(Into::into),
                 queue_tx.clone(),
                 )
             );

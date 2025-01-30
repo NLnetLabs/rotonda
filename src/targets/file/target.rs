@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 
 //use crate::comms::{AnyDirectUpdate, DirectLink, DirectUpdate};
 use crate::comms::{Link, Terminated};
+use crate::config::ConfigPath;
 use crate::ingress;
 use crate::payload::Update;
 use crate::roto_runtime::types::{LogEntry, OutputStreamMessageRecord};
@@ -30,7 +31,7 @@ pub struct File {
 #[derive(Debug, Deserialize)]
 pub struct Config {
     format: Format,
-    filename: PathBuf,
+    filename: ConfigPath,
 }
 
 #[derive(Debug, Deserialize)]

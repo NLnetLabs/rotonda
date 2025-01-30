@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.0
+## 0.3.0 'Hempcrete & Hawthorn'
 
 Released 2025-01-30.
 

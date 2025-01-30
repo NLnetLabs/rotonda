@@ -666,9 +666,10 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     /// Log the given community (NB: this method will likely be removed)
     #[roto_method(rt, Log, log_matched_community)]
-    fn log_community(stream: *mut Log, community: u32) {
+    fn log_community(stream: *mut Log, community: *mut StandardCommunity) {
         let stream = unsafe { &mut **stream };
-        stream.push(Output::Community(community));
+        let community = unsafe { &mut *community };
+        stream.push(Output::Community(community.to_u32()));
     }
 
 

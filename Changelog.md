@@ -1,23 +1,68 @@
 # Changelog
 
-## New unreleased version
+## 0.3.0 'Hempcrete & Hawthorn'
 
-Released yyyy-mm-dd
+Released 2025-01-30.
 
-Breaking Changes
+Breaking changes
+
+* In the embedded `roto` the _define_ and _apply_ blocks are gone. Users can
+  now define variables and functions throughout the script.
+* Arguments to filter-maps in `roto` have changed: some of them are now
+  implicit.
+
+  See the bundled example in `etc/examples` for more details.
+
 
 New
 
-Bug Fixes
+* In the `roto` language users can now assign variables and functions through
+   the use of `let` statements anywhere in a `roto` script.
+* In `roto`, in addition to the breaking changes, there now is support for
+  constants and strings. This enables, amongst other things, customizable
+  logging. 
+  Several other helper methods on the various types, including ones to format
+  fields to strings, are introduced.
+* The new `file-out` target enables logging to a file in JSON or CSV format.
+  Several helpers to log specific features are available, as well as the
+  aforementioned custom logging via strings.
+* The `mrt-file-in` unit can now be configured to process multiple files in
+  sequence, and is able to process the most common message types seen in
+  `update` MRT files. Furthermore, _.bz2_ compressed archives can be processed.
+  A new API endpoint enables queueing of files.
+* Upon re-establishment of a previous BMP session, the previous session
+  information is looked up and re-used. This should reduce memory use, and
+  moreover, prevent confusing results when querying prefixes.
+* BMP messages originating from a _LocRib_ are now recognized and stored.
+
+
+Bug fixes
+
+* Several metric counters were not increased properly.
+
+
+Known issues
+
+* The "more_specifics" field in a query result may include wrong prefixes.
+
 
 Other changes
 
-* We no longed build binary packages for Debian 9 "Stretch" and Ubuntu 16.04
+* We no longer build binary packages for Debian 9 "Stretch" and Ubuntu 16.04
   LTS "Xenial Xerus".
+
+
+Acknowledgements
+
+We would like to very much thank the following people for their (ongoing) input
+and support in various ways: Tobias Fiebig, Ties de Kock, Lisa Bruder, Ralph
+Koning, Bruno Blanes.
+
+
 
 ## 0.2.1
 
-Released 2024-12-06
+Released 2024-12-06.
 
 Bug Fixes
 
@@ -43,7 +88,7 @@ Other changes
 
 ## 0.2.0 'Happy Fuzzballs'
 
-Released 2024-11-21
+Released 2024-11-21.
 
 Breaking changes
 

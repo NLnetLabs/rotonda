@@ -2,18 +2,19 @@
 
 ## 0.3.0
 
-Released 2025-01-30
+Released 2025-01-30.
 
 Breaking changes
 
-* The changes to the `roto` language include several improvements that break
-  backwards compatibility. Most notable, the _define_ and _apply_ blocks are
-  gone. Replacing the former, _let_ statements are introduced.
+* In the embedded `roto` the _define_ and _apply_ blocks are gone. They
+  are both replaced by _let_ statements.
+* Arguments to filter-maps in `roto` have changed: some of them are now
+  implicit. Look into the bundled examples in `etc/examples` for more details.
 
 
 New
 
-* In `roto`, in addition to the syntax changes, there now is support for
+* In `roto`, in addition to the breaking changes, there now is support for
   constants and strings. This enables, amongst other things, customizable
   logging. 
   Several other helper methods on the various types, including ones to format
@@ -23,9 +24,9 @@ New
   aforementioned custom logging via strings.
 * The `mrt-file-in` unit can now be configured to process multiple files in
   sequence, and is able to process the most common message types seen in
-  'update' MRT files. Furthermore, _.bz2_ compressed archives can be processed.
+  `update` MRT files. Furthermore, _.bz2_ compressed archives can be processed.
   A new API endpoint enables queueing of files.
-* Upon reestablishment of a previous BMP session, the previous session
+* Upon re-establishment of a previous BMP session, the previous session
   information is looked up and re-used. This should reduce memory use, and
   moreover, prevent confusing results when querying prefixes.
 * BMP messages originating from a _LocRib_ are now recognized and stored.
@@ -33,12 +34,12 @@ New
 
 Bug fixes
 
-* Several metric counters were not increased properly
+* Several metric counters were not increased properly.
 
 
 Known issues
 
-* The "more_specifics" field in a query result may include wrong prefixes
+* The "more_specifics" field in a query result may include wrong prefixes.
 
 
 Other changes
@@ -57,7 +58,7 @@ Koning, Bruno Blanes.
 
 ## 0.2.1
 
-Released 2024-12-06
+Released 2024-12-06.
 
 Bug Fixes
 
@@ -83,7 +84,7 @@ Other changes
 
 ## 0.2.0 'Happy Fuzzballs'
 
-Released 2024-11-21
+Released 2024-11-21.
 
 Breaking changes
 

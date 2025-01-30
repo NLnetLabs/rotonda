@@ -1,5 +1,28 @@
 # Changelog
 
+
+## Unreleased new version 'release name'
+
+Released yyyy-mm-dd.
+
+Breaking changes
+
+
+New
+
+
+Bug fixes
+
+
+Known issues
+
+
+Other changes
+
+
+Acknowledgements
+
+
 ## 0.3.0 'Hempcrete & Hawthorn'
 
 Released 2025-01-30.

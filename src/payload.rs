@@ -32,50 +32,6 @@ pub enum UpstreamStatus {
 
 //------------ Payload -------------------------------------------------------
 
-/*
-pub trait Filterable {
-    fn filter<E, T, U>(
-        self,
-        filter_fn: T,
-        filtered_fn: U,
-    ) -> Result<SmallVec<[Payload; 8]>, FilterError>
-    where
-        T: Fn(TypeValue, DateTime<Utc>, Option<u8>, RouteContext) -> FilterResult<E>
-            + Clone,
-        //U: Fn(ingress::IngressId) + Clone,
-        U: Fn(IngressId) + Clone,
-        FilterError: From<E>;
-}
-*/
-
-/*
-#[derive(Debug)]
-pub enum FilterError {
-    RotoScriptError(RotoError),
-    OtherError(String),
-}
-
-impl From<RotoError> for FilterError {
-    fn from(err: RotoError) -> Self {
-        FilterError::RotoScriptError(err)
-    }
-}
-
-impl Display for FilterError {
-    #[rustfmt::skip]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FilterError::RotoScriptError(err) => {
-                f.write_fmt(format_args!("Filtering failed due to Roto script error: {err}"))
-            }
-            FilterError::OtherError(err) => {
-                f.write_fmt(format_args!("Filtering failed: {err}"))
-            }
-        }
-    }
-}
-*/
-
 // TODO macrofy
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RotondaRoute {
@@ -270,10 +226,8 @@ impl Payload {
         trace_id: Option<u8>,
     ) -> Self {
         Self {
-            // source_id: source_id.into(),
             rx_value,
             context,
-            // bgp_msg,
             trace_id,
             received: std::time::Instant::now(),
         }
@@ -298,125 +252,6 @@ impl Payload {
     }
 }
 
-/*
-impl Filterable for Payload {
-    fn filter<E, T, U>(
-        self,
-        filter_fn: T,
-        filtered_fn: U,
-    ) -> Result<SmallVec<[Payload; 8]>, FilterError>
-    where
-        T: Fn(TypeValue, DateTime<Utc>, Option<u8>, RouteContext) -> FilterResult<E>
-            + Clone,
-        //U: Fn(ingress::IngressId) + Clone,
-        U: Fn(IngressId) + Clone,
-        FilterError: From<E>,
-    {
-        if let ControlFlow::Continue(filter_output) =
-            // filter_fn(self.rx_value, self.received, self.trace_id)?
-            filter_fn(self.rx_value, self.received, self.trace_id, self.context.clone())?
-        {
-            Ok(Payload::from_filter_output(
-                // self.source_id.clone(),
-                filter_output,
-                self.trace_id,
-                self.context
-            ))
-        } else {
-            filtered_fn(self.context.ingress_id());
-            Ok(smallvec![])
-        }
-    }
-}
-
-impl Filterable for SmallVec<[Payload; 8]> {
-    fn filter<E, T, U>(
-        self,
-        filter_fn: T,
-        filtered_fn: U,
-    ) -> Result<SmallVec<[Payload; 8]>, FilterError>
-    where
-        T: Fn(TypeValue, DateTime<Utc>, Option<u8>, RouteContext) -> FilterResult<E>
-            + Clone,
-        U: Fn(IngressId) + Clone,
-        FilterError: From<E>,
-    {
-        let mut out_payloads = smallvec![];
-
-        for payload in self {
-            out_payloads.extend(
-                payload.filter(filter_fn.clone(), filtered_fn.clone())?,
-            );
-        }
-
-        Ok(out_payloads)
-    }
-}
-
-impl Payload {
-    pub fn from_filter_output(
-        filter_output: FilterOutput,
-        trace_id: Option<u8>,
-        context: RouteContext,
-    ) -> SmallVec<[Payload; 8]> {
-        let mut out_payloads = smallvec![];
-
-        // Add output stream messages to the result
-        if !filter_output.south.is_empty() {
-            out_payloads.extend(Self::from_output_stream_queue(
-                filter_output.south,
-                context.clone(),
-                trace_id,
-            ));
-        }
-
-        // Make a payload out of it
-        let new_payload = Payload::with_received(
-            // source_id,
-            filter_output.east,
-            context,
-            // filter_output.bgp_msg,
-            trace_id,
-            filter_output.received,
-        );
-
-        // Add the payload to the result
-        out_payloads.push(new_payload);
-
-
-        out_payloads
-    }
-
-    pub fn from_output_stream_queue(
-        osq: OutputStreamQueue,
-        context: RouteContext,
-        trace_id: Option<u8>,
-    ) -> SmallVec<[Payload; 8]> {
-        osq.into_iter()
-            .map(|osm| Payload::new(osm, context.clone(), trace_id))
-            .collect()
-    }
-}
-
-impl From<Payload> for SmallVec<[Payload; 8]> {
-    fn from(payload: Payload) -> Self {
-        smallvec![payload]
-    }
-}
-
-impl From<Payload> for SmallVec<[Update; 1]> {
-    fn from(payload: Payload) -> Self {
-        smallvec![payload.into()]
-    }
-}
-
-// impl From<TypeValue> for Payload {
-//     fn from(tv: TypeValue) -> Self {
-//         Self::new(tv, None, None)
-//     }
-// }
-
-*/
 //------------ Update --------------------------------------------------------
 
 #[derive(Clone, Debug)]
@@ -452,7 +287,6 @@ impl Update {
             Update::Bulk(payloads) => {
                 payloads.iter().filter(|p| p.trace_id().is_some()).collect()
             }
-            //Update::Withdraw(_ingress_id, _maybe_afisafi) => todo!(),
             Update::Withdraw(_ingress_id, _maybe_afisafi) => smallvec![],
             Update::WithdrawBulk(..) => smallvec![],
             Update::QueryResult(_, _) => smallvec![],

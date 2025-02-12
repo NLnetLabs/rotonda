@@ -1,9 +1,6 @@
 //! Controlling the entire operation.
 
 use crate::common::file_io::TheFileIo;
-//use crate::common::roto::{
-//    FilterName, LoadErrorKind, RotoError, RotoScriptOrigin, RotoScripts,
-//};
 use crate::roto_runtime::types::FilterName;
 use crate::roto_runtime::types::CompiledRoto;
 use crate::roto_runtime::create_runtime;

@@ -111,7 +111,6 @@ impl RouterHandler {
 
         let mock = Self {
             gate: parent_gate.clone(),
-            // roto_scripts: Default::default(),
             router_id_template: Arc::new(ArcSwap::from_pointee(
                 BmpTcpIn::default_router_id_template(),
             )),
@@ -133,7 +132,6 @@ impl RouterHandler {
         &self,
         mut tcp_stream: TcpStream,
         router_addr: SocketAddr,
-        //source_id: SourceId,
         ingress_id: IngressId,
         ingress_register: Arc<ingress::Register>,
         // we need access to the ingress Register to register new IDs, for
@@ -152,7 +150,6 @@ impl RouterHandler {
         &self,
         rx: T,
         router_addr: SocketAddr,
-        //source_id: SourceId,
         ingress_id: IngressId,
         ingress_register: Arc<ingress::Register>,
     ) {
@@ -162,9 +159,6 @@ impl RouterHandler {
 
         let mut router_id = hash32::FnvHasher::default();
         router_addr.hash(&mut router_id);
-
-        //let mut connection_id =  hash32::FnvHasher::default();
-        //source_id.hash(&mut connection_id);
 
         let provenance = Provenance::for_bmp(
             ingress_id,
@@ -322,7 +316,6 @@ impl RouterHandler {
         &self,
         received: std::time::Instant,
         addr: SocketAddr,
-        //source_id: SourceId,
         ingress_id: IngressId,
         msg: Message<Bytes>,
         provenance: Provenance,
@@ -502,143 +495,11 @@ impl RouterHandler {
 
         *bmp_state_lock = Some(next_state);
         Ok(())
-
-        //LH: we'll need roughly the same as in the BGP handler here:
-        //- execute the BMP pre-explosion filter
-        //- based on the verdict, call process_msg or not
-        //- handle any items in the outputstream queue
-
-        /*
-
-        let next_state = if let ControlFlow::Continue(FilterOutput {
-            south,
-            east,
-            received,
-        }) = Self::VM
-            .with(|vm| {
-                let value = TypeValue::Builtin(BuiltinTypeValue::BmpMessage(
-                    msg.into(),
-                ));
-
-                // We will only create a context if we have a provenance, i.e.
-                // we have already processed a BMP PeerUpNotification (the
-                // first BMP message with a per-peer-header that contains some
-                // of the Provenance content).
-                //
-                // LH: but, we must have a RouteContext for the VM to build
-                // successfully...
-                // Currently, prior to the very first run of the VM,
-                // vm.borrow_mut().as_mut() will return None and thus the
-                // map() below has no effect.
-                let ctx;
-                if let Some(prov) = provenance {
-                    ctx = RouteContext::new(None, NlriStatus::InConvergence, prov);
-                    vm.borrow_mut().as_mut().map(|vm| vm.update_context(Arc::new(ctx.clone())));
-                } else {
-                    ctx = RouteContext::new(None, NlriStatus::InConvergence, Provenance::mock());
-                }
-
-                self.roto_scripts.exec_with_tracer(
-                    vm,
-                    &self.filter_name.load(),
-                    value,
-                    received,
-                    bound_tracer,
-                    trace_id,
-                    ctx,
-                )
-            })
-            .map_err(|err| {
-                self.status_reporter.message_filtering_failure(&err);
-                (bmp_state.router_id(), err.to_string())
-            })? {
-            if !south.is_empty() {
-                let context = RouteContext::new(
-                    None,
-                    NlriStatus::Empty,
-                    provenance.unwrap_or_else(||Provenance::mock())
-                );
-                let payload = Payload::from_output_stream_queue(
-                    south,
-                    context,
-                    trace_id
-                ).into();
-                self.gate.update_data(payload).await;
-            }
-
-            if let TypeValue::Builtin(BuiltinTypeValue::BmpMessage(msg)) =
-                east
-            {
-                self.status_reporter
-                    .message_processed(bmp_state.router_id());
-
-                let mut res = bmp_state.process_msg(received, msg.into_inner(), trace_id);
-
-                match res.message_type {
-                    MessageType::InvalidMessage { .. } => {
-                        self.status_reporter.message_processing_failure(
-                            res.next_state.router_id(),
-                        );
-                    }
-
-                    MessageType::StateTransition => {
-                        // If we have transitioned to the Dumping state that means we
-                        // just processed an Initiation message and MUST have captured
-                        // a sysName Information TLV string. Use the captured value to
-                        // make the router ID more meaningful, instead of the
-                        // UNKNOWN_ROUTER_SYSNAME sysName value we used until now.
-                        self.check_update_router_id(
-                            addr,
-                            &source_id,
-                            &mut res.next_state,
-                        );
-                    }
-
-                    MessageType::RoutingUpdate { update } => {
-                        // Pass the routing update on to downstream units and/or targets.
-                        // This is where we send an update down the pipeline.
-                        self.gate.update_data(update).await;
-                    }
-
-                    MessageType::Other => {
-                        // A BMP initiation message received after the initiation
-                        // phase will result in this type of message.
-                        self.check_update_router_id(
-                            addr,
-                            &source_id,
-                            &mut res.next_state,
-                        );
-                    }
-
-                    MessageType::Aborted => {
-                        // Something went fatally wrong and we've lost the BMP
-                        // state machine. The issue should already have been
-                        // logged so there's nothing more we can do here
-                        // except stop processing this BMP stream.
-                        return Err((
-                            res.next_state.router_id(),
-                            "Aborted".to_string(),
-                        ));
-                    }
-                }
-
-                res.next_state
-            } else {
-                bmp_state
-            }
-        } else {
-            bmp_state
-        };
-
-        *bmp_state_lock = Some(next_state);
-        Ok(())
-        */
     }
 
     fn check_update_router_id(
         &self,
-        _addr: SocketAddr, // TODO: Why both socket address AND source id?
-        //source_id: &SourceId,
+        _addr: SocketAddr, // XXX: still useful somehow?
         ingress_id: IngressId,
         next_state: &mut BmpState,
     ) {

@@ -20,7 +20,6 @@ use tokio::{
     sync::{Mutex, RwLock},
     time::sleep,
 };
-//use roto::types::builtin::SourceId;
 
 use crate::{
     common::{
@@ -31,7 +30,20 @@ use crate::{
         },
         status_reporter::Chainable,
         unit::UnitActivity,
-    }, comms::{Gate, GateStatus, Terminated}, ingress::{self, IngressId, IngressInfo}, manager::{Component, WaitPoint}, roto_runtime::{types::{CompiledRoto, FilterName, Provenance, RotoOutputStream, RotoScripts}, Ctx}, tokio::TokioTaskMetrics, tracing::Tracer, units::Unit
+    },
+    comms::{Gate, GateStatus, Terminated},
+    ingress::{self, IngressId, IngressInfo},
+    manager::{Component, WaitPoint},
+    roto_runtime::{
+        types::{
+            CompiledRoto, FilterName, Provenance, RotoOutputStream,
+            RotoScripts
+        },
+        Ctx
+    },
+    tokio::TokioTaskMetrics,
+    tracing::Tracer,
+    units::Unit
 };
 
 use super::{
@@ -90,7 +102,6 @@ impl std::fmt::Display for TracingMode {
 pub(crate) type RotoFunc = roto::TypedFunc<
     Ctx,
     (
-        //roto::Val<*mut RotoOutputStream>,
         roto::Val<BmpMessage<Bytes>>,
         roto::Val<Provenance>,
     ),
@@ -268,7 +279,6 @@ struct BmpTcpInRunner {
             Arc<tokio::sync::Mutex<Option<BmpState>>>,
         >,
     >, // Option is never None, instead Some is take()'n and replace()'d.
-    //router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
     router_info: Arc<FrimMap<ingress::IngressId, Arc<RouterInfo>>>,
     bmp_metrics: Arc<BmpStateMachineMetrics>,
     bmp_in_metrics: Arc<BmpTcpInMetrics>,
@@ -290,13 +300,11 @@ impl BmpTcpInRunner {
         http_api_path: Arc<String>,
         gate: Gate,
         router_states: Arc<
-            //FrimMap<SourceId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
             FrimMap<
                 ingress::IngressId,
                 Arc<tokio::sync::Mutex<Option<BmpState>>>,
             >,
         >, // Option is never None, instead Some is take()'n and replace()'d.
-        //router_info: Arc<FrimMap<SourceId, Arc<RouterInfo>>>,
         router_info: Arc<FrimMap<ingress::IngressId, Arc<RouterInfo>>>,
         bmp_metrics: Arc<BmpStateMachineMetrics>,
         bmp_in_metrics: Arc<BmpTcpInMetrics>,
@@ -417,7 +425,6 @@ impl BmpTcpInRunner {
             'inner: loop {
                 match self.process_until(listener.accept()).await {
                     ControlFlow::Continue(Ok((tcp_stream, client_addr))) => {
-                        //let source_id = SourceId::from(client_addr);
 
                         let query_ingress = IngressInfo::new()
                             .with_parent(unit_ingress_id)
@@ -487,7 +494,6 @@ impl BmpTcpInRunner {
                             tcp_stream,
                             client_addr,
 
-                            //&source_id,
                             router_ingress_id,
                             &self.router_states,
                             &self.router_info,
@@ -622,8 +628,6 @@ impl BmpTcpInRunner {
     async fn setup_router_specific_api_endpoint(
         &self,
         state_machine: Weak<Mutex<Option<BmpState>>>,
-        //#[allow(unused_variables)]
-        //source_id: &SourceId,
         ingress_id: IngressId,
     ) -> Option<Arc<std::sync::RwLock<DateTime<Utc>>>> {
         match self.router_info.get(&ingress_id) {
@@ -682,7 +686,6 @@ impl ConfigAcceptor for BmpTcpInRunner {
         router_handler: RouterHandler,
         tcp_stream: impl TcpStreamWrapper,
         client_addr: SocketAddr,
-        //source_id: &SourceId,
         ingress_id: IngressId,
         router_states: &Arc<
             FrimMap<IngressId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
@@ -690,7 +693,6 @@ impl ConfigAcceptor for BmpTcpInRunner {
         router_info: &Arc<FrimMap<IngressId, Arc<RouterInfo>>>,
         ingress_register: Arc<ingress::Register>,
     ) {
-        //let source_id = source_id.clone();
         let router_states = router_states.clone();
         let router_info = router_info.clone();
 
@@ -699,7 +701,6 @@ impl ConfigAcceptor for BmpTcpInRunner {
 
         crate::tokio::spawn(&child_name, async move {
             router_handler
-                //.run(tcp_stream, client_addr, source_id.clone(), ingress_register)
                 .run(tcp_stream, client_addr, ingress_id, ingress_register)
                 .await;
             router_states.remove(&ingress_id);

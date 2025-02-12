@@ -3,9 +3,6 @@ use crate::roto_runtime::types::{explode_announcements, explode_withdrawals, Fre
 use crate::tests::util::internal::{
     get_testable_metrics_snapshot, MOCK_ROUTER_ID,
 };
-//use crate::units::rib_unit::rib::{
-//    StoreEvictionPolicy, StoreMergeUpdateSettings,
-//};
 use crate::units::RibType;
 use crate::{
     bgp::encode::{mk_bgp_update, Announcements, Prefixes},
@@ -15,16 +12,6 @@ use crate::{
 use chrono::Utc;
 use futures::future::join_all;
 use inetnum::{addr::Prefix, asn::Asn};
-//use roto::types::builtin::{PrefixRoute, RouteContext};
-//use roto::types::{
-//    builtin::{
-//        BuiltinTypeValue,
-//        RotondaId,
-//        //BgpUpdateMessage,
-//        //RouteStatus, UpdateMessage,
-//    },
-//    typevalue::TypeValue,
-//};
 use rotonda_store::prelude::multi::{PrefixStoreError, RouteStatus};
 use rotonda_store::{epoch, MatchOptions, MatchType};
 use routecore::bgp::communities::Wellknown;

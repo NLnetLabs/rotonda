@@ -484,40 +484,6 @@ where
                 }
             }
 
-            /*
-            Update::Single(Payload {
-                rx_value: TypeValue::OutputStreamMessage(osm),
-                ..
-            }) => {
-                if let Some(msg) = self.output_stream_message_to_msg(osm) {
-                    if let Err(_err) =
-                        self.pub_q_tx.as_ref().unwrap().send(msg)
-                    {
-                        // TODO
-                    }
-                }
-            }
-
-            Update::Bulk(payloads) => {
-                for payload in payloads {
-                    if let Payload {
-                        rx_value: TypeValue::OutputStreamMessage(osm),
-                        ..
-                    } = payload
-                    {
-                        if let Some(msg) =
-                            self.output_stream_message_to_msg(osm)
-                        {
-                            if let Err(_err) =
-                                self.pub_q_tx.as_ref().unwrap().send(msg)
-                            {
-                                // TODO
-                            }
-                        }
-                    }
-                }
-            }
-            */
             _ => {
                 // We may have received the output from another unit, but we
                 // are not interested in it

@@ -13,13 +13,6 @@ use mqtt::{
     ClientError, ConnAck, ConnectReturnCode, ConnectionError, Event,
     Incoming, MqttOptions, NetworkOptions, Outgoing, PubAck, QoS,
 };
-//use roto::{
-//    types::{
-//        builtin::RouteContext, collections::Record,
-//        outputs::OutputStreamMessage, typedef::TypeDef,
-//    },
-//    vm::OutputStreamQueue,
-//};
 use serde_json::json;
 use tokio::{
     sync::mpsc::{self, Sender},
@@ -28,7 +21,14 @@ use tokio::{
 };
 
 use crate::{
-    comms::{DirectUpdate, Terminated}, ingress::IngressId, manager::TargetCommand, metrics::Target, payload::{Payload, Update}, roto_runtime::types::{LogEntry, OutputStreamMessage, RouteContext}, targets::{mqtt::config::ClientId, Target::Mqtt}, tests::util::{
+    comms::{DirectUpdate, Terminated},
+    ingress::IngressId,
+    manager::TargetCommand,
+    metrics::Target,
+    payload::{Payload, Update},
+    roto_runtime::types::{LogEntry, OutputStreamMessage, RouteContext},
+    targets::{mqtt::config::ClientId, Target::Mqtt},
+    tests::util::{
         assert_json_eq,
         internal::{enable_logging, get_testable_metrics_snapshot},
     }
@@ -178,13 +178,6 @@ async fn publish_msg() {
     .await;
 
     let test_output_stream_message = mk_roto_output_stream_payload();
-    //let mut output_stream_queue = OutputStreamQueue::new();
-    //output_stream_queue.push(test_output_stream_message.clone());
-    //let payload = Payload::from_output_stream_queue(
-    //    output_stream_queue,
-    //    RouteContext::for_reprocessing(),
-    //    None,
-    //);
 
     let payload = Update::OutputStream(smallvec::smallvec![test_output_stream_message]);
 
@@ -633,25 +626,6 @@ fn mk_roto_output_stream_payload() -> OutputStreamMessage {
     let ingress_id = 1;
     OutputStreamMessage::entry(LogEntry::new(), Some(ingress_id))
 
-
-
-
-    //let typedef = TypeDef::new_record_type(vec![
-    //    ("name", Box::new(TypeDef::StringLiteral)),
-    //    ("topic", Box::new(TypeDef::StringLiteral)),
-    //    ("some-str", Box::new(TypeDef::StringLiteral)),
-    //    ("some-asn", Box::new(TypeDef::Asn)),
-    //])
-    //.unwrap();
-
-    //let fields = vec![
-    //    ("name", "MOCK".into()),
-    //    ("topic", "my-topic".into()),
-    //    ("some-str", "some-value".into()),
-    //    ("some-asn", inetnum::asn::Asn::from_u32(1818).into()),
-    //];
-    //let record = Record::create_instance_with_sort(&typedef, fields).unwrap();
-    //OutputStreamMessage::from(record)
 }
 
 async fn assert_metric<D: Display, F: Fn(&Target) -> bool>(

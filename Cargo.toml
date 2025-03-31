@@ -29,9 +29,9 @@ authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]
 #members = []
 
 [workspace.dependencies]
-routecore          = { version = "0.5.1", features = ["bgp", "bmp", "serde", "fsm", "mrt"] }
+routecore          = { git = "https://github.com/nlnetlabs/routecore", version = "0.5.2-dev", features = ["bgp", "bmp", "serde", "fsm", "mrt"], branch="dev" }
 inetnum            = { version = "0.1.1", features = ["arbitrary", "serde"] }
-rotonda-store      = { version = "0.4.1" }
+rotonda-store      = { git = "https://github.com/nlnetlabs/rotonda-store", branch = "dev", version = "0.5.0" }
 log                = "0.4"
 
 
@@ -78,7 +78,7 @@ mqtt               = { version = "0.23.0", package = "rumqttc", default-features
 memmap2            = "0.9.4"
 non-empty-vec      = { version = "0.2", features = ["serde"]}
 percent-encoding   = "2.3"
-roto               = { version = "0.4.0" }
+roto               = { git = "https://github.com/nlnetlabs/roto", branch = "main", version = "0.4.1-dev" }
 rotonda-store       = { workspace = true }
 serde_with         = "3"
 smallvec           = { version = "1.11", features = ["const_generics", "const_new", "union"] }

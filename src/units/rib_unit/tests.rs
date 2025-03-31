@@ -12,8 +12,7 @@ use crate::{
 use chrono::Utc;
 use futures::future::join_all;
 use inetnum::{addr::Prefix, asn::Asn};
-use rotonda_store::prelude::multi::{PrefixStoreError, RouteStatus};
-use rotonda_store::{epoch, MatchOptions, MatchType};
+use rotonda_store::prefix_record::RouteStatus;
 use routecore::bgp::communities::Wellknown;
 use routecore::bgp::message::update_builder::StandardCommunitiesList;
 use routecore::bgp::message::{SessionConfig, UpdateMessage};
@@ -54,7 +53,7 @@ async fn process_non_route_update() {
 
 #[tokio::test]
 async fn process_update_single_route() {
-    let (runner, _) = RibUnitRunner::mock("", RibType::Physical);
+    let (runner, _) = RibUnitRunner::mock("", RibType::Physical).unwrap();
 
     // Given a BGP update containing a single route announcement
     let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
@@ -65,7 +64,7 @@ async fn process_update_single_route() {
     runner.process_update(update).await.unwrap();
 
     // And it should be added to the route store
-    assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
+    assert_eq!(runner.rib().store().unwrap().prefixes_count().in_memory(), 1);
 
     // And check that recorded metrics are correct
     assert_eq!(query_metrics(&runner.status_reporter()), (1, 0, 1, 0, 1));
@@ -74,7 +73,7 @@ async fn process_update_single_route() {
 #[tokio::test]
 #[ignore = "this is really different after refactoring of the store"]
 async fn process_update_withdraw_unannounced_route() {
-    let (runner, _) = RibUnitRunner::mock("", RibType::Physical);
+    let (runner, _) = RibUnitRunner::mock("", RibType::Physical).unwrap();
 
     // Given a BGP update containing a single route withdrawal
     let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
@@ -86,7 +85,7 @@ async fn process_update_withdraw_unannounced_route() {
 
     // And it should cause the prefix to be added to the route store
     // LH: errr, it should not?
-    assert_eq!(runner.rib().store().unwrap().prefixes_count(), 0);
+    assert_eq!(runner.rib().store().unwrap().prefixes_count().in_memory(), 0);
 
     // And check that recorded metrics are correct
     assert_eq!(query_metrics(&runner.status_reporter()), (0, 1, 0, 0, 1));
@@ -96,7 +95,7 @@ async fn process_update_withdraw_unannounced_route() {
     runner.process_update(update).await.unwrap();
 
     // And it should cause the prefix to be added to the route store
-    assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
+    assert_eq!(runner.rib().store().unwrap().prefixes_count().in_memory(), 1);
 
     // And check that recorded metrics are correct
     assert_eq!(query_metrics(&runner.status_reporter()), (0, 2, 0, 0, 1));
@@ -104,7 +103,7 @@ async fn process_update_withdraw_unannounced_route() {
 
 #[tokio::test]
 async fn process_update_same_route_twice() {
-    let (runner, _) = RibUnitRunner::mock("", RibType::Physical);
+    let (runner, _) = RibUnitRunner::mock("", RibType::Physical).unwrap();
 
     // Given a BGP update containing a single route announcement
     let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
@@ -115,14 +114,14 @@ async fn process_update_same_route_twice() {
     runner.process_update(update.clone()).await.unwrap();
 
     // And it should be added to the route store
-    assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
+    assert_eq!(runner.rib().store().unwrap().prefixes_count().in_memory(), 1);
 
     //// When it is processed by this unit again it should not be filtered
     //assert!(!is_filtered(&runner, update).await);
     runner.process_update(update.clone()).await.unwrap();
 
     // And it should NOT be added again to the route store
-    assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
+    assert_eq!(runner.rib().store().unwrap().prefixes_count().in_memory(), 1);
 
     // And check that recorded metrics are correct
     assert_eq!(query_metrics(&runner.status_reporter()), (1, 0, 1, 0, 1));
@@ -135,7 +134,7 @@ async fn process_update_same_route_twice() {
     runner.process_update(update).await.unwrap();
 
     // And it should cause the route to be marked as withdrawn
-    assert_eq!(runner.rib().store().unwrap().prefixes_count(), 1);
+    assert_eq!(runner.rib().store().unwrap().prefixes_count().in_memory(), 1);
 
     // And check that recorded metrics are correct
     assert_eq!(query_metrics(&runner.status_reporter()), (1, 0, 0, 1, 1));

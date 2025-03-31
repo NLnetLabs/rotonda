@@ -2,19 +2,18 @@ use core::fmt;
 use std::{
     collections::{HashMap, HashSet},
     net::IpAddr,
-    path::PathBuf, sync::Arc,
+    path::PathBuf,
+    sync::Arc,
 };
 
 use bytes::Bytes;
-use chrono::Utc;
 use chrono::serde::ts_microseconds;
+use chrono::Utc;
 use inetnum::{addr::Prefix, asn::Asn};
 use log::debug;
-use rotonda_store::prelude::multi::RouteStatus;
+use rotonda_store::prefix_record::RouteStatus;
 use routecore::bgp::{
-    message::UpdateMessage,
-    nlri::afisafi::Nlri,
-    types::AfiSafiType
+    message::UpdateMessage, nlri::afisafi::Nlri, types::AfiSafiType,
 };
 use serde::Deserialize;
 
@@ -413,9 +412,7 @@ impl From<(bool, routecore::bmp::message::RibType)> for PeerRibType {
                     PeerRibType::OutPre
                 }
             }
-            routecore::bmp::message::RibType::LocRib => {
-                PeerRibType::Loc
-            }
+            routecore::bmp::message::RibType::LocRib => PeerRibType::Loc,
         }
     }
 }
@@ -444,11 +441,11 @@ pub enum OutputStreamMessageRecord {
 impl OutputStreamMessageRecord {
     pub fn into_timestamped(
         self,
-        timestamp: chrono::DateTime<Utc>
+        timestamp: chrono::DateTime<Utc>,
     ) -> TimestampedOSMR {
         TimestampedOSMR {
             timestamp: timestamp.timestamp(),
-            record: self
+            record: self,
         }
     }
 }
@@ -463,7 +460,7 @@ impl From<OutputStreamMessageRecord> for TimestampedOSMR {
     fn from(value: OutputStreamMessageRecord) -> Self {
         Self {
             timestamp: Utc::now().timestamp(),
-            record: value
+            record: value,
         }
     }
 }
@@ -535,17 +532,16 @@ impl From<LogEntry> for MinimalLogEntry {
             mp_reach: value.mp_reach,
             mp_reach_afisafi: value.mp_reach_afisafi,
             mp_unreach: value.mp_unreach,
-            mp_unreach_afisafi: value.mp_unreach_afisafi
+            mp_unreach_afisafi: value.mp_unreach_afisafi,
         }
     }
 }
 
-
 impl LogEntry {
     pub fn new() -> Self {
-        Self { 
+        Self {
             timestamp: Utc::now(),
-            .. Default::default()
+            ..Default::default()
         }
     }
     pub fn into_minimal(self) -> MinimalLogEntry {
@@ -638,10 +634,7 @@ impl OutputStreamMessage {
         }
     }
 
-    pub fn entry(
-        entry: LogEntry,
-        ingress_id: Option<IngressId>,
-    ) -> Self {
+    pub fn entry(entry: LogEntry, ingress_id: Option<IngressId>) -> Self {
         Self {
             name: MQTT_NAME.into(),
             topic: "log_entry".into(),

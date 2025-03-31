@@ -11,16 +11,13 @@ use crate::{
 };
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
+use rotonda_store::{errors::PrefixStoreError, match_options::QueryResult, prefix_record::{Record, RecordSet, RouteStatus}, stats::UpsertReport};
 use std::io::prelude::*;
 
 use chrono::Utc;
 use hash_hasher::{HashBuildHasher, HashedSet};
 use log::{debug, error, info, log_enabled, trace, warn};
 use non_empty_vec::NonEmpty;
-use rotonda_store::{
-    custom_alloc::UpsertReport, prelude::multi::{PrefixStoreError, RouteStatus},
-    QueryResult, RecordSet,
-};
 
 use inetnum::addr::Prefix;
 use routecore::bgp::types::AfiSafiType;
@@ -198,6 +195,7 @@ impl RibUnit {
             self.rib_type,
             self.vrib_upstream,
         )
+        .map_err(|_| Terminated)?
         .run(self.sources, waitpoint)
         .await
     }
@@ -263,10 +261,10 @@ impl RibUnitRunner {
         filter_name: FilterName,
         rib_type: RibType,
         vrib_upstream: Option<Link>,
-    ) -> Self {
+    ) -> Result<Self, PrefixStoreError> {
         let unit_name = component.name().clone();
         let gate = Arc::new(gate);
-        let rib = Arc::new(ArcSwap::from_pointee(Rib::new_physical()));
+        let rib = Arc::new(ArcSwap::from_pointee(Rib::new_physical()?));
         let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> =
             Default::default();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
@@ -341,7 +339,7 @@ impl RibUnitRunner {
 
         let tracer = component.tracer().clone();
 
-        Self {
+        Ok(Self {
             roto_function_pre,
             roto_function_post,
             gate,
@@ -355,14 +353,14 @@ impl RibUnitRunner {
             _process_metrics,
             rib_merge_update_stats,
             tracer,
-        }
+        })
     }
 
     #[cfg(test)]
     pub(crate) fn mock(
         roto_script: &str,
         rib_type: RibType,
-    ) -> (Self, crate::comms::GateAgent) {
+    ) -> Result<(Self, crate::comms::GateAgent), PrefixStoreError> {
         //use crate::common::roto::RotoScriptOrigin;
 
         use crate::roto_runtime::types::RotoScripts;
@@ -372,7 +370,7 @@ impl RibUnitRunner {
         let gate = gate.into();
         let query_limits =
             Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
-        let rib = Rib::new_physical();
+        let rib = Rib::new_physical()?;
         let status_reporter = RibUnitStatusReporter::default().into();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
         let filter_name =
@@ -409,7 +407,7 @@ impl RibUnitRunner {
             roto_function_post: None,
         };
 
-        (runner, gate_agent)
+        Ok((runner, gate_agent))
     }
 
     fn http_api_path_for_rib_type(
@@ -871,20 +869,20 @@ impl RibUnitRunner {
         let mut processed_res = QueryResult::<RotondaPaMap> {
             match_type: res.match_type,
             prefix: res.prefix,
-            prefix_meta: vec![],
+            records: vec![],
             less_specifics: None,
             more_specifics: None,
         };
 
-        let is_in_prefix_meta_set = !res.prefix_meta.is_empty();
+        let is_in_prefix_meta_set = !res.records.is_empty();
 
-        for record in res.prefix_meta {
+        for record in res.records {
             let (mui, ltime, status) =
                 (record.multi_uniq_id, record.ltime, record.status);
 
             if let Some(meta) = self.reprocess_rib_value(record.meta).await {
-                processed_res.prefix_meta.push(
-                    rotonda_store::PublicRecord::<RotondaPaMap>::new(
+                processed_res.records.push(
+                    Record::<RotondaPaMap>::new(
                         mui, ltime, status, meta,
                     ),
                 );
@@ -903,7 +901,7 @@ impl RibUnitRunner {
 
         if log_enabled!(log::Level::Trace) {
             let is_out_prefix_meta_set =
-                !processed_res.prefix_meta.is_empty();
+                !processed_res.records.is_empty();
             let exact_match_diff = (is_in_prefix_meta_set as u8)
                 - (is_out_prefix_meta_set as u8);
             let less_specifics_diff =

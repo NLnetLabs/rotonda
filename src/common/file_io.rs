@@ -1,4 +1,5 @@
 //! Support for dumping of BMP messages to files for diagnostic purposes.
+//! 
 
 use std::path::Path;
 

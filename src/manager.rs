@@ -898,10 +898,10 @@ impl Manager {
             return Ok(());
         };
 
-        let i = roto::read_files([path.to_string_lossy()])
-            .map_err(|e| e.to_string())?;
+        let i = roto::FileTree::read(path);
+            // .map_err(|e| e.to_string())?;
         let c = i
-            .compile(create_runtime().unwrap(), usize::BITS / 8)
+            .compile(create_runtime().unwrap())
             .map_err(|e| e.to_string())?;
 
         self.roto_compiled = Some(Arc::new(Mutex::new(c)));

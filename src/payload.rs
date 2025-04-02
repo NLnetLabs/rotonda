@@ -272,6 +272,7 @@ pub enum Update {
     UpstreamStatusChange(UpstreamStatus),
 
     OutputStream(SmallVec<[OutputStreamMessage; 2]>),
+    Rtr(crate::units::RtrUpdate),
 }
 
 impl Update {
@@ -292,6 +293,7 @@ impl Update {
             Update::QueryResult(_, _) => smallvec![],
             Update::UpstreamStatusChange(_) => smallvec![],
             Update::OutputStream(..) => smallvec![],
+            Update::Rtr(..) => smallvec![],
         }
     }
 }

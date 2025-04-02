@@ -196,7 +196,8 @@ impl FileRunner {
                             Update::Withdraw(..)  |
                             Update::WithdrawBulk(..)  |
                             Update::QueryResult(..)  |
-                            Update::UpstreamStatusChange(..) =>  { }
+                            Update::UpstreamStatusChange(..) |
+                            Update::Rtr(..) =>  { }
                     }
                 }
             }

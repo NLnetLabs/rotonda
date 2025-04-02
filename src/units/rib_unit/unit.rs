@@ -11,7 +11,7 @@ use crate::{
 };
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
-use std::io::prelude::*;
+use std::{collections::HashSet, io::prelude::*};
 
 use chrono::Utc;
 use hash_hasher::{HashBuildHasher, HashedSet};
@@ -211,6 +211,13 @@ impl RibUnit {
     }
 }
 
+#[derive(Debug, Default)]
+pub struct RtrCache {
+    route_origins: HashSet<rpki::rtr::payload::RouteOrigin>,
+    router_keys: HashSet<rpki::rtr::payload::RouterKey>,
+    aspas: HashSet<rpki::rtr::payload::Aspa>,
+}
+
 pub struct RibUnitRunner {
     roto_function_pre: Option<RotoFuncPre>,
     roto_function_post: Option<RotoFuncPost>,
@@ -222,6 +229,7 @@ pub struct RibUnitRunner {
     query_limits: Arc<ArcSwap<QueryLimits>>,
     rib: Arc<ArcSwap<Rib>>, // XXX LH: why the ArcSwap here?
     rib_type: RibType,
+    rtr_cache: std::sync::RwLock<RtrCache>,
     filter_name: Arc<ArcSwap<FilterName>>,
     pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
     rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
@@ -349,6 +357,7 @@ impl RibUnitRunner {
             query_limits,
             rib,
             rib_type,
+            rtr_cache: std::sync::RwLock::new(RtrCache::default()),
             status_reporter,
             filter_name,
             pending_vrib_query_results,
@@ -685,6 +694,69 @@ impl RibUnitRunner {
                     self.gate
                         .update_data(Update::QueryResult(uuid, processed_res))
                         .await;
+                }
+            }
+            Update::Rtr(rtr_update) => {
+                use crate::units::RtrUpdate;
+                use rpki::rtr::Payload as RtrPayload;
+                match rtr_update {
+                    RtrUpdate::Full(rtr_verbs) => {
+                        let mut new_cache = RtrCache::default();
+                        for (action, payload) in rtr_verbs {
+                            if action == rpki::rtr::Action::Withdraw {
+                                warn!("Unexpected RTR Withdraw in Cache Reset");
+                                continue;
+                            }
+                            match payload {
+                                RtrPayload::Origin(route_origin) => new_cache.route_origins.insert(route_origin),
+                                RtrPayload::RouterKey(router_key) => new_cache.router_keys.insert(router_key),
+                                RtrPayload::Aspa(aspa) => new_cache.aspas.insert(aspa),
+                            };
+                        }
+                        debug!(
+                            "new RTR cache, vrp/routerkey/aspa {}/{}/{}",
+                            new_cache.route_origins.len(),
+                            new_cache.router_keys.len(),
+                            new_cache.aspas.len(),
+                        );
+                        match self.rtr_cache.try_write() {
+                            Ok(mut lock) => {
+                                *lock = new_cache;
+                            }
+                            Err(_) => warn!("failed to update RTR-cache in RIB unit (Reset)"),
+                        }
+                    }
+                    RtrUpdate::Delta(rtr_verbs) => {
+                        let mut lock = match self.rtr_cache.try_write() {
+                            Ok(lock) => lock,
+                            Err(_) => return Err("failed to update RTR-cache in RIB unit (Serial update)".into()),
+                        };
+
+                        for (action, payload) in rtr_verbs.into_iter() {
+                            match action {
+                                rpki::rtr::Action::Announce => {
+                                    match payload {
+                                        RtrPayload::Origin(route_origin) => { lock.route_origins.replace(route_origin); }
+                                        RtrPayload::RouterKey(router_key) => { lock.router_keys.replace(router_key); }
+                                        RtrPayload::Aspa(aspa) => { lock.aspas.replace(aspa); }
+                                    }
+                                }
+                                rpki::rtr::Action::Withdraw => {
+                                    match payload {
+                                        RtrPayload::Origin(route_origin) => { lock.route_origins.remove(&route_origin); }
+                                        RtrPayload::RouterKey(router_key) => { lock.router_keys.remove(&router_key); }
+                                        RtrPayload::Aspa(aspa) => { lock.aspas.remove(&aspa); }
+                                    }
+                                }
+                            }
+                        }
+                        debug!(
+                            "RTR cache after Serial update, vrp/routerkey/aspa {}/{}/{}",
+                            lock.route_origins.len(),
+                            lock.router_keys.len(),
+                            lock.aspas.len(),
+                        );
+                    }
                 }
             }
         }

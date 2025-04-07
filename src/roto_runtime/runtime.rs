@@ -3,6 +3,7 @@ use std::sync::Arc;
 use bytes::Bytes;
 use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
+use log::{debug, warn};
 use routecore::bgp::aspath::{AsPath, Hop, HopPath};
 use routecore::bgp::communities::{Community, LargeCommunity, StandardCommunity, Wellknown};
 use routecore::bgp::message::update_builder::StandardCommunitiesList;
@@ -20,9 +21,10 @@ use super::types::{
 };
 use crate::payload::RotondaRoute;
 use crate::roto_runtime::types::LogEntry;
+use crate::units::rib_unit::unit::RtrCache;
 
 pub(crate) type Log = *mut RotoOutputStream;
-
+pub(crate) type SharedRtrCache = Arc<RtrCache>;
 
 /// Context used for all components.
 ///
@@ -31,16 +33,19 @@ pub(crate) type Log = *mut RotoOutputStream;
 #[derive(Context, Clone)]
 pub struct Ctx {
     pub output: Log,
+    pub rpki: SharedRtrCache,
 }
 
 unsafe impl Send for Ctx {}
 
 impl Ctx {
-    pub fn new(log: Log) -> Self {
+    pub fn new(log: Log, rpki: SharedRtrCache) -> Self {
         Self {
             output: log,
+            rpki,
         }
     }
+
 }
 
 pub fn create_runtime() -> Result<roto::Runtime, String> {
@@ -61,6 +66,10 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         "Machinery to create output entries",
     )?;
 
+    rt.register_clone_type_with_name::<SharedRtrCache>(
+        "Rpki",
+        "RPKI information retrieved via RTR",
+    )?;
     rt.register_context_type::<Ctx>()?;
 
     rt.register_copy_type::<InsertionInfo>(
@@ -913,6 +922,41 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         stream.push(Output::Entry(entry));
     }
 
+
+    //------------ RPKI / RTR methods ----------------------------------------
+
+    #[roto_method(rt, SharedRtrCache, rov_for_origin)]
+    fn rov_for_origin(rpki: *mut SharedRtrCache, rr: *mut RotondaRoute) -> bool {
+        let rr = unsafe { &*rr };
+        let rpki = unsafe { &**rpki };
+        let prefix = match rr {
+            RotondaRoute::Ipv4Unicast(nlri, _) => nlri.prefix(),
+            RotondaRoute::Ipv6Unicast(nlri, _) => nlri.prefix(),
+            _=> return false
+        };
+        let mut covered = false;
+        let mut valid = false;
+        if let Some(hoppath) = rr.owned_map().get::<HopPath>() {
+            if let Some(origin) = hoppath.origin().and_then(|o| Hop::try_into_asn(o.clone()).ok()) {
+                let origin_cache = rpki.origin_cache.load();
+
+                if let Some(candidates) = origin_cache.get(&prefix) {
+                    covered = true;
+                    valid = candidates
+                        .iter()
+                        .any(|e| e.into_u32() == origin.into_u32())
+                }
+            }
+        }
+        //match (covered, valid) {
+        //    (true, true) => { }, // eprint!("+"),
+        //    (true, false) => eprint!("-"),
+        //    (false, true) => unreachable!(),
+        //    (false, false) => { },
+        //}
+
+        valid || !covered
+    }
 
     // currently unused
     //// --- InsertionInfo methods

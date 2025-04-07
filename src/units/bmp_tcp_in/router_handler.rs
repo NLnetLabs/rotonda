@@ -25,6 +25,7 @@ use crate::ingress::{self, IngressId};
 use crate::payload::RouterId;
 use crate::roto_runtime::Ctx;
 use crate::tracing::Tracer;
+use crate::units::rib_unit::unit::RtrCache;
 use crate::{
     comms::{Gate, GateStatus},
     payload::{Payload, Update, UpstreamStatus},
@@ -52,6 +53,10 @@ pub struct RouterHandler {
     tracing_mode: Arc<ArcSwap<TracingMode>>,
     last_msg_at: Option<Arc<RwLock<DateTime<Utc>>>>,
     bmp_metrics: Arc<BmpStateMachineMetrics>,
+
+    // Link to an empty RtrCache for now. Eventually, this should point to the
+    // main all-encompassing RIB.
+    rtr_cache: Arc<RtrCache>,
 }
 
 impl RouterHandler {
@@ -79,6 +84,7 @@ impl RouterHandler {
             tracing_mode,
             last_msg_at,
             bmp_metrics,
+            rtr_cache: Default::default(),
         }
     }
 
@@ -363,7 +369,7 @@ impl RouterHandler {
         };
 
         let mut output_stream = RotoOutputStream::new();
-        let mut ctx = Ctx::new(&mut output_stream);
+        let mut ctx = Ctx::new(&mut output_stream, self.rtr_cache.clone());
         let verdict = self.roto_function.as_ref().map(|roto_function| {
             roto_function.call(
                 &mut ctx,

@@ -34,6 +34,7 @@ use crate::ingress;
 use crate::payload::{Payload, RotondaRoute, Update};
 use crate::roto_runtime::Ctx;
 use crate::units::bgp_tcp_in::status_reporter::BgpTcpInStatusReporter;
+use crate::units::rib_unit::unit::RtrCache;
 use crate::units::Unit;
 
 use super::peer_config::{CombinedConfig, ConfigExt};
@@ -84,6 +85,10 @@ struct Processor {
 
     /// The 'overall' IngressId for the BGP-IN unit.
     ingress_id: ingress::IngressId,
+
+    // Link to an empty RtrCache for now. Eventually, this should point to the
+    // main all-encompassing RIB.
+    rtr_cache: Arc<RtrCache>,
 }
 
 impl Processor {
@@ -107,6 +112,7 @@ impl Processor {
             status_reporter,
             ingresses,
             ingress_id,
+            rtr_cache: Default::default(),
         }
     }
 
@@ -263,7 +269,7 @@ impl Processor {
                             );
 
                             let mut output_stream = RotoOutputStream::new();
-                            let mut ctx = Ctx::new(&mut output_stream);
+                            let mut ctx = Ctx::new(&mut output_stream, self.rtr_cache.clone());
                             let received = std::time::Instant::now();
 
                             let verdict = self.roto_function.as_ref().map(

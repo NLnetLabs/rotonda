@@ -319,7 +319,7 @@ where
                                 "Unit {}: RTR client terminated.",
                                 client.target().name
                             );
-                            break
+                           return Err(Terminated);
                         }
                     };
                     if let Some(update) = update {

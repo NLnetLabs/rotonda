@@ -10,15 +10,14 @@ use std::{
 use chrono::{Duration, Utc};
 use hash_hasher::{HashBuildHasher, HashedSet};
 use inetnum::{addr::Prefix, asn::Asn};
-use log::{debug, error};
+use log::{debug, error, trace};
 use rotonda_store::{
-    custom_alloc::UpsertReport,
     epoch,
-    prelude::{
-        multi::{PrefixStoreError, RouteStatus},
-        PrefixRecord,
-    },
-    MatchOptions, MultiThreadedStore, QueryResult,
+    errors::{FatalResult, PrefixStoreError},
+    match_options::{MatchOptions, QueryResult},
+    prefix_record::{Meta, PrefixRecord, Record, RouteStatus},
+    rib::{config::MemoryOnlyConfig, StarCastRib},
+    stats::UpsertReport,
 };
 use routecore::bgp::{
     nlri::afisafi::{IsPrefix, Nlri},
@@ -37,19 +36,21 @@ use crate::{
 // -------- PhysicalRib ------------------------------------------------------
 
 // XXX is this actually used for something in the Store right now?
-impl rotonda_store::Meta for RotondaRoute {
-    type Orderable<'a> = OrdRoute<'a, Rfc4271>;
+// impl Meta for RotondaRoute {
+//     type Orderable<'a> = OrdRoute<'a, Rfc4271>;
 
-    type TBI = TiebreakerInfo;
+//     type TBI = TiebreakerInfo;
 
-    fn as_orderable(&self, _tbi: Self::TBI) -> Self::Orderable<'_> {
-        todo!()
-    }
-}
+//     fn as_orderable(&self, _tbi: Self::TBI) -> Self::Orderable<'_> {
+//         todo!()
+//     }
+// }
+
+type Store = StarCastRib<RotondaPaMap, MemoryOnlyConfig>;
 
 pub struct Rib {
-    unicast: Arc<Option<MultiThreadedStore<RotondaPaMap>>>,
-    multicast: Arc<Option<MultiThreadedStore<RotondaPaMap>>>,
+    unicast: Arc<Option<Store>>,
+    multicast: Arc<Option<Store>>,
     other_fams:
         HashMap<AfiSafiType, HashMap<(IngressId, Nlri<bytes::Bytes>), PaMap>>,
 }
@@ -58,13 +59,12 @@ pub struct Rib {
 struct Multicast(bool);
 
 impl Rib {
-    pub fn new_physical() -> Self {
-        Rib {
-            // FIXME are these always safe to unwrap?
-            unicast: Arc::new(Some(MultiThreadedStore::new().unwrap())),
-            multicast: Arc::new(Some(MultiThreadedStore::new().unwrap())),
+    pub fn new_physical() -> Result<Self, PrefixStoreError> {
+        Ok(Rib {
+            unicast: Arc::new(Some(Store::try_default()?)),
+            multicast: Arc::new(Some(Store::try_default()?)),
             other_fams: HashMap::new(),
-        }
+        })
     }
 
     pub fn new_virtual() -> Self {
@@ -84,13 +84,10 @@ impl Rib {
         self.unicast.is_some()
     }
 
-    pub fn store(
-        &self,
-    ) -> Result<&MultiThreadedStore<RotondaPaMap>, PrefixStoreError> {
+    pub fn store(&self) -> Result<&Store, PrefixStoreError> {
         if let Some(rib) = self.unicast.as_ref() {
             Ok(rib)
-        }
-        else {
+        } else {
             Err(PrefixStoreError::StoreNotReadyError)
         }
     }
@@ -166,7 +163,7 @@ impl Rib {
             // mark_mui_as_withdrawn_for_prefix . This way, we preserve the
             // last seen attributes/nexthop for this {prefix,mui} combination,
             // while setting the status to Withdrawn.
-            store.mark_mui_as_withdrawn_for_prefix(prefix, mui)?;
+            store.mark_mui_as_withdrawn_for_prefix(prefix, mui, 0)?;
 
             // FIXME this is just to satisfy the function signature, but is
             // quite useless as-is.
@@ -178,16 +175,20 @@ impl Rib {
             });
         }
 
-        let pubrec = rotonda_store::PublicRecord::new(
+        let pubrec = Record::new(
             mui,
             ltime,
             route_status,
             val.rotonda_pamap().clone(),
         );
 
-        store.insert(
+        let res = store.insert(
             prefix, pubrec, None, // Option<TBI>
-        )
+        );
+
+        println!("store counters {}", store.prefixes_count());
+
+        res
     }
 
     pub fn withdraw_for_ingress(
@@ -311,8 +312,10 @@ impl Rib {
         let store = (*self.unicast)
             .as_ref()
             .ok_or(PrefixStoreError::StoreNotReadyError.to_string())?;
-        let unicast_res = store.match_prefix(prefix, match_options, guard);
-        if unicast_res.prefix_meta.is_empty()
+        let unicast_res = store
+            .match_prefix(prefix, match_options, guard)
+            .map_err(|err| err.to_string())?;
+        if unicast_res.records.is_empty()
             && unicast_res.less_specifics.is_none()
             && unicast_res.more_specifics.is_none()
         {
@@ -320,9 +323,10 @@ impl Rib {
             let multicast_store = (*self.multicast)
                 .as_ref()
                 .ok_or(PrefixStoreError::StoreNotReadyError.to_string())?;
-            let multicast_res =
-                multicast_store.match_prefix(prefix, match_options, guard);
-            if !(multicast_res.prefix_meta.is_empty()
+            let multicast_res = multicast_store
+                .match_prefix(prefix, match_options, guard)
+                .map_err(|err| err.to_string())?;
+            if !(multicast_res.records.is_empty()
                 && multicast_res.less_specifics.is_none()
                 && multicast_res.more_specifics.is_none())
             {
@@ -344,7 +348,8 @@ impl Rib {
         let include_withdrawals = false;
         let mut res = store
             .iter_records_for_mui_v4(ingress_id, include_withdrawals, guard)
-            .collect::<Vec<_>>();
+            .collect::<FatalResult<Vec<_>>>()
+            .map_err(|e| e.to_string())?;
         res.append(
             &mut store
                 .iter_records_for_mui_v6(
@@ -352,7 +357,8 @@ impl Rib {
                     include_withdrawals,
                     guard,
                 )
-                .collect::<Vec<_>>(),
+                .collect::<FatalResult<Vec<_>>>()
+                .map_err(|e| e.to_string())?,
         );
 
         //tmp: while the per mui methods do not work yet, we can use
@@ -363,12 +369,6 @@ impl Rib {
             res.len()
         );
         Ok(res)
-    }
-}
-
-impl Default for Rib {
-    fn default() -> Self {
-        Self::new_physical()
     }
 }
 

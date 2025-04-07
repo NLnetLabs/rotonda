@@ -1,8 +1,11 @@
 use log::debug;
-use rotonda_store::QueryResult;
+use rotonda_store::match_options::QueryResult;
 
+use rotonda_store::prefix_record::Meta;
 use routecore::bgp::communities::{Community, HumanReadableCommunity};
-use routecore::bgp::path_attributes::PathAttribute;
+use routecore::bgp::message::PduParseInfo;
+use routecore::bgp::path_attributes::{OwnedPathAttributes, PathAttribute};
+use routecore::bgp::path_selection::TiebreakerInfo;
 use routecore::bgp::types::AfiSafiType;
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::{Serialize, Serializer};
@@ -111,16 +114,28 @@ impl fmt::Display for RotondaRoute {
     }
 }
 
-impl rotonda_store::Meta for RotondaPaMap {
+impl Meta for RotondaPaMap {
     type Orderable<'a> = routecore::bgp::path_selection::OrdRoute<
         'a,
         routecore::bgp::path_selection::Rfc4271,
     >;
 
-    type TBI = rotonda_store::prelude::multi::TiebreakerInfo;
+    type TBI = TiebreakerInfo;
 
     fn as_orderable(&self, _tbi: Self::TBI) -> Self::Orderable<'_> {
         todo!()
+    }
+}
+
+impl From<Vec<u8>> for RotondaPaMap {
+    fn from(value: Vec<u8>) -> Self {
+        OwnedPathAttributes::new(PduParseInfo::modern(), value).into()
+    }
+}
+
+impl AsRef<[u8]> for RotondaPaMap {
+    fn as_ref(&self) -> &[u8] {
+        self.0.as_ref()
     }
 }
 
@@ -200,6 +215,12 @@ impl Serialize for RotondaPaMap {
             s.serialize_element(&c)?;
         }
         s.end()
+    }
+}
+
+impl From<OwnedPathAttributes> for RotondaPaMap {
+    fn from(value: OwnedPathAttributes) -> Self {
+        RotondaPaMap(value)
     }
 }
 

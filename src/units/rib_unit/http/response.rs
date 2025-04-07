@@ -7,12 +7,12 @@ use log::{debug, error};
 //    builtin::{BuiltinTypeValue, PrefixRoute}, collections::ElementTypeValue,
 //    typevalue::TypeValue,
 //};
-use inetnum::asn::Asn;
-use rotonda_store::{
-    prelude::{multi::RouteStatus, Prefix},
-    PublicRecord,
-};
+use inetnum::{addr::Prefix, asn::Asn};
 
+use rotonda_store::{
+    match_options::QueryResult,
+    prefix_record::{Record, RouteStatus},
+};
 use routecore::bgp::{
     aspath::{AsPath, Hop, HopPath},
     communities::{
@@ -41,7 +41,7 @@ use super::{
 impl PrefixesApi {
     pub fn mk_json_response(
         //res: rotonda_store::QueryResult<RotondaRoute>,
-        res: rotonda_store::QueryResult<RotondaPaMap>,
+        res: QueryResult<RotondaPaMap>,
         includes: Includes,
         details_cfg: Details,
         filters_cfg: Filters,
@@ -55,7 +55,7 @@ impl PrefixesApi {
         //debug!("creating response for {:#?}", res);
 
         if let Some(prefix) = res.prefix {
-            for public_record in res.prefix_meta {
+            for public_record in res.records {
                 Self::prefixes_as_json(
                     &prefix,
                     &public_record,
@@ -129,7 +129,7 @@ impl PrefixesApi {
         query_prefix: &Prefix,
         //rib_value: &RibValue, // RibValue is basically PrefixRoute now
         //record: &PublicRecord<RotondaRoute>,
-        record: &PublicRecord<RotondaPaMap>,
+        record: &Record<RotondaPaMap>,
         details_cfg: &Details,
         filter_cfg: &Filters,
         sort_cfg: &SortKey,
@@ -296,7 +296,7 @@ impl PrefixesApi {
 
         let matches = |filter: &Filter| match filter.kind() {
             FilterKind::AsPath(filter_as_path) => {
-                Self::match_as_path(item, filter_as_path)
+                Self::match_as_path(item, filter_as_path.as_slice())
             }
 
             FilterKind::Community(community) => {

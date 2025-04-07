@@ -8,11 +8,15 @@ use inetnum::{addr::Prefix, asn::Asn};
 //    builtin::{BuiltinTypeValue, NlriStatus, RouteContext},
 //    typevalue::TypeValue,
 //};
-use rotonda_store::prelude::multi::RouteStatus;
 use routecore::bmp::message::{Message as BmpMsg, PerPeerHeader};
 
 use crate::{
-    bgp::encode::{mk_per_peer_header, Announcements, Prefixes}, common::status_reporter::AnyStatusReporter, payload::{Payload, RotondaRoute, Update}, roto_runtime::types::RouteContext, tests::util::internal::get_testable_metrics_snapshot, units::bmp_tcp_in::{
+    bgp::encode::{mk_per_peer_header, Announcements, Prefixes},
+    common::status_reporter::AnyStatusReporter,
+    payload::{Payload, RotondaRoute, Update},
+    roto_runtime::types::RouteContext,
+    tests::util::internal::get_testable_metrics_snapshot,
+    units::bmp_tcp_in::{
         metrics::BmpTcpInMetrics,
         state_machine::{
             machine::{BmpState, PeerAware},
@@ -20,7 +24,7 @@ use crate::{
             states::{dumping::Dumping, updating::Updating},
         },
         status_reporter::BmpTcpInStatusReporter,
-    }
+    },
 };
 
 use super::{
@@ -70,7 +74,8 @@ fn terminate() {
         .next_state;
 
     // When
-    let res = processor.process_msg(Instant::now(), termination_msg_buf, None);
+    let res =
+        processor.process_msg(Instant::now(), termination_msg_buf, None);
 
     // Then
     assert!(matches!(res.message_type, MessageType::StateTransition));
@@ -106,7 +111,8 @@ fn statistics_report() {
     let processor = processor
         .process_msg(Instant::now(), peer_up_msg_buf, None)
         .next_state;
-    let res = processor.process_msg(Instant::now(), stats_report_msg_buf, None);
+    let res =
+        processor.process_msg(Instant::now(), stats_report_msg_buf, None);
 
     // Then
     assert!(matches!(res.message_type, MessageType::Other));
@@ -114,10 +120,7 @@ fn statistics_report() {
 
     // Check the metrics
     let processor = res.next_state;
-    assert_metrics(
-        &processor,
-        ("Dumping", [1, 0, 0, 0, 0, 0, 1, 0, 0, 0]),
-    );
+    assert_metrics(&processor, ("Dumping", [1, 0, 0, 0, 0, 0, 1, 0, 0, 0]));
     //               ^ 1 connected router
     //                                 ^ 1 up peer
 }
@@ -155,10 +158,7 @@ fn peer_up_with_eor_capable_peer() {
 
     // Check the metrics
     let processor = res.next_state;
-    assert_metrics(
-        &processor,
-        ("Dumping", [1, 0, 0, 0, 0, 0, 1, 0, 1, 0]),
-    );
+    assert_metrics(&processor, ("Dumping", [1, 0, 0, 0, 0, 0, 1, 0, 1, 0]));
     //               ^ 1 connected router
     //                                 ^ 1 up peer
     //              and the peer is EoR capable ^
@@ -258,36 +258,34 @@ fn peer_up_route_monitoring_peer_down() {
     assert_eq!(get_unique_peer_up_count(&processor), 2);
 
     // Check the metrics
-    assert_metrics(
-        &processor,
-        ("Dumping", [1, 0, 0, 0, 0, 0, 2, 0, 0, 0]),
-    );
+    assert_metrics(&processor, ("Dumping", [1, 0, 0, 0, 0, 0, 2, 0, 0, 0]));
     //               ^ 1 connected router
     //                                 ^ 2 up peers
 
     // When the state machine processes a peer down notification for a peer that announced no routes
-    let res = processor.process_msg(Instant::now(), peer_down_msg_1_buf, None);
+    let res =
+        processor.process_msg(Instant::now(), peer_down_msg_1_buf, None);
 
     // Then the state should remain unchanged
     assert!(matches!(res.next_state, BmpState::Dumping(_)));
     // Because the BMP unit does not keep track of what was announced by every
     // peer, it always sends out a withdraw-all (in forms of a RoutingUpdate)
     // to the East.
-    assert!(matches!(res.message_type, MessageType::RoutingUpdate { .. }));
+    assert!(matches!(
+        res.message_type,
+        MessageType::RoutingUpdate { .. }
+    ));
     let processor = res.next_state;
 
     // Check the metrics
-    assert_metrics(
-        &processor,
-        ("Dumping", [1, 0, 0, 0, 0, 0, 1, 0, 0, 0]),
-    );
+    assert_metrics(&processor, ("Dumping", [1, 0, 0, 0, 0, 0, 1, 0, 0, 0]));
     //                                 ^ now only 1 peer up
 
     // When the state machine processes a couple of route announcements
     let processor = processor
         .process_msg(Instant::now(), route_mon_msg_buf.clone(), None)
         .next_state;
-    
+
     let res = processor.process_msg(Instant::now(), route_mon_msg_buf, None);
 
     // Then the state should remain unchanged
@@ -297,7 +295,7 @@ fn peer_up_route_monitoring_peer_down() {
     // BMP itself does not store the prefixes anymore, so ignore
     // get_announced_prefix_count:
     //assert_eq!(get_announced_prefix_count(&res.next_state, &real_pph_2), 2);
-    
+
     let processor = res.next_state;
 
     // Check the metrics
@@ -332,7 +330,8 @@ fn peer_up_route_monitoring_peer_down() {
     // and now only 1 prefix is stored ^
 
     // Unless it is a not-before-announced/already-withdrawn route
-    let res = processor.process_msg(Instant::now(), route_withdraw_msg_buf, None);
+    let res =
+        processor.process_msg(Instant::now(), route_withdraw_msg_buf, None);
 
     // Then the number of announced prefixes should remain unchanged
     assert!(matches!(res.next_state, BmpState::Dumping(_)));
@@ -347,7 +346,8 @@ fn peer_up_route_monitoring_peer_down() {
     //                              another withdrawal ^
 
     // And when a peer down notification for the other peer is received
-    let res = processor.process_msg(Instant::now(), peer_down_msg_2_buf, None);
+    let res =
+        processor.process_msg(Instant::now(), peer_down_msg_2_buf, None);
 
     // Then the state should remain unchanged
     assert!(matches!(res.next_state, BmpState::Dumping(_)));
@@ -372,10 +372,7 @@ fn peer_up_route_monitoring_peer_down() {
     }
 
     // Check the metrics
-    assert_metrics(
-        &processor,
-        ("Dumping", [1, 2, 0, 0, 0, 2, 0, 0, 0, 2]),
-    );
+    assert_metrics(&processor, ("Dumping", [1, 2, 0, 0, 0, 2, 0, 0, 0, 2]));
     //                                    ^ all peers are down
 }
 
@@ -409,10 +406,7 @@ fn peer_down_without_peer_up() {
 
     // Check the metrics
     let processor = res.next_state;
-    assert_metrics(
-        &processor,
-        ("Dumping", [1, 0, 0, 0, 1, 0, 0, 0, 0, 0]),
-    );
+    assert_metrics(&processor, ("Dumping", [1, 0, 0, 0, 1, 0, 0, 0, 0, 0]));
     //               ^ 1 connected router
     //                           ^ 1 unprocessable BMP message
 }
@@ -474,10 +468,7 @@ fn peer_up_different_peer_down() {
 
     // Check the metrics
     let processor = res.next_state;
-    assert_metrics(
-        &processor,
-        ("Dumping", [1, 0, 0, 0, 1, 0, 1, 0, 0, 0]),
-    );
+    assert_metrics(&processor, ("Dumping", [1, 0, 0, 0, 1, 0, 1, 0, 0, 0]));
     //               ^ 1 connected router
     //                                    ^ 1 up peer
     //                           ^ 1 unprocessable BMP message
@@ -754,10 +745,7 @@ fn end_of_rib_ipv4_for_a_single_peer() {
 
     // Check the metrics
     let processor = res.next_state;
-    assert_metrics(
-        &processor,
-        ("Dumping", [1, 0, 0, 0, 0, 0, 1, 0, 1, 0]),
-    );
+    assert_metrics(&processor, ("Dumping", [1, 0, 0, 0, 0, 0, 1, 0, 1, 0]));
     //               ^ 1 connected router
     //                                 ^ 1 up peer
     //           and the peer is EoR capable ^
@@ -835,10 +823,7 @@ fn route_monitoring_from_unknown_peer() {
 
     // Check the metrics
     let processor = res.next_state;
-    assert_metrics(
-        &processor,
-        ("Dumping", [1, 0, 0, 1, 1, 0, 0, 0, 0, 0]),
-    );
+    assert_metrics(&processor, ("Dumping", [1, 0, 0, 1, 1, 0, 0, 0, 0, 0]));
     //                  ^ 0 announcements because the msg was rejected!
     //                        ^ 1 BGP UPDATE was from an unknown peer
     //                           ^ 1 unprocessable BMP message
@@ -914,10 +899,7 @@ fn route_monitoring_invalid_message() {
 
     // Check the metrics
     let processor = res.next_state;
-    assert_metrics(
-        &processor,
-        ("Dumping", [1, 0, 0, 0, 1, 0, 1, 0, 0, 0]),
-    );
+    assert_metrics(&processor, ("Dumping", [1, 0, 0, 0, 1, 0, 1, 0, 0, 0]));
     //               ^ 1 connected router
     //                  ^ 0 announcements because the msg was rejected!
     //                           ^ 1 unprocessable BMP message
@@ -1214,7 +1196,7 @@ fn mk_test_processor() -> BmpState {
 
     BmpState::new(
         //SourceId::SocketAddr(addr),
-        ingress_id, 
+        ingress_id,
         //Arc::new("test-router".to_string()),
         Arc::new(ingress_id.to_string()),
         status_reporter,

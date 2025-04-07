@@ -77,7 +77,7 @@ use futures::future::{select, Either, Future};
 use futures::pin_mut;
 use inetnum::addr::Prefix;
 use log::{error, log_enabled, trace, Level};
-use rotonda_store::MatchOptions;
+use rotonda_store::match_options::MatchOptions;
 use serde::Deserialize;
 use tokio::sync::mpsc::Sender;
 

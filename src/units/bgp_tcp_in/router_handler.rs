@@ -10,7 +10,7 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use log::{debug, error, warn};
 use inetnum::asn::Asn;
-use rotonda_store::prelude::multi::RouteStatus;
+use rotonda_store::prefix_record::RouteStatus;
 use routecore::bgp::message::{Message as BgpMsg, UpdateMessage};
 use smallvec::{smallvec, SmallVec};
 use tokio::net::TcpStream;

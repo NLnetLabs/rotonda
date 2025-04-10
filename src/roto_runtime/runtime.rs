@@ -885,7 +885,9 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         let mut valid = false;
 
         if let Some(hoppath) = rr.owned_map().get::<HopPath>() {
-            if let Some(origin) = hoppath.origin().and_then(|o| Hop::try_into_asn(o.clone()).ok()) {
+            if let Some(origin) = hoppath.origin()
+                .and_then(|o| Hop::try_into_asn(o.clone()).ok())
+            {
                 let match_options = MatchOptions {
                     match_type: MatchType::LongestMatch,
                     include_withdrawn: false,
@@ -896,25 +898,32 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
                 };
 
                 let guard = &rotonda_store::epoch::pin();
-                if let Ok(res) =  rpki.vrps.match_prefix(
+                let res = match rpki.vrps.match_prefix(
                     &prefix,
                     &match_options,
                     guard
                 ) {
-                    // check exact/longest matches
-                    'outer: for r in res.records {
-                        for maxlen in r.meta.iter() {
-                            if prefix.len() <= *maxlen {
-                                covered = true;
-                                if r.multi_uniq_id == u32::from(origin) {
-                                    valid = true;
-                                    break 'outer;
-                                }
+                    Ok(res) => res,
+                    Err(e) => {
+                        warn!("could not lookup ");
+                        return; // RovStatus::NotChecked;
+                    }
+                };
+                // check exact/longest matches
+                'outer: for r in res.records {
+                    for maxlen in r.meta.iter() {
+                        if prefix.len() <= *maxlen {
+                            covered = true;
+                            if r.multi_uniq_id == u32::from(origin) {
+                                valid = true;
+                                break 'outer;
                             }
                         }
                     }
+                }
 
-                    // check less specifics
+                // check less specifics
+                if !valid {
                     if let Some(less_specifics) = res.less_specifics {
                         'outer: for r in less_specifics.iter() {
                             for record in r.meta.iter() {
@@ -930,7 +939,6 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
                             }
                         }
                     }
-
                 }
             }
         }

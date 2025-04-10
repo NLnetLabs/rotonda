@@ -76,12 +76,12 @@ impl Serialize for RotondaRoute {
 impl RotondaRoute {
     pub fn owned_map(
         &self,
-    ) -> &routecore::bgp::path_attributes::OwnedPathAttributes {
+    ) -> routecore::bgp::path_attributes::OwnedPathAttributes {
         match self {
-            RotondaRoute::Ipv4Unicast(_, p) => &p.0,
-            RotondaRoute::Ipv6Unicast(_, p) => &p.0,
-            RotondaRoute::Ipv4Multicast(_, p) => &p.0,
-            RotondaRoute::Ipv6Multicast(_, p) => &p.0,
+            RotondaRoute::Ipv4Unicast(_, p) => p.path_attributes(),
+            RotondaRoute::Ipv6Unicast(_, p) => p.path_attributes(),
+            RotondaRoute::Ipv4Multicast(_, p) => p.path_attributes(),
+            RotondaRoute::Ipv6Multicast(_, p) => p.path_attributes(),
         }
     }
 
@@ -91,6 +91,15 @@ impl RotondaRoute {
             RotondaRoute::Ipv6Unicast(_, p) => p,
             RotondaRoute::Ipv4Multicast(_, p) => p,
             RotondaRoute::Ipv6Multicast(_, p) => p,
+        }
+    }
+
+    pub fn rotonda_pamap_mut(&mut self) -> &mut RotondaPaMap {
+        match self {
+            RotondaRoute::Ipv4Unicast(_, ref mut p) => p,
+            RotondaRoute::Ipv6Unicast(_, ref mut p) => p,
+            RotondaRoute::Ipv4Multicast(_, ref mut p) => p,
+            RotondaRoute::Ipv6Multicast(_, ref mut p) => p,
         }
     }
 }
@@ -135,18 +144,117 @@ impl From<Vec<u8>> for RotondaPaMap {
 
 impl AsRef<[u8]> for RotondaPaMap {
     fn as_ref(&self) -> &[u8] {
-        self.0.as_ref()
+        self.raw.as_ref()
     }
 }
 
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+#[derive(Serialize)]
+pub struct RpkiInfo {
+    rov: RovStatus,
+}
+
+impl From<u8> for RpkiInfo {
+    fn from(value: u8) -> Self {
+        let rov = match value {
+            1 => RovStatus::NotFound,
+            2 => RovStatus::Valid,
+            4 => RovStatus::Invalid,
+            _ => RovStatus::NotChecked
+        };
+
+        Self { rov }
+    }
+}
+
+impl From<RpkiInfo> for u8 {
+    fn from(value: RpkiInfo) -> Self {
+        match value.rov {
+            RovStatus::NotChecked => 0,
+            RovStatus::NotFound => 1,
+            RovStatus::Valid => 2,
+            RovStatus::Invalid => 4,
+        }
+    }
+}
+
+
+
+
+impl From<RovStatus> for RpkiInfo {
+    fn from(value: RovStatus) -> Self {
+        Self { rov: value }
+    }
+}
+
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+#[derive(Serialize)]
+pub enum RovStatus {
+    #[default]
+    NotChecked,
+    NotFound,
+    Valid,
+    Invalid,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct RotondaPaMap(
-    pub routecore::bgp::path_attributes::OwnedPathAttributes,
-);
+pub struct RotondaPaMap{
+    // raw[0] is RpkiInfo
+    // raw[1] is PduParseInfo
+    // raw[2..] contains the path attributes blob
+    raw: Vec<u8>,
+}
+
+// These from/to byte functions should ideally live in routecore, but as we
+// will refactor many routecore types to zerocopy structs soon(tm), we define
+// these here for now.
+fn ppi_to_byte(ppi: PduParseInfo) -> u8 {
+    match ppi.four_octet_enabled() {
+        true => 1,
+        false => 0,
+    }
+}
+
+fn byte_to_ppi(byte: u8) -> PduParseInfo {
+    if byte == 0x01 {
+        PduParseInfo::modern()
+    } else {
+        PduParseInfo::legacy()
+    }
+}
+
+
+impl RotondaPaMap {
+    pub fn new(path_attributes: OwnedPathAttributes) -> Self {
+        let ppi = path_attributes.pdu_parse_info();
+        let mut pas = path_attributes.into_vec();
+        let mut raw = Vec::with_capacity(2 + pas.len());
+        
+        let rpki_info = RpkiInfo::default();
+        raw.push(rpki_info.into());
+        raw.push(ppi_to_byte(ppi));
+
+        raw.append(&mut pas);
+        Self { raw }
+    }
+
+    pub fn set_rpki_info(&mut self, rpki_info: RpkiInfo) {
+        self.raw[0] = rpki_info.into();
+    }
+
+    pub fn rpki_info(&self) -> RpkiInfo {
+        self.raw[0].into()
+    }
+
+    pub fn path_attributes(&self) -> OwnedPathAttributes {
+        let ppi = byte_to_ppi(self.raw[1]);
+        OwnedPathAttributes::new(ppi, self.raw[2..].to_vec())
+    }
+}
 
 impl fmt::Display for RotondaPaMap {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.0)
+        write!(f, "{:?}", self.path_attributes())
     }
 }
 
@@ -157,7 +265,7 @@ impl Serialize for RotondaPaMap {
     {
         let mut s = serializer.serialize_seq(None)?;
         let mut communities: Vec<HumanReadableCommunity> = vec![];
-        for pa in self.0.iter().flatten() {
+        for pa in self.path_attributes().iter().flatten() {
             match pa.to_owned().unwrap() {
                 PathAttribute::StandardCommunities(list) => {
                     for c in list.communities() {
@@ -220,7 +328,7 @@ impl Serialize for RotondaPaMap {
 
 impl From<OwnedPathAttributes> for RotondaPaMap {
     fn from(value: OwnedPathAttributes) -> Self {
-        RotondaPaMap(value)
+        RotondaPaMap::new(value)
     }
 }
 

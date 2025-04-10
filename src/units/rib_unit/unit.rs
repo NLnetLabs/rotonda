@@ -12,7 +12,7 @@ use crate::{
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use std::{collections::{HashMap, HashSet}, io::prelude::*, sync::RwLock};
-use rotonda_store::{errors::PrefixStoreError, match_options::QueryResult, prefix_record::{Record, RecordSet, RouteStatus}, stats::UpsertReport};
+use rotonda_store::{errors::PrefixStoreError, match_options::QueryResult, prefix_record::{Record, RecordSet, RouteStatus}, rib::{config::MemoryOnlyConfig, StarCastRib}, stats::UpsertReport};
 use std::io::prelude::*;
 
 use chrono::Utc;
@@ -44,11 +44,15 @@ use super::{
 pub(crate) type RotoFuncPre = roto::TypedFunc<
     Ctx,
     (
-        roto::Val<RotondaRoute>,
-        //roto::Val<RouteContext>,
+        //roto::Val<*mut RotondaRoute>,
+        roto::Val<roto_runtime::MutRotondaRoute>,
     ),
     roto::Verdict<(), ()>,
 >;
+const ROTO_FUNC_PRE_FILTER_NAME: &str = "rib_in_pre";
+
+
+
 
 type RotoFuncPost = roto::TypedFunc<
     Ctx,
@@ -58,6 +62,8 @@ type RotoFuncPost = roto::TypedFunc<
     ),
     roto::Verdict<(), ()>,
 >;
+
+const ROTO_FUNC_POST_FILTER_NAME: &str = "rib_in_post";
 
 impl From<UpsertReport> for InsertionInfo {
     fn from(value: UpsertReport) -> Self {
@@ -210,13 +216,65 @@ impl RibUnit {
     }
 }
 
-#[derive(Debug, Default)]
+
+#[derive(Clone, Debug, Default)]
+pub struct MaxLenList {
+    list: Vec<u8>,
+}
+impl MaxLenList {
+    pub fn push(&mut self, value: u8) {
+        self.list.push(value);
+    }
+    pub fn iter(&self) -> std::slice::Iter<'_, u8> {
+        self.list.iter()
+    }
+}
+impl AsRef<[u8]> for MaxLenList {
+    fn as_ref(&self) -> &[u8] {
+        self.list.as_ref()
+    }
+}
+impl From<Vec<u8>> for MaxLenList {
+    fn from(value: Vec<u8>) -> Self {
+        Self { list: value }
+    }
+}
+impl std::fmt::Display for MaxLenList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.list.iter()).finish()
+    }
+}
+impl rotonda_store::prefix_record::Meta for MaxLenList {
+    type Orderable<'a> = ();
+
+    type TBI = ();
+
+    fn as_orderable(&self, tbi: Self::TBI) -> Self::Orderable<'_> {
+        todo!()
+    }
+}
+type VrpStore = StarCastRib<MaxLenList, MemoryOnlyConfig>;
+
 pub struct RtrCache {
     route_origins: RwLock<HashSet<rpki::rtr::payload::RouteOrigin>>,
     router_keys: RwLock<HashSet<rpki::rtr::payload::RouterKey>>,
     aspas: RwLock<HashSet<rpki::rtr::payload::Aspa>>,
 
     pub origin_cache: Arc<ArcSwap<HashMap<Prefix, Vec<Asn>>>>,
+    pub vrps: VrpStore,
+    pub tmp_stats: HashMap<(Prefix, Asn), usize>,
+}
+impl Default for RtrCache {
+    fn default() -> Self {
+        Self {
+            vrps: VrpStore::try_default().unwrap(),
+            route_origins: Default::default(),
+            router_keys: Default::default(),
+            aspas: Default::default(),
+            origin_cache: Default::default(),
+            tmp_stats: Default::default(),
+        }
+    }
 }
 
 pub struct RibUnitRunner {
@@ -329,7 +387,7 @@ impl RibUnitRunner {
         let roto_function_pre: Option<RotoFuncPre> =
             roto_compiled.clone().and_then(|c| {
                 let mut c = c.lock().unwrap();
-                c.get_function("rib-in-pre")
+                c.get_function(ROTO_FUNC_PRE_FILTER_NAME)
                 .inspect_err(|_|
                     warn!("Loaded Roto script has no filter for rib-in-pre")
                 )
@@ -341,7 +399,7 @@ impl RibUnitRunner {
         //let roto_function_post: Option<RotoFuncPost> = roto_compiled
         //    .and_then(|c| {
         //        let mut c = c.lock().unwrap();
-        //        c.get_function("rib-in-post")
+        //        c.get_function(ROTO_FUNC_POST_FILTER_NAME)
         //        .inspect_err(|_|
         //            warn!("Loaded Roto script has no filter for rib-in-post")
         //        )
@@ -743,6 +801,40 @@ impl RibUnitRunner {
 
                                     }
                                     ;
+
+                                    let guard = &rotonda_store::epoch::pin();
+                                    let mut maxlen_list = if let Ok(e) = self.rtr_cache.vrps.match_prefix(
+                                        &prefix,
+                                        &rotonda_store::match_options::MatchOptions{
+                                            match_type: rotonda_store::match_options::MatchType::ExactMatch,
+                                            include_withdrawn: false,
+                                            include_less_specifics: false,
+                                            include_more_specifics: false,
+                                            mui: Some(u32::from(asn)), 
+                                            include_history: rotonda_store::match_options::IncludeHistory::None,
+                                        },
+                                        guard,
+                                    ) {
+                                        if !e.records.is_empty() {
+                                            assert_eq!(e.records.len(), 1);
+                                            e.records.first().unwrap().meta.clone()
+                                        } else {
+                                            MaxLenList::default()
+                                        }
+                                    } else {
+                                        warn!("failed to do lookup in VrpStore");
+                                        MaxLenList::default()
+                                    };
+
+                                    maxlen_list.push(route_origin.prefix.resolved_max_len());
+                                    //eprintln!("upserting {}: {}", &prefix, &maxlen_list);
+                                    let r = Record {
+                                        multi_uniq_id: u32::from(asn),
+                                        ltime: 0,
+                                        status: RouteStatus::Active,
+                                        meta: maxlen_list,
+                                    };
+                                    self.rtr_cache.vrps.insert(&prefix, r, None).unwrap();
                                 }
                                 RtrPayload::RouterKey(router_key) => {
                                     new_router_keys.insert(router_key);
@@ -829,24 +921,37 @@ impl RibUnitRunner {
         let mut output_stream = RotoOutputStream::new();
         let mut ctx = Ctx::new(&mut output_stream, self.rtr_cache.clone());
 
-        for p in payload {
+        for mut p in payload {
             let ingress_id = match &p.context {
                 RouteContext::Fresh(f) => Some(f.provenance().ingress_id),
                 RouteContext::Mrt(m) => Some(m.provenance().ingress_id),
                 _ => None,
             };
+
             if let Some(ref roto_function) = self.roto_function_pre {
-                match roto_function.call(
-                    &mut ctx,
-                    roto::Val(p.rx_value.clone()),
-                    //roto::Val(p.context.clone()),
-                ) {
+                let Payload{ rx_value, context, trace_id, received } = p;
+                let mutrr: roto_runtime::MutRotondaRoute = rx_value.into();
+                match roto_function.call(&mut ctx, roto::Val(mutrr.clone())) {
                     roto::Verdict::Accept(_) => {
+                        let modified_rr = std::rc::Rc::into_inner(mutrr).unwrap().into_inner();
+                        p = Payload {
+                            rx_value: modified_rr,
+                            context,
+                            trace_id,
+                            received,
+                        };
                         self.insert_payload(&p);
                         res.push(p.clone());
                     }
                     roto::Verdict::Reject(_) => {
                         //debug!("roto::Verdict Reject, dropping {p:#?}");
+                        let modified_rr = std::rc::Rc::into_inner(mutrr).unwrap().into_inner();
+                        p = Payload {
+                            rx_value: modified_rr,
+                            context,
+                            trace_id,
+                            received,
+                        };
                     }
                 }
             } else {
@@ -854,6 +959,7 @@ impl RibUnitRunner {
                 self.insert_payload(&p);
                 res.push(p.clone());
             }
+
             if !output_stream.is_empty() {
                 let mut osms = smallvec![];
 

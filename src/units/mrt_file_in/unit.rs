@@ -372,13 +372,13 @@ impl MrtInRunner {
                     AfiSafiType::Ipv4Unicast => {
                         RotondaRoute::Ipv4Unicast(
                             prefix.try_into().map_err(MrtError::other)?,
-                            RotondaPaMap(routecore::bgp::path_attributes::OwnedPathAttributes::new(PduParseInfo::modern(), raw_attr))
+                            RotondaPaMap::new(routecore::bgp::path_attributes::OwnedPathAttributes::new(PduParseInfo::modern(), raw_attr))
                         )
                     }
                     AfiSafiType::Ipv6Unicast => {
                         RotondaRoute::Ipv6Unicast(
                             prefix.try_into().map_err(MrtError::other)?,
-                            RotondaPaMap(routecore::bgp::path_attributes::OwnedPathAttributes::new(PduParseInfo::modern(), raw_attr))
+                            RotondaPaMap::new(routecore::bgp::path_attributes::OwnedPathAttributes::new(PduParseInfo::modern(), raw_attr))
                         )
                     }
                     AfiSafiType::Ipv4Multicast |

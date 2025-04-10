@@ -186,7 +186,7 @@ impl Rib {
             prefix, pubrec, None, // Option<TBI>
         );
 
-        println!("store counters {}", store.prefixes_count());
+        //println!("store counters {}", store.prefixes_count());
 
         res
     }

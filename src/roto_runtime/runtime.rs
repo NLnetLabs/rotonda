@@ -1,9 +1,12 @@
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
 use log::{debug, warn};
+use rotonda_store::match_options::{IncludeHistory, MatchOptions, MatchType};
 use routecore::bgp::aspath::{AsPath, Hop, HopPath};
 use routecore::bgp::communities::{
     Community, LargeCommunity, StandardCommunity, Wellknown,
@@ -16,18 +19,24 @@ use routecore::bgp::path_attributes::LargeCommunitiesList;
 use routecore::bmp::message::PerPeerHeader;
 use routecore::bmp::message::{Message as BmpMsg, MessageType as BmpMsgType};
 
-use roto::{roto_function, roto_method, Context};
+use roto::{roto_function, roto_method, roto_static_method, Context};
 
 use super::types::{
     InsertionInfo, Output, Provenance, RotoOutputStream, RouteContext,
 };
-use crate::payload::RotondaRoute;
+use crate::payload::{RotondaRoute, RovStatus};
 use crate::roto_runtime::types::LogEntry;
 use crate::units::rib_unit::unit::RtrCache;
 
 pub(crate) type Log = *mut RotoOutputStream;
 pub(crate) type SharedRtrCache = Arc<RtrCache>;
+pub(crate) type MutRotondaRoute = Rc<RefCell<RotondaRoute>>;
 
+impl From<RotondaRoute> for MutRotondaRoute {
+    fn from(value: RotondaRoute) -> Self {
+        Rc::new(RefCell::new(value))
+    }
+}
 /// Context used for all components.
 ///
 /// Currently, the Provenance is not stored so it is not guaranteed to be
@@ -54,7 +63,8 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     let mut rt = roto::Runtime::new();
 
     // --- General types
-    rt.register_clone_type_with_name::<RotondaRoute>(
+    //rt.register_clone_type_with_name::<*mut RotondaRoute>(
+    rt.register_clone_type_with_name::<MutRotondaRoute>(
         "Route",
         "A single announced or withdrawn path",
     )?;
@@ -101,17 +111,22 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         "A BGP Large Community (RFC8092)",
     )?;
 
-    #[roto_function(rt, Community)]
-    fn from_u32(raw: u32) -> StandardCommunity {
+    //#[roto_function(rt)]
+    //fn community(raw: u32) -> StandardCommunity {
+    //    StandardCommunity::from_u32(raw)
+    //}
+
+    #[roto_static_method(rt, StandardCommunity, new)]
+    fn new(raw: u32) -> StandardCommunity {
         StandardCommunity::from_u32(raw)
     }
+
 
     // --- Provenance methods
 
     /// Return the peer ASN
     #[roto_method(rt, Provenance)]
-    fn peer_asn(provenance: *const Provenance) -> Asn {
-        let provenance = unsafe { &*provenance };
+    fn peer_asn(provenance: &Provenance) -> Asn {
         provenance.peer_asn
     }
 
@@ -124,14 +139,10 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     // --- RotondaRoute methods
 
     /// Check whether the prefix for this `RotondaRoute` matches
-    #[roto_method(rt, RotondaRoute)]
-    fn prefix_matches(
-        rr: *const RotondaRoute,
-        to_match: *const Prefix,
-    ) -> bool {
-        let rr = unsafe { &*rr };
-        let to_match = unsafe { &*to_match };
-        let rr_prefix = match rr {
+    #[roto_method(rt, MutRotondaRoute)]
+    fn prefix_matches(rr: &MutRotondaRoute, to_match: &Prefix) -> bool {
+        let rr = rr.borrow_mut();
+        let rr_prefix = match *rr {
             RotondaRoute::Ipv4Unicast(n, ..) => n.prefix(),
             RotondaRoute::Ipv6Unicast(n, ..) => n.prefix(),
             RotondaRoute::Ipv4Multicast(n, ..) => n.prefix(),
@@ -139,11 +150,10 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         };
         rr_prefix == *to_match
     }
-
     /// Check whether the AS_PATH contains the given `Asn`
-    #[roto_method(rt, RotondaRoute, aspath_contains)]
-    fn rr_aspath_contains(rr: *const RotondaRoute, to_match: Asn) -> bool {
-        let rr = unsafe { &*rr };
+    #[roto_method(rt, MutRotondaRoute, aspath_contains)]
+    fn rr_aspath_contains(rr: &MutRotondaRoute, to_match: Asn) -> bool {
+        let rr = rr.borrow_mut();
 
         if let Some(hoppath) = rr.owned_map().get::<HopPath>() {
             hoppath.into_iter().any(|h| h == to_match.into())
@@ -153,28 +163,27 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     }
 
     /// Check whether the AS_PATH origin matches the given `Asn`
-    #[roto_method(rt, RotondaRoute, match_aspath_origin)]
+    #[roto_method(rt, MutRotondaRoute, match_aspath_origin)]
     fn rr_match_aspath_origin(
-        rr: *const RotondaRoute,
-        to_match: Asn,
+        rr: &MutRotondaRoute,
+        to_match: &Asn,
     ) -> bool {
-        let rr = unsafe { &*rr };
+        let rr = rr.borrow_mut();
         if let Some(hoppath) = rr.owned_map().get::<HopPath>() {
             if let Some(Hop::Asn(asn)) = hoppath.origin() {
-                return *asn == to_match;
+                return asn == to_match;
             }
         }
         false
     }
 
     /// Check whether this `RotondaRoute` contains the given Standard Community
-    #[roto_method(rt, RotondaRoute, contains_community)]
+    #[roto_method(rt, MutRotondaRoute, contains_community)]
     fn rr_contains_community(
-        rr: *const RotondaRoute,
-        to_match: *const StandardCommunity,
+        rr: &MutRotondaRoute,
+        to_match: &StandardCommunity,
     ) -> bool {
-        let rr = unsafe { &*rr };
-        let to_match = unsafe { &*to_match };
+        let rr = rr.borrow_mut();
 
         if let Some(list) = rr.owned_map().get::<StandardCommunitiesList>() {
             return list.communities().iter().any(|c| c == to_match);
@@ -183,13 +192,12 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     }
 
     /// Check whether this `RotondaRoute` contains the given Large Community
-    #[roto_method(rt, RotondaRoute, contains_large_community)]
+    #[roto_method(rt, MutRotondaRoute, contains_large_community)]
     fn rr_contains_large_community(
-        rr: *const RotondaRoute,
-        to_match: *const LargeCommunity,
+        rr: &MutRotondaRoute,
+        to_match: &LargeCommunity,
     ) -> bool {
-        let rr = unsafe { &*rr };
-        let to_match = unsafe { &*to_match };
+        let rr = rr.borrow_mut();
 
         if let Some(list) = rr.owned_map().get::<LargeCommunitiesList>() {
             return list.communities().iter().any(|c| c == to_match);
@@ -198,18 +206,18 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     }
 
     /// Check whether this `RotondaRoute` contains the given Path Attribute
-    #[roto_method(rt, RotondaRoute, has_attribute)]
-    fn rr_has_attribute(rr: *const RotondaRoute, to_match: u8) -> bool {
-        let rr = unsafe { &*rr };
+    #[roto_method(rt, MutRotondaRoute, has_attribute)]
+    fn rr_has_attribute(rr: &MutRotondaRoute, to_match: u8) -> bool {
+        let rr = rr.borrow_mut();
         rr.owned_map()
             .iter()
             .any(|pa| pa.ok().is_some_and(|pa| pa.type_code() == to_match))
     }
 
     /// Return a formatted string for the AS_PATH
-    #[roto_method(rt, RotondaRoute, fmt_aspath)]
-    fn rr_fmt_aspath(rr: *const RotondaRoute) -> Arc<str> {
-        let rr = unsafe { &*rr };
+    #[roto_method(rt, MutRotondaRoute, fmt_aspath)]
+    fn rr_fmt_aspath(rr: &MutRotondaRoute) -> Arc<str> {
+        let rr = rr.borrow_mut();
         if let Some(hoppath) = rr.owned_map().get::<HopPath>() {
             let Ok(as_path) = hoppath.to_as_path();
             _fmt_aspath(as_path)
@@ -219,9 +227,9 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     }
 
     /// Return a formatted string for the AS_PATH origin
-    #[roto_method(rt, RotondaRoute, fmt_aspath_origin)]
-    fn rr_fmt_aspath_origin(rr: *const RotondaRoute) -> Arc<str> {
-        let rr = unsafe { &*rr };
+    #[roto_method(rt, MutRotondaRoute, fmt_aspath_origin)]
+    fn rr_fmt_aspath_origin(rr: &MutRotondaRoute) -> Arc<str> {
+        let rr = rr.borrow_mut();
         if let Some(hoppath) = rr.owned_map().get::<HopPath>() {
             let Ok(as_path) = hoppath.to_as_path();
             _fmt_aspath_origin(as_path)
@@ -231,9 +239,9 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     }
 
     /// Return a formatted string for the Standard Communities
-    #[roto_method(rt, RotondaRoute, fmt_communities)]
-    fn rr_fmt_communities(rr: *const RotondaRoute) -> Arc<str> {
-        let rr = unsafe { &*rr };
+    #[roto_method(rt, MutRotondaRoute, fmt_communities)]
+    fn rr_fmt_communities(rr: &MutRotondaRoute) -> Arc<str> {
+        let rr = rr.borrow_mut();
 
         if let Some(iter) = rr.owned_map().get::<StandardCommunitiesList>() {
             iter.communities()
@@ -248,9 +256,9 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     }
 
     /// Return a formatted string for the Large Communities
-    #[roto_method(rt, RotondaRoute, fmt_large_communities)]
-    fn rr_fmt_large_communities(rr: *const RotondaRoute) -> Arc<str> {
-        let rr = unsafe { &*rr };
+    #[roto_method(rt, MutRotondaRoute, fmt_large_communities)]
+    fn rr_fmt_large_communities(rr: &MutRotondaRoute) -> Arc<str> {
+        let rr = rr.borrow_mut();
 
         if let Some(iter) = rr.owned_map().get::<LargeCommunitiesList>() {
             iter.communities()
@@ -269,110 +277,91 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     /// Check whether the AS_PATH contains the given `Asn`
     #[roto_method(rt, BgpUpdateMessage<Bytes>, aspath_contains)]
     fn bgp_aspath_contains(
-        msg: *const BgpUpdateMessage<Bytes>,
+        msg: &BgpUpdateMessage<Bytes>,
         to_match: Asn,
     ) -> bool {
-        let msg = unsafe { &*msg };
-
         aspath_contains(msg, to_match)
     }
 
     /// Check whether the AS_PATH origin matches the given `Asn`
     #[roto_method(rt, BgpUpdateMessage<Bytes>, match_aspath_origin)]
     fn bgp_match_aspath_origin(
-        msg: *const BgpUpdateMessage<Bytes>,
+        msg: &BgpUpdateMessage<Bytes>,
         to_match: Asn,
     ) -> bool {
-        let msg = unsafe { &*msg };
-
         match_aspath_origin(msg, to_match)
     }
 
     /// Check whether this message contains the given Standard Community
     #[roto_method(rt, BgpUpdateMessage<Bytes>, contains_community)]
     fn bgp_contains_community(
-        msg: *const BgpUpdateMessage<Bytes>,
-        to_match: *const StandardCommunity,
+        msg: &BgpUpdateMessage<Bytes>,
+        to_match: &StandardCommunity,
     ) -> bool {
-        let msg = unsafe { &*msg };
-        let to_match = unsafe { &*to_match };
-
         contains_community(msg, to_match)
     }
 
     /// Check whether this message contains the given Large Community
     #[roto_method(rt, BgpUpdateMessage<Bytes>, contains_large_community)]
     fn bgp_contains_large_community(
-        msg: *const BgpUpdateMessage<Bytes>,
-        to_match: *const LargeCommunity,
+        msg: &BgpUpdateMessage<Bytes>,
+        to_match: &LargeCommunity,
     ) -> bool {
-        let msg = unsafe { &*msg };
-        let to_match = unsafe { &*to_match };
-
         contains_large_community(msg, to_match)
     }
 
     /// Check whether this message contains the given Path Attribute
     #[roto_method(rt, BgpUpdateMessage<Bytes>, has_attribute)]
     fn bgp_has_attribute(
-        msg: *const BgpUpdateMessage<Bytes>,
+        msg: &BgpUpdateMessage<Bytes>,
         to_match: u8,
     ) -> bool {
-        let msg = unsafe { &*msg };
-
         has_attribute(msg, to_match)
     }
 
     /// Return the number of announcements in this message
     #[roto_method(rt, BgpUpdateMessage<Bytes>, announcements_count)]
-    fn bgp_announcements_count(msg: *const BgpUpdateMessage<Bytes>) -> u32 {
-        let msg = unsafe { &*msg };
+    fn bgp_announcements_count(msg: &BgpUpdateMessage<Bytes>) -> u32 {
         announcements_count(msg)
     }
 
     /// Return the number of withdrawals in this message
     #[roto_method(rt, BgpUpdateMessage<Bytes>, withdrawals_count)]
-    fn bgp_withdrawals_count(msg: *const BgpUpdateMessage<Bytes>) -> u32 {
-        let msg = unsafe { &*msg };
+    fn bgp_withdrawals_count(msg: &BgpUpdateMessage<Bytes>) -> u32 {
         withdrawals_count(msg)
     }
 
     /// Return a formatted string for the AS_PATH
     #[roto_method(rt, BgpUpdateMessage<Bytes>, fmt_aspath)]
-    fn bgp_fmt_aspath(msg: *const BgpUpdateMessage<Bytes>) -> Arc<str> {
-        let msg = unsafe { &*msg };
+    fn bgp_fmt_aspath(msg: &BgpUpdateMessage<Bytes>) -> Arc<str> {
         fmt_aspath(msg)
     }
 
     /// Return a formatted string for the AS_PATH origin
     #[roto_method(rt, BgpUpdateMessage<Bytes>, fmt_aspath_origin)]
     fn bgp_fmt_aspath_origin(
-        msg: *const BgpUpdateMessage<Bytes>,
+        msg: &BgpUpdateMessage<Bytes>,
     ) -> Arc<str> {
-        let msg = unsafe { &*msg };
         fmt_aspath_origin(msg)
     }
 
     /// Return a formatted string for the Standard Communities
     #[roto_method(rt, BgpUpdateMessage<Bytes>, fmt_communities)]
-    fn bgp_fmt_communities(msg: *const BgpUpdateMessage<Bytes>) -> Arc<str> {
-        let msg = unsafe { &*msg };
+    fn bgp_fmt_communities(msg: &BgpUpdateMessage<Bytes>) -> Arc<str> {
         fmt_communities(msg)
     }
 
     /// Return a formatted string for the Large Communities
     #[roto_method(rt, BgpUpdateMessage<Bytes>, fmt_large_communities)]
     fn bgp_fmt_large_communities(
-        msg: *const BgpUpdateMessage<Bytes>,
+        msg: &BgpUpdateMessage<Bytes>,
     ) -> Arc<str> {
-        let msg = unsafe { &*msg };
         fmt_large_communities(msg)
     }
 
     /// Format this message as hexadecimal Wireshark input
     #[roto_method(rt, BgpUpdateMessage<Bytes>, fmt_pcap)]
-    fn bgp_fmt_pcap(msg: *const BgpUpdateMessage<Bytes>) -> Arc<str> {
-        let msg = unsafe { &*msg };
+    fn bgp_fmt_pcap(msg: &BgpUpdateMessage<Bytes>) -> Arc<str> {
         fmt_pcap(msg.as_ref())
     }
 
@@ -388,8 +377,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     /// Return true if `asn` matches the asn in the `BmpMsg`.
     /// returns false if no PPH is present.
     #[roto_method(rt, BmpMsg<Bytes>)]
-    fn is_ibgp(msg: *const BmpMsg<Bytes>, asn: Asn) -> bool {
-        let msg = unsafe { &*msg };
+    fn is_ibgp(msg: &BmpMsg<Bytes>, asn: Asn) -> bool {
         let asn_in_msg = match msg {
             BmpMsg::RouteMonitoring(m) => m.per_peer_header().asn(),
             BmpMsg::StatisticsReport(m) => m.per_peer_header().asn(),
@@ -402,25 +390,22 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         asn == asn_in_msg
     }
 
+
     /// Check whether this message is of type 'RouteMonitoring'
     #[roto_method(rt, BmpMsg<Bytes>)]
-    fn is_route_monitoring(msg: *const BmpMsg<Bytes>) -> bool {
-        let msg = unsafe { &*msg };
+    fn is_route_monitoring(msg: &BmpMsg<Bytes>) -> bool {
         matches!(msg, BmpMsg::RouteMonitoring(..))
     }
 
     /// Check whether this message is of type 'PeerDownNotification'
     #[roto_method(rt, BmpMsg<Bytes>)]
-    fn is_peer_down(msg: *const BmpMsg<Bytes>) -> bool {
-        let msg = unsafe { &*msg };
+    fn is_peer_down(msg: &BmpMsg<Bytes>) -> bool {
         msg.msg_type() == BmpMsgType::PeerDownNotification
     }
 
     /// Check whether the AS_PATH contains the given `Asn`
     #[roto_method(rt, BmpMsg<Bytes>, aspath_contains)]
-    fn bmp_aspath_contains(msg: *const BmpMsg<Bytes>, to_match: Asn) -> bool {
-        let msg = unsafe { &*msg };
-
+    fn bmp_aspath_contains(msg: &BmpMsg<Bytes>, to_match: Asn) -> bool {
         let update = if let BmpMsg::RouteMonitoring(rm) = msg {
             if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                 upd
@@ -438,11 +423,9 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     /// Check whether the AS_PATH origin matches the given `Asn`
     #[roto_method(rt, BmpMsg<Bytes>, match_aspath_origin)]
     fn bmp_match_aspath_origin(
-        msg: *const BmpMsg<Bytes>,
+        msg: &BmpMsg<Bytes>,
         to_match: Asn,
     ) -> bool {
-        let msg = unsafe { &*msg };
-
         let update = if let BmpMsg::RouteMonitoring(rm) = msg {
             if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                 upd
@@ -460,12 +443,9 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     /// Check whether this message contains the given Standard Community
     #[roto_method(rt, BmpMsg<Bytes>, contains_community)]
     fn bmp_contains_community(
-        msg: *const BmpMsg<Bytes>,
-        to_match: *const StandardCommunity,
+        msg: &BmpMsg<Bytes>,
+        to_match: &StandardCommunity,
     ) -> bool {
-        let msg = unsafe { &*msg };
-        let to_match = unsafe { &*to_match };
-
         let update = if let BmpMsg::RouteMonitoring(rm) = msg {
             if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                 upd
@@ -483,12 +463,9 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     /// Check whether this message contains the given Large Community
     #[roto_method(rt, BmpMsg<Bytes>, contains_large_community)]
     fn bmp_contains_large_community(
-        msg: *const BmpMsg<Bytes>,
-        to_match: *const LargeCommunity,
+        msg: &BmpMsg<Bytes>,
+        to_match: &LargeCommunity,
     ) -> bool {
-        let msg = unsafe { &*msg };
-        let to_match = unsafe { &*to_match };
-
         let update = if let BmpMsg::RouteMonitoring(rm) = msg {
             if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                 upd
@@ -505,9 +482,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     /// Check whether this message contains the given Path Attribute
     #[roto_method(rt, BmpMsg<Bytes>, has_attribute)]
-    fn bmp_has_attribute(msg: *const BmpMsg<Bytes>, to_match: u8) -> bool {
-        let msg = unsafe { &*msg };
-
+    fn bmp_has_attribute(msg: &BmpMsg<Bytes>, to_match: u8) -> bool {
         let update = if let BmpMsg::RouteMonitoring(rm) = msg {
             if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                 upd
@@ -524,8 +499,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     /// Return the number of announcements in this message
     #[roto_method(rt, BmpMsg<Bytes>, announcements_count)]
-    fn bmp_announcements_count(msg: *const BmpMsg<Bytes>) -> u32 {
-        let msg = unsafe { &*msg };
+    fn bmp_announcements_count(msg: &BmpMsg<Bytes>) -> u32 {
         if let BmpMsg::RouteMonitoring(rm) = msg {
             if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                 return announcements_count(&upd);
@@ -539,8 +513,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     /// Return the number of withdrawals in this message
     #[roto_method(rt, BmpMsg<Bytes>, withdrawals_count)]
-    fn bmp_withdrawals_count(msg: *const BmpMsg<Bytes>) -> u32 {
-        let msg = unsafe { &*msg };
+    fn bmp_withdrawals_count(msg: &BmpMsg<Bytes>) -> u32 {
         if let BmpMsg::RouteMonitoring(rm) = msg {
             if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                 return withdrawals_count(&upd);
@@ -554,9 +527,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     /// Return a formatted string for the AS_PATH
     #[roto_method(rt, BmpMsg<Bytes>, fmt_aspath)]
-    fn bmp_fmt_aspath(msg: *const BmpMsg<Bytes>) -> Arc<str> {
-        let msg = unsafe { &*msg };
-
+    fn bmp_fmt_aspath(msg: &BmpMsg<Bytes>) -> Arc<str> {
         let update = if let BmpMsg::RouteMonitoring(rm) = msg {
             if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                 upd
@@ -573,9 +544,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     /// Return a string of the AS_PATH origin for this `BmpMsg`.
     #[roto_method(rt, BmpMsg<Bytes>, fmt_aspath_origin)]
-    fn bmp_fmt_aspath_origin(msg: *const BmpMsg<Bytes>) -> Arc<str> {
-        let msg = unsafe { &*msg };
-
+    fn bmp_fmt_aspath_origin(msg: &BmpMsg<Bytes>) -> Arc<str> {
         let update = if let BmpMsg::RouteMonitoring(rm) = msg {
             if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                 upd
@@ -592,9 +561,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     /// Return a string for the Standard Communities in this `BmpMsg`.
     #[roto_method(rt, BmpMsg<Bytes>, fmt_communities)]
-    fn bmp_fmt_communities(msg: *const BmpMsg<Bytes>) -> Arc<str> {
-        let msg = unsafe { &*msg };
-
+    fn bmp_fmt_communities(msg: &BmpMsg<Bytes>) -> Arc<str> {
         let update = if let BmpMsg::RouteMonitoring(rm) = msg {
             if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                 upd
@@ -611,9 +578,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     /// Return a string for the Large Communities in this `BmpMsg`.
     #[roto_method(rt, BmpMsg<Bytes>, fmt_large_communities)]
-    fn bmp_fmt_large_communities(msg: *const BmpMsg<Bytes>) -> Arc<str> {
-        let msg = unsafe { &*msg };
-
+    fn bmp_fmt_large_communities(msg: &BmpMsg<Bytes>) -> Arc<str> {
         let update = if let BmpMsg::RouteMonitoring(rm) = msg {
             if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                 upd
@@ -630,8 +595,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     /// Format this message as hexadecimal Wireshark input
     #[roto_method(rt, BmpMsg<Bytes>, fmt_pcap)]
-    fn bmp_fmt_pcap(msg: *const BmpMsg<Bytes>) -> Arc<str> {
-        let msg = unsafe { &*msg };
+    fn bmp_fmt_pcap(msg: &BmpMsg<Bytes>) -> Arc<str> {
         fmt_pcap(msg.as_ref())
     }
 
@@ -639,9 +603,8 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     /// Log the given prefix (NB: this method will likely be removed)
     #[roto_method(rt, Log)]
-    fn log_prefix(stream: *mut Log, prefix: *const Prefix) {
+    fn log_prefix(stream: *mut Log, prefix: &Prefix) {
         let stream = unsafe { &mut **stream };
-        let prefix = unsafe { &*prefix };
         stream.push(Output::Prefix(*prefix));
     }
 
@@ -908,40 +871,78 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         let entry = stream.take_entry();
         stream.push(Output::Entry(entry));
     }
-
     //------------ RPKI / RTR methods ----------------------------------------
 
-    #[roto_method(rt, SharedRtrCache, rov_for_origin)]
-    fn rov_for_origin(rpki: *mut SharedRtrCache, rr: *mut RotondaRoute) -> bool {
-        let rr = unsafe { &*rr };
-        let rpki = unsafe { &**rpki };
-        let prefix = match rr {
+    #[roto_method(rt, SharedRtrCache)]
+    fn check_rov(rpki: &SharedRtrCache, rr: &MutRotondaRoute) {
+        let mut rr = rr.borrow_mut();
+        let prefix = match *rr {
             RotondaRoute::Ipv4Unicast(nlri, _) => nlri.prefix(),
             RotondaRoute::Ipv6Unicast(nlri, _) => nlri.prefix(),
-            _=> return false
+            _=> { return; } // defaults to 'NotChecked'
         };
         let mut covered = false;
         let mut valid = false;
+
         if let Some(hoppath) = rr.owned_map().get::<HopPath>() {
             if let Some(origin) = hoppath.origin().and_then(|o| Hop::try_into_asn(o.clone()).ok()) {
-                let origin_cache = rpki.origin_cache.load();
+                let match_options = MatchOptions {
+                    match_type: MatchType::LongestMatch,
+                    include_withdrawn: false,
+                    include_less_specifics: true,
+                    include_more_specifics: false,
+                    mui: None,
+                    include_history: IncludeHistory::None,
+                };
 
-                if let Some(candidates) = origin_cache.get(&prefix) {
-                    covered = true;
-                    valid = candidates
-                        .iter()
-                        .any(|e| e.into_u32() == origin.into_u32())
+                let guard = &rotonda_store::epoch::pin();
+                if let Ok(res) =  rpki.vrps.match_prefix(
+                    &prefix,
+                    &match_options,
+                    guard
+                ) {
+                    // check exact/longest matches
+                    'outer: for r in res.records {
+                        for maxlen in r.meta.iter() {
+                            if prefix.len() <= *maxlen {
+                                covered = true;
+                                if r.multi_uniq_id == u32::from(origin) {
+                                    valid = true;
+                                    break 'outer;
+                                }
+                            }
+                        }
+                    }
+
+                    // check less specifics
+                    if let Some(less_specifics) = res.less_specifics {
+                        'outer: for r in less_specifics.iter() {
+                            for record in r.meta.iter() {
+                                for maxlen in record.meta.iter() {
+                                    if prefix.len() <= *maxlen {
+                                        covered = true;
+                                        if record.multi_uniq_id == u32::from(origin) {
+                                            valid = true;
+                                            break 'outer;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
                 }
             }
         }
-        //match (covered, valid) {
-        //    (true, true) => { }, // eprint!("+"),
-        //    (true, false) => eprint!("-"),
-        //    (false, true) => unreachable!(),
-        //    (false, false) => { },
-        //}
+        let rov = match (covered, valid) {
+            (true, true) => RovStatus::Valid,
+            (true, false) => RovStatus::Invalid,
+            (false, true) => unreachable!(),
+            (false, false) => RovStatus::NotFound,
+        };
 
-        valid || !covered
+        rr.rotonda_pamap_mut().set_rpki_info(rov.into());
+        //valid || !covered
     }
 
     // currently unused
@@ -982,8 +983,10 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         StandardCommunity::from_wellknown(Wellknown::NoPeer),
     )?;
 
+
     Ok(rt)
 }
+
 
 //------------ Path Attributes helpers ----------------------------------------
 

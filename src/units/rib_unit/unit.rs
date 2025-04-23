@@ -44,7 +44,6 @@ use super::{
 pub(crate) type RotoFuncPre = roto::TypedFunc<
     Ctx,
     (
-        //roto::Val<*mut RotondaRoute>,
         roto::Val<roto_runtime::MutRotondaRoute>,
     ),
     roto::Verdict<(), ()>,
@@ -63,6 +62,7 @@ type RotoFuncPost = roto::TypedFunc<
     roto::Verdict<(), ()>,
 >;
 
+#[allow(dead_code)]
 const ROTO_FUNC_POST_FILTER_NAME: &str = "rib_in_post";
 
 impl From<UpsertReport> for InsertionInfo {
@@ -225,6 +225,9 @@ impl MaxLenList {
     pub fn push(&mut self, value: u8) {
         self.list.push(value);
     }
+    pub fn remove(&mut self, index: usize) {
+        self.list.remove(index);
+    }
     pub fn iter(&self) -> std::slice::Iter<'_, u8> {
         self.list.iter()
     }
@@ -253,6 +256,7 @@ impl rotonda_store::prefix_record::Meta for MaxLenList {
         todo!()
     }
 }
+
 type VrpStore = StarCastRib<MaxLenList, MemoryOnlyConfig>;
 
 pub struct RtrCache {
@@ -260,19 +264,15 @@ pub struct RtrCache {
     router_keys: RwLock<HashSet<rpki::rtr::payload::RouterKey>>,
     aspas: RwLock<HashSet<rpki::rtr::payload::Aspa>>,
 
-    pub origin_cache: Arc<ArcSwap<HashMap<Prefix, Vec<Asn>>>>,
     pub vrps: VrpStore,
-    pub tmp_stats: HashMap<(Prefix, Asn), usize>,
 }
 impl Default for RtrCache {
     fn default() -> Self {
         Self {
-            vrps: VrpStore::try_default().unwrap(),
             route_origins: Default::default(),
             router_keys: Default::default(),
             aspas: Default::default(),
-            origin_cache: Default::default(),
-            tmp_stats: Default::default(),
+            vrps: VrpStore::try_default().unwrap(),
         }
     }
 }
@@ -468,6 +468,7 @@ impl RibUnitRunner {
             rib: shared_rib,
             rib_type,
             status_reporter,
+            rtr_cache: Default::default(),
             filter_name,
             pending_vrib_query_results,
             _process_metrics,
@@ -758,13 +759,14 @@ impl RibUnitRunner {
             Update::Rtr(rtr_update) => {
                 use crate::units::RtrUpdate;
                 use rpki::rtr::Payload as RtrPayload;
+                use rpki::rtr::Action as RtrAction;
                 match rtr_update {
                     RtrUpdate::Full(rtr_verbs) => {
                     debug!("got RTR update (Reset)");
                         let mut new_route_origins = HashSet::new();
-                        let mut new_origin_cache = HashMap::new();
                         let mut new_router_keys = HashSet::new();
                         let mut new_aspas = HashSet::new();
+                        let mut new_vrps = 0_usize;
                         for (action, payload) in rtr_verbs {
                             if action == rpki::rtr::Action::Withdraw {
                                 warn!("Unexpected RTR Withdraw in Cache Reset");
@@ -782,25 +784,6 @@ impl RibUnitRunner {
                                         maxlen_pref.addr(),
                                         maxlen_pref.prefix_len()
                                     ).unwrap();
-
-                                    new_origin_cache.entry(prefix)
-                                        .and_modify(|asns: &mut Vec<Asn>| asns.push(asn) )
-                                        .or_insert(vec![asn])
-                                    ;
-
-                                    if let Some(maxlen) = maxlen_pref.max_len() {
-                                        for len in prefix.len()+1..=maxlen {
-                                            let additional_pref = Prefix::new(
-                                                prefix.addr(), len
-                                            ).unwrap();
-                                            new_origin_cache.entry(additional_pref)
-                                                .and_modify(|asns: &mut Vec<Asn>| asns.push(asn) )
-                                                .or_insert(vec![asn])
-                                            ;
-                                        }
-
-                                    }
-                                    ;
 
                                     let guard = &rotonda_store::epoch::pin();
                                     let mut maxlen_list = if let Ok(e) = self.rtr_cache.vrps.match_prefix(
@@ -827,7 +810,6 @@ impl RibUnitRunner {
                                     };
 
                                     maxlen_list.push(route_origin.prefix.resolved_max_len());
-                                    //eprintln!("upserting {}: {}", &prefix, &maxlen_list);
                                     let r = Record {
                                         multi_uniq_id: u32::from(asn),
                                         ltime: 0,
@@ -835,6 +817,7 @@ impl RibUnitRunner {
                                         meta: maxlen_list,
                                     };
                                     self.rtr_cache.vrps.insert(&prefix, r, None).unwrap();
+                                    new_vrps += 1;
                                 }
                                 RtrPayload::RouterKey(router_key) => {
                                     new_router_keys.insert(router_key);
@@ -844,10 +827,9 @@ impl RibUnitRunner {
                                 }
                             };
                         }
-                        debug!(
-                            "new RTR cache, vrp(exploded)routerkey/aspa {}({})/{}/{}",
-                            new_route_origins.len(),
-                            new_origin_cache.len(),
+                        info!(
+                            "new RTR cache, vrp/routerkey/aspa {}/{}/{}",
+                            new_vrps,
                             new_router_keys.len(),
                             new_aspas.len(),
                         );
@@ -870,40 +852,133 @@ impl RibUnitRunner {
                             }
                             Err(_) => warn!("failed to update ASPAs in RTR-cache in RIB unit (Reset)"),
                         }
-                        self.rtr_cache.origin_cache.store(Arc::new(new_origin_cache));
-
                     }
                     RtrUpdate::Delta(rtr_verbs) => {
-                        warn!("got RTR Serial update, but ignoring for now");
-                        //let mut lock = match self.rtr_cache.try_write() {
-                        //    Ok(lock) => lock,
-                        //    Err(_) => return Err("failed to update RTR-cache in RIB unit (Serial update)".into()),
-                        //};
+                        debug!("got RTR Serial update");
+                        for (action, payload) in rtr_verbs {
+                            match payload {
+                                RtrPayload::Origin(route_origin) => {
+                                    // XXX D-R-Y, put into separate function
+                                    // and call that from here and Reset
+                                    // handler above
+                                    let maxlen_pref = route_origin.prefix;
+                                    let asn = Asn::from_u32(route_origin.asn.into_u32());
+                                    let prefix = Prefix::new(
+                                        maxlen_pref.addr(),
+                                        maxlen_pref.prefix_len()
+                                    ).unwrap();
+                                    let guard = &rotonda_store::epoch::pin();
+                                    let mut maxlen_list = if let Ok(e) = self.rtr_cache.vrps.match_prefix(
+                                        &prefix,
+                                        &rotonda_store::match_options::MatchOptions{
+                                            match_type: rotonda_store::match_options::MatchType::ExactMatch,
+                                            include_withdrawn: false,
+                                            include_less_specifics: false,
+                                            include_more_specifics: false,
+                                            mui: Some(u32::from(asn)), 
+                                            include_history: rotonda_store::match_options::IncludeHistory::None,
+                                        },
+                                        guard,
+                                    ) {
+                                        if !e.records.is_empty() {
+                                            assert_eq!(e.records.len(), 1);
+                                            e.records.first().unwrap().meta.clone()
+                                        } else {
+                                            MaxLenList::default()
+                                        }
+                                    } else {
+                                        warn!("failed to do lookup in VrpStore");
+                                        return Err("could not access VrpStore".into());
+                                    };
+                                    let maxlen = route_origin.prefix.resolved_max_len();
+                                    match action {
+                                        RtrAction::Announce => {
+                                            if maxlen_list.iter().any(|m| *m == maxlen) {
+                                                warn!("VRP for {}-{} from{} already in cache", prefix, maxlen, asn);
+                                            } else {
+                                                maxlen_list.push(maxlen);
+                                                debug!("pushed VRP for {}-{} from {}", prefix, maxlen, asn)
+                                            }
 
-                        //for (action, payload) in rtr_verbs.into_iter() {
-                        //    match action {
-                        //        rpki::rtr::Action::Announce => {
-                        //            match payload {
-                        //                RtrPayload::Origin(route_origin) => { lock.route_origins.replace(route_origin); }
-                        //                RtrPayload::RouterKey(router_key) => { lock.router_keys.replace(router_key); }
-                        //                RtrPayload::Aspa(aspa) => { lock.aspas.replace(aspa); }
-                        //            }
-                        //        }
-                        //        rpki::rtr::Action::Withdraw => {
-                        //            match payload {
-                        //                RtrPayload::Origin(route_origin) => { lock.route_origins.remove(&route_origin); }
-                        //                RtrPayload::RouterKey(router_key) => { lock.router_keys.remove(&router_key); }
-                        //                RtrPayload::Aspa(aspa) => { lock.aspas.remove(&aspa); }
-                        //            }
-                        //        }
-                        //    }
-                        //}
-                        //debug!(
-                        //    "RTR cache after Serial update, vrp/routerkey/aspa {}/{}/{}",
-                        //    lock.route_origins.len(),
-                        //    lock.router_keys.len(),
-                        //    lock.aspas.len(),
-                        //);
+                                            // tmp check with the HashSet
+                                            let mut set = self.rtr_cache.route_origins.try_write().unwrap();
+                                            if !set.insert(route_origin) {
+                                                warn!("VRP for {}-{} from{} already in HashSet", prefix, maxlen, asn);
+                                            }
+                                            
+                                        }
+                                        RtrAction::Withdraw => {
+                                            let mut dbg = false;
+                                            if let Some(pos) = maxlen_list.iter().position(|m| *m == maxlen) {
+                                                maxlen_list.remove(pos);
+                                                debug!("removed VRP for {}-{} from {}", prefix, maxlen, asn)
+                                            } else {
+                                                warn!("can not remove unexisting maxlen from VrpStore: {} not in {} for {} from {}",
+                                                    maxlen,
+                                                    maxlen_list,
+                                                    prefix,
+                                                    asn
+                                                    );
+                                                dbg = true;
+                                            }
+                                            // tmp check with the HashSet
+                                            let mut set = self.rtr_cache.route_origins.try_write().unwrap();
+                                            if !set.remove(&route_origin) {
+                                                warn!("VRP for {}-{} from {} not in HashSet, can't remove", prefix, maxlen, asn);
+                                            } else if dbg {
+                                                warn!("successfully removed VRP for {}-{} from {} from HashSet though, bug in store?", prefix, maxlen, asn);
+                                            }
+                                        }
+                                    }
+                                    let r = Record {
+                                        multi_uniq_id: u32::from(asn),
+                                        ltime: 0,
+                                        status: RouteStatus::Active,
+                                        meta: maxlen_list,
+                                    };
+                                    self.rtr_cache.vrps.insert(&prefix, r, None).unwrap();
+                                    
+                                }
+                                RtrPayload::RouterKey(router_key) => {
+                                    match self.rtr_cache.router_keys.try_write() {
+                                        Ok(mut lock) => {
+                                            match action {
+                                                RtrAction::Announce => {
+                                                    if !lock.insert(router_key) {
+                                                        error!("inserting RouterKey already in cache");
+                                                    }
+                                                }
+                                                RtrAction::Withdraw => {
+                                                    if !lock.remove(&router_key){
+                                                        error!("removing non-existing RouterKey from cache");
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Err(_) => warn!("failed to update router_keys in RTR-cache in RIB unit (Serial)"),
+                                    }
+                                }
+                                RtrPayload::Aspa(aspa) => {
+                                    match self.rtr_cache.aspas.try_write() {
+                                        Ok(mut lock) => {
+                                            match action {
+                                                RtrAction::Announce => {
+                                                    if !lock.insert(aspa.clone()) {
+                                                        error!("inserting Aspa already in cache: {:?}", aspa);
+                                                    }
+                                                }
+                                                RtrAction::Withdraw => {
+                                                    if !lock.remove(&aspa){
+                                                        error!("removing non-existing Aspa from cache: {:?}", aspa);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        Err(_) => warn!("failed to update aspas in RTR-cache in RIB unit (Serial)"),
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -918,15 +993,15 @@ impl RibUnitRunner {
     ) -> Result<(), String> {
         let mut res = SmallVec::<[Payload; 8]>::new();
 
-        let mut output_stream = RotoOutputStream::new();
-        let mut ctx = Ctx::new(&mut output_stream, self.rtr_cache.clone());
-
         for mut p in payload {
             let ingress_id = match &p.context {
                 RouteContext::Fresh(f) => Some(f.provenance().ingress_id),
                 RouteContext::Mrt(m) => Some(m.provenance().ingress_id),
                 _ => None,
             };
+
+            let output_stream = RotoOutputStream::new_rced();
+            let mut ctx = Ctx::new(output_stream, self.rtr_cache.clone());
 
             if let Some(ref roto_function) = self.roto_function_pre {
                 let Payload{ rx_value, context, trace_id, received } = p;
@@ -960,11 +1035,12 @@ impl RibUnitRunner {
                 res.push(p.clone());
             }
 
+            let Ctx{ output, ..} = ctx;
+            let output_stream = RotoOutputStream::into_inner(output).into_messages();
             if !output_stream.is_empty() {
                 let mut osms = smallvec![];
 
-                for entry in output_stream.drain() {
-                    debug!("output stream entry {entry:?}");
+                for entry in output_stream {
                     let osm = match entry {
                         Output::Prefix(_prefix) => {
                             OutputStreamMessage::prefix(

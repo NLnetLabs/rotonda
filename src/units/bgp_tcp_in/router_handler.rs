@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use std::hash::Hash;
 use std::net::SocketAddr;
 use std::ops::ControlFlow;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
@@ -133,6 +134,7 @@ impl Processor {
             status_reporter: Default::default(),
             ingresses: Arc::new(ingress::Register::default()),
             ingress_id: 0,
+            rtr_cache: Default::default(),
         };
 
         (processor, gate_agent)
@@ -268,8 +270,8 @@ impl Processor {
                                 negotiated.remote_asn(),
                             );
 
-                            let mut output_stream = RotoOutputStream::new();
-                            let mut ctx = Ctx::new(&mut output_stream, self.rtr_cache.clone());
+                            let output_stream = RotoOutputStream::new_rced();
+                            let mut ctx = Ctx::new(output_stream, self.rtr_cache.clone());
                             let received = std::time::Instant::now();
 
                             let verdict = self.roto_function.as_ref().map(
@@ -277,15 +279,18 @@ impl Processor {
                             {
                                 roto_function.call(
                                     &mut ctx,
-                                    //roto::Val(&mut output_stream),
                                     roto::Val(bgp_msg.clone()),
                                     roto::Val(provenance),
-                                    )
+                                )
                             });
+
+
+                            let Ctx {output, ..} = ctx;
+                            let output_stream = RotoOutputStream::into_inner(output).into_messages();
                             if !output_stream.is_empty() {
                                 let mut osms = smallvec![];
                                 use crate::roto_runtime::types::Output;
-                                for entry in output_stream.drain() {
+                                for entry in output_stream {
                                     debug!("output stream entry {entry:?}");
                                     let osm = match entry {
                                         Output::Prefix(_prefix) => {

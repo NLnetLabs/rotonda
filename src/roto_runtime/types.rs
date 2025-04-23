@@ -1,9 +1,6 @@
 use core::fmt;
 use std::{
-    collections::{HashMap, HashSet},
-    net::IpAddr,
-    path::PathBuf,
-    sync::Arc,
+    cell::RefCell, collections::{HashMap, HashSet}, net::IpAddr, path::PathBuf, rc::Rc,
 };
 
 use bytes::Bytes;
@@ -22,6 +19,8 @@ use crate::{
     manager,
     payload::{RotondaPaMap, RotondaRoute},
 };
+
+use super::MutLogEntry;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct FilterName(String);
@@ -90,7 +89,7 @@ pub type CompiledRoto = std::sync::Mutex<roto::Compiled>;
 #[derive(Default)]
 pub struct OutputStream<M> {
     msgs: Vec<M>,
-    entry: LogEntry,
+    entry: MutLogEntry,
 }
 
 pub type RotoOutputStream = OutputStream<Output>;
@@ -99,24 +98,42 @@ impl<M> OutputStream<M> {
     pub fn new() -> Self {
         Self {
             msgs: vec![],
-            entry: LogEntry::new(),
+            entry: Rc::new(RefCell::new(LogEntry::new())),
         }
+    }
+
+    /// Create a new `OutputStream` wrapped in an `Rc<RefCell<>>`
+    pub fn new_rced() -> Rc<RefCell<Self>> {
+        Rc::new(RefCell::new(Self::new()))
+    }
+
+    /// Unwrap the `OutputStream` from an `Rc<RefCell<>>`
+    pub fn into_inner(rced: Rc<RefCell<Self>>) -> Self {
+        Rc::into_inner(rced).unwrap().into_inner()
+    }
+
+    /// Turn into the messages vec
+    pub fn into_messages(self) -> Vec<M> {
+        self.msgs
     }
 
     pub fn push(&mut self, msg: M) {
         self.msgs.push(msg);
     }
-    pub fn drain(&mut self) -> std::vec::Drain<'_, M> {
-        self.msgs.drain(..)
-    }
+
+    //pub fn drain(&mut self) -> std::vec::Drain<'_, M> {
+    //    self.msgs.drain(..)
+    //}
+
     pub fn is_empty(&self) -> bool {
         self.msgs.is_empty()
     }
 
-    pub fn entry(&mut self) -> &mut LogEntry {
-        &mut self.entry
+    pub fn entry(&mut self) -> MutLogEntry {
+        self.entry.clone()
     }
-    pub fn take_entry(&mut self) -> LogEntry {
+
+    pub fn take_entry(&mut self) -> MutLogEntry {
         std::mem::take(&mut self.entry)
     }
 
@@ -504,6 +521,7 @@ pub struct LogEntry {
 }
 
 use serde_with;
+
 #[serde_with::skip_serializing_none]
 #[derive(serde::Serialize)]
 pub struct MinimalLogEntry {

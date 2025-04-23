@@ -1919,7 +1919,7 @@ mod tests {
             Payload::new(
                 RotondaRoute::Ipv4Unicast(
                     Ipv4UnicastNlri::from_str("1.2.3.0/24").unwrap(),
-                    RotondaPaMap(
+                    RotondaPaMap::new(
                         OwnedPathAttributes::new(
                             PduParseInfo::modern(),
                             vec![]

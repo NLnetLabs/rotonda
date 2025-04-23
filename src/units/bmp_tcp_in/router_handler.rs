@@ -121,6 +121,7 @@ impl RouterHandler {
                 BmpTcpIn::default_router_id_template(),
             )),
             filter_name: Default::default(),
+            rtr_cache: Default::default(),
             status_reporter: parent_status_reporter,
             state_machine,
             tracer: Default::default(),
@@ -368,8 +369,8 @@ impl RouterHandler {
             provenance
         };
 
-        let mut output_stream = RotoOutputStream::new();
-        let mut ctx = Ctx::new(&mut output_stream, self.rtr_cache.clone());
+        let output_stream = RotoOutputStream::new_rced();
+        let mut ctx = Ctx::new(output_stream, self.rtr_cache.clone());
         let verdict = self.roto_function.as_ref().map(|roto_function| {
             roto_function.call(
                 &mut ctx,
@@ -378,9 +379,12 @@ impl RouterHandler {
                 roto::Val(provenance),
             )
         });
+
+        let Ctx { output, ..} = ctx;
+        let output_stream = RotoOutputStream::into_inner(output).into_messages();
         if !output_stream.is_empty() {
             let mut osms = smallvec![];
-            for entry in output_stream.drain() {
+            for entry in output_stream {
                 let osm = match entry {
                     Output::Prefix(_prefix) => {
                         OutputStreamMessage::prefix(None, Some(ingress_id))

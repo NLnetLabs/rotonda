@@ -148,10 +148,18 @@ impl AsRef<[u8]> for RotondaPaMap {
     }
 }
 
+/// RPKI related information for individual routes
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 #[derive(Serialize)]
 pub struct RpkiInfo {
     rov: RovStatus,
+}
+
+impl RpkiInfo {
+    /// Create an `RpkiInfo` from a [`RovStatus`]
+    pub fn rov_status(&self) -> RovStatus {
+        self.rov
+    }
 }
 
 impl From<u8> for RpkiInfo {
@@ -177,8 +185,6 @@ impl From<RpkiInfo> for u8 {
         }
     }
 }
-
-
 
 
 impl From<RovStatus> for RpkiInfo {

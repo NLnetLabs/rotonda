@@ -3,7 +3,7 @@
 # One such message can contain multiple NLRI, thus multiple announcements or
 # withdrawals. To act on individual announcements or withdrawals, use the
 # 'rib-in' filter-map below.
-filter bgp-in(
+filter bgp_in(
     bgp_msg: BgpMsg,
     prov: Provenance,
 ) {
@@ -27,13 +27,13 @@ filter bgp-in(
 # information via an encapsulated BGP UPDATE message), this filter-map can act
 # on different types as well. Helper methods are provided, e.g.
 # 'is_peer_down()' returns true if the message is a BMP PeerDownNotification.
-filter bmp-in(
+filter bmp_in(
     bmp_msg: BmpMsg,
     prov: Provenance,
 ) {
     let my_asn = AS12345;
     let asn_to_log = AS65536;
-    let community_to_log = Community(0xffff029a);
+    let community_to_log = community(0xffff029a);
 
     if bmp_msg.is_peer_down() {
         output.log_peer_down()
@@ -65,7 +65,7 @@ filter bmp-in(
 # Filtering purely based on values of attributes (regardless of the individual
 # NLRI) can and should be done in the bmp-in/bgp-in filter-maps, as making such
 # a decision early on is more efficient.
-filter rib-in-pre(
+filter rib_in_pre(
     route: Route,
 ) {
 

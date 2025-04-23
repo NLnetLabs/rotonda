@@ -1,9 +1,9 @@
 # Changelog
 
 
-## Unreleased new version 'release name'
+## 0.4.0
 
-Released yyyy-mm-dd.
+Released 2025-04-24.
 
 Breaking changes
 
@@ -32,8 +32,6 @@ Other changes
 
 * Parsing of certain BMP/BGP fields, specifically BGP Capabilities, are more
   forgiving to prevent reconnection loops.
-
-Acknowledgements
 
 
 ## 0.3.0 'Hempcrete & Hawthorn'

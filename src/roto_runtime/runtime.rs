@@ -90,9 +90,9 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     )?;
 
     // XXX can we get away with registering only one of these, somehow?
-    rt.register_clone_type::<LogEntry>("Entry to log to file/mqtt")?;
+    //rt.register_clone_type::<LogEntry>("Entry to log to file/mqtt")?;
     rt.register_clone_type_with_name::<MutLogEntry>(
-        "LogEntryFoo",
+        "LogEntry",
         "Entry to log to file/mqtt",
     )?;
 

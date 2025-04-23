@@ -1140,7 +1140,6 @@ fn _fmt_aspath(aspath: AsPath<Bytes>) -> Arc<str> {
         }
         res.into()
     } else {
-        eprintln!("not single sequence");
         aspath.to_string().into()
     }
 }

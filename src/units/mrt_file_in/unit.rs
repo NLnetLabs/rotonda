@@ -177,7 +177,7 @@ impl MrtInRunner {
                 ) {
                     let update = Update::Withdraw(ingress_id, None);
                     gate.update_data(update).await;
-                    eprintln!("Withdraw for {ingress_id} sent");
+                    debug!("Withdraw for {ingress_id} sent");
                 }
                 else {
                     debug!("No IngressInfo for {} {} going Established -> Idle",
@@ -347,7 +347,7 @@ impl MrtInRunner {
         // --- Dump part (RIB entries)
         //
         if let Ok(peer_index_table) = mrt_file.pi() {
-            eprintln!("found peer index table of len {} in {}",
+            debug!("found peer index table of len {} in {}",
                 peer_index_table.len(),
                 filename.to_string_lossy()
             );
@@ -423,7 +423,6 @@ impl MrtInRunner {
         let mut announcements_sent = 0;
         let mut withdrawals_sent = 0;
 
-        //eprintln!("pre .messages iter, ingress register:\n{}", ingresses.overview());
         let mut messages_processed = 0;
         for msg in mrt_file.messages() {
             match msg {

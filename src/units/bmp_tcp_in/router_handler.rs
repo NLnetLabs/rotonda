@@ -25,6 +25,7 @@ use crate::ingress::{self, IngressId};
 use crate::payload::RouterId;
 use crate::roto_runtime::Ctx;
 use crate::tracing::Tracer;
+use crate::units::rib_unit::unit::RtrCache;
 use crate::{
     comms::{Gate, GateStatus},
     payload::{Payload, Update, UpstreamStatus},
@@ -52,6 +53,10 @@ pub struct RouterHandler {
     tracing_mode: Arc<ArcSwap<TracingMode>>,
     last_msg_at: Option<Arc<RwLock<DateTime<Utc>>>>,
     bmp_metrics: Arc<BmpStateMachineMetrics>,
+
+    // Link to an empty RtrCache for now. Eventually, this should point to the
+    // main all-encompassing RIB.
+    rtr_cache: Arc<RtrCache>,
 }
 
 impl RouterHandler {
@@ -79,6 +84,7 @@ impl RouterHandler {
             tracing_mode,
             last_msg_at,
             bmp_metrics,
+            rtr_cache: Default::default(),
         }
     }
 
@@ -115,6 +121,7 @@ impl RouterHandler {
                 BmpTcpIn::default_router_id_template(),
             )),
             filter_name: Default::default(),
+            rtr_cache: Default::default(),
             status_reporter: parent_status_reporter,
             state_machine,
             tracer: Default::default(),
@@ -362,8 +369,8 @@ impl RouterHandler {
             provenance
         };
 
-        let mut output_stream = RotoOutputStream::new();
-        let mut ctx = Ctx::new(&mut output_stream);
+        let output_stream = RotoOutputStream::new_rced();
+        let mut ctx = Ctx::new(output_stream, self.rtr_cache.clone());
         let verdict = self.roto_function.as_ref().map(|roto_function| {
             roto_function.call(
                 &mut ctx,
@@ -372,9 +379,12 @@ impl RouterHandler {
                 roto::Val(provenance),
             )
         });
+
+        let Ctx { output, ..} = ctx;
+        let output_stream = RotoOutputStream::into_inner(output).into_messages();
         if !output_stream.is_empty() {
             let mut osms = smallvec![];
-            for entry in output_stream.drain() {
+            for entry in output_stream {
                 let osm = match entry {
                     Output::Prefix(_prefix) => {
                         OutputStreamMessage::prefix(None, Some(ingress_id))

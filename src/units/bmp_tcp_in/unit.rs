@@ -56,6 +56,9 @@ use super::{
     status_reporter::BmpTcpInStatusReporter, util::format_source_id,
 };
 
+
+
+
 //-------- BmpIn -------------------------------------------------------------
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
@@ -107,6 +110,8 @@ pub(crate) type RotoFunc = roto::TypedFunc<
     ),
     roto::Verdict<(), ()>,
 >;
+
+const ROTO_FUNC_FILTER_NAME: &str = "bmp_in";
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
@@ -383,7 +388,7 @@ impl BmpTcpInRunner {
         let roto_function: Option<RotoFunc> =
             self.roto_compiled.clone().and_then(|c| {
                 let mut c = c.lock().unwrap();
-                c.get_function("bmp-in")
+                c.get_function(ROTO_FUNC_FILTER_NAME)
                 .inspect_err(|_|
                     warn!("Loaded Roto script has no filter for bmp-in")
                 )

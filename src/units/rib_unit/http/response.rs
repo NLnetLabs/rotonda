@@ -272,8 +272,9 @@ impl PrefixesApi {
             "ingress_id": ingress_id,
             "ingress_info": ingress_info,
             "prefix": query_prefix,
+            "rpki": route.rpki_info(),
             "status": status.to_string(),
-            "attributes": route,
+            "attributes": route//.path_attributes(),
 
         }))
         .unwrap()
@@ -336,7 +337,7 @@ impl PrefixesApi {
         item: &RotondaPaMap,
         filter_as_path: &[Asn],
     ) -> bool {
-        let as_path = item.0.get::<HopPath>();
+        let as_path = item.path_attributes().get::<HopPath>();
         let as_path = if let Some(as_path) = as_path {
             debug!("trying to match as_path {:?}", as_path);
             as_path
@@ -412,7 +413,7 @@ impl PrefixesApi {
         let wanted_c = community.0;
         debug!("in match_community, wanted_c {:?}", &wanted_c);
 
-        if let Some(communities) = item.0.get::<Vec<CommunityEnum>>() {
+        if let Some(communities) = item.path_attributes().get::<Vec<CommunityEnum>>() {
             #[allow(unused_variables)] // false positive
             communities.iter().any(|item| {
                 //let match_res = matches!( item,

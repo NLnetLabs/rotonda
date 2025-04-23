@@ -17,6 +17,7 @@ use chrono::{TimeZone, Utc};
 //use daemonbase::config::ConfigPath;
 use futures_util::pin_mut;
 use futures_util::future::{select, Either};
+use log::info;
 use log::{debug, error, warn};
 use pin_project_lite::pin_project;
 use rpki::rtr::client::{Client, PayloadError, PayloadTarget, PayloadUpdate};
@@ -54,7 +55,7 @@ pub struct Tcp {
 impl Tcp {
     /// The default re-connect timeout in seconds.
     fn default_retry() -> u64 {
-        5
+        60
     }
 
     /// Runs the unit.
@@ -67,10 +68,13 @@ impl Tcp {
         let metrics = Arc::new(RtrMetrics::new(&gate));
 
         gate.process_until(waitpoint.ready()).await?;
-        waitpoint.running().await;
+        // We call waitpoint.running() from within ::run() to allow this
+        // component to have a head start and fetch RTR data before other
+        // units start processing incoming routes.
+        //waitpoint.running().await;
 
         RtrClient::run(
-            component, gate, self.retry, metrics.clone(),
+            component, waitpoint, gate, self.retry, metrics.clone(),
             || async {
                 Ok(RtrTcpStream {
                     sock: TcpStream::connect(&self.remote).await?,
@@ -274,6 +278,7 @@ where
         /// error.
         async fn run(
             mut component: Component,
+            waitpoint: WaitPoint,
             mut gate: Gate,
             retry: u64,
             metrics: Arc<RtrMetrics>,
@@ -282,16 +287,31 @@ where
             let mut rtr_target = RtrTarget::new(component.name().clone());
             component.register_metrics(metrics.clone());
             let mut this = Self::new(connect, retry, metrics);
+
+            // If the rtr-in connector is configured, we want to give it a
+            // couple of seconds to retrieve RPKI data from the connected RP
+            // software. Ideally we signal the other components immediatly
+            // after a RTR Reset (i.e., the initial sync), but that requires
+            // some refactoring to not stall Rotonda entirely when the
+            // connection to the RP software is never successful. For now,
+            // simply wait 5 seconds.
+
+            tokio::spawn(async  {
+                debug!("waiting 5 secs to give rtr-in a headstart");
+                tokio::time::sleep(Duration::from_secs(5)).await;
+                debug!("waiting done, calling waitpoint.running()");
+                waitpoint.running().await;
+            });
+
             loop {
                 debug!("Unit {}: Connecting ...", component.name());
                 let mut client = match this.connect(rtr_target, &mut gate).await {
                     Ok(client) => client,
                     Err(res) => {
-                        debug!(
-                            "Unit {}: Connection failed. Awaiting reconnect.",
+                        info!(
+                            "Unit {}: Connection failed, retrying in {retry}s",
                             res.name
                         );
-                        //gate.update(UnitUpdate::Stalled).await;
                         this.retry_wait(&mut gate).await?;
                         rtr_target = res;
                         continue;
@@ -328,7 +348,6 @@ where
                 }
 
                 rtr_target = client.into_target();
-                //gate.update(UnitUpdate::Stalled).await;
                 this.retry_wait(&mut gate).await?;
             }
         }

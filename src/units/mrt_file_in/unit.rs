@@ -134,7 +134,6 @@ impl MrtFileIn {
             &endpoint_path,
         );
 
-
         MrtInRunner::new(self, gate, ingresses, parent_id, queue_tx).run(queue_rx).await
     }
 }

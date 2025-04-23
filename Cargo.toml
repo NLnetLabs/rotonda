@@ -31,7 +31,7 @@ authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]
 [workspace.dependencies]
 routecore          = { version = "0.5.2", features = ["bgp", "bmp", "serde", "fsm", "mrt"] }
 inetnum            = { version = "0.1.1", features = ["arbitrary", "serde"] }
-rotonda-store      = { git = "https://github.com/nlnetlabs/rotonda-store", branch = "dev", version = "0.5.0" }
+rotonda-store      = { version = "0.5.0" }
 log                = "0.4"
 
 

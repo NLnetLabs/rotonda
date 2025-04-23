@@ -69,7 +69,6 @@ filter rib_in_pre(
     route: Route,
 ) {
 
-    let attribute_to_log = 35; # OTC
     let my_prefix_v4 = 185.49.141.0/24;
     let my_prefix_v6 = 2a04:b901::/29;
 
@@ -77,9 +76,8 @@ filter rib_in_pre(
         output.log_prefix(my_prefix_v4);
     }
 
-    if route.has_attribute(attribute_to_log) {
-      accept
-    } else {
-      reject
-    }
+    # Only has effect when an RTR unit is configured in rotonda.conf
+    rpki.check_rov(route);
+
+    accept
 }

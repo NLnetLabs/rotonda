@@ -7,18 +7,31 @@ Released yyyy-mm-dd.
 
 Breaking changes
 
+* Roto filter names have changed, as dashes are replaced with underscores.
 
 New
 
+* An RTR component is introduced, enabling Rotonda to receive RPKI information
+  from RP software via the RTR protocol.
+* Route Origin Validation is available on incoming routes in the 'rib_in_pre'
+  filter using a new `rpki.check_rov(..)` method. The ROV result is included in
+  responses from the RIB's HTTP endpoint.
 
 Bug fixes
 
+* In some cases, log entries would not actually be written to the output file.
+* Several store related fixes.
 
 Known issues
 
+* Performing ROV from roto scripts currently only works on incoming routes,
+  using the VRP data that is available at that moment. New VRP data coming in
+  via VRP does not trigger reevaluation of stored routes yet.
 
 Other changes
 
+* Parsing of certain BMP/BGP fields, specifically BGP Capabilities, are more
+  forgiving to prevent reconnection loops.
 
 Acknowledgements
 

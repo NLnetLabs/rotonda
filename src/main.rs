@@ -208,7 +208,7 @@ mod tests {
     };
 
     use atomic_enum::atomic_enum;
-    use inetnum::asn::Asn;
+    use inetnum::{addr::Prefix, asn::Asn};
     use prometheus_parse::Value;
     use rotonda::{
         bgp::encode::{
@@ -220,7 +220,6 @@ mod tests {
         metrics::{self, OutputFormat},
         tests::util::assert_json_eq,
     };
-    use rotonda_store::prelude::Prefix;
     use routecore::{bmp::message::PeerType};
     use rumqttd::{local::LinkRx, Broker, Notification};
     use serde_json::Number;

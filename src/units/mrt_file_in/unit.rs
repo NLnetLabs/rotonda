@@ -12,7 +12,7 @@ use futures::future::{select, Either};
 use futures::{pin_mut, FutureExt, TryFutureExt};
 use log::{debug, error, info, warn};
 use rand::seq::SliceRandom;
-use rotonda_store::prelude::multi::RouteStatus;
+use rotonda_store::prefix_record::RouteStatus;
 use routecore::bgp::fsm::state_machine::State;
 use routecore::bgp::message::{Message as BgpMsg, PduParseInfo};
 use routecore::bgp::nlri::afisafi::{Ipv4UnicastNlri, Nlri};
@@ -134,7 +134,6 @@ impl MrtFileIn {
             &endpoint_path,
         );
 
-
         MrtInRunner::new(self, gate, ingresses, parent_id, queue_tx).run(queue_rx).await
     }
 }
@@ -177,7 +176,7 @@ impl MrtInRunner {
                 ) {
                     let update = Update::Withdraw(ingress_id, None);
                     gate.update_data(update).await;
-                    eprintln!("Withdraw for {ingress_id} sent");
+                    debug!("Withdraw for {ingress_id} sent");
                 }
                 else {
                     debug!("No IngressInfo for {} {} going Established -> Idle",
@@ -347,7 +346,7 @@ impl MrtInRunner {
         // --- Dump part (RIB entries)
         //
         if let Ok(peer_index_table) = mrt_file.pi() {
-            eprintln!("found peer index table of len {} in {}",
+            debug!("found peer index table of len {} in {}",
                 peer_index_table.len(),
                 filename.to_string_lossy()
             );
@@ -372,13 +371,13 @@ impl MrtInRunner {
                     AfiSafiType::Ipv4Unicast => {
                         RotondaRoute::Ipv4Unicast(
                             prefix.try_into().map_err(MrtError::other)?,
-                            RotondaPaMap(routecore::bgp::path_attributes::OwnedPathAttributes::new(PduParseInfo::modern(), raw_attr))
+                            RotondaPaMap::new(routecore::bgp::path_attributes::OwnedPathAttributes::new(PduParseInfo::modern(), raw_attr))
                         )
                     }
                     AfiSafiType::Ipv6Unicast => {
                         RotondaRoute::Ipv6Unicast(
                             prefix.try_into().map_err(MrtError::other)?,
-                            RotondaPaMap(routecore::bgp::path_attributes::OwnedPathAttributes::new(PduParseInfo::modern(), raw_attr))
+                            RotondaPaMap::new(routecore::bgp::path_attributes::OwnedPathAttributes::new(PduParseInfo::modern(), raw_attr))
                         )
                     }
                     AfiSafiType::Ipv4Multicast |
@@ -423,7 +422,6 @@ impl MrtInRunner {
         let mut announcements_sent = 0;
         let mut withdrawals_sent = 0;
 
-        //eprintln!("pre .messages iter, ingress register:\n{}", ingresses.overview());
         let mut messages_processed = 0;
         for msg in mrt_file.messages() {
             match msg {

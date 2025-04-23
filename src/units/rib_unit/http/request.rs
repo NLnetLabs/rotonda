@@ -5,7 +5,7 @@ use async_trait::async_trait;
 use hyper::{Body, Method, Request, Response};
 use inetnum::{addr::Prefix, asn::Asn};
 use log::{debug, trace};
-use rotonda_store::MatchOptions;
+use rotonda_store::match_options::{self, IncludeHistory, MatchOptions};
 use routecore::bgp::communities::HumanReadableCommunity as Community;
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -166,11 +166,12 @@ impl PrefixesApi {
         // to receive the query result back.
         //
         let options = MatchOptions {
-            match_type: rotonda_store::MatchType::ExactMatch,
+            match_type: match_options::MatchType::ExactMatch,
             include_less_specifics: includes.less_specifics,
             include_more_specifics: includes.more_specifics,
             include_withdrawn: true,
             mui: None,
+            include_history: IncludeHistory::None,
         };
 
         // XXX res: QueryResult will be different

@@ -1,4 +1,5 @@
 use hyper::{Body, Response};
+use rotonda_store::match_options::QueryResult;
 
 use crate::{
     payload::{RotondaPaMap, RotondaRoute},
@@ -9,7 +10,7 @@ impl PrefixesApi {
     pub fn mk_dump_response(
         //res: &rotonda_store::QueryResult<RibValue>,
         //res: &rotonda_store::QueryResult<RotondaRoute>,
-        res: &rotonda_store::QueryResult<RotondaPaMap>,
+        res: &QueryResult<RotondaPaMap>,
     ) -> Response<Body> {
         Response::builder()
             .header("Content-Type", "text/plain")

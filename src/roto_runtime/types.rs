@@ -1,20 +1,16 @@
 use core::fmt;
 use std::{
-    collections::{HashMap, HashSet},
-    net::IpAddr,
-    path::PathBuf, sync::Arc,
+    cell::RefCell, collections::{HashMap, HashSet}, net::IpAddr, path::PathBuf, rc::Rc,
 };
 
 use bytes::Bytes;
-use chrono::Utc;
 use chrono::serde::ts_microseconds;
+use chrono::Utc;
 use inetnum::{addr::Prefix, asn::Asn};
 use log::debug;
-use rotonda_store::prelude::multi::RouteStatus;
+use rotonda_store::prefix_record::RouteStatus;
 use routecore::bgp::{
-    message::UpdateMessage,
-    nlri::afisafi::Nlri,
-    types::AfiSafiType
+    message::UpdateMessage, nlri::afisafi::Nlri, types::AfiSafiType,
 };
 use serde::Deserialize;
 
@@ -23,6 +19,8 @@ use crate::{
     manager,
     payload::{RotondaPaMap, RotondaRoute},
 };
+
+use super::MutLogEntry;
 
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct FilterName(String);
@@ -91,7 +89,7 @@ pub type CompiledRoto = std::sync::Mutex<roto::Compiled>;
 #[derive(Default)]
 pub struct OutputStream<M> {
     msgs: Vec<M>,
-    entry: LogEntry,
+    entry: MutLogEntry,
 }
 
 pub type RotoOutputStream = OutputStream<Output>;
@@ -100,24 +98,42 @@ impl<M> OutputStream<M> {
     pub fn new() -> Self {
         Self {
             msgs: vec![],
-            entry: LogEntry::new(),
+            entry: Rc::new(RefCell::new(LogEntry::new())),
         }
+    }
+
+    /// Create a new `OutputStream` wrapped in an `Rc<RefCell<>>`
+    pub fn new_rced() -> Rc<RefCell<Self>> {
+        Rc::new(RefCell::new(Self::new()))
+    }
+
+    /// Unwrap the `OutputStream` from an `Rc<RefCell<>>`
+    pub fn into_inner(rced: Rc<RefCell<Self>>) -> Self {
+        Rc::into_inner(rced).unwrap().into_inner()
+    }
+
+    /// Turn into the messages vec
+    pub fn into_messages(self) -> Vec<M> {
+        self.msgs
     }
 
     pub fn push(&mut self, msg: M) {
         self.msgs.push(msg);
     }
-    pub fn drain(&mut self) -> std::vec::Drain<'_, M> {
-        self.msgs.drain(..)
-    }
+
+    //pub fn drain(&mut self) -> std::vec::Drain<'_, M> {
+    //    self.msgs.drain(..)
+    //}
+
     pub fn is_empty(&self) -> bool {
         self.msgs.is_empty()
     }
 
-    pub fn entry(&mut self) -> &mut LogEntry {
-        &mut self.entry
+    pub fn entry(&mut self) -> MutLogEntry {
+        self.entry.clone()
     }
-    pub fn take_entry(&mut self) -> LogEntry {
+
+    pub fn take_entry(&mut self) -> MutLogEntry {
         std::mem::take(&mut self.entry)
     }
 
@@ -413,9 +429,7 @@ impl From<(bool, routecore::bmp::message::RibType)> for PeerRibType {
                     PeerRibType::OutPre
                 }
             }
-            routecore::bmp::message::RibType::LocRib => {
-                PeerRibType::Loc
-            }
+            routecore::bmp::message::RibType::LocRib => PeerRibType::Loc,
         }
     }
 }
@@ -444,11 +458,11 @@ pub enum OutputStreamMessageRecord {
 impl OutputStreamMessageRecord {
     pub fn into_timestamped(
         self,
-        timestamp: chrono::DateTime<Utc>
+        timestamp: chrono::DateTime<Utc>,
     ) -> TimestampedOSMR {
         TimestampedOSMR {
             timestamp: timestamp.timestamp(),
-            record: self
+            record: self,
         }
     }
 }
@@ -463,7 +477,7 @@ impl From<OutputStreamMessageRecord> for TimestampedOSMR {
     fn from(value: OutputStreamMessageRecord) -> Self {
         Self {
             timestamp: Utc::now().timestamp(),
-            record: value
+            record: value,
         }
     }
 }
@@ -507,6 +521,7 @@ pub struct LogEntry {
 }
 
 use serde_with;
+
 #[serde_with::skip_serializing_none]
 #[derive(serde::Serialize)]
 pub struct MinimalLogEntry {
@@ -535,17 +550,16 @@ impl From<LogEntry> for MinimalLogEntry {
             mp_reach: value.mp_reach,
             mp_reach_afisafi: value.mp_reach_afisafi,
             mp_unreach: value.mp_unreach,
-            mp_unreach_afisafi: value.mp_unreach_afisafi
+            mp_unreach_afisafi: value.mp_unreach_afisafi,
         }
     }
 }
 
-
 impl LogEntry {
     pub fn new() -> Self {
-        Self { 
+        Self {
             timestamp: Utc::now(),
-            .. Default::default()
+            ..Default::default()
         }
     }
     pub fn into_minimal(self) -> MinimalLogEntry {
@@ -638,10 +652,7 @@ impl OutputStreamMessage {
         }
     }
 
-    pub fn entry(
-        entry: LogEntry,
-        ingress_id: Option<IngressId>,
-    ) -> Self {
+    pub fn entry(entry: LogEntry, ingress_id: Option<IngressId>) -> Self {
         Self {
             name: MQTT_NAME.into(),
             topic: "log_entry".into(),
@@ -720,7 +731,7 @@ pub(crate) fn explode_announcements(
     let mut res = vec![];
 
     let pas = bgp_update.path_attributes()?;
-    let pamap = RotondaPaMap(pas.into());
+    let pamap = RotondaPaMap::new(pas.into());
 
     for a in bgp_update.announcements()? {
         let a = a?;
@@ -738,7 +749,7 @@ pub(crate) fn explode_withdrawals(
 ) -> Result<Vec<RotondaRoute>, routecore::bgp::ParseError> {
     let mut res = vec![];
 
-    let pamap = RotondaPaMap(
+    let pamap = RotondaPaMap::new(
         routecore::bgp::path_attributes::OwnedPathAttributes::new(
             bgp_update.pdu_parse_info(),
             vec![],

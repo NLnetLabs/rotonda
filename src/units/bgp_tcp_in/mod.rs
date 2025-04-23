@@ -1,4 +1,3 @@
-//pub(crate) mod io;
 pub(crate) mod metrics;
 pub(crate) mod peer_config;
 pub(crate) mod router_handler;

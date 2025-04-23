@@ -27,7 +27,7 @@ use log::{debug, error, warn};
 /// lead to fixes in one place and not in another which should be avoided be
 /// factoring the common code out.
 use inetnum::addr::Prefix;
-use rotonda_store::prelude::multi::RouteStatus;
+use rotonda_store::prefix_record::RouteStatus;
 use routecore::bgp::fsm::session;
 use routecore::{
     bgp::nlri::afisafi::IsPrefix,
@@ -374,8 +374,10 @@ where
             .join("|");
 
         if sys_name.is_empty() {
-            warn!("Invalid BMP InitiationMessage: \
-                Missing or empty sysName Information TLV");
+            warn!(
+                "Invalid BMP InitiationMessage: \
+                Missing or empty sysName Information TLV"
+            );
         }
         let sys_desc = msg
             .information_tlvs()
@@ -1217,14 +1219,15 @@ impl PeerAware for PeerStates {
     ) -> bool {
         let mut added = false;
 
-        let query_ingress =  ingress::IngressInfo::new()
+        let query_ingress = ingress::IngressInfo::new()
             .with_parent(bmp_ingress_id)
             .with_remote_addr(pph.address())
             .with_remote_asn(pph.asn())
-            .with_rib_type(pph.rib_type())
-        ;
+            .with_rib_type(pph.rib_type());
         let peer_ingress_id;
-        if let Some((ingress_id, _ingress_info)) = ingress_register.find_existing_peer(&query_ingress) {
+        if let Some((ingress_id, _ingress_info)) =
+            ingress_register.find_existing_peer(&query_ingress)
+        {
             peer_ingress_id = ingress_id;
         } else {
             peer_ingress_id = ingress_register.register();

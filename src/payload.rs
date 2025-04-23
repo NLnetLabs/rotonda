@@ -1,8 +1,11 @@
 use log::debug;
-use rotonda_store::QueryResult;
+use rotonda_store::match_options::QueryResult;
 
+use rotonda_store::prefix_record::Meta;
 use routecore::bgp::communities::{Community, HumanReadableCommunity};
-use routecore::bgp::path_attributes::PathAttribute;
+use routecore::bgp::message::PduParseInfo;
+use routecore::bgp::path_attributes::{OwnedPathAttributes, PathAttribute};
+use routecore::bgp::path_selection::TiebreakerInfo;
 use routecore::bgp::types::AfiSafiType;
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::{Serialize, Serializer};
@@ -31,50 +34,6 @@ pub enum UpstreamStatus {
 }
 
 //------------ Payload -------------------------------------------------------
-
-/*
-pub trait Filterable {
-    fn filter<E, T, U>(
-        self,
-        filter_fn: T,
-        filtered_fn: U,
-    ) -> Result<SmallVec<[Payload; 8]>, FilterError>
-    where
-        T: Fn(TypeValue, DateTime<Utc>, Option<u8>, RouteContext) -> FilterResult<E>
-            + Clone,
-        //U: Fn(ingress::IngressId) + Clone,
-        U: Fn(IngressId) + Clone,
-        FilterError: From<E>;
-}
-*/
-
-/*
-#[derive(Debug)]
-pub enum FilterError {
-    RotoScriptError(RotoError),
-    OtherError(String),
-}
-
-impl From<RotoError> for FilterError {
-    fn from(err: RotoError) -> Self {
-        FilterError::RotoScriptError(err)
-    }
-}
-
-impl Display for FilterError {
-    #[rustfmt::skip]
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FilterError::RotoScriptError(err) => {
-                f.write_fmt(format_args!("Filtering failed due to Roto script error: {err}"))
-            }
-            FilterError::OtherError(err) => {
-                f.write_fmt(format_args!("Filtering failed: {err}"))
-            }
-        }
-    }
-}
-*/
 
 // TODO macrofy
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -117,12 +76,12 @@ impl Serialize for RotondaRoute {
 impl RotondaRoute {
     pub fn owned_map(
         &self,
-    ) -> &routecore::bgp::path_attributes::OwnedPathAttributes {
+    ) -> routecore::bgp::path_attributes::OwnedPathAttributes {
         match self {
-            RotondaRoute::Ipv4Unicast(_, p) => &p.0,
-            RotondaRoute::Ipv6Unicast(_, p) => &p.0,
-            RotondaRoute::Ipv4Multicast(_, p) => &p.0,
-            RotondaRoute::Ipv6Multicast(_, p) => &p.0,
+            RotondaRoute::Ipv4Unicast(_, p) => p.path_attributes(),
+            RotondaRoute::Ipv6Unicast(_, p) => p.path_attributes(),
+            RotondaRoute::Ipv4Multicast(_, p) => p.path_attributes(),
+            RotondaRoute::Ipv6Multicast(_, p) => p.path_attributes(),
         }
     }
 
@@ -132,6 +91,15 @@ impl RotondaRoute {
             RotondaRoute::Ipv6Unicast(_, p) => p,
             RotondaRoute::Ipv4Multicast(_, p) => p,
             RotondaRoute::Ipv6Multicast(_, p) => p,
+        }
+    }
+
+    pub fn rotonda_pamap_mut(&mut self) -> &mut RotondaPaMap {
+        match self {
+            RotondaRoute::Ipv4Unicast(_, ref mut p) => p,
+            RotondaRoute::Ipv6Unicast(_, ref mut p) => p,
+            RotondaRoute::Ipv4Multicast(_, ref mut p) => p,
+            RotondaRoute::Ipv6Multicast(_, ref mut p) => p,
         }
     }
 }
@@ -155,27 +123,144 @@ impl fmt::Display for RotondaRoute {
     }
 }
 
-impl rotonda_store::Meta for RotondaPaMap {
+impl Meta for RotondaPaMap {
     type Orderable<'a> = routecore::bgp::path_selection::OrdRoute<
         'a,
         routecore::bgp::path_selection::Rfc4271,
     >;
 
-    type TBI = rotonda_store::prelude::multi::TiebreakerInfo;
+    type TBI = TiebreakerInfo;
 
     fn as_orderable(&self, _tbi: Self::TBI) -> Self::Orderable<'_> {
         todo!()
     }
 }
 
+impl From<Vec<u8>> for RotondaPaMap {
+    fn from(value: Vec<u8>) -> Self {
+        OwnedPathAttributes::new(PduParseInfo::modern(), value).into()
+    }
+}
+
+impl AsRef<[u8]> for RotondaPaMap {
+    fn as_ref(&self) -> &[u8] {
+        self.raw.as_ref()
+    }
+}
+
+/// RPKI related information for individual routes
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+#[derive(Serialize)]
+pub struct RpkiInfo {
+    rov: RovStatus,
+}
+
+impl RpkiInfo {
+    /// Create an `RpkiInfo` from a [`RovStatus`]
+    pub fn rov_status(&self) -> RovStatus {
+        self.rov
+    }
+}
+
+impl From<u8> for RpkiInfo {
+    fn from(value: u8) -> Self {
+        let rov = match value {
+            1 => RovStatus::NotFound,
+            2 => RovStatus::Valid,
+            4 => RovStatus::Invalid,
+            _ => RovStatus::NotChecked
+        };
+
+        Self { rov }
+    }
+}
+
+impl From<RpkiInfo> for u8 {
+    fn from(value: RpkiInfo) -> Self {
+        match value.rov {
+            RovStatus::NotChecked => 0,
+            RovStatus::NotFound => 1,
+            RovStatus::Valid => 2,
+            RovStatus::Invalid => 4,
+        }
+    }
+}
+
+
+impl From<RovStatus> for RpkiInfo {
+    fn from(value: RovStatus) -> Self {
+        Self { rov: value }
+    }
+}
+
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
+#[derive(Serialize)]
+pub enum RovStatus {
+    #[default]
+    NotChecked,
+    NotFound,
+    Valid,
+    Invalid,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub struct RotondaPaMap(
-    pub routecore::bgp::path_attributes::OwnedPathAttributes,
-);
+pub struct RotondaPaMap{
+    // raw[0] is RpkiInfo
+    // raw[1] is PduParseInfo
+    // raw[2..] contains the path attributes blob
+    raw: Vec<u8>,
+}
+
+// These from/to byte functions should ideally live in routecore, but as we
+// will refactor many routecore types to zerocopy structs soon(tm), we define
+// these here for now.
+fn ppi_to_byte(ppi: PduParseInfo) -> u8 {
+    match ppi.four_octet_enabled() {
+        true => 1,
+        false => 0,
+    }
+}
+
+fn byte_to_ppi(byte: u8) -> PduParseInfo {
+    if byte == 0x01 {
+        PduParseInfo::modern()
+    } else {
+        PduParseInfo::legacy()
+    }
+}
+
+
+impl RotondaPaMap {
+    pub fn new(path_attributes: OwnedPathAttributes) -> Self {
+        let ppi = path_attributes.pdu_parse_info();
+        let mut pas = path_attributes.into_vec();
+        let mut raw = Vec::with_capacity(2 + pas.len());
+        
+        let rpki_info = RpkiInfo::default();
+        raw.push(rpki_info.into());
+        raw.push(ppi_to_byte(ppi));
+
+        raw.append(&mut pas);
+        Self { raw }
+    }
+
+    pub fn set_rpki_info(&mut self, rpki_info: RpkiInfo) {
+        self.raw[0] = rpki_info.into();
+    }
+
+    pub fn rpki_info(&self) -> RpkiInfo {
+        self.raw[0].into()
+    }
+
+    pub fn path_attributes(&self) -> OwnedPathAttributes {
+        let ppi = byte_to_ppi(self.raw[1]);
+        OwnedPathAttributes::new(ppi, self.raw[2..].to_vec())
+    }
+}
 
 impl fmt::Display for RotondaPaMap {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{:?}", self.0)
+        write!(f, "{:?}", self.path_attributes())
     }
 }
 
@@ -186,7 +271,7 @@ impl Serialize for RotondaPaMap {
     {
         let mut s = serializer.serialize_seq(None)?;
         let mut communities: Vec<HumanReadableCommunity> = vec![];
-        for pa in self.0.iter().flatten() {
+        for pa in self.path_attributes().iter().flatten() {
             match pa.to_owned().unwrap() {
                 PathAttribute::StandardCommunities(list) => {
                     for c in list.communities() {
@@ -247,6 +332,12 @@ impl Serialize for RotondaPaMap {
     }
 }
 
+impl From<OwnedPathAttributes> for RotondaPaMap {
+    fn from(value: OwnedPathAttributes) -> Self {
+        RotondaPaMap::new(value)
+    }
+}
+
 #[derive(Clone, Debug, Eq)]
 pub struct Payload {
     pub rx_value: RotondaRoute, //RouteWorkshop<N>, //was: TypeValue,
@@ -270,10 +361,8 @@ impl Payload {
         trace_id: Option<u8>,
     ) -> Self {
         Self {
-            // source_id: source_id.into(),
             rx_value,
             context,
-            // bgp_msg,
             trace_id,
             received: std::time::Instant::now(),
         }
@@ -298,125 +387,6 @@ impl Payload {
     }
 }
 
-/*
-impl Filterable for Payload {
-    fn filter<E, T, U>(
-        self,
-        filter_fn: T,
-        filtered_fn: U,
-    ) -> Result<SmallVec<[Payload; 8]>, FilterError>
-    where
-        T: Fn(TypeValue, DateTime<Utc>, Option<u8>, RouteContext) -> FilterResult<E>
-            + Clone,
-        //U: Fn(ingress::IngressId) + Clone,
-        U: Fn(IngressId) + Clone,
-        FilterError: From<E>,
-    {
-        if let ControlFlow::Continue(filter_output) =
-            // filter_fn(self.rx_value, self.received, self.trace_id)?
-            filter_fn(self.rx_value, self.received, self.trace_id, self.context.clone())?
-        {
-            Ok(Payload::from_filter_output(
-                // self.source_id.clone(),
-                filter_output,
-                self.trace_id,
-                self.context
-            ))
-        } else {
-            filtered_fn(self.context.ingress_id());
-            Ok(smallvec![])
-        }
-    }
-}
-
-impl Filterable for SmallVec<[Payload; 8]> {
-    fn filter<E, T, U>(
-        self,
-        filter_fn: T,
-        filtered_fn: U,
-    ) -> Result<SmallVec<[Payload; 8]>, FilterError>
-    where
-        T: Fn(TypeValue, DateTime<Utc>, Option<u8>, RouteContext) -> FilterResult<E>
-            + Clone,
-        U: Fn(IngressId) + Clone,
-        FilterError: From<E>,
-    {
-        let mut out_payloads = smallvec![];
-
-        for payload in self {
-            out_payloads.extend(
-                payload.filter(filter_fn.clone(), filtered_fn.clone())?,
-            );
-        }
-
-        Ok(out_payloads)
-    }
-}
-
-impl Payload {
-    pub fn from_filter_output(
-        filter_output: FilterOutput,
-        trace_id: Option<u8>,
-        context: RouteContext,
-    ) -> SmallVec<[Payload; 8]> {
-        let mut out_payloads = smallvec![];
-
-        // Add output stream messages to the result
-        if !filter_output.south.is_empty() {
-            out_payloads.extend(Self::from_output_stream_queue(
-                filter_output.south,
-                context.clone(),
-                trace_id,
-            ));
-        }
-
-        // Make a payload out of it
-        let new_payload = Payload::with_received(
-            // source_id,
-            filter_output.east,
-            context,
-            // filter_output.bgp_msg,
-            trace_id,
-            filter_output.received,
-        );
-
-        // Add the payload to the result
-        out_payloads.push(new_payload);
-
-
-        out_payloads
-    }
-
-    pub fn from_output_stream_queue(
-        osq: OutputStreamQueue,
-        context: RouteContext,
-        trace_id: Option<u8>,
-    ) -> SmallVec<[Payload; 8]> {
-        osq.into_iter()
-            .map(|osm| Payload::new(osm, context.clone(), trace_id))
-            .collect()
-    }
-}
-
-impl From<Payload> for SmallVec<[Payload; 8]> {
-    fn from(payload: Payload) -> Self {
-        smallvec![payload]
-    }
-}
-
-impl From<Payload> for SmallVec<[Update; 1]> {
-    fn from(payload: Payload) -> Self {
-        smallvec![payload.into()]
-    }
-}
-
-// impl From<TypeValue> for Payload {
-//     fn from(tv: TypeValue) -> Self {
-//         Self::new(tv, None, None)
-//     }
-// }
-
-*/
 //------------ Update --------------------------------------------------------
 
 #[derive(Clone, Debug)]
@@ -437,6 +407,7 @@ pub enum Update {
     UpstreamStatusChange(UpstreamStatus),
 
     OutputStream(SmallVec<[OutputStreamMessage; 2]>),
+    Rtr(crate::units::RtrUpdate),
 }
 
 impl Update {
@@ -452,12 +423,12 @@ impl Update {
             Update::Bulk(payloads) => {
                 payloads.iter().filter(|p| p.trace_id().is_some()).collect()
             }
-            //Update::Withdraw(_ingress_id, _maybe_afisafi) => todo!(),
             Update::Withdraw(_ingress_id, _maybe_afisafi) => smallvec![],
             Update::WithdrawBulk(..) => smallvec![],
             Update::QueryResult(_, _) => smallvec![],
             Update::UpstreamStatusChange(_) => smallvec![],
             Update::OutputStream(..) => smallvec![],
+            Update::Rtr(..) => smallvec![],
         }
     }
 }

@@ -77,7 +77,7 @@ use futures::future::{select, Either, Future};
 use futures::pin_mut;
 use inetnum::addr::Prefix;
 use log::{error, log_enabled, trace, Level};
-use rotonda_store::MatchOptions;
+use rotonda_store::match_options::MatchOptions;
 use serde::Deserialize;
 use tokio::sync::mpsc::Sender;
 
@@ -1919,7 +1919,7 @@ mod tests {
             Payload::new(
                 RotondaRoute::Ipv4Unicast(
                     Ipv4UnicastNlri::from_str("1.2.3.0/24").unwrap(),
-                    RotondaPaMap(
+                    RotondaPaMap::new(
                         OwnedPathAttributes::new(
                             PduParseInfo::modern(),
                             vec![]

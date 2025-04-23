@@ -53,12 +53,13 @@ use super::peer_config::{CombinedConfig, PeerConfigs};
 pub(crate) type RotoFunc = roto::TypedFunc<
     crate::roto_runtime::Ctx,
     (
-        //roto::Val<*mut RotoOutputStream>,
         roto::Val<UpdateMessage<Bytes>>,
         roto::Val<Provenance>,
     ),
     roto::Verdict<(), ()>,
 >;
+
+const ROTO_FUNC_FILTER_NAME: &str = "bgp_in";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct BgpTcpIn {
@@ -265,7 +266,7 @@ impl BgpTcpInRunner {
         let roto_function: Option<RotoFunc> =
             arc_self.roto_compiled.clone().and_then(|c| {
                 let mut c = c.lock().unwrap();
-                c.get_function("bgp-in")
+                c.get_function(ROTO_FUNC_FILTER_NAME)
                 .inspect_err(|_|
                     warn!("Loaded Roto script has no filter for bgp-in")
                 )
@@ -771,7 +772,6 @@ mod tests {
     impl ConfigAcceptor for NoOpConfigAcceptor {
         fn accept_config(
             _child_name: String,
-            //_roto_scripts: &RotoScripts,
             _roto_function: Option<RotoFunc>,
             _gate: &Gate,
             _bgp: &BgpTcpIn,

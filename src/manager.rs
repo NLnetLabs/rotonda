@@ -1,9 +1,6 @@
 //! Controlling the entire operation.
 
 use crate::common::file_io::TheFileIo;
-//use crate::common::roto::{
-//    FilterName, LoadErrorKind, RotoError, RotoScriptOrigin, RotoScripts,
-//};
 use crate::roto_runtime::types::FilterName;
 use crate::roto_runtime::types::CompiledRoto;
 use crate::roto_runtime::create_runtime;
@@ -901,10 +898,10 @@ impl Manager {
             return Ok(());
         };
 
-        let i = roto::read_files([path.to_string_lossy()])
-            .map_err(|e| e.to_string())?;
+        let i = roto::FileTree::read(path);
+            // .map_err(|e| e.to_string())?;
         let c = i
-            .compile(create_runtime().unwrap(), usize::BITS / 8)
+            .compile(create_runtime().unwrap())
             .map_err(|e| e.to_string())?;
 
         self.roto_compiled = Some(Arc::new(Mutex::new(c)));

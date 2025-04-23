@@ -152,36 +152,36 @@ impl FileRunner {
                             for m in msgs {
                                 let m = m.into_record();
                                 if let Some(dst) = self.target_file.as_mut() {
-                                    if let OutputStreamMessageRecord::Entry(e) = m {
-                                        if let Some(custom_str) = e.custom {
+                                    if let OutputStreamMessageRecord::Entry(ref e) = m {
+                                        if let Some(ref custom_str) = e.custom {
                                             dst.write_all(custom_str.as_ref()).await.unwrap();
                                             dst.write_all(b"\n").await.unwrap();
+                                            continue;
+                                        } 
+                                    }
+                                    match self.config.format {
+                                        Format::Csv => {
+                                            let mut wrt = csv::WriterBuilder::new().has_headers(false).from_writer(vec![]);
+                                            wrt.serialize(m).unwrap();
+                                            dst.write_all(&wrt.into_inner().unwrap()).await.unwrap();
                                         }
-                                    } else {
-                                        match self.config.format {
-                                            Format::Csv => {
-                                                let mut wrt = csv::WriterBuilder::new().has_headers(false).from_writer(vec![]);
-                                                wrt.serialize(m).unwrap();
-                                                dst.write_all(&wrt.into_inner().unwrap()).await.unwrap();
+                                        Format::Json => {
+                                            if let Ok(bytes) = serde_json::to_vec(&m) {
+                                                dst.write_all(&bytes).await.unwrap();
+                                                dst.write_all(b"\n").await.unwrap();
                                             }
-                                            Format::Json => {
-                                                if let Ok(bytes) = serde_json::to_vec(&m) {
+                                        }
+                                        Format::JsonMin => {
+                                            if let OutputStreamMessageRecord::Entry(e) = m {
+                                                if let Ok(bytes) = serde_json::to_vec(&e.into_minimal()) {
                                                     dst.write_all(&bytes).await.unwrap();
                                                     dst.write_all(b"\n").await.unwrap();
                                                 }
-                                            }
-                                            Format::JsonMin => {
-                                                if let OutputStreamMessageRecord::Entry(e) = m {
-                                                    if let Ok(bytes) = serde_json::to_vec(&e.into_minimal()) {
-                                                        dst.write_all(&bytes).await.unwrap();
-                                                        dst.write_all(b"\n").await.unwrap();
-                                                    }
-                                                } else {
-                                                    // same as Json case
-                                                    if let Ok(bytes) = serde_json::to_vec(&m) {
-                                                        dst.write_all(&bytes).await.unwrap();
-                                                        dst.write_all(b"\n").await.unwrap();
-                                                    }
+                                            } else {
+                                                // same as Json case
+                                                if let Ok(bytes) = serde_json::to_vec(&m) {
+                                                    dst.write_all(&bytes).await.unwrap();
+                                                    dst.write_all(b"\n").await.unwrap();
                                                 }
                                             }
                                         }

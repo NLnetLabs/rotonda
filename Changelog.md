@@ -1,6 +1,28 @@
 # Changelog
 
 
+## Unreleased new version
+
+
+Breaking changes
+
+
+New
+
+
+Bug fixes
+
+
+Known issues
+
+
+Other changes
+
+
+Acknowledgements
+
+
+
 ## 0.4.0 'Bold and Undaunting Youth'
 
 Released 2025-04-24.

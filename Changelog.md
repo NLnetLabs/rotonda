@@ -1,26 +1,27 @@
 # Changelog
 
 
-## 0.4.0
+## 0.4.0 'Bold and Undaunting Youth'
 
 Released 2025-04-24.
 
 Breaking changes
 
-* Roto filter names have changed, as dashes are replaced with underscores.
+* Roto filter names :wqhave changed, as dashes are replaced with underscores.
 
 New
 
 * An RTR component is introduced, enabling Rotonda to receive RPKI information
   from RP software via the RTR protocol.
 * Route Origin Validation is available on incoming routes in the 'rib_in_pre'
-  filter using a new `rpki.check_rov(..)` method. The ROV result is included in
-  responses from the RIB's HTTP endpoint.
+  filter using a new `rpki.check_rov(..)` method. The ROV result is included
+  in responses from the RIB's HTTP endpoint.
 
 Bug fixes
 
 * In some cases, log entries would not actually be written to the output file.
-* Several store related fixes.
+* Under certain circumstances existing more specific prefixes, that were not
+  covered by a requested prefix were returned. This is now fixed.
 
 Known issues
 

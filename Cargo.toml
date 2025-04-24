@@ -19,7 +19,7 @@ name = "print_rotonda_std_doc"
 path = "doc/bin/print_rotonda_std_doc.rs"
 
 [workspace.package]
-version = "0.4.0-dev"
+version = "0.4.0"
 edition = "2021"
 rust-version = "1.80"
 authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]
@@ -54,7 +54,7 @@ sanitise-file-name = "1.0"
 serde              = { version = "1.0", features = ["derive", "rc"] }
 serde_json         = { version = "1.0", features = ["preserve_order"] }
 slab               = "0.4"
-tokio              = { version = "1.40", features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "test-util", "time", "tracing"] }
+tokio              = { version = "1.44.2", features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "test-util", "time", "tracing"] }
 toml               = "0.8"
 url                = { version = "2.4", features = ["serde"] }
 

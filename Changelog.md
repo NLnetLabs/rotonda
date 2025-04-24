@@ -1,9 +1,9 @@
 # Changelog
 
 
-## Unreleased new version 'release name'
+## 0.4.0 'Bold and Undaunting Youth'
 
-Released yyyy-mm-dd.
+Released 2025-04-24.
 
 Breaking changes
 
@@ -14,13 +14,14 @@ New
 * An RTR component is introduced, enabling Rotonda to receive RPKI information
   from RP software via the RTR protocol.
 * Route Origin Validation is available on incoming routes in the 'rib_in_pre'
-  filter using a new `rpki.check_rov(..)` method. The ROV result is included in
-  responses from the RIB's HTTP endpoint.
+  filter using a new `rpki.check_rov(..)` method. The ROV result is included
+  in responses from the RIB's HTTP endpoint.
 
 Bug fixes
 
 * In some cases, log entries would not actually be written to the output file.
-* Several store related fixes.
+* Under certain circumstances existing more specific prefixes, that were not
+  covered by a requested prefix were returned. This is now fixed.
 
 Known issues
 
@@ -32,8 +33,6 @@ Other changes
 
 * Parsing of certain BMP/BGP fields, specifically BGP Capabilities, are more
   forgiving to prevent reconnection loops.
-
-Acknowledgements
 
 
 ## 0.3.0 'Hempcrete & Hawthorn'

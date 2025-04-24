@@ -7,7 +7,7 @@ Released 2025-04-24.
 
 Breaking changes
 
-* Roto filter names :wqhave changed, as dashes are replaced with underscores.
+* Roto filter names have changed, as dashes are replaced with underscores.
 
 New
 

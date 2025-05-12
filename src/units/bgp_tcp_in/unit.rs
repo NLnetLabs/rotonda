@@ -40,6 +40,8 @@ use crate::comms::{
 use crate::ingress;
 use crate::manager::{Component, WaitPoint};
 use crate::payload::Update;
+use crate::roto_runtime::Ctx;
+use crate::units::rib_unit::unit::RtrCache;
 use crate::units::{Gate, Unit};
 
 use super::metrics::BgpTcpInMetrics;
@@ -272,6 +274,15 @@ impl BgpTcpInRunner {
                 )
                 .ok()
             });
+
+        let mut roto_context = Ctx::empty();
+
+        if let Some(c) = arc_self.roto_compiled.clone() {
+            let mut c = c.lock().unwrap();
+            if let Ok(f) = c.get_function::<Ctx, (), ()>("compile_lists") {
+                f.call(&mut roto_context);
+            }
+        }
 
         loop {
             let listen_addr = arc_self.bgp.load().listen.clone();

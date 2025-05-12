@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::str::FromStr;
+use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use inetnum::addr::Prefix;
@@ -21,12 +22,16 @@ use routecore::bmp::message::{Message as BmpMsg, MessageType as BmpMsgType};
 
 use roto::{roto_function, roto_method, roto_static_method, Context};
 
+use super::lists::{MutNamedAsnLists, MutNamedPrefixLists};
 use super::types::{
     InsertionInfo, Output, Provenance, RotoOutputStream, RouteContext,
 };
-use crate::payload::{RotondaRoute, RovStatus};
+use crate::payload::RotondaRoute;
+use crate::roto_runtime::lists::{AsnList, PrefixList};
 use crate::roto_runtime::types::LogEntry;
+use crate::units::rib_unit::rpki::{RovStatus, RovUpdate};
 use crate::units::rib_unit::unit::RtrCache;
+use crate::units::rtr::client::VrpUpdate;
 
 pub(crate) type Log = Rc<RefCell<RotoOutputStream>>;
 pub(crate) type SharedRtrCache = Arc<RtrCache>;
@@ -47,6 +52,8 @@ impl From<RotondaRoute> for MutRotondaRoute {
 pub struct Ctx {
     pub output: Log,
     pub rpki: SharedRtrCache,
+    pub asn_lists: MutNamedAsnLists,
+    pub prefix_lists: MutNamedPrefixLists,
 }
 
 unsafe impl Send for Ctx {}
@@ -56,6 +63,16 @@ impl Ctx {
         Self {
             output: log,
             rpki,
+            asn_lists: Default::default(),
+            prefix_lists: Default::default(),
+        }
+    }
+    pub fn empty() -> Self {
+        Self {
+            output: RotoOutputStream::new_rced(),
+            rpki: Arc::<RtrCache>::default(),
+            asn_lists: Default::default(),
+            prefix_lists: Default::default(),
         }
     }
 
@@ -83,6 +100,20 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         "Rpki",
         "RPKI information retrieved via RTR",
     )?;
+
+    rt.register_clone_type::<VrpUpdate>(
+        "A single announced or withdrawn VRP"
+    )?;
+
+    rt.register_clone_type_with_name::<MutNamedAsnLists>(
+        "AsnLists",
+        "Named lists of ASNs"
+    ).unwrap();
+    rt.register_clone_type_with_name::<MutNamedPrefixLists>(
+        "PrefixLists",
+        "Named lists of prefixes"
+    ).unwrap();
+
     rt.register_context_type::<Ctx>()?;
 
     rt.register_copy_type::<InsertionInfo>(
@@ -896,6 +927,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     //------------ RPKI / RTR methods ----------------------------------------
 
     rt.register_copy_type::<RovStatus>("ROV status of a `Route`").unwrap();
+    rt.register_copy_type::<RovUpdate>("ROV update of a `Route`").unwrap();
 
     /// Returns 'true' if the status is 'Valid'
     #[roto_method(rt, RovStatus)]
@@ -913,6 +945,34 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     #[roto_method(rt, RovStatus)]
     fn is_not_found(status: &RovStatus) -> bool {
         *status == RovStatus::NotFound
+    }
+
+    #[roto_method(rt, RovUpdate)]
+    fn has_changed(rov_update: &RovUpdate) -> bool {
+        rov_update.old_status != rov_update.new_status
+    }
+
+    #[roto_method(rt, RovUpdate)]
+    fn old_status(rov_update: &RovUpdate) -> RovStatus {
+        rov_update.old_status
+    }
+
+    #[roto_method(rt, RovUpdate)]
+    fn new_status(rov_update: &RovUpdate) -> RovStatus {
+        rov_update.new_status
+    }
+
+    #[roto_method(rt, RovUpdate, fmt)]
+    fn fmt_rov_update(rov_update: &RovUpdate) -> Arc<str> {
+        format!(
+            "[{:?}] -> [{:?}] {} originated by {}, learned from {}",
+            rov_update.old_status,
+            rov_update.new_status,
+            rov_update.prefix,
+            rov_update.origin,
+            rov_update.peer_as,
+        ).as_str().into()
+
     }
 
     /// Perform Route Origin Validation on the route
@@ -1005,6 +1065,55 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         rr.rotonda_pamap_mut().set_rpki_info(rov.into());
         rov
     }
+
+
+    //------------ Lists -----------------------------------------------------
+
+    #[roto_method(rt, MutNamedAsnLists, add)]
+    fn add_asn_list(lists: &MutNamedAsnLists, name: &Arc<str>, s: &Arc<str>) {
+        let mut lists = lists.lock().unwrap();
+        let res = AsnList::from_str(s).unwrap_or_default();
+        lists.add(name.clone(), res);
+    }
+
+    #[roto_method(rt, MutNamedPrefixLists, add)]
+    fn add_prefix_list(lists: &MutNamedPrefixLists, name: &Arc<str>, s: &Arc<str>) {
+        let mut lists = lists.lock().unwrap();
+        let res = PrefixList::from_str(s).unwrap_or_default();
+        lists.add(name.clone(), res);
+    }
+
+    #[roto_method(rt, MutNamedAsnLists, contains)]
+    fn asn_list_contains(asn_list: &MutNamedAsnLists, name: &Arc<str>, asn: Asn) -> bool {
+        let asn_list = asn_list.lock().unwrap();
+        if let Some(list) = asn_list.inner.get(&*name.clone()) {
+            list.contains(asn)
+        } else {
+         false
+        }
+    }
+
+    #[roto_method(rt, MutNamedPrefixLists, contains)]
+    fn prefix_list_contains(prefix_list: &MutNamedPrefixLists, name: &Arc<str>, prefix: &Prefix) -> bool {
+        let prefix_list = prefix_list.lock().unwrap();
+        if let Some(list) = prefix_list.inner.get(&*name.clone()) {
+            list.contains(*prefix)
+        } else {
+         false
+        }
+    }
+
+    #[roto_method(rt, MutNamedPrefixLists, covers)]
+    fn prefix_list_covers(prefix_list: &MutNamedPrefixLists, name: &Arc<str>, prefix: &Prefix) -> bool {
+        let prefix_list = prefix_list.lock().unwrap();
+        if let Some(list) = prefix_list.inner.get(&*name.clone()) {
+            list.covers(*prefix)
+        } else {
+         false
+        }
+    }
+
+
 
     // currently unused
     //// --- InsertionInfo methods

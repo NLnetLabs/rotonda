@@ -369,22 +369,20 @@ impl RouterHandler {
             provenance
         };
 
-        let output_stream = RotoOutputStream::new_rced();
-        let mut ctx = Ctx::new(output_stream, self.rtr_cache.clone());
+        let mut ctx = Ctx::empty();
         let verdict = self.roto_function.as_ref().map(|roto_function| {
             roto_function.call(
                 &mut ctx,
-                //roto::Val(&mut output_stream),
                 roto::Val(msg.clone()),
                 roto::Val(provenance),
             )
         });
 
-        let Ctx { output, ..} = ctx;
-        let output_stream = RotoOutputStream::into_inner(output).into_messages();
+        let mut osms = smallvec![];
+        { // lock scope
+        let mut output_stream = ctx.output.borrow_mut();
         if !output_stream.is_empty() {
-            let mut osms = smallvec![];
-            for entry in output_stream {
+            for entry in output_stream.drain() {
                 let osm = match entry {
                     Output::Prefix(_prefix) => {
                         OutputStreamMessage::prefix(None, Some(ingress_id))
@@ -432,8 +430,10 @@ impl RouterHandler {
                 };
                 osms.push(osm);
             }
-            self.gate.update_data(Update::OutputStream(osms)).await;
         }
+        } // end of lock scope
+            
+        self.gate.update_data(Update::OutputStream(osms)).await;
         let next_state = match verdict {
             // Default action when no roto script is used
             // is Accept (i.e. None here).

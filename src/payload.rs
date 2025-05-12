@@ -15,6 +15,7 @@ use uuid::Uuid;
 
 use crate::ingress::{self, IngressId};
 use crate::roto_runtime::types::{OutputStreamMessage, RouteContext};
+use crate::units::rib_unit::rpki::RpkiInfo;
 
 // TODO: make this a reference
 pub type RouterId = String;
@@ -146,61 +147,6 @@ impl AsRef<[u8]> for RotondaPaMap {
     fn as_ref(&self) -> &[u8] {
         self.raw.as_ref()
     }
-}
-
-/// RPKI related information for individual routes
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
-#[derive(Serialize)]
-pub struct RpkiInfo {
-    rov: RovStatus,
-}
-
-impl RpkiInfo {
-    /// Create an `RpkiInfo` from a [`RovStatus`]
-    pub fn rov_status(&self) -> RovStatus {
-        self.rov
-    }
-}
-
-impl From<u8> for RpkiInfo {
-    fn from(value: u8) -> Self {
-        let rov = match value {
-            1 => RovStatus::NotFound,
-            2 => RovStatus::Valid,
-            4 => RovStatus::Invalid,
-            _ => RovStatus::NotChecked
-        };
-
-        Self { rov }
-    }
-}
-
-impl From<RpkiInfo> for u8 {
-    fn from(value: RpkiInfo) -> Self {
-        match value.rov {
-            RovStatus::NotChecked => 0,
-            RovStatus::NotFound => 1,
-            RovStatus::Valid => 2,
-            RovStatus::Invalid => 4,
-        }
-    }
-}
-
-
-impl From<RovStatus> for RpkiInfo {
-    fn from(value: RovStatus) -> Self {
-        Self { rov: value }
-    }
-}
-
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
-#[derive(Serialize)]
-pub enum RovStatus {
-    #[default]
-    NotChecked,
-    NotFound,
-    Valid,
-    Invalid,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]

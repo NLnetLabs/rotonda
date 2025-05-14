@@ -4,6 +4,7 @@ use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
+use chrono::{SecondsFormat, Utc};
 use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
 use log::warn;
@@ -710,6 +711,18 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         stream.print(msg);
     }
 
+    /// Print a message to standard error
+    #[roto_method(rt, Log)]
+    fn timestamped_print(stream: &Log, msg: &Arc<str>) {
+        let stream = stream.borrow();
+        stream.print(
+            format!("[{}] {}",
+                Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+                msg
+            )
+        );
+    }
+
     //------------ LogEntry --------------------------------------------------
 
     /// Get the current/new entry
@@ -730,6 +743,13 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     #[roto_method(rt, MutLogEntry)]
     fn custom(entry_ptr: &MutLogEntry, custom_msg: &Arc<str>) {
         let mut entry = entry_ptr.borrow_mut();
+        entry.custom = Some(custom_msg.to_string());
+    }
+
+    #[roto_method(rt, MutLogEntry)]
+    fn timestamped_custom(entry_ptr: &MutLogEntry, custom_msg: &Arc<str>) {
+        let mut entry = entry_ptr.borrow_mut();
+        entry.timestamp = chrono::Utc::now();
         entry.custom = Some(custom_msg.to_string());
     }
 
@@ -929,6 +949,12 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     rt.register_copy_type::<RovStatus>("ROV status of a `Route`").unwrap();
     rt.register_copy_type::<RovUpdate>("ROV update of a `Route`").unwrap();
 
+    /// Return a formatted string for `vrp_update`
+    #[roto_method(rt, VrpUpdate, fmt)]
+    fn fmt_vrp_update(vrp_update: &VrpUpdate) -> Arc<str> {
+        vrp_update.to_string().into()
+    }
+
     /// Returns 'true' if the status is 'Valid'
     #[roto_method(rt, RovStatus)]
     fn is_valid(status: &RovStatus) -> bool {
@@ -947,21 +973,25 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         *status == RovStatus::NotFound
     }
 
+    /// Returns 'true' if the new status differs from the old status
     #[roto_method(rt, RovUpdate)]
     fn has_changed(rov_update: &RovUpdate) -> bool {
         rov_update.old_status != rov_update.new_status
     }
 
+    /// Returns the old status of the route
     #[roto_method(rt, RovUpdate)]
     fn old_status(rov_update: &RovUpdate) -> RovStatus {
         rov_update.old_status
     }
 
+    /// Returns the new status of the route
     #[roto_method(rt, RovUpdate)]
     fn new_status(rov_update: &RovUpdate) -> RovStatus {
         rov_update.new_status
     }
 
+    /// Return a formatted string for `rov_update`
     #[roto_method(rt, RovUpdate, fmt)]
     fn fmt_rov_update(rov_update: &RovUpdate) -> Arc<str> {
         format!(
@@ -972,7 +1002,6 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
             rov_update.origin,
             rov_update.peer_as,
         ).as_str().into()
-
     }
 
     /// Perform Route Origin Validation on the route
@@ -1069,6 +1098,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     //------------ Lists -----------------------------------------------------
 
+    /// Add a named ASN list
     #[roto_method(rt, MutNamedAsnLists, add)]
     fn add_asn_list(lists: &MutNamedAsnLists, name: &Arc<str>, s: &Arc<str>) {
         let mut lists = lists.lock().unwrap();
@@ -1076,6 +1106,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         lists.add(name.clone(), res);
     }
 
+    /// Add a named prefix list
     #[roto_method(rt, MutNamedPrefixLists, add)]
     fn add_prefix_list(lists: &MutNamedPrefixLists, name: &Arc<str>, s: &Arc<str>) {
         let mut lists = lists.lock().unwrap();
@@ -1083,6 +1114,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         lists.add(name.clone(), res);
     }
 
+    /// Returns 'true' if `asn` is in the named list
     #[roto_method(rt, MutNamedAsnLists, contains)]
     fn asn_list_contains(asn_list: &MutNamedAsnLists, name: &Arc<str>, asn: Asn) -> bool {
         let asn_list = asn_list.lock().unwrap();
@@ -1103,6 +1135,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         }
     }
 
+    /// Returns 'true' if `prefix` or a less-specific is in the named list 
     #[roto_method(rt, MutNamedPrefixLists, covers)]
     fn prefix_list_covers(prefix_list: &MutNamedPrefixLists, name: &Arc<str>, prefix: &Prefix) -> bool {
         let prefix_list = prefix_list.lock().unwrap();

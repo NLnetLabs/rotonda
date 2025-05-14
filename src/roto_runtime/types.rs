@@ -132,7 +132,7 @@ impl<M> OutputStream<M> {
     }
 
     pub fn print(&self, msg: impl AsRef<str>) {
-        eprintln!("roto output: {}", msg.as_ref());
+        eprintln!("{}", msg.as_ref());
     }
 }
 

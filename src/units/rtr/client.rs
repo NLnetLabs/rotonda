@@ -489,10 +489,10 @@ struct RtrTarget {
     pub name: Arc<str>,
 }
 
-impl RtrTarget {
-    //pub fn replace_cache(&mut self, cache: RtrVerbs) {
-    //    self.cache = cache;
-    //}
+#[derive(Clone, Debug)]
+pub struct VrpUpdate {
+    pub action: Action,
+    pub payload: Payload
 }
 
 #[derive(Clone, Debug, Default)]

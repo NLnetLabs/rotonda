@@ -4,6 +4,7 @@
 //! different transport protocols: [`Tcp`] uses plain, unencrypted TCP while
 //! [`Tls`] uses TLS.
 
+use std::fmt::Display;
 use std::io;
 use std::fs::File;
 use std::future::Future;
@@ -493,6 +494,30 @@ struct RtrTarget {
 pub struct VrpUpdate {
     pub action: Action,
     pub payload: Payload
+}
+
+impl Display for VrpUpdate {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.action {
+            Action::Announce => { write!(f, "announce ")? }
+            Action::Withdraw =>  { write!(f, "withdraw ")? }
+        }
+        match self.payload {
+            Payload::Origin(ref vrp) => {
+                write!(f, "VRP {} from {}", vrp.prefix, vrp.asn)
+            }
+            Payload::RouterKey(ref key) => {
+                write!(f, "BGPSec router for {}", key.asn)
+            }
+            Payload::Aspa(ref aspa) => {
+                write!(f, "ASPA for {}, providers: {:?}",
+                    aspa.customer,
+                    aspa.providers,
+                )
+            }
+        }
+        
+    }
 }
 
 #[derive(Clone, Debug, Default)]

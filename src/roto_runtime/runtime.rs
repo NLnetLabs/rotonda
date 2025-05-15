@@ -623,6 +623,12 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         0
     }
 
+    #[roto_method(rt, u32, fmt)]
+    fn fmt_u32(n: u32) -> Arc<str> {
+        format!("{n}").into()
+    }
+    
+
     /// Return the number of withdrawals in this message
     #[roto_method(rt, BmpMsg<Bytes>, withdrawals_count)]
     fn bmp_withdrawals_count(msg: &BmpMsg<Bytes>) -> u32 {
@@ -762,7 +768,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         stream.print(msg);
     }
 
-    /// Print a message to standard error
+    /// Print a timestamped message to standard error
     #[roto_method(rt, Log)]
     fn timestamped_print(stream: &Log, msg: &Arc<str>) {
         let stream = stream.borrow();
@@ -797,6 +803,9 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         entry.custom = Some(custom_msg.to_string());
     }
 
+    /// Log a custom, timestamped message based on the given string
+    /// 
+    /// Also see [`custom`].
     #[roto_method(rt, MutLogEntry)]
     fn timestamped_custom(entry_ptr: &MutLogEntry, custom_msg: &Arc<str>) {
         let mut entry = entry_ptr.borrow_mut();
@@ -1024,6 +1033,12 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         *status == RovStatus::NotFound
     }
 
+
+    #[roto_method(rt, RovUpdate)]
+    fn origin(rov_update: &RovUpdate) -> Asn {
+        rov_update.origin
+    }
+
     /// Returns 'true' if the new status differs from the old status
     #[roto_method(rt, RovUpdate)]
     fn has_changed(rov_update: &RovUpdate) -> bool {
@@ -1195,6 +1210,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         }
     }
 
+    /// Returns 'true' if `prefix` is in the named list
     #[roto_method(rt, MutNamedPrefixLists, contains)]
     fn prefix_list_contains(prefix_list: &MutNamedPrefixLists, name: &Arc<str>, prefix: &Prefix) -> bool {
         let prefix_list = prefix_list.lock().unwrap();

@@ -1454,6 +1454,8 @@ mod tests {
         use crate::units::bgp_tcp_in::unit::RotoFunc as BgpInFunc;
         use crate::units::bmp_tcp_in::unit::RotoFunc as BmpInFunc;
         use crate::units::rib_unit::unit::RotoFuncPre as RibInPreFunc;
+        use crate::units::rib_unit::unit::RotoFuncVrpUpdate as VrpUpdateFunc;
+        use crate::units::rib_unit::unit::RotoFuncVrpUpdatePost as VrpUpdateFuncPost;
 
         let roto_script = "etc/examples/filters.roto.example";
         let i = roto::FileTree::single_file(roto_script);
@@ -1463,5 +1465,7 @@ mod tests {
         let _: BgpInFunc = c.get_function("bgp_in").unwrap();
         let _: BmpInFunc = c.get_function("bmp_in").unwrap();
         let _: RibInPreFunc = c.get_function("rib_in_pre").unwrap();
+        let _ : VrpUpdateFunc = c.get_function("vrp_update").unwrap();
+        let _ : VrpUpdateFuncPost = c.get_function("vrp_update_post").unwrap();
     }
 }

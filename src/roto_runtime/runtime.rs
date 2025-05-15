@@ -1462,6 +1462,8 @@ mod tests {
         let mut c = i.compile(create_runtime().unwrap())
             .inspect_err(|e| eprintln!("{e}"))
             .unwrap();
+
+        let _: CompileListsFunc = c.get_function(COMPILE_LISTS_FUNC_NAME).unwrap();
         let _: BgpInFunc = c.get_function("bgp_in").unwrap();
         let _: BmpInFunc = c.get_function("bmp_in").unwrap();
         let _: RibInPreFunc = c.get_function("rib_in_pre").unwrap();

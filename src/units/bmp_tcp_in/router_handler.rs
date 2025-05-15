@@ -45,6 +45,7 @@ use super::util::format_source_id;
 pub struct RouterHandler {
     gate: Gate,
     roto_function: Option<RotoFunc>,
+    roto_context: Arc<std::sync::Mutex<Ctx>>,
     router_id_template: Arc<ArcSwap<String>>,
     filter_name: Arc<ArcSwap<FilterName>>,
     status_reporter: Arc<BmpTcpInStatusReporter>,
@@ -64,6 +65,7 @@ impl RouterHandler {
     pub fn new(
         gate: Gate,
         roto_function: Option<RotoFunc>,
+        roto_context: Arc<std::sync::Mutex<Ctx>>,
         router_id_template: Arc<ArcSwap<String>>,
         filter_name: Arc<ArcSwap<FilterName>>,
         status_reporter: Arc<BmpTcpInStatusReporter>,
@@ -76,6 +78,7 @@ impl RouterHandler {
         Self {
             gate,
             roto_function,
+            roto_context,
             router_id_template,
             filter_name,
             status_reporter,
@@ -369,17 +372,19 @@ impl RouterHandler {
             provenance
         };
 
-        let mut ctx = Ctx::empty();
-        let verdict = self.roto_function.as_ref().map(|roto_function| {
+        let mut osms = smallvec![];
+        let verdict;
+        { // lock scope
+        let mut ctx = self.roto_context.lock().unwrap();
+        verdict = self.roto_function.as_ref().map(|roto_function| {
             roto_function.call(
                 &mut ctx,
                 roto::Val(msg.clone()),
                 roto::Val(provenance),
             )
         });
+        
 
-        let mut osms = smallvec![];
-        { // lock scope
         let mut output_stream = ctx.output.borrow_mut();
         if !output_stream.is_empty() {
             for entry in output_stream.drain() {

@@ -521,11 +521,12 @@ impl RibUnitRunner {
             RotoOutputStream::new_rced(),
             rtr_cache.clone()
         );
-        roto_compiled.clone().map(|c| {
+        if let Some(c) = roto_compiled.clone() {
             let mut c = c.lock().unwrap();
-            c.get_function::<Ctx, (), ()>("compile_lists")
-                .map(|f| f.call(&mut roto_context));
-            });
+            if let Ok(f) = c.get_function::<Ctx, (), ()>("compile_lists") {
+                f.call(&mut roto_context);
+            }
+        }
 
         let tracer = component.tracer().clone();
 
@@ -1440,48 +1441,44 @@ impl RibUnitRunner {
         output_stream: &mut OutputStream<Output>
     ) -> SmallVec<[OutputStreamMessage; N]> {
         let mut osms = smallvec![];
-        if !output_stream.is_empty() {
-
-            for entry in output_stream.drain() {
-                let osm = match entry {
-                    Output::Prefix(_prefix) => {
-                        OutputStreamMessage::prefix(
-                            rotonda_route.cloned(),
-                            //Some(rotonda_route.clone()),
-                            ingress_id,
-                        )
-                    }
-                    Output::Community(_u32) => {
-                        OutputStreamMessage::community(
-                            rotonda_route.cloned(),
-                            ingress_id,
-                        )
-                    }
-                    Output::Asn(_u32) => OutputStreamMessage::asn(
+        for entry in output_stream.drain() {
+            let osm = match entry {
+                Output::Prefix(_prefix) => {
+                    OutputStreamMessage::prefix(
                         rotonda_route.cloned(),
                         ingress_id,
-                    ),
-                    Output::Origin(_u32) => OutputStreamMessage::origin(
+                    )
+                }
+                Output::Community(_u32) => {
+                    OutputStreamMessage::community(
                         rotonda_route.cloned(),
                         ingress_id,
-                    ),
-                    Output::PeerDown => {
-                        debug!("Logged PeerDown from Rib unit, ignoring");
-                        continue;
-                    }
-                    Output::Custom((id, local)) => {
-                        OutputStreamMessage::custom(id, local, ingress_id)
-                    }
-                    Output::Entry(entry) => {
-                        OutputStreamMessage::entry(
-                            entry,
-                            ingress_id,
-                        )
-                    }
+                    )
+                }
+                Output::Asn(_u32) => OutputStreamMessage::asn(
+                    rotonda_route.cloned(),
+                    ingress_id,
+                ),
+                Output::Origin(_u32) => OutputStreamMessage::origin(
+                    rotonda_route.cloned(),
+                    ingress_id,
+                ),
+                Output::PeerDown => {
+                    debug!("Logged PeerDown from Rib unit, ignoring");
+                    continue;
+                }
+                Output::Custom((id, local)) => {
+                    OutputStreamMessage::custom(id, local, ingress_id)
+                }
+                Output::Entry(entry) => {
+                    OutputStreamMessage::entry(
+                        entry,
+                        ingress_id,
+                    )
+                }
 
-                };
-                osms.push(osm);
-            }
+            };
+            osms.push(osm);
         }
         osms
     }

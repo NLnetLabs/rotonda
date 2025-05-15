@@ -94,8 +94,10 @@ struct Processor {
 }
 
 impl Processor {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         roto_function: Option<RotoFunc>,
+        roto_context: Arc<Mutex<Ctx>>,
         gate: Gate,
         unit_cfg: BgpTcpIn,
         tx: mpsc::Sender<Command>,
@@ -106,7 +108,7 @@ impl Processor {
     ) -> Self {
         Processor {
             roto_function,
-            roto_context: Arc::new(Mutex::new(Ctx::empty())),
+            roto_context,
             gate,
             unit_cfg,
             //bgp_ltime: 0,
@@ -558,6 +560,7 @@ impl Processor {
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_connection(
     roto_function: Option<RotoFunc>,
+    roto_context: Arc<Mutex<Ctx>>,
     gate: Gate,
     unit_config: BgpTcpIn,
     tcp_stream: TcpStream,
@@ -621,6 +624,7 @@ pub async fn handle_connection(
 
     let mut p = Processor::new(
         roto_function,
+        roto_context,
         gate,
         unit_config,
         cmds_tx,

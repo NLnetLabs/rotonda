@@ -163,6 +163,7 @@ trait ConfigAcceptor {
     fn accept_config(
         child_name: String,
         roto_function: Option<RotoFunc>,
+        roto_context: Arc<Mutex<Ctx>>,
         gate: &Gate,
         bgp: &BgpTcpIn,
         tcp_stream: impl TcpStreamWrapper,
@@ -283,6 +284,7 @@ impl BgpTcpInRunner {
                 f.call(&mut roto_context);
             }
         }
+        let roto_context = Arc::new(Mutex::new(roto_context));
 
         loop {
             let listen_addr = arc_self.bgp.load().listen.clone();
@@ -348,6 +350,7 @@ impl BgpTcpInRunner {
                             F::accept_config(
                                 child_name,
                                 roto_function.clone(),
+                                roto_context.clone(),
                                 &arc_self.gate,
                                 &arc_self.bgp.load().clone(),
                                 tcp_stream,
@@ -561,6 +564,7 @@ impl ConfigAcceptor for BgpTcpInRunner {
     fn accept_config(
         child_name: String,
         roto_function: Option<RotoFunc>,
+        roto_context: Arc<Mutex<Ctx>>,
         gate: &Gate,
         bgp: &BgpTcpIn,
         tcp_stream: impl TcpStreamWrapper,
@@ -578,6 +582,7 @@ impl ConfigAcceptor for BgpTcpInRunner {
             &child_name,
             handle_connection(
                 roto_function,
+                roto_context,
                 gate.clone(),
                 bgp.clone(),
                 tcp_stream,

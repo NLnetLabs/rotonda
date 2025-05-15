@@ -130,7 +130,7 @@ impl Processor {
 
         let processor = Self {
             roto_function: None,
-            roto_context: Default::default,
+            roto_context: Arc::new(Mutex::new(Ctx::empty())),
             gate,
             unit_cfg,
             //bgp_ltime: 0,

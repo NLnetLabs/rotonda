@@ -601,6 +601,9 @@ impl RibUnitRunner {
             roto_function_pre: None,
             roto_function_vrp_update: None,
             roto_function_post: None,
+            roto_function_vrp_update_post: None,
+            ingress_register: Arc::new(ingress::Register::new()),
+            roto_context: Arc::new(Mutex::new(Ctx::empty())),
         };
 
         Ok((runner, gate_agent))

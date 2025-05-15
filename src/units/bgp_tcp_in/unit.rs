@@ -787,6 +787,7 @@ mod tests {
         fn accept_config(
             _child_name: String,
             _roto_function: Option<RotoFunc>,
+            _roto_context: Arc<std::sync::Mutex<crate::roto_runtime::Ctx>>,
             _gate: &Gate,
             _bgp: &BgpTcpIn,
             _tcp_stream: impl TcpStreamWrapper,

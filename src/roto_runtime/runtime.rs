@@ -30,7 +30,7 @@ use super::types::{
 use crate::payload::RotondaRoute;
 use crate::roto_runtime::lists::{AsnList, PrefixList};
 use crate::roto_runtime::types::LogEntry;
-use crate::units::rib_unit::rpki::{RovStatus, RovUpdate};
+use crate::units::rib_unit::rpki::{RovStatus, RovStatusUpdate};
 use crate::units::rib_unit::unit::RtrCache;
 use crate::units::rtr::client::VrpUpdate;
 
@@ -1021,13 +1021,25 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     //------------ RPKI / RTR methods ----------------------------------------
 
     rt.register_copy_type::<RovStatus>("ROV status of a `Route`").unwrap();
-    rt.register_copy_type::<RovUpdate>("ROV update of a `Route`").unwrap();
+    rt.register_copy_type::<RovStatusUpdate>("ROV update of a `Route`").unwrap();
+
+
+    /// Returns the `Asn` for this `VrpUpdate`
+    #[roto_method(rt, VrpUpdate, asn)]
+    fn vrp_update_origin(vrp_update: &VrpUpdate) -> Asn {
+        // We need to convert the rpki-rs Asn into the inetnum Asn, hence the
+        // into_u32->from_u32 calls.
+        Asn::from_u32(vrp_update.vrp.asn.into_u32())
+    }
 
     /// Return a formatted string for `vrp_update`
     #[roto_method(rt, VrpUpdate, fmt)]
     fn fmt_vrp_update(vrp_update: &VrpUpdate) -> Arc<str> {
         vrp_update.to_string().into()
     }
+
+
+
 
     /// Returns 'true' if the status is 'Valid'
     #[roto_method(rt, RovStatus)]
@@ -1047,40 +1059,46 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         *status == RovStatus::NotFound
     }
 
-
-    #[roto_method(rt, RovUpdate)]
-    fn origin(rov_update: &RovUpdate) -> Asn {
+    /// Returns the origin `asn` from the 'AS_PATH' of the updated route
+    #[roto_method(rt, RovStatusUpdate)]
+    fn origin(rov_update: &RovStatusUpdate) -> Asn {
         rov_update.origin
     }
 
+    /// Returns the peer `asn` from which the route was received
+    #[roto_method(rt, RovStatusUpdate, peer_asn)]
+    fn rov_peer_asn(rov_update: &RovStatusUpdate) -> Asn {
+        rov_update.peer_asn
+    }
+
     /// Returns 'true' if the new status differs from the old status
-    #[roto_method(rt, RovUpdate)]
-    fn has_changed(rov_update: &RovUpdate) -> bool {
+    #[roto_method(rt, RovStatusUpdate)]
+    fn has_changed(rov_update: &RovStatusUpdate) -> bool {
         rov_update.old_status != rov_update.new_status
     }
 
     /// Returns the old status of the route
-    #[roto_method(rt, RovUpdate)]
-    fn old_status(rov_update: &RovUpdate) -> RovStatus {
+    #[roto_method(rt, RovStatusUpdate)]
+    fn old_status(rov_update: &RovStatusUpdate) -> RovStatus {
         rov_update.old_status
     }
 
     /// Returns the new status of the route
-    #[roto_method(rt, RovUpdate)]
-    fn new_status(rov_update: &RovUpdate) -> RovStatus {
+    #[roto_method(rt, RovStatusUpdate)]
+    fn new_status(rov_update: &RovStatusUpdate) -> RovStatus {
         rov_update.new_status
     }
 
     /// Return a formatted string for `rov_update`
-    #[roto_method(rt, RovUpdate, fmt)]
-    fn fmt_rov_update(rov_update: &RovUpdate) -> Arc<str> {
+    #[roto_method(rt, RovStatusUpdate, fmt)]
+    fn fmt_rov_update(rov_update: &RovStatusUpdate) -> Arc<str> {
         format!(
             "[{:?}] -> [{:?}] {} originated by {}, learned from {}",
             rov_update.old_status,
             rov_update.new_status,
             rov_update.prefix,
             rov_update.origin,
-            rov_update.peer_as,
+            rov_update.peer_asn,
         ).as_str().into()
     }
 
@@ -1449,13 +1467,22 @@ fn fmt_pcap(buf: impl AsRef<[u8]>) -> Arc<str> {
 mod tests {
     use super::*;
 
+
     #[test]
     fn packaged_roto_script() {
-        use crate::units::bgp_tcp_in::unit::RotoFunc as BgpInFunc;
-        use crate::units::bmp_tcp_in::unit::RotoFunc as BmpInFunc;
+        use crate::units::bgp_tcp_in::unit::{
+            RotoFunc as BgpInFunc,
+            ROTO_FUNC_FILTER_NAME as ROTO_FUNC_BGP_IN_NAME
+        };
+        use crate::units::bmp_tcp_in::unit::{
+            RotoFunc as BmpInFunc,
+            ROTO_FUNC_FILTER_NAME as ROTO_FUNC_BMP_IN_NAME
+        };
         use crate::units::rib_unit::unit::RotoFuncPre as RibInPreFunc;
-        use crate::units::rib_unit::unit::RotoFuncVrpUpdate as VrpUpdateFunc;
-        use crate::units::rib_unit::unit::RotoFuncVrpUpdatePost as VrpUpdateFuncPost;
+        use crate::units::rib_unit::unit::{
+            RotoFuncVrpUpdate, ROTO_FUNC_VRP_UPDATE_FILTER_NAME,
+            RotoFuncRovStatusUpdate, ROTO_FUNC_ROV_STATUS_UPDATE_NAME,
+        };
 
         let roto_script = "etc/examples/filters.roto.example";
         let i = roto::FileTree::single_file(roto_script);
@@ -1467,7 +1494,7 @@ mod tests {
         let _: BgpInFunc = c.get_function("bgp_in").unwrap();
         let _: BmpInFunc = c.get_function("bmp_in").unwrap();
         let _: RibInPreFunc = c.get_function("rib_in_pre").unwrap();
-        let _ : VrpUpdateFunc = c.get_function("vrp_update").unwrap();
-        let _ : VrpUpdateFuncPost = c.get_function("vrp_update_post").unwrap();
+        let _: VrpUpdateFunc = c.get_function(ROTO_FUNC_VRP_UPDATE_FILTER_NAME).unwrap();
+        let _: RotoFuncRovStatusUpdate = c.get_function(ROTO_FUNC_ROV_STATUS_UPDATE_NAME).unwrap();
     }
 }

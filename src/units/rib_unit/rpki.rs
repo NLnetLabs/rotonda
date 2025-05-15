@@ -50,6 +50,7 @@ impl From<RovStatus> for RpkiInfo {
     }
 }
 
+/// RPKI Route Origin Validation status for a route
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
 #[derive(Serialize)]
 pub enum RovStatus {
@@ -61,25 +62,35 @@ pub enum RovStatus {
 }
 
 
+/// Route Origin Validation status update for a route
 #[derive(Copy, Clone, Debug)]
-pub struct RovUpdate {
+pub struct RovStatusUpdate {
+    /// The prefix of the route
     pub prefix: Prefix,
+
+    /// The old `RovStatus
     pub old_status: RovStatus,
+
+    /// The new `RovStatus
     pub new_status: RovStatus,
+
+    /// The origin `Asn`, i.e. right-most in 'AS_PATH' of this route
     pub origin: Asn,
-    pub peer_as: Asn,
+
+    /// The peer `Asn` from the route was received
+    pub peer_asn: Asn,
 }
 
-impl RovUpdate {
+impl RovStatusUpdate {
     pub fn new(
         prefix: Prefix,
         old_status: RovStatus,
         new_status: RovStatus,
         origin: Asn,
-        peer_as: Asn,
+        peer_asn: Asn,
     ) -> Self {
         Self {
-            prefix, old_status, new_status, origin, peer_as,
+            prefix, old_status, new_status, origin, peer_asn,
         }
     }
 }

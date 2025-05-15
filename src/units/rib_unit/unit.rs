@@ -32,7 +32,7 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use super::{
-    http::PrefixesApi, metrics::RibUnitMetrics, rib::{Rib, RouteExtra, StoreInsertionEffect}, rpki::{RovStatus, RovUpdate}, status_reporter::RibUnitStatusReporter
+    http::PrefixesApi, metrics::RibUnitMetrics, rib::{Rib, RouteExtra, StoreInsertionEffect}, rpki::{RovStatus, RovStatusUpdate}, status_reporter::RibUnitStatusReporter
 };
 use super::{
     rib::StoreInsertionReport, statistics::RibMergeUpdateStatistics,
@@ -57,14 +57,14 @@ pub(crate) type RotoFuncVrpUpdate = roto::TypedFunc<
 >;
 const ROTO_FUNC_VRP_UPDATE_FILTER_NAME: &str = "rib_in_vrp_update";
 
-pub(crate) type RotoFuncVrpUpdatePost = roto::TypedFunc<
+pub(crate) type RotoFuncRovStatusUpdate = roto::TypedFunc<
     Ctx,
     (
-        roto::Val<RovUpdate>,
+        roto::Val<RovStatusUpdate>,
     ),
     (),
 >;
-const ROTO_FUNC_VRP_UPDATE_POST_FILTER_NAME: &str = "rib_in_vrp_update_post";
+const ROTO_FUNC_ROV_STATUS_UPDATE_NAME: &str = "rib_in_rov_status_update";
 
 
 type RotoFuncPost = roto::TypedFunc<
@@ -365,7 +365,7 @@ impl Default for RtrCache {
 pub struct RibUnitRunner {
     roto_function_pre: Option<RotoFuncPre>,
     roto_function_vrp_update: Option<RotoFuncVrpUpdate>,
-    roto_function_vrp_update_post: Option<RotoFuncVrpUpdatePost>,
+    roto_function_vrp_update_post: Option<RotoFuncRovStatusUpdate>,
     roto_function_post: Option<RotoFuncPost>,
     roto_context: Arc<Mutex<Ctx>>,
     gate: Arc<Gate>,
@@ -493,10 +493,10 @@ impl RibUnitRunner {
                 .ok()
             });
 
-        let roto_function_vrp_update_post: Option<RotoFuncVrpUpdatePost> =
+        let roto_function_vrp_update_post: Option<RotoFuncRovStatusUpdate> =
             roto_compiled.clone().and_then(|c| {
                 let mut c = c.lock().unwrap();
-                c.get_function(ROTO_FUNC_VRP_UPDATE_POST_FILTER_NAME)
+                c.get_function(ROTO_FUNC_ROV_STATUS_UPDATE_NAME)
                 .inspect_err(|_|
                     warn!("Loaded Roto script has no filter for rib_in_vrp_update_post")
                 )
@@ -1109,31 +1109,33 @@ impl RibUnitRunner {
                                     // rtr-cache2, or something.
 
                                     let mut apply_vrp_update = true;
-                                    if let Some(ref vrp_update_filter) = self.roto_function_vrp_update {
-                                        let vrp_update = VrpUpdate {
-                                            action, payload
-                                        };
+                                    if let RtrPayload::Origin(vrp) = payload {
+                                        if let Some(ref vrp_update_filter) = self.roto_function_vrp_update {
+                                            let vrp_update = VrpUpdate {
+                                                action, vrp
+                                            };
 
-                                        let osms;
-                                        {
-                                        let mut ctx = self.roto_context.lock().unwrap();
+                                            let osms;
+                                            {
+                                            let mut ctx = self.roto_context.lock().unwrap();
 
-                                        match vrp_update_filter.call(&mut ctx, roto::Val(vrp_update)) {
-                                            Verdict::Accept(_) => { },
-                                            Verdict::Reject(_) => {
-                                                apply_vrp_update = false
+                                            match vrp_update_filter.call(&mut ctx, roto::Val(vrp_update)) {
+                                                Verdict::Accept(_) => { },
+                                                Verdict::Reject(_) => {
+                                                    apply_vrp_update = false
+                                                }
                                             }
-                                        }
-                                        //debug!("called {ROTO_FUNC_VRP_UPDATE_FILTER_NAME}, apply VRP update? {apply_vrp_update}");
+                                            //debug!("called {ROTO_FUNC_VRP_UPDATE_FILTER_NAME}, apply VRP update? {apply_vrp_update}");
 
-                                        osms = self.process_output_stream(
-                                            None,
-                                            None,
-                                            &mut ctx.output.borrow_mut(),
-                                        );
-                                        }
-                                        self.gate.update_data(Update::OutputStream(osms)).await;
+                                            osms = self.process_output_stream(
+                                                None,
+                                                None,
+                                                &mut ctx.output.borrow_mut(),
+                                            );
+                                            }
+                                            self.gate.update_data(Update::OutputStream(osms)).await;
 
+                                        }
                                     }
                                     if apply_vrp_update {
 
@@ -1164,7 +1166,7 @@ impl RibUnitRunner {
 
                                                         let peer_as = self.ingress_register.get(r.multi_uniq_id).and_then(|i| i.remote_asn).unwrap_or(Asn::from_u32(0));
                                                         rov_updates.push(
-                                                            RovUpdate::new(prefix, old_status, rov_status, origin, peer_as)
+                                                            RovStatusUpdate::new(prefix, old_status, rov_status, origin, peer_as)
                                                         );
 
                                                         //debug!("rov_status {rov_status:?} (was: {old_status:?}) for {prefix} from {origin}");
@@ -1199,7 +1201,7 @@ impl RibUnitRunner {
                                                                 //debug!("rov_status {rov_status:?} (was: {old_status:?}) for more-specific {ms_prefix} from {origin}");
                                                                 let peer_as = self.ingress_register.get(rec.multi_uniq_id).and_then(|i| i.remote_asn).unwrap_or(Asn::from_u32(0));
                                                                 rov_updates.push(
-                                                                    RovUpdate::new(prefix, old_status, rov_status, origin, peer_as)
+                                                                    RovStatusUpdate::new(prefix, old_status, rov_status, origin, peer_as)
                                                                 );
 
                                                                 pamap.set_rpki_info(rov_status.into());

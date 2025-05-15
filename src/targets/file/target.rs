@@ -1,6 +1,6 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
+use chrono::SecondsFormat;
 //use async_trait::async_trait;
 use futures::future::{select, Either};
 use futures::FutureExt;
@@ -16,7 +16,7 @@ use crate::comms::{Link, Terminated};
 use crate::config::ConfigPath;
 use crate::ingress;
 use crate::payload::Update;
-use crate::roto_runtime::types::{LogEntry, OutputStreamMessageRecord};
+use crate::roto_runtime::types::OutputStreamMessageRecord;
 use crate::targets::Component;
 use crate::targets::TargetCommand;
 use crate::targets::WaitPoint;
@@ -109,11 +109,20 @@ impl FileRunner {
         waitpoint.running().await;
 
         loop {
-            match select(
+            let select_fut = select(
                 cmd_rx.recv().boxed(),
                 sources.query().boxed(),
-            ).await { 
-
+            );
+            let select = match tokio::time::timeout(std::time::Duration::from_secs(1), select_fut).await {
+                Ok(select) => select,
+                Err(_timeout) => {
+                    if let Some(dst) = self.target_file.as_mut() {
+                        let _ = dst.flush().await;
+                    }
+                    continue;
+                }
+            };
+            match select {
                 Either::Left((gate_cmd, _)) => { 
                     match gate_cmd {
                         Some(cmd) => match cmd {
@@ -154,6 +163,14 @@ impl FileRunner {
                                 if let Some(dst) = self.target_file.as_mut() {
                                     if let OutputStreamMessageRecord::Entry(ref e) = m {
                                         if let Some(ref custom_str) = e.custom {
+                                            if e.timestamp != chrono::DateTime::UNIX_EPOCH {
+                                                dst.write_all(
+                                                    format!(
+                                                        "[{}] ",
+                                                        e.timestamp.to_rfc3339_opts(SecondsFormat::Secs, true)
+                                                    ).as_ref()
+                                                ).await.unwrap();
+                                            }
                                             dst.write_all(custom_str.as_ref()).await.unwrap();
                                             dst.write_all(b"\n").await.unwrap();
                                             continue;

@@ -7,7 +7,7 @@ use crate::{
         Terminated, TriggerData,
     }, ingress, manager::{Component, WaitPoint}, payload::{
         Payload, RotondaPaMap, RotondaRoute, RouterId, Update, UpstreamStatus
-    }, roto_runtime::{self, types::{FilterName, InsertionInfo, Output, OutputStream, OutputStreamMessage, RotoOutputStream, RouteContext}, Ctx}, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::{rtr::client::VrpUpdate, Unit}
+    }, roto_runtime::{self, types::{FilterName, InsertionInfo, Output, OutputStream, OutputStreamMessage, RotoOutputStream, RouteContext}, CompileListsFunc, Ctx, COMPILE_LISTS_FUNC_NAME}, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::{rtr::client::VrpUpdate, Unit}
 };
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
@@ -521,11 +521,9 @@ impl RibUnitRunner {
             RotoOutputStream::new_rced(),
             rtr_cache.clone()
         );
+
         if let Some(c) = roto_compiled.clone() {
-            let mut c = c.lock().unwrap();
-            if let Ok(f) = c.get_function::<Ctx, (), ()>("compile_lists") {
-                f.call(&mut roto_context);
-            }
+            roto_context.prepare(&mut c.lock().unwrap());
         }
 
         let tracer = component.tracer().clone();

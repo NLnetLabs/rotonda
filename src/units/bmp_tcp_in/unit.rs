@@ -398,10 +398,7 @@ impl BmpTcpInRunner {
         let mut roto_context = Ctx::empty();
 
         if let Some(c) = self.roto_compiled.clone() {
-            let mut c = c.lock().unwrap();
-            if let Ok(f) = c.get_function::<Ctx, (), ()>("compile_lists") {
-                f.call(&mut roto_context);
-            }
+            roto_context.prepare(&mut c.lock().unwrap());
         }
 
         let roto_context = Arc::new(std::sync::Mutex::new(roto_context));

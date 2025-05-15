@@ -7,7 +7,7 @@ use bytes::Bytes;
 use chrono::{SecondsFormat, Utc};
 use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
-use log::warn;
+use log::{debug, warn};
 use rotonda_store::match_options::{IncludeHistory, MatchOptions, MatchType};
 use routecore::bgp::aspath::{AsPath, Hop, HopPath};
 use routecore::bgp::communities::{
@@ -33,6 +33,11 @@ use crate::roto_runtime::types::LogEntry;
 use crate::units::rib_unit::rpki::{RovStatus, RovUpdate};
 use crate::units::rib_unit::unit::RtrCache;
 use crate::units::rtr::client::VrpUpdate;
+
+
+pub type CompileListsFunc = roto::TypedFunc<Ctx, (), ()>;
+pub const COMPILE_LISTS_FUNC_NAME: &str = "compile_lists";
+
 
 pub(crate) type Log = Rc<RefCell<RotoOutputStream>>;
 pub(crate) type SharedRtrCache = Arc<RtrCache>;
@@ -77,6 +82,15 @@ impl Ctx {
         }
     }
 
+    pub fn prepare(&mut self, compiled: &mut roto::Compiled) {
+        let f: Result<CompileListsFunc, _> = compiled
+            .get_function(COMPILE_LISTS_FUNC_NAME);
+        if let Ok(f) = f {
+            f.call(self);
+        } else {
+            debug!("No {COMPILE_LISTS_FUNC_NAME} to prepare");
+        }
+    }
 }
 
 /// Newtype for a possibly empty `Asn`.

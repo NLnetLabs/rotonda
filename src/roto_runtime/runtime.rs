@@ -79,6 +79,13 @@ impl Ctx {
 
 }
 
+/// Newtype for a possibly empty `Asn`.
+///
+/// NB: This type might become obsolete depending on the development of
+/// Optional value handling in roto.
+#[derive(Copy, Clone, Debug)]
+pub struct OriginAs(pub Option<Asn>);
+
 pub fn create_runtime() -> Result<roto::Runtime, String> {
     let mut rt = roto::Runtime::new();
 
@@ -104,6 +111,12 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     rt.register_clone_type::<VrpUpdate>(
         "A single announced or withdrawn VRP"
+    )?;
+
+    rt.register_copy_type::<OriginAs>(
+        "Origin ASN\n\n\
+        Represents an optional ASN.
+        "
     )?;
 
     rt.register_clone_type_with_name::<MutNamedAsnLists>(
@@ -343,6 +356,18 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         aspath_contains(msg, to_match)
     }
 
+    /// Returns the right-most `Asn` in the 'AS_PATH' attribute
+    ///
+    /// Note that the returned value is of type `OriginAs`, which optionally
+    /// contains an `Asn`. In case of empty an 'AS_PATH' (e.g. in iBGP) this
+    /// method will still return an `OriginAs`, though representing 'None'.
+    #[roto_method(rt, BgpUpdateMessage<Bytes>, aspath_origin)]
+    fn bgp_aspath_origin(
+        msg: &BgpUpdateMessage<Bytes>,
+    ) -> OriginAs {
+        aspath_origin(msg)
+    }
+
     /// Check whether the AS_PATH origin matches the given `Asn`
     #[roto_method(rt, BgpUpdateMessage<Bytes>, match_aspath_origin)]
     fn bgp_match_aspath_origin(
@@ -480,6 +505,32 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
         aspath_contains(&update, to_match)
     }
+
+    /// Returns the right-most `Asn` in the 'AS_PATH' attribute
+    ///
+    /// Note that the returned value is of type `OriginAs`, which optionally
+    /// contains an `Asn`. In case of empty an 'AS_PATH' (e.g. in iBGP) this
+    /// method will still return an `OriginAs`, though representing 'None'.
+    ///
+    /// When called on BMP messages not of type 'RouteMonitoring', the
+    /// 'None'-variant is returned as well.
+    #[roto_method(rt, BmpMsg<Bytes>, aspath_origin)]
+    fn bmp_aspath_origin(
+        msg: &BmpMsg<Bytes>,
+    ) -> OriginAs {
+        let update = if let BmpMsg::RouteMonitoring(rm) = msg {
+            if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
+                upd
+            } else {
+                return OriginAs(None);
+            }
+        } else {
+            return OriginAs(None);
+        };
+
+        aspath_origin(&update)
+    }
+
 
     /// Check whether the AS_PATH origin matches the given `Asn`
     #[roto_method(rt, BmpMsg<Bytes>, match_aspath_origin)]
@@ -1121,7 +1172,26 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         if let Some(list) = asn_list.inner.get(&*name.clone()) {
             list.contains(asn)
         } else {
-         false
+            false
+        }
+    }
+
+    /// Returns 'true' if the named list contains `origin`
+    ///
+    /// This method returns false if the list does not exist, or if `origin`
+    /// does not actually contain an `Asn`. The latter could occur for
+    /// announcements with an empty 'AS_PATH' attribute (iBGP).
+    #[roto_method(rt, MutNamedAsnLists, contains_origin)]
+    fn asn_list_contains_origin(asn_list: &MutNamedAsnLists, name: &Arc<str>, origin: &OriginAs) -> bool {
+        let asn = match origin.0 {
+            Some(asn) => asn,
+            None => { return false }
+        };
+        let asn_list = asn_list.lock().unwrap();
+        if let Some(list) = asn_list.inner.get(&*name.clone()) {
+            list.contains(asn)
+        } else {
+            false
         }
     }
 
@@ -1232,6 +1302,18 @@ fn aspath_contains(
     } else {
         false
     }
+}
+
+fn aspath_origin(
+    bgp_update: &BgpUpdateMessage<Bytes>,
+) -> OriginAs {
+    OriginAs(
+        if let Some(aspath) = bgp_update.aspath().ok().flatten() {
+            aspath.origin().and_then(|o| o.try_into_asn().ok())
+        } else {
+            None
+        }
+    )
 }
 
 fn match_aspath_origin(

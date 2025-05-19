@@ -1418,8 +1418,9 @@ mod tests {
             RotoFunc as BmpInFunc,
             ROTO_FUNC_FILTER_NAME as ROTO_FUNC_BMP_IN_NAME
         };
-        use crate::units::rib_unit::unit::RotoFuncPre as RibInPreFunc;
         use crate::units::rib_unit::unit::{
+            RotoFuncPre as RibInPreFunc,
+            ROTO_FUNC_PRE_FILTER_NAME as ROTO_FUNC_RIB_IN_PRE_NAME,
             RotoFuncVrpUpdate, ROTO_FUNC_VRP_UPDATE_FILTER_NAME,
             RotoFuncRovStatusUpdate, ROTO_FUNC_ROV_STATUS_UPDATE_NAME,
         };
@@ -1431,10 +1432,10 @@ mod tests {
             .unwrap();
 
         let _: CompileListsFunc = c.get_function(COMPILE_LISTS_FUNC_NAME).unwrap();
-        let _: BgpInFunc = c.get_function("bgp_in").unwrap();
-        let _: BmpInFunc = c.get_function("bmp_in").unwrap();
-        let _: RibInPreFunc = c.get_function("rib_in_pre").unwrap();
-        let _: VrpUpdateFunc = c.get_function(ROTO_FUNC_VRP_UPDATE_FILTER_NAME).unwrap();
+        let _: BgpInFunc = c.get_function(ROTO_FUNC_BGP_IN_NAME).unwrap();
+        let _: BmpInFunc = c.get_function(ROTO_FUNC_BMP_IN_NAME).unwrap();
+        let _: RibInPreFunc = c.get_function(ROTO_FUNC_RIB_IN_PRE_NAME).unwrap();
+        let _: RotoFuncVrpUpdate = c.get_function(ROTO_FUNC_VRP_UPDATE_FILTER_NAME).unwrap();
         let _: RotoFuncRovStatusUpdate = c.get_function(ROTO_FUNC_ROV_STATUS_UPDATE_NAME).unwrap();
     }
 }

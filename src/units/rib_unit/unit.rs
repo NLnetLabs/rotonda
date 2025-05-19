@@ -46,7 +46,7 @@ pub(crate) type RotoFuncPre = roto::TypedFunc<
     ),
     roto::Verdict<(), ()>,
 >;
-const ROTO_FUNC_PRE_FILTER_NAME: &str = "rib_in_pre";
+pub const ROTO_FUNC_PRE_FILTER_NAME: &str = "rib_in_pre";
 
 pub(crate) type RotoFuncVrpUpdate = roto::TypedFunc<
     Ctx,
@@ -55,7 +55,7 @@ pub(crate) type RotoFuncVrpUpdate = roto::TypedFunc<
     ),
     roto::Verdict<(), ()>,
 >;
-const ROTO_FUNC_VRP_UPDATE_FILTER_NAME: &str = "rib_in_vrp_update";
+pub const ROTO_FUNC_VRP_UPDATE_FILTER_NAME: &str = "vrp_update";
 
 pub(crate) type RotoFuncRovStatusUpdate = roto::TypedFunc<
     Ctx,
@@ -64,7 +64,7 @@ pub(crate) type RotoFuncRovStatusUpdate = roto::TypedFunc<
     ),
     (),
 >;
-const ROTO_FUNC_ROV_STATUS_UPDATE_NAME: &str = "rib_in_rov_status_update";
+pub const ROTO_FUNC_ROV_STATUS_UPDATE_NAME: &str = "rib_in_rov_status_update";
 
 
 type RotoFuncPost = roto::TypedFunc<
@@ -77,7 +77,7 @@ type RotoFuncPost = roto::TypedFunc<
 >;
 
 #[allow(dead_code)]
-const ROTO_FUNC_POST_FILTER_NAME: &str = "rib_in_post";
+pub const ROTO_FUNC_POST_FILTER_NAME: &str = "rib_in_post";
 
 impl From<UpsertReport> for InsertionInfo {
     fn from(value: UpsertReport) -> Self {

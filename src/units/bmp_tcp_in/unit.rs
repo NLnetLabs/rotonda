@@ -111,7 +111,7 @@ pub(crate) type RotoFunc = roto::TypedFunc<
     roto::Verdict<(), ()>,
 >;
 
-const ROTO_FUNC_FILTER_NAME: &str = "bmp_in";
+pub const ROTO_FUNC_FILTER_NAME: &str = "bmp_in";
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]

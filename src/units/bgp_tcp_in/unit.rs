@@ -61,7 +61,7 @@ pub(crate) type RotoFunc = roto::TypedFunc<
     roto::Verdict<(), ()>,
 >;
 
-const ROTO_FUNC_FILTER_NAME: &str = "bgp_in";
+pub const ROTO_FUNC_FILTER_NAME: &str = "bgp_in";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct BgpTcpIn {

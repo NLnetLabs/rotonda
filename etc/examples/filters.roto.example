@@ -104,11 +104,8 @@ filter rib_in_pre(
     route: Route,
 ) {
 
-    let my_prefix_v4 = 185.49.141.0/24;
-    let my_prefix_v6 = 2a04:b901::/29;
-
-    if route.prefix_matches(my_prefix_v4) {
-        output.log_prefix(my_prefix_v4);
+    if prefix_lists.contains("my_prefixes", route.prefix()) {
+        output.log_prefix(route.prefix());
     }
 
     # Only has effect when an RTR unit is configured in rotonda.conf

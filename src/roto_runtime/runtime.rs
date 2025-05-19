@@ -1042,6 +1042,16 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         Asn::from_u32(vrp_update.vrp.asn.into_u32())
     }
 
+    /// Returns the prefix of the updated route
+    #[roto_method(rt, VrpUpdate, prefix)]
+    fn vrp_prefix(vrp_update: &VrpUpdate) -> Prefix {
+        let maxlen_pref = vrp_update.vrp.prefix;
+        Prefix::new(
+            maxlen_pref.addr(),
+            maxlen_pref.prefix_len()
+        ).unwrap()
+    }
+
     /// Return a formatted string for `vrp_update`
     #[roto_method(rt, VrpUpdate, fmt)]
     fn fmt_vrp_update(vrp_update: &VrpUpdate) -> Arc<str> {

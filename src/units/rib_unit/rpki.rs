@@ -1,7 +1,11 @@
 //! RPKI related types and handlers for the Rib.
 //!
 
+use std::{collections::HashSet, sync::RwLock};
+
 use inetnum::{addr::Prefix, asn::Asn};
+use log::warn;
+use rotonda_store::{match_options::{IncludeHistory, MatchOptions, MatchType}, rib::{config::MemoryOnlyConfig, StarCastRib}};
 use serde::Serialize;
 
 
@@ -97,29 +101,155 @@ impl RovStatusUpdate {
 
 
 
+type VrpStore = StarCastRib<MaxLenList, MemoryOnlyConfig>;
+
+#[derive(Clone, Debug, Default)]
+pub struct MaxLenList {
+    list: Vec<u8>,
+}
+impl MaxLenList {
+    pub fn push(&mut self, value: u8) {
+        self.list.push(value);
+    }
+    pub fn remove(&mut self, index: usize) {
+        self.list.remove(index);
+    }
+    pub fn iter(&self) -> std::slice::Iter<'_, u8> {
+        self.list.iter()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.list.is_empty()
+    }
+}
+impl AsRef<[u8]> for MaxLenList {
+    fn as_ref(&self) -> &[u8] {
+        self.list.as_ref()
+    }
+}
+impl From<Vec<u8>> for MaxLenList {
+    fn from(value: Vec<u8>) -> Self {
+        Self { list: value }
+    }
+}
+impl std::fmt::Display for MaxLenList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_list().entries(self.list.iter()).finish()
+    }
+}
+impl rotonda_store::prefix_record::Meta for MaxLenList {
+    type Orderable<'a> = ();
+
+    type TBI = ();
+
+    fn as_orderable(&self, tbi: Self::TBI) -> Self::Orderable<'_> {
+        todo!()
+    }
+}
+
+
+pub struct RtrCache {
+    pub route_origins: RwLock<HashSet<rpki::rtr::payload::RouteOrigin>>,
+    pub router_keys: RwLock<HashSet<rpki::rtr::payload::RouterKey>>,
+    pub aspas: RwLock<HashSet<rpki::rtr::payload::Aspa>>,
+    pub vrps: VrpStore,
+}
+
+impl RtrCache {
+    pub fn check_rov(&self, prefix: &Prefix, origin: Asn) -> RovStatus {
+        #[allow(unused_assignments)]
+        let mut covered = false;
+        let mut valid = false;
+
+        let match_options = MatchOptions {
+            match_type: MatchType::LongestMatch,
+            include_withdrawn: false,
+            include_less_specifics: true,
+            include_more_specifics: false,
+            mui: None,
+            include_history: IncludeHistory::None,
+        };
+
+        let guard = &rotonda_store::epoch::pin();
+        let res = match self.vrps.match_prefix(
+            prefix,
+            &match_options,
+            guard
+        ) {
+            Ok(res) => res,
+            Err(e) => {
+                warn!("could not lookup {}: {}", &prefix, e);
+                return RovStatus::NotChecked;
+            }
+        };
+        // check exact/longest matches
+
+        // NB: Because the VRP Store (rotonda_store::StarCastRib) will not
+        // actually remove any prefixes, checking whether res.records is empty
+        // or not is not enough to determine ROV coverage for `prefix`.
+        // Instead, we have to check the stored MaxLenList: if that is not
+        // empty, `prefix` is covered.
+        'outer: for r in &res.records {
+            covered = covered || !r.meta.is_empty();
+            for maxlen in r.meta.iter() {
+                #[allow(clippy::collapsible_if)]
+                if prefix.len() <= *maxlen {
+                    if r.multi_uniq_id == u32::from(origin) {
+                        valid = true;
+                        break 'outer;
+                    }
+                }
+            }
+        }
+
+        // check less specifics
+        if !valid {
+            if let Some(less_specifics) = res.less_specifics {
+                'outer: for r in less_specifics.iter() {
+                    covered = covered || !r.meta.is_empty();
+                    for record in r.meta.iter() {
+                        for maxlen in record.meta.iter() {
+                            #[allow(clippy::collapsible_if)]
+                            if prefix.len() <= *maxlen {
+                                if record.multi_uniq_id == u32::from(origin) {
+                                    valid = true;
+                                    break 'outer;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        match (covered, valid) {
+            (true, true) => RovStatus::Valid,
+            (true, false) => RovStatus::Invalid,
+            (false, true) => unreachable!(),
+            (false, false) => RovStatus::NotFound,
+        }
+    }
+}
+
+
+impl Default for RtrCache {
+    fn default() -> Self {
+        Self {
+            route_origins: Default::default(),
+            router_keys: Default::default(),
+            aspas: Default::default(),
+            vrps: VrpStore::try_default().unwrap(),
+        }
+    }
+}
+
+
 
 
 //// TODO
-//// move in from rib_unit::unit.rs
-//// - RtrCache, VrpStore et al
 //
 //// create helpers to
 //// - update the prefix store based on RtrUpdates
 //// - D-R-Y the Full+Delta handling in unit.rs
-//
-//
-//// use the return value to update e.g. RotondaRoute, Store, ..
-//fn check_rov_for_route(
-//    rtr_cache: &RtrCache,
-//    route: &SomeRoute,
-//    // or
-//    prefix: &Prefix,
-//    origin_asn: Asn,
-//
-//) -> RovStatus {
-//
-//}
-//
 //
 //fn update_rov_in_store(
 //    store: &Store,

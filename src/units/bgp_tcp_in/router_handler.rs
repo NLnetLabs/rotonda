@@ -35,7 +35,7 @@ use crate::ingress;
 use crate::payload::{Payload, RotondaRoute, Update};
 use crate::roto_runtime::Ctx;
 use crate::units::bgp_tcp_in::status_reporter::BgpTcpInStatusReporter;
-use crate::units::rib_unit::unit::RtrCache;
+use crate::units::rib_unit::rpki::RtrCache;
 use crate::units::Unit;
 
 use super::peer_config::{CombinedConfig, ConfigExt};

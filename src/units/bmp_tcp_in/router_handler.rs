@@ -25,7 +25,7 @@ use crate::ingress::{self, IngressId};
 use crate::payload::RouterId;
 use crate::roto_runtime::Ctx;
 use crate::tracing::Tracer;
-use crate::units::rib_unit::unit::RtrCache;
+use crate::units::rib_unit::rpki::RtrCache;
 use crate::{
     comms::{Gate, GateStatus},
     payload::{Payload, Update, UpstreamStatus},

@@ -1,14 +1,13 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::str::FromStr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use bytes::Bytes;
 use chrono::{SecondsFormat, Utc};
 use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
-use log::{debug, warn};
-use rotonda_store::match_options::{IncludeHistory, MatchOptions, MatchType};
+use log::debug;
 use routecore::bgp::aspath::{AsPath, Hop, HopPath};
 use routecore::bgp::communities::{
     LargeCommunity, StandardCommunity, Wellknown,
@@ -30,8 +29,7 @@ use super::types::{
 use crate::payload::RotondaRoute;
 use crate::roto_runtime::lists::{AsnList, PrefixList};
 use crate::roto_runtime::types::LogEntry;
-use crate::units::rib_unit::rpki::{RovStatus, RovStatusUpdate};
-use crate::units::rib_unit::unit::RtrCache;
+use crate::units::rib_unit::rpki::{RovStatus, RovStatusUpdate, RtrCache};
 use crate::units::rtr::client::VrpUpdate;
 
 

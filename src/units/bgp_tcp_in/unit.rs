@@ -41,7 +41,7 @@ use crate::ingress;
 use crate::manager::{Component, WaitPoint};
 use crate::payload::Update;
 use crate::roto_runtime::Ctx;
-use crate::units::rib_unit::unit::RtrCache;
+use crate::units::rib_unit::rpki::RtrCache;
 use crate::units::{Gate, Unit};
 
 use super::metrics::BgpTcpInMetrics;

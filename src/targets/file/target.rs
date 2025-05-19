@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use chrono::SecondsFormat;
 //use async_trait::async_trait;
@@ -10,6 +11,7 @@ use serde::Deserialize;
 
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::mpsc;
+use tokio::time::Instant;
 
 //use crate::comms::{AnyDirectUpdate, DirectLink, DirectUpdate};
 use crate::comms::{Link, Terminated};
@@ -66,6 +68,7 @@ pub struct FileRunner {
     config: Config,
     ingresses: Arc<ingress::Register>,
     target_file: Option<BufWriter<tokio::fs::File>>,
+    last_flush: Instant,
 }
 
 
@@ -76,7 +79,16 @@ impl FileRunner {
             config,
             component,
             ingresses,
-            target_file: None
+            target_file: None,
+            last_flush: Instant::now(),
+
+        }
+    }
+
+    async fn flush(&mut self) {
+        if let Some(dst) = self.target_file.as_mut() {
+            let _ = dst.flush().await;
+            self.last_flush = Instant::now();
         }
     }
 
@@ -108,17 +120,22 @@ impl FileRunner {
 
         waitpoint.running().await;
 
+        //let mut last_flush = Instant::now();
+
         loop {
             let select_fut = select(
                 cmd_rx.recv().boxed(),
                 sources.query().boxed(),
             );
             let select = match tokio::time::timeout(std::time::Duration::from_secs(1), select_fut).await {
-                Ok(select) => select,
-                Err(_timeout) => {
-                    if let Some(dst) = self.target_file.as_mut() {
-                        let _ = dst.flush().await;
+                Ok(select) => {
+                    if self.last_flush + Duration::from_secs(1) < Instant::now() {
+                        self.flush().await;
                     }
+                    select
+                }
+                Err(_timeout) => {
+                    self.flush().await;
                     continue;
                 }
             };
@@ -220,9 +237,7 @@ impl FileRunner {
             }
 
         }
-        if let Some(dst) = self.target_file.as_mut() {
-            let _ = dst.flush().await;
-        }
+        self.flush().await;
         Ok(())
     }
 }

@@ -196,6 +196,18 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     // --- RotondaRoute methods
 
+    /// Return the prefix for this `RotondaRoute`
+    #[roto_method(rt, MutRotondaRoute, prefix)]
+    fn route_prefix(rr: &MutRotondaRoute) -> Prefix {
+        let rr = rr.borrow_mut();
+        match *rr {
+            RotondaRoute::Ipv4Unicast(n, ..) => n.prefix(),
+            RotondaRoute::Ipv6Unicast(n, ..) => n.prefix(),
+            RotondaRoute::Ipv4Multicast(n, ..) => n.prefix(),
+            RotondaRoute::Ipv6Multicast(n, ..) => n.prefix(),
+        }
+    }
+
     /// Check whether the prefix for this `RotondaRoute` matches
     #[roto_method(rt, MutRotondaRoute)]
     fn prefix_matches(rr: &MutRotondaRoute, to_match: &Prefix) -> bool {
@@ -1058,8 +1070,8 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     //--- RovStatusUpdate
 
     /// Returns the prefix of the updated route
-    #[roto_method(rt, RovStatusUpdate)]
-    fn prefix(rov_update: &RovStatusUpdate) -> Prefix {
+    #[roto_method(rt, RovStatusUpdate, prefix)]
+    fn rov_prefix(rov_update: &RovStatusUpdate) -> Prefix {
         rov_update.prefix
     }
 

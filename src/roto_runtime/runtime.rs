@@ -96,7 +96,7 @@ impl Ctx {
 /// NB: This type might become obsolete depending on the development of
 /// Optional value handling in roto.
 #[derive(Copy, Clone, Debug)]
-pub struct OriginAs(pub Option<Asn>);
+pub struct OriginAsn(pub Option<Asn>);
 
 pub fn create_runtime() -> Result<roto::Runtime, String> {
     let mut rt = roto::Runtime::new();
@@ -125,7 +125,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         "A single announced or withdrawn VRP"
     )?;
 
-    rt.register_copy_type::<OriginAs>(
+    rt.register_copy_type::<OriginAsn>(
         "Origin ASN\n\n\
         Represents an optional ASN.
         "
@@ -370,13 +370,13 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     /// Returns the right-most `Asn` in the 'AS_PATH' attribute
     ///
-    /// Note that the returned value is of type `OriginAs`, which optionally
+    /// Note that the returned value is of type `OriginAsn`, which optionally
     /// contains an `Asn`. In case of empty an 'AS_PATH' (e.g. in iBGP) this
-    /// method will still return an `OriginAs`, though representing 'None'.
+    /// method will still return an `OriginAsn`, though representing 'None'.
     #[roto_method(rt, BgpUpdateMessage<Bytes>, aspath_origin)]
     fn bgp_aspath_origin(
         msg: &BgpUpdateMessage<Bytes>,
-    ) -> OriginAs {
+    ) -> OriginAsn {
         aspath_origin(msg)
     }
 
@@ -520,24 +520,24 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     /// Returns the right-most `Asn` in the 'AS_PATH' attribute
     ///
-    /// Note that the returned value is of type `OriginAs`, which optionally
+    /// Note that the returned value is of type `OriginAsn`, which optionally
     /// contains an `Asn`. In case of empty an 'AS_PATH' (e.g. in iBGP) this
-    /// method will still return an `OriginAs`, though representing 'None'.
+    /// method will still return an `OriginAsn`, though representing 'None'.
     ///
     /// When called on BMP messages not of type 'RouteMonitoring', the
     /// 'None'-variant is returned as well.
     #[roto_method(rt, BmpMsg<Bytes>, aspath_origin)]
     fn bmp_aspath_origin(
         msg: &BmpMsg<Bytes>,
-    ) -> OriginAs {
+    ) -> OriginAsn {
         let update = if let BmpMsg::RouteMonitoring(rm) = msg {
             if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                 upd
             } else {
-                return OriginAs(None);
+                return OriginAsn(None);
             }
         } else {
-            return OriginAs(None);
+            return OriginAsn(None);
         };
 
         aspath_origin(&update)
@@ -1036,9 +1036,6 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         vrp_update.to_string().into()
     }
 
-
-
-
     /// Returns 'true' if the status is 'Valid'
     #[roto_method(rt, RovStatus)]
     fn is_valid(status: &RovStatus) -> bool {
@@ -1055,6 +1052,15 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     #[roto_method(rt, RovStatus)]
     fn is_not_found(status: &RovStatus) -> bool {
         *status == RovStatus::NotFound
+    }
+
+
+    //--- RovStatusUpdate
+
+    /// Returns the prefix of the updated route
+    #[roto_method(rt, RovStatusUpdate)]
+    fn prefix(rov_update: &RovStatusUpdate) -> Prefix {
+        rov_update.prefix
     }
 
     /// Returns the origin `asn` from the 'AS_PATH' of the updated route
@@ -1117,8 +1123,6 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
             _=> { return RovStatus::NotChecked ; } // defaults to 'NotChecked'
         };
 
-        // TODO  move that to rib_unit::rpki
-
         let mut rov_status = RovStatus::default();
 
         if let Some(hoppath) = rr.owned_map().get::<HopPath>() {
@@ -1169,7 +1173,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     /// does not actually contain an `Asn`. The latter could occur for
     /// announcements with an empty 'AS_PATH' attribute (iBGP).
     #[roto_method(rt, MutNamedAsnLists, contains_origin)]
-    fn asn_list_contains_origin(asn_list: &MutNamedAsnLists, name: &Arc<str>, origin: &OriginAs) -> bool {
+    fn asn_list_contains_origin(asn_list: &MutNamedAsnLists, name: &Arc<str>, origin: &OriginAsn) -> bool {
         let asn = match origin.0 {
             Some(asn) => asn,
             None => { return false }
@@ -1294,8 +1298,8 @@ fn aspath_contains(
 
 fn aspath_origin(
     bgp_update: &BgpUpdateMessage<Bytes>,
-) -> OriginAs {
-    OriginAs(
+) -> OriginAsn {
+    OriginAsn(
         if let Some(aspath) = bgp_update.aspath().ok().flatten() {
             aspath.origin().and_then(|o| o.try_into_asn().ok())
         } else {

@@ -245,6 +245,9 @@ impl MaxLenList {
     pub fn iter(&self) -> std::slice::Iter<'_, u8> {
         self.list.iter()
     }
+    pub fn is_empty(&self) -> bool {
+        self.list.is_empty()
+    }
 }
 impl AsRef<[u8]> for MaxLenList {
     fn as_ref(&self) -> &[u8] {
@@ -298,7 +301,7 @@ impl RtrCache {
 
         let guard = &rotonda_store::epoch::pin();
         let res = match self.vrps.match_prefix(
-            &prefix,
+            prefix,
             &match_options,
             guard
         ) {
@@ -309,8 +312,14 @@ impl RtrCache {
             }
         };
         // check exact/longest matches
-        covered = !res.records.is_empty();
+
+        // NB: Because the VRP Store (rotonda_store::StarCastRib) will not
+        // actually remove any prefixes, checking whether res.records is empty
+        // or not is not enough to determine ROV coverage for `prefix`.
+        // Instead, we have to check the stored MaxLenList: if that is not
+        // empty, `prefix` is covered.
         'outer: for r in &res.records {
+            covered = covered || !r.meta.is_empty();
             for maxlen in r.meta.iter() {
                 #[allow(clippy::collapsible_if)]
                 if prefix.len() <= *maxlen {
@@ -326,6 +335,7 @@ impl RtrCache {
         if !valid {
             if let Some(less_specifics) = res.less_specifics {
                 'outer: for r in less_specifics.iter() {
+                    covered = covered || !r.meta.is_empty();
                     for record in r.meta.iter() {
                         for maxlen in record.meta.iter() {
                             #[allow(clippy::collapsible_if)]

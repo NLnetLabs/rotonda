@@ -1118,79 +1118,21 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
             RotondaRoute::Ipv6Unicast(nlri, _) => nlri.prefix(),
             _=> { return RovStatus::NotChecked ; } // defaults to 'NotChecked'
         };
-        let mut covered = false;
-        let mut valid = false;
+
+        // TODO  move that to rib_unit::rpki
+
+        let mut rov_status = RovStatus::default();
 
         if let Some(hoppath) = rr.owned_map().get::<HopPath>() {
             if let Some(origin) = hoppath.origin()
                 .and_then(|o| Hop::try_into_asn(o.clone()).ok())
             {
-                let match_options = MatchOptions {
-                    match_type: MatchType::LongestMatch,
-                    include_withdrawn: false,
-                    include_less_specifics: true,
-                    include_more_specifics: false,
-                    mui: None,
-                    include_history: IncludeHistory::None,
-                };
-
-                let guard = &rotonda_store::epoch::pin();
-                let res = match rpki.vrps.match_prefix(
-                    &prefix,
-                    &match_options,
-                    guard
-                ) {
-                    Ok(res) => res,
-                    Err(e) => {
-                        warn!("could not lookup {}: {}", &prefix, e);
-                        return RovStatus::NotChecked;
-                    }
-                };
-                // check exact/longest matches
-                covered = !res.records.is_empty();
-                'outer: for r in &res.records {
-                    for maxlen in r.meta.iter() {
-                        #[allow(clippy::collapsible_if)]
-                        if prefix.len() <= *maxlen {
-                            if r.multi_uniq_id == u32::from(origin) {
-                                valid = true;
-                                break 'outer;
-                            }
-                        }
-                    }
-                }
-
-                // check less specifics
-                if !valid {
-                    if let Some(less_specifics) = res.less_specifics {
-                        'outer: for r in less_specifics.iter() {
-                            for record in r.meta.iter() {
-                                for maxlen in record.meta.iter() {
-                                    #[allow(clippy::collapsible_if)]
-                                    if prefix.len() <= *maxlen {
-                                        if record.multi_uniq_id == u32::from(origin) {
-                                            valid = true;
-                                            break 'outer;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                rov_status = rpki.check_rov(&prefix, origin);
             }
         }
 
-
-        let rov = match (covered, valid) {
-            (true, true) => RovStatus::Valid,
-            (true, false) => RovStatus::Invalid,
-            (false, true) => unreachable!(),
-            (false, false) => RovStatus::NotFound,
-        };
-
-        rr.rotonda_pamap_mut().set_rpki_info(rov.into());
-        rov
+        rr.rotonda_pamap_mut().set_rpki_info(rov_status.into());
+        rov_status
     }
 
 

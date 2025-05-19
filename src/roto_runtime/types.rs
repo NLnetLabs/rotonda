@@ -552,7 +552,7 @@ impl From<LogEntry> for MinimalLogEntry {
 impl LogEntry {
     pub fn new() -> Self {
         Self {
-            timestamp: Utc::now(),
+            //timestamp: Utc::now(),
             ..Default::default()
         }
     }

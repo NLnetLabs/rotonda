@@ -2125,6 +2125,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "micromap"
+version = "0.0.19"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c97286efc9fe97652f1f821b1b12c13fdec3bca8969f4d2e5967df78de83b594"
+
+[[package]]
 name = "mime"
 version = "0.3.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2833,6 +2839,7 @@ dependencies = [
  "log",
  "log-reroute",
  "memmap2",
+ "micromap",
  "non-empty-vec",
  "percent-encoding",
  "pin-project-lite",

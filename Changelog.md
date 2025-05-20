@@ -1,26 +1,27 @@
 # Changelog
 
 
-## Unreleased new version
+## 0.4.1 'Melolontha²'
 
-
-Breaking changes
-
+Released 2025-05-20.
 
 New
 
-
-Bug fixes
-
-
-Known issues
-
+* VRP information coming in via RTR updates (both full Cache Resets and Serial
+  responses) now triggers reevaluation of stored prefixes.
+* The new `vrp_update` filter can be used to act upon incoming VRP updates, for
+  example for logging purposes.
+* The new `rib_in_rov_status_update` function can be used to act upon changes
+  with regards to the ROV status of stored routes.
+* In roto, lists of ASNs and prefixes can be defined in the new `compile_lists`
+  function. These lists can be used from all other filters to match on, for
+  example for logging and monitoring purposes.
+* A new `timestamped_print` method is added on the `output` type in roto.
 
 Other changes
 
-
-Acknowledgements
-
+* The `file-out` logging target now periodically flushes to disk, to prevent
+  information from waiting in the buffer in low traffic scenarios.
 
 
 ## 0.4.0 'Bold and Undaunting Youth'

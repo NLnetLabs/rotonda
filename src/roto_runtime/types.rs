@@ -96,8 +96,12 @@ pub type RotoOutputStream = OutputStream<Output>;
 
 impl<M> OutputStream<M> {
     pub fn new() -> Self {
+        Self::with_vec(vec![])
+    }
+
+    pub fn with_vec(v: Vec<M>) -> Self {
         Self {
-            msgs: vec![],
+            msgs: v,
             entry: Rc::new(RefCell::new(LogEntry::new())),
         }
     }
@@ -107,23 +111,13 @@ impl<M> OutputStream<M> {
         Rc::new(RefCell::new(Self::new()))
     }
 
-    /// Unwrap the `OutputStream` from an `Rc<RefCell<>>`
-    pub fn into_inner(rced: Rc<RefCell<Self>>) -> Self {
-        Rc::into_inner(rced).unwrap().into_inner()
-    }
-
-    /// Turn into the messages vec
-    pub fn into_messages(self) -> Vec<M> {
-        self.msgs
-    }
-
     pub fn push(&mut self, msg: M) {
         self.msgs.push(msg);
     }
 
-    //pub fn drain(&mut self) -> std::vec::Drain<'_, M> {
-    //    self.msgs.drain(..)
-    //}
+    pub fn drain(&mut self) -> std::vec::Drain<'_, M> {
+        self.msgs.drain(..)
+    }
 
     pub fn is_empty(&self) -> bool {
         self.msgs.is_empty()
@@ -138,7 +132,7 @@ impl<M> OutputStream<M> {
     }
 
     pub fn print(&self, msg: impl AsRef<str>) {
-        eprintln!("roto output: {}", msg.as_ref());
+        eprintln!("{}", msg.as_ref());
     }
 }
 
@@ -558,7 +552,7 @@ impl From<LogEntry> for MinimalLogEntry {
 impl LogEntry {
     pub fn new() -> Self {
         Self {
-            timestamp: Utc::now(),
+            //timestamp: Utc::now(),
             ..Default::default()
         }
     }

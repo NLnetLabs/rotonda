@@ -6,13 +6,14 @@ use crate::{
         AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus, Link,
         Terminated, TriggerData,
     }, ingress, manager::{Component, WaitPoint}, payload::{
-        Payload, RotondaPaMap, RotondaRoute, RouterId, Update, UpstreamStatus,
-    }, roto_runtime::{self, types::{FilterName, InsertionInfo, Output, OutputStreamMessage, RotoOutputStream, RouteContext}, Ctx}, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::Unit
+        Payload, RotondaPaMap, RotondaRoute, RouterId, Update, UpstreamStatus
+    }, roto_runtime::{self, types::{FilterName, InsertionInfo, Output, OutputStream, OutputStreamMessage, RotoOutputStream, RouteContext}, CompileListsFunc, Ctx, COMPILE_LISTS_FUNC_NAME}, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::{rib_unit::rpki::MaxLenList, rtr::client::VrpUpdate, Unit}
 };
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
-use std::{collections::{HashMap, HashSet}, io::prelude::*, sync::RwLock};
-use rotonda_store::{errors::PrefixStoreError, match_options::QueryResult, prefix_record::{Record, RecordSet, RouteStatus}, rib::{config::MemoryOnlyConfig, StarCastRib}, stats::UpsertReport};
+use roto::Verdict;
+use std::{collections::{HashMap, HashSet}, io::prelude::*, sync::{Mutex, RwLock}};
+use rotonda_store::{errors::PrefixStoreError, match_options::{IncludeHistory, MatchOptions, MatchType, QueryResult}, prefix_record::{Record, RecordSet, RouteStatus}, rib::{config::MemoryOnlyConfig, StarCastRib}, stats::UpsertReport};
 use std::io::prelude::*;
 
 use chrono::Utc;
@@ -21,7 +22,7 @@ use log::{debug, error, info, log_enabled, trace, warn};
 use non_empty_vec::NonEmpty;
 
 use inetnum::{addr::Prefix, asn::Asn};
-use routecore::bgp::types::AfiSafiType;
+use routecore::bgp::{aspath::{Hop, HopPath}, types::AfiSafiType};
 use serde::Deserialize;
 use smallvec::{smallvec, SmallVec};
 use std::{
@@ -31,10 +32,7 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use super::{
-    http::PrefixesApi,
-    metrics::RibUnitMetrics,
-    rib::{Rib, RouteExtra, StoreInsertionEffect},
-    status_reporter::RibUnitStatusReporter,
+    http::PrefixesApi, metrics::RibUnitMetrics, rib::{Rib, RouteExtra, StoreInsertionEffect}, rpki::{RovStatus, RovStatusUpdate, RtrCache}, status_reporter::RibUnitStatusReporter
 };
 use super::{
     rib::StoreInsertionReport, statistics::RibMergeUpdateStatistics,
@@ -48,9 +46,25 @@ pub(crate) type RotoFuncPre = roto::TypedFunc<
     ),
     roto::Verdict<(), ()>,
 >;
-const ROTO_FUNC_PRE_FILTER_NAME: &str = "rib_in_pre";
+pub const ROTO_FUNC_PRE_FILTER_NAME: &str = "rib_in_pre";
 
+pub(crate) type RotoFuncVrpUpdate = roto::TypedFunc<
+    Ctx,
+    (
+        roto::Val<VrpUpdate>,
+    ),
+    roto::Verdict<(), ()>,
+>;
+pub const ROTO_FUNC_VRP_UPDATE_FILTER_NAME: &str = "vrp_update";
 
+pub(crate) type RotoFuncRovStatusUpdate = roto::TypedFunc<
+    Ctx,
+    (
+        roto::Val<RovStatusUpdate>,
+    ),
+    (),
+>;
+pub const ROTO_FUNC_ROV_STATUS_UPDATE_NAME: &str = "rib_in_rov_status_update";
 
 
 type RotoFuncPost = roto::TypedFunc<
@@ -63,7 +77,7 @@ type RotoFuncPost = roto::TypedFunc<
 >;
 
 #[allow(dead_code)]
-const ROTO_FUNC_POST_FILTER_NAME: &str = "rib_in_post";
+pub const ROTO_FUNC_POST_FILTER_NAME: &str = "rib_in_post";
 
 impl From<UpsertReport> for InsertionInfo {
     fn from(value: UpsertReport) -> Self {
@@ -217,69 +231,12 @@ impl RibUnit {
 }
 
 
-#[derive(Clone, Debug, Default)]
-pub struct MaxLenList {
-    list: Vec<u8>,
-}
-impl MaxLenList {
-    pub fn push(&mut self, value: u8) {
-        self.list.push(value);
-    }
-    pub fn remove(&mut self, index: usize) {
-        self.list.remove(index);
-    }
-    pub fn iter(&self) -> std::slice::Iter<'_, u8> {
-        self.list.iter()
-    }
-}
-impl AsRef<[u8]> for MaxLenList {
-    fn as_ref(&self) -> &[u8] {
-        self.list.as_ref()
-    }
-}
-impl From<Vec<u8>> for MaxLenList {
-    fn from(value: Vec<u8>) -> Self {
-        Self { list: value }
-    }
-}
-impl std::fmt::Display for MaxLenList {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_list().entries(self.list.iter()).finish()
-    }
-}
-impl rotonda_store::prefix_record::Meta for MaxLenList {
-    type Orderable<'a> = ();
-
-    type TBI = ();
-
-    fn as_orderable(&self, tbi: Self::TBI) -> Self::Orderable<'_> {
-        todo!()
-    }
-}
-
-type VrpStore = StarCastRib<MaxLenList, MemoryOnlyConfig>;
-
-pub struct RtrCache {
-    route_origins: RwLock<HashSet<rpki::rtr::payload::RouteOrigin>>,
-    router_keys: RwLock<HashSet<rpki::rtr::payload::RouterKey>>,
-    aspas: RwLock<HashSet<rpki::rtr::payload::Aspa>>,
-
-    pub vrps: VrpStore,
-}
-impl Default for RtrCache {
-    fn default() -> Self {
-        Self {
-            route_origins: Default::default(),
-            router_keys: Default::default(),
-            aspas: Default::default(),
-            vrps: VrpStore::try_default().unwrap(),
-        }
-    }
-}
-
 pub struct RibUnitRunner {
     roto_function_pre: Option<RotoFuncPre>,
+    roto_function_vrp_update: Option<RotoFuncVrpUpdate>,
+    roto_function_vrp_update_post: Option<RotoFuncRovStatusUpdate>,
     roto_function_post: Option<RotoFuncPost>,
+    roto_context: Arc<Mutex<Ctx>>,
     gate: Arc<Gate>,
     #[allow(dead_code)]
     // A strong ref needs to be held to http_processor but not used otherwise
@@ -288,6 +245,7 @@ pub struct RibUnitRunner {
     query_limits: Arc<ArcSwap<QueryLimits>>,
     rib: Arc<ArcSwap<Rib>>, // XXX LH: why the ArcSwap here?
     rib_type: RibType,
+    ingress_register: Arc<ingress::Register>,
     rtr_cache: Arc<RtrCache>,
     filter_name: Arc<ArcSwap<FilterName>>,
     pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
@@ -389,7 +347,27 @@ impl RibUnitRunner {
                 let mut c = c.lock().unwrap();
                 c.get_function(ROTO_FUNC_PRE_FILTER_NAME)
                 .inspect_err(|_|
-                    warn!("Loaded Roto script has no filter for rib-in-pre")
+                    warn!("Loaded Roto script has no filter for rib_in_pre")
+                )
+                .ok()
+            });
+
+        let roto_function_vrp_update: Option<RotoFuncVrpUpdate> =
+            roto_compiled.clone().and_then(|c| {
+                let mut c = c.lock().unwrap();
+                c.get_function(ROTO_FUNC_VRP_UPDATE_FILTER_NAME)
+                .inspect_err(|_|
+                    warn!("Loaded Roto script has no filter for rib_in_vrp_update")
+                )
+                .ok()
+            });
+
+        let roto_function_vrp_update_post: Option<RotoFuncRovStatusUpdate> =
+            roto_compiled.clone().and_then(|c| {
+                let mut c = c.lock().unwrap();
+                c.get_function(ROTO_FUNC_ROV_STATUS_UPDATE_NAME)
+                .inspect_err(|_|
+                    warn!("Loaded Roto script has no filter for rib_in_vrp_update_post")
                 )
                 .ok()
             });
@@ -401,22 +379,37 @@ impl RibUnitRunner {
         //        let mut c = c.lock().unwrap();
         //        c.get_function(ROTO_FUNC_POST_FILTER_NAME)
         //        .inspect_err(|_|
-        //            warn!("Loaded Roto script has no filter for rib-in-post")
+        //            warn!("Loaded Roto script has no filter for rib_in_post")
         //        )
         //        .ok()
         //    });
+
+        let rtr_cache: Arc<RtrCache> = Default::default();
+
+        let mut roto_context = Ctx::new(
+            RotoOutputStream::new_rced(),
+            rtr_cache.clone()
+        );
+
+        if let Some(c) = roto_compiled.clone() {
+            roto_context.prepare(&mut c.lock().unwrap());
+        }
 
         let tracer = component.tracer().clone();
 
         Ok(Self {
             roto_function_pre,
+            roto_function_vrp_update,
+            roto_function_vrp_update_post,
             roto_function_post,
+            roto_context: Arc::new(Mutex::new(roto_context)),
             gate,
             http_processor,
             query_limits,
             rib,
             rib_type,
-            rtr_cache: Default::default(),
+            rtr_cache,
+            ingress_register: component.ingresses(),
             status_reporter,
             filter_name,
             pending_vrib_query_results,
@@ -475,7 +468,11 @@ impl RibUnitRunner {
             rib_merge_update_stats,
             tracer,
             roto_function_pre: None,
+            roto_function_vrp_update: None,
             roto_function_post: None,
+            roto_function_vrp_update_post: None,
+            ingress_register: Arc::new(ingress::Register::new()),
+            roto_context: Arc::new(Mutex::new(Ctx::empty())),
         };
 
         Ok((runner, gate_agent))
@@ -788,13 +785,13 @@ impl RibUnitRunner {
                                     let guard = &rotonda_store::epoch::pin();
                                     let mut maxlen_list = if let Ok(e) = self.rtr_cache.vrps.match_prefix(
                                         &prefix,
-                                        &rotonda_store::match_options::MatchOptions{
-                                            match_type: rotonda_store::match_options::MatchType::ExactMatch,
+                                        &MatchOptions{
+                                            match_type: MatchType::ExactMatch,
                                             include_withdrawn: false,
                                             include_less_specifics: false,
                                             include_more_specifics: false,
                                             mui: Some(u32::from(asn)), 
-                                            include_history: rotonda_store::match_options::IncludeHistory::None,
+                                            include_history: IncludeHistory::None,
                                         },
                                         guard,
                                     ) {
@@ -852,6 +849,43 @@ impl RibUnitRunner {
                             }
                             Err(_) => warn!("failed to update ASPAs in RTR-cache in RIB unit (Reset)"),
                         }
+
+                        let rib_arc = self.rib.clone();
+                        let rtr_cache = self.rtr_cache.clone();
+
+                        tokio::spawn(async move {
+                            let t_start = tokio::time::Instant::now();
+                            debug!("starting ROV for entire RIB");
+
+                            if let Ok(store) = rib_arc.load().store(){
+                                let guard = &rotonda_store::epoch::pin();
+                                for prefix_record in store.prefixes_iter(guard).flatten() {
+                                    let prefix = prefix_record.prefix;
+                                    for record in prefix_record.meta.into_iter() {
+                                        let mut pamap = record.meta;
+                                        if let Some(hoppath) = pamap.path_attributes().get::<HopPath>() {
+                                            if let Some(origin) = hoppath.origin()
+                                                .and_then(|o| Hop::try_into_asn(o.clone()).ok())
+                                            {
+                                                let rov_status = rtr_cache.check_rov(&prefix, origin);
+                                                pamap.set_rpki_info(rov_status.into());
+                                                let new_record = Record::new(
+                                                    record.multi_uniq_id,
+                                                    record.ltime,
+                                                    record.status,
+                                                    pamap
+                                                );
+
+                                                if let Err(e) = store.insert(&prefix, new_record, None) {
+                                                    error!("{e}");
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                debug!("ROV run done, took {}s", t_start.elapsed().as_secs());
+                            }
+                        });
                     }
                     RtrUpdate::Delta(rtr_verbs) => {
                         debug!("got RTR Serial update");
@@ -867,8 +901,10 @@ impl RibUnitRunner {
                                         maxlen_pref.addr(),
                                         maxlen_pref.prefix_len()
                                     ).unwrap();
+                                    let mut maxlen_list;
+                                    {
                                     let guard = &rotonda_store::epoch::pin();
-                                    let mut maxlen_list = if let Ok(e) = self.rtr_cache.vrps.match_prefix(
+                                    maxlen_list = if let Ok(e) = self.rtr_cache.vrps.match_prefix(
                                         &prefix,
                                         &rotonda_store::match_options::MatchOptions{
                                             match_type: rotonda_store::match_options::MatchType::ExactMatch,
@@ -890,11 +926,12 @@ impl RibUnitRunner {
                                         warn!("failed to do lookup in VrpStore");
                                         return Err("could not access VrpStore".into());
                                     };
+                                    }
                                     let maxlen = route_origin.prefix.resolved_max_len();
                                     match action {
                                         RtrAction::Announce => {
                                             if maxlen_list.iter().any(|m| *m == maxlen) {
-                                                warn!("VRP for {}-{} from{} already in cache", prefix, maxlen, asn);
+                                                debug!("VRP for {}-{} from{} already in cache", prefix, maxlen, asn);
                                             } else {
                                                 maxlen_list.push(maxlen);
                                                 debug!("pushed VRP for {}-{} from {}", prefix, maxlen, asn)
@@ -937,7 +974,177 @@ impl RibUnitRunner {
                                         meta: maxlen_list,
                                     };
                                     self.rtr_cache.vrps.insert(&prefix, r, None).unwrap();
-                                    
+
+                                    // Now, update the routes stored in the
+                                    // prefix store.
+                                    // Possibly, this is more efficient to do
+                                    // in one single go after the entire
+                                    // Serial update has been processed.
+                                    //
+                                    // Possible optimisations:
+                                    // - is there a difference between
+                                    // Announce and Withdraw?
+                                    // - how does the current RovStatus affect
+                                    // things, can we optimize? e.g., a Valid
+                                    // route is not affected by an Announce,
+                                    // but possibly is by a Withdraw
+                                    // - an Invalid might be affected by both
+                                    // - a NotFound is only affected by an
+                                    // Announce
+                                    //
+                                    // Furthermore: how do we determine that
+                                    // we actually _should_ update stored
+                                    // routes? Because the marking of incoming
+                                    // routes is triggered explicity by
+                                    // check_rov() in the roto filter.
+                                    // Should both simply become automatic
+                                    // actions whenever a rtr-in component is
+                                    // configured?
+                                    // For now, keep things as flexible as
+                                    // possible: have the vrp_update filter
+                                    // (defaulting to Accept) so logging of
+                                    // VRP updates is possible, as well as
+                                    // rejecting it (for whatever reason).
+                                    // Then, trigger the _post function for
+                                    // every altered RIB entry.
+                                    //
+                                    // We do want to keep (and require from
+                                    // the user) that explicitness, to allow
+                                    // use cases where e.g. bmp is checked
+                                    // with rtr-cache1 and bgp is checked with
+                                    // rtr-cache2, or something.
+
+                                    let mut apply_vrp_update = true;
+                                    if let RtrPayload::Origin(vrp) = payload {
+                                        if let Some(ref vrp_update_filter) = self.roto_function_vrp_update {
+                                            let vrp_update = VrpUpdate {
+                                                action, vrp
+                                            };
+
+                                            let osms;
+                                            {
+                                            let mut ctx = self.roto_context.lock().unwrap();
+
+                                            match vrp_update_filter.call(&mut ctx, roto::Val(vrp_update)) {
+                                                Verdict::Accept(_) => { },
+                                                Verdict::Reject(_) => {
+                                                    apply_vrp_update = false
+                                                }
+                                            }
+                                            //debug!("called {ROTO_FUNC_VRP_UPDATE_FILTER_NAME}, apply VRP update? {apply_vrp_update}");
+
+                                            osms = self.process_output_stream(
+                                                None,
+                                                None,
+                                                &mut ctx.output.borrow_mut(),
+                                            );
+                                            }
+                                            self.gate.update_data(Update::OutputStream(osms)).await;
+
+                                        }
+                                    }
+                                    if apply_vrp_update {
+
+                                        let mut rov_updates = Vec::new();
+
+                                        let store = self.rib.load();
+                                        if let Ok(res) = store.match_prefix(
+                                            &prefix,
+                                            &MatchOptions {
+                                                match_type: MatchType::ExactMatch,
+                                                include_withdrawn: false,
+                                                include_less_specifics: false,
+                                                include_more_specifics: true,
+                                                mui: None, //Some(u32::from(asn)),
+                                                include_history: IncludeHistory::None,
+
+                                            }
+                                        ) {
+                                            // do ROV for exact match
+                                            for r in res.records {
+                                                let mut pamap = r.meta;
+                                                if let Some(hoppath) = pamap.path_attributes().get::<HopPath>() {
+                                                    if let Some(origin) = hoppath.origin()
+                                                        .and_then(|o| Hop::try_into_asn(o.clone()).ok())
+                                                    {
+                                                        let rov_status = self.rtr_cache.check_rov(&prefix, origin);
+                                                        let old_status = pamap.rpki_info().rov_status();
+
+                                                        let peer_as = self.ingress_register.get(r.multi_uniq_id).and_then(|i| i.remote_asn).unwrap_or(Asn::from_u32(0));
+                                                        rov_updates.push(
+                                                            RovStatusUpdate::new(prefix, old_status, rov_status, origin, peer_as)
+                                                        );
+
+                                                        //debug!("rov_status {rov_status:?} (was: {old_status:?}) for {prefix} from {origin}");
+                                                        pamap.set_rpki_info(rov_status.into());
+                                                        let new_record = Record::new(
+                                                            r.multi_uniq_id,
+                                                            r.ltime,
+                                                            r.status,
+                                                            pamap
+                                                        );
+
+                                                        if let Err(e) = store.store().map(|store| store.insert(&prefix, new_record, None)) {
+                                                            error!("{e}");
+                                                        }
+                                                    }
+                                                }
+                                            }
+
+                                            // do ROV for more specifics
+                                            if let Some(more_specifics) = res.more_specifics {
+                                                for r in more_specifics.iter() {
+                                                    let ms_prefix = r.prefix;
+                                                    for rec in r.meta.into_iter() {
+                                                        let mut pamap = rec.meta;
+                                                        if let Some(hoppath) = pamap.path_attributes().get::<HopPath>() {
+                                                            if let Some(origin) = hoppath.origin()
+                                                                .and_then(|o| Hop::try_into_asn(o.clone()).ok())
+                                                            {
+                                                                let rov_status = self.rtr_cache.check_rov(&ms_prefix, origin);
+                                                                let old_status = pamap.rpki_info().rov_status();
+
+                                                                //debug!("rov_status {rov_status:?} (was: {old_status:?}) for more-specific {ms_prefix} from {origin}");
+                                                                let peer_as = self.ingress_register.get(rec.multi_uniq_id).and_then(|i| i.remote_asn).unwrap_or(Asn::from_u32(0));
+                                                                rov_updates.push(
+                                                                    RovStatusUpdate::new(ms_prefix, old_status, rov_status, origin, peer_as)
+                                                                );
+
+                                                                pamap.set_rpki_info(rov_status.into());
+                                                                let new_record = Record::new(
+                                                                    rec.multi_uniq_id,
+                                                                    rec.ltime,
+                                                                    rec.status,
+                                                                    pamap
+                                                                );
+
+                                                                if let Err(e) = store.store().map(|store| store.insert(&ms_prefix, new_record, None)) {
+                                                                    error!("{e}");
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            if let Some(ref vrp_update_post) = self.roto_function_vrp_update_post {
+                                                let osms;
+                                                {
+                                                let mut ctx = self.roto_context.lock().unwrap();
+                                                if !rov_updates.is_empty() {
+                                                    for rov_update in rov_updates {
+                                                        vrp_update_post.call(&mut ctx, roto::Val(rov_update));
+                                                    }
+                                                }
+                                                osms = self.process_output_stream(
+                                                    None,
+                                                    None,
+                                                    &mut ctx.output.borrow_mut(),
+                                                );
+                                                }
+                                                self.gate.update_data(Update::OutputStream(osms)).await;
+                                            }
+                                        }
+                                    }
                                 }
                                 RtrPayload::RouterKey(router_key) => {
                                     match self.rtr_cache.router_keys.try_write() {
@@ -999,9 +1206,10 @@ impl RibUnitRunner {
                 RouteContext::Mrt(m) => Some(m.provenance().ingress_id),
                 _ => None,
             };
-
-            let output_stream = RotoOutputStream::new_rced();
-            let mut ctx = Ctx::new(output_stream, self.rtr_cache.clone());
+                
+            let osms;
+            { // scope for lock
+            let mut ctx = self.roto_context.lock().unwrap();
 
             if let Some(ref roto_function) = self.roto_function_pre {
                 let Payload{ rx_value, context, trace_id, received } = p;
@@ -1035,52 +1243,14 @@ impl RibUnitRunner {
                 res.push(p.clone());
             }
 
-            let Ctx{ output, ..} = ctx;
-            let output_stream = RotoOutputStream::into_inner(output).into_messages();
-            if !output_stream.is_empty() {
-                let mut osms = smallvec![];
-
-                for entry in output_stream {
-                    let osm = match entry {
-                        Output::Prefix(_prefix) => {
-                            OutputStreamMessage::prefix(
-                                Some(p.rx_value.clone()),
-                                ingress_id,
-                            )
-                        }
-                        Output::Community(_u32) => {
-                            OutputStreamMessage::community(
-                                Some(p.rx_value.clone()),
-                                ingress_id,
-                            )
-                        }
-                        Output::Asn(_u32) => OutputStreamMessage::asn(
-                            Some(p.rx_value.clone()),
-                            ingress_id,
-                        ),
-                        Output::Origin(_u32) => OutputStreamMessage::origin(
-                            Some(p.rx_value.clone()),
-                            ingress_id,
-                        ),
-                        Output::PeerDown => {
-                            debug!("Logged PeerDown from Rib unit, ignoring");
-                            continue;
-                        }
-                        Output::Custom((id, local)) => {
-                            OutputStreamMessage::custom(id, local, ingress_id)
-                        }
-                        Output::Entry(entry) => {
-                            OutputStreamMessage::entry(
-                                entry,
-                                ingress_id,
-                            )
-                        }
-
-                    };
-                    osms.push(osm);
-                }
-                self.gate.update_data(Update::OutputStream(osms)).await;
+            let mut output_stream  = ctx.output.borrow_mut();
+            osms = self.process_output_stream(
+                Some(&p.rx_value),
+                ingress_id,
+                &mut output_stream,
+            );
             }
+            self.gate.update_data(Update::OutputStream(osms)).await;
         }
 
         match res.len() {
@@ -1171,6 +1341,55 @@ impl RibUnitRunner {
                 self.status_reporter.insert_failed(&payload.rx_value, err);
             }
         }
+    }
+
+    fn process_output_stream<const N: usize>(
+        &self,
+        rotonda_route: Option<&RotondaRoute>,
+        ingress_id: Option<u32>,
+        output_stream: &mut OutputStream<Output>
+    ) -> SmallVec<[OutputStreamMessage; N]> {
+        let mut osms = smallvec![];
+        for entry in output_stream.drain() {
+            let osm = match entry {
+                Output::Prefix(_prefix) => {
+                    OutputStreamMessage::prefix(
+                        rotonda_route.cloned(),
+                        ingress_id,
+                    )
+                }
+                Output::Community(_u32) => {
+                    OutputStreamMessage::community(
+                        rotonda_route.cloned(),
+                        ingress_id,
+                    )
+                }
+                Output::Asn(_u32) => OutputStreamMessage::asn(
+                    rotonda_route.cloned(),
+                    ingress_id,
+                ),
+                Output::Origin(_u32) => OutputStreamMessage::origin(
+                    rotonda_route.cloned(),
+                    ingress_id,
+                ),
+                Output::PeerDown => {
+                    debug!("Logged PeerDown from Rib unit, ignoring");
+                    continue;
+                }
+                Output::Custom((id, local)) => {
+                    OutputStreamMessage::custom(id, local, ingress_id)
+                }
+                Output::Entry(entry) => {
+                    OutputStreamMessage::entry(
+                        entry,
+                        ingress_id,
+                    )
+                }
+
+            };
+            osms.push(osm);
+        }
+        osms
     }
 
     async fn reprocess_query_results(

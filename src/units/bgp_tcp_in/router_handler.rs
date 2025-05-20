@@ -35,7 +35,7 @@ use crate::ingress;
 use crate::payload::{Payload, RotondaRoute, Update};
 use crate::roto_runtime::Ctx;
 use crate::units::bgp_tcp_in::status_reporter::BgpTcpInStatusReporter;
-use crate::units::rib_unit::unit::RtrCache;
+use crate::units::rib_unit::rpki::RtrCache;
 use crate::units::Unit;
 
 use super::peer_config::{CombinedConfig, ConfigExt};
@@ -76,6 +76,7 @@ impl BgpSession<CombinedConfig> for Session<CombinedConfig> {
 
 struct Processor {
     roto_function: Option<RotoFunc>,
+    roto_context: Arc<Mutex<Ctx>>,
     gate: Gate,
     unit_cfg: BgpTcpIn,
     //bgp_ltime: u64, // XXX or should this be on Unit level?
@@ -93,8 +94,10 @@ struct Processor {
 }
 
 impl Processor {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         roto_function: Option<RotoFunc>,
+        roto_context: Arc<Mutex<Ctx>>,
         gate: Gate,
         unit_cfg: BgpTcpIn,
         tx: mpsc::Sender<Command>,
@@ -105,6 +108,7 @@ impl Processor {
     ) -> Self {
         Processor {
             roto_function,
+            roto_context,
             gate,
             unit_cfg,
             //bgp_ltime: 0,
@@ -126,6 +130,7 @@ impl Processor {
 
         let processor = Self {
             roto_function: None,
+            roto_context: Arc::new(Mutex::new(Ctx::empty())),
             gate,
             unit_cfg,
             //bgp_ltime: 0,
@@ -270,11 +275,13 @@ impl Processor {
                                 negotiated.remote_asn(),
                             );
 
-                            let output_stream = RotoOutputStream::new_rced();
-                            let mut ctx = Ctx::new(output_stream, self.rtr_cache.clone());
+                            let verdict;
+                            let mut osms = smallvec![];
                             let received = std::time::Instant::now();
+                            { // lock scope
+                            let mut ctx = self.roto_context.lock().unwrap();
 
-                            let verdict = self.roto_function.as_ref().map(
+                            verdict = self.roto_function.as_ref().map(
                                 |roto_function|
                             {
                                 roto_function.call(
@@ -285,12 +292,11 @@ impl Processor {
                             });
 
 
-                            let Ctx {output, ..} = ctx;
-                            let output_stream = RotoOutputStream::into_inner(output).into_messages();
+                            let mut output_stream = ctx.output.borrow_mut();
+
                             if !output_stream.is_empty() {
-                                let mut osms = smallvec![];
                                 use crate::roto_runtime::types::Output;
-                                for entry in output_stream {
+                                for entry in output_stream.drain() {
                                     debug!("output stream entry {entry:?}");
                                     let osm = match entry {
                                         Output::Prefix(_prefix) => {
@@ -336,8 +342,11 @@ impl Processor {
                                     };
                                     osms.push(osm);
                                 }
-                                self.gate.update_data(Update::OutputStream(osms)).await;
                             }
+
+                            } // end of lock scope
+
+                            self.gate.update_data(Update::OutputStream(osms)).await;
 
                             match verdict {
                                 // Default action when no roto script is used
@@ -551,6 +560,7 @@ impl Processor {
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_connection(
     roto_function: Option<RotoFunc>,
+    roto_context: Arc<Mutex<Ctx>>,
     gate: Gate,
     unit_config: BgpTcpIn,
     tcp_stream: TcpStream,
@@ -614,6 +624,7 @@ pub async fn handle_connection(
 
     let mut p = Processor::new(
         roto_function,
+        roto_context,
         gate,
         unit_config,
         cmds_tx,

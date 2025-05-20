@@ -1,4 +1,39 @@
-# The bgp-in filter works on incoming BGP UPDATE messages.
+# Optionally prepare lists of ASNs or prefixes to match against in filters.
+#
+# The lists constructed in this function are available in all the filters, but
+# the list compilation only happens once. Up to 64 lists of each type (ASN list
+# or prefix list) can be defined.
+#
+# To use the ASN lists in other filters, be aware roto currently supports two
+# types to represent ASNs: the `Asn` type, and the `OriginAsn` type which either
+# holds an `Asn` or is empty. The `OriginAsn` type is returned from methods that
+# try to get the origin ASN from the AS_PATH attribute (i.e. in a `BgpMsg`, a
+# `BmpMsg` or in a `Route`) which might be empty (e.g. in case of iBGP).
+# To distinguish between the two, there are dedicated methods for each type,
+# e.g.:
+#   - asn_lists.contains("my_asns", vrp_update.asn())
+#   - asn_lists.contains_origin("my_asns", bmp_msg.aspath_origin())
+# 
+
+function compile_lists() {
+    # First parameter of `add` is the name of the list, the second is a
+    # whitespace separated list of ASNs, optionally prefixed with 'AS'.
+    # Non-parseable items are ignored.
+    asn_lists.add("my_asns", "AS211321");
+    asn_lists.add("other_asns", "AS65536 65537 65538 not65536 foo");
+
+
+    # Similarly, create a named list of prefixes. IPv4 and IPv6 can be mixed in
+    # a single list.
+    prefix_lists.add("my_prefixes",
+    "
+        185.49.140.0/23
+        2a04:b900::/29
+    ");
+
+}
+
+# The bgp_in filter works on incoming BGP UPDATE messages.
 #
 # One such message can contain multiple NLRI, thus multiple announcements or
 # withdrawals. To act on individual announcements or withdrawals, use the
@@ -21,7 +56,7 @@ filter bgp_in(
     accept
 }
 
-# The bmp-in filter works on incoming BMP messages.
+# The bmp_in filter works on incoming BMP messages.
 #
 # While most BMP message will be of type RouteMonitoring (transporting route
 # information via an encapsulated BGP UPDATE message), this filter-map can act
@@ -52,7 +87,7 @@ filter bmp_in(
     }
 }
 
-# The rib-in-pre filter processes individual routes prior to insertion into the
+# The rib_in_pre filter processes individual routes prior to insertion into the
 # main RIB.
 #
 # Different from the BGP UPDATE message in the bgp-in filter-map, and the BMP
@@ -69,15 +104,61 @@ filter rib_in_pre(
     route: Route,
 ) {
 
-    let my_prefix_v4 = 185.49.141.0/24;
-    let my_prefix_v6 = 2a04:b901::/29;
-
-    if route.prefix_matches(my_prefix_v4) {
-        output.log_prefix(my_prefix_v4);
+    if prefix_lists.contains("my_prefixes", route.prefix()) {
+        output.log_prefix(route.prefix());
     }
 
     # Only has effect when an RTR unit is configured in rotonda.conf
     rpki.check_rov(route);
 
     accept
+}
+
+# The vrp_update filter processes updates pertaining to VRPs coming in via RTR.
+#
+# This is mainly useful for monitoring and generally, one would like to always
+# return 'accept' from this filter: Returning 'reject' will cause Rotonda to not
+# apply the update which is probably not what you want. As such, if this filter
+# definition is omitted, Rotonda defaults to 'accept'.
+#
+# Note that this filter is triggered for any incoming VRP update, regardless of
+# whether the prefixes in the VRPs are stored in the RIB. To act on actual
+# changes in terms of ROV status of stored prefixes, see the
+# `rib_in_rov_status_update` function below.
+#
+# NB: this function is only called for RTR Serial updates, not for the initial
+# RTR Cache Reset sync.
+filter vrp_update(vrp_update: VrpUpdate) {
+
+    #if asn_lists.contains("my_asns", vrp_update.asn()) {
+    #    output.entry().timestamped_custom("[RTR] (my asns): " + vrp_update.fmt());
+    #    output.write_entry();
+    #}
+
+    if prefix_lists.covers("my_prefixes", vrp_update.prefix()) {
+        output.timestamped_print("[RTR] (my prefixes): " + vrp_update.fmt())
+    }
+
+    accept
+}
+
+# After applying a VRP update, this function is called for every stored route
+# that was affected by the new VRP. Note that even renewals that did not cause a
+# change in ROV status will trigger the call to this function.
+#
+# NB: this function is only called for updates caused by RTR Serial updates, not
+# during the initial RTR Cache Reset sync or when calling `rpki.check_rov` from
+# the `rib_in_pre` filter.
+function rib_in_rov_status_update(rov_update: RovStatusUpdate) {
+
+    if rov_update.has_changed() {
+        # Only log whenever something changed to Invalid:
+        if rov_update.current_status().is_invalid() {
+            output.timestamped_print("[RTR]" + rov_update.fmt())
+        }
+    }
+    # When it concerns any of 'my_prefixes', always log:
+    if prefix_lists.covers("my_prefixes", rov_update.prefix()) {
+        output.timestamped_print("[RTR] (my prefixes): " + rov_update.fmt())
+    }
 }

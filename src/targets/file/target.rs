@@ -1,6 +1,7 @@
-use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
+use chrono::SecondsFormat;
 //use async_trait::async_trait;
 use futures::future::{select, Either};
 use futures::FutureExt;
@@ -10,16 +11,21 @@ use serde::Deserialize;
 
 use tokio::io::{AsyncWriteExt, BufWriter};
 use tokio::sync::mpsc;
+use tokio::time::Instant;
 
 //use crate::comms::{AnyDirectUpdate, DirectLink, DirectUpdate};
 use crate::comms::{Link, Terminated};
 use crate::config::ConfigPath;
 use crate::ingress;
 use crate::payload::Update;
-use crate::roto_runtime::types::{LogEntry, OutputStreamMessageRecord};
+use crate::roto_runtime::types::OutputStreamMessageRecord;
 use crate::targets::Component;
 use crate::targets::TargetCommand;
 use crate::targets::WaitPoint;
+
+// For low-traffic logging, make sure we flush to disk at least every N secs:
+const LAST_FLUSH_TIMEOUT_SECS: u64 = 1;
+
 
 #[derive(Debug, Deserialize)]
 pub struct File {
@@ -66,6 +72,7 @@ pub struct FileRunner {
     config: Config,
     ingresses: Arc<ingress::Register>,
     target_file: Option<BufWriter<tokio::fs::File>>,
+    last_flush: Instant,
 }
 
 
@@ -76,7 +83,16 @@ impl FileRunner {
             config,
             component,
             ingresses,
-            target_file: None
+            target_file: None,
+            last_flush: Instant::now(),
+
+        }
+    }
+
+    async fn flush(&mut self) {
+        if let Some(dst) = self.target_file.as_mut() {
+            let _ = dst.flush().await;
+            self.last_flush = Instant::now();
         }
     }
 
@@ -103,17 +119,30 @@ impl FileRunner {
         //    
         //    link.connect(false).await.unwrap();
         //}
+
         sources.connect(false).await.unwrap();
         let sources2 = sources.clone();
 
         waitpoint.running().await;
 
         loop {
-            match select(
+            let select_fut = select(
                 cmd_rx.recv().boxed(),
                 sources.query().boxed(),
-            ).await { 
-
+            );
+            let select = match tokio::time::timeout(std::time::Duration::from_secs(LAST_FLUSH_TIMEOUT_SECS), select_fut).await {
+                Ok(select) => {
+                    if self.last_flush + Duration::from_secs(LAST_FLUSH_TIMEOUT_SECS) < Instant::now() {
+                        self.flush().await;
+                    }
+                    select
+                }
+                Err(_timeout) => {
+                    self.flush().await;
+                    continue;
+                }
+            };
+            match select {
                 Either::Left((gate_cmd, _)) => { 
                     match gate_cmd {
                         Some(cmd) => match cmd {
@@ -154,6 +183,14 @@ impl FileRunner {
                                 if let Some(dst) = self.target_file.as_mut() {
                                     if let OutputStreamMessageRecord::Entry(ref e) = m {
                                         if let Some(ref custom_str) = e.custom {
+                                            if e.timestamp != chrono::DateTime::UNIX_EPOCH {
+                                                dst.write_all(
+                                                    format!(
+                                                        "[{}] ",
+                                                        e.timestamp.to_rfc3339_opts(SecondsFormat::Secs, true)
+                                                    ).as_ref()
+                                                ).await.unwrap();
+                                            }
                                             dst.write_all(custom_str.as_ref()).await.unwrap();
                                             dst.write_all(b"\n").await.unwrap();
                                             continue;
@@ -203,9 +240,7 @@ impl FileRunner {
             }
 
         }
-        if let Some(dst) = self.target_file.as_mut() {
-            let _ = dst.flush().await;
-        }
+        self.flush().await;
         Ok(())
     }
 }

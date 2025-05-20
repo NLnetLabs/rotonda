@@ -1,12 +1,13 @@
 use std::cell::RefCell;
 use std::rc::Rc;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use bytes::Bytes;
+use chrono::{SecondsFormat, Utc};
 use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
-use log::warn;
-use rotonda_store::match_options::{IncludeHistory, MatchOptions, MatchType};
+use log::debug;
 use routecore::bgp::aspath::{AsPath, Hop, HopPath};
 use routecore::bgp::communities::{
     LargeCommunity, StandardCommunity, Wellknown,
@@ -21,12 +22,20 @@ use routecore::bmp::message::{Message as BmpMsg, MessageType as BmpMsgType};
 
 use roto::{roto_function, roto_method, roto_static_method, Context};
 
+use super::lists::{MutNamedAsnLists, MutNamedPrefixLists};
 use super::types::{
     InsertionInfo, Output, Provenance, RotoOutputStream, RouteContext,
 };
-use crate::payload::{RotondaRoute, RovStatus};
+use crate::payload::RotondaRoute;
+use crate::roto_runtime::lists::{AsnList, PrefixList};
 use crate::roto_runtime::types::LogEntry;
-use crate::units::rib_unit::unit::RtrCache;
+use crate::units::rib_unit::rpki::{RovStatus, RovStatusUpdate, RtrCache};
+use crate::units::rtr::client::VrpUpdate;
+
+
+pub type CompileListsFunc = roto::TypedFunc<Ctx, (), ()>;
+pub const COMPILE_LISTS_FUNC_NAME: &str = "compile_lists";
+
 
 pub(crate) type Log = Rc<RefCell<RotoOutputStream>>;
 pub(crate) type SharedRtrCache = Arc<RtrCache>;
@@ -47,6 +56,8 @@ impl From<RotondaRoute> for MutRotondaRoute {
 pub struct Ctx {
     pub output: Log,
     pub rpki: SharedRtrCache,
+    pub asn_lists: MutNamedAsnLists,
+    pub prefix_lists: MutNamedPrefixLists,
 }
 
 unsafe impl Send for Ctx {}
@@ -56,10 +67,36 @@ impl Ctx {
         Self {
             output: log,
             rpki,
+            asn_lists: Default::default(),
+            prefix_lists: Default::default(),
+        }
+    }
+    pub fn empty() -> Self {
+        Self {
+            output: RotoOutputStream::new_rced(),
+            rpki: Arc::<RtrCache>::default(),
+            asn_lists: Default::default(),
+            prefix_lists: Default::default(),
         }
     }
 
+    pub fn prepare(&mut self, compiled: &mut roto::Compiled) {
+        let f: Result<CompileListsFunc, _> = compiled
+            .get_function(COMPILE_LISTS_FUNC_NAME);
+        if let Ok(f) = f {
+            f.call(self);
+        } else {
+            debug!("No {COMPILE_LISTS_FUNC_NAME} to prepare");
+        }
+    }
 }
+
+/// Newtype for a possibly empty `Asn`.
+///
+/// NB: This type might become obsolete depending on the development of
+/// Optional value handling in roto.
+#[derive(Copy, Clone, Debug)]
+pub struct OriginAsn(pub Option<Asn>);
 
 pub fn create_runtime() -> Result<roto::Runtime, String> {
     let mut rt = roto::Runtime::new();
@@ -83,6 +120,26 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         "Rpki",
         "RPKI information retrieved via RTR",
     )?;
+
+    rt.register_clone_type::<VrpUpdate>(
+        "A single announced or withdrawn VRP"
+    )?;
+
+    rt.register_copy_type::<OriginAsn>(
+        "Origin ASN\n\n\
+        Represents an optional ASN.
+        "
+    )?;
+
+    rt.register_clone_type_with_name::<MutNamedAsnLists>(
+        "AsnLists",
+        "Named lists of ASNs"
+    ).unwrap();
+    rt.register_clone_type_with_name::<MutNamedPrefixLists>(
+        "PrefixLists",
+        "Named lists of prefixes"
+    ).unwrap();
+
     rt.register_context_type::<Ctx>()?;
 
     rt.register_copy_type::<InsertionInfo>(
@@ -138,6 +195,18 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     }
 
     // --- RotondaRoute methods
+
+    /// Return the prefix for this `RotondaRoute`
+    #[roto_method(rt, MutRotondaRoute, prefix)]
+    fn route_prefix(rr: &MutRotondaRoute) -> Prefix {
+        let rr = rr.borrow_mut();
+        match *rr {
+            RotondaRoute::Ipv4Unicast(n, ..) => n.prefix(),
+            RotondaRoute::Ipv6Unicast(n, ..) => n.prefix(),
+            RotondaRoute::Ipv4Multicast(n, ..) => n.prefix(),
+            RotondaRoute::Ipv6Multicast(n, ..) => n.prefix(),
+        }
+    }
 
     /// Check whether the prefix for this `RotondaRoute` matches
     #[roto_method(rt, MutRotondaRoute)]
@@ -311,6 +380,18 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         aspath_contains(msg, to_match)
     }
 
+    /// Returns the right-most `Asn` in the 'AS_PATH' attribute
+    ///
+    /// Note that the returned value is of type `OriginAsn`, which optionally
+    /// contains an `Asn`. In case of empty an 'AS_PATH' (e.g. in iBGP) this
+    /// method will still return an `OriginAsn`, though representing 'None'.
+    #[roto_method(rt, BgpUpdateMessage<Bytes>, aspath_origin)]
+    fn bgp_aspath_origin(
+        msg: &BgpUpdateMessage<Bytes>,
+    ) -> OriginAsn {
+        aspath_origin(msg)
+    }
+
     /// Check whether the AS_PATH origin matches the given `Asn`
     #[roto_method(rt, BgpUpdateMessage<Bytes>, match_aspath_origin)]
     fn bgp_match_aspath_origin(
@@ -449,6 +530,32 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         aspath_contains(&update, to_match)
     }
 
+    /// Returns the right-most `Asn` in the 'AS_PATH' attribute
+    ///
+    /// Note that the returned value is of type `OriginAsn`, which optionally
+    /// contains an `Asn`. In case of empty an 'AS_PATH' (e.g. in iBGP) this
+    /// method will still return an `OriginAsn`, though representing 'None'.
+    ///
+    /// When called on BMP messages not of type 'RouteMonitoring', the
+    /// 'None'-variant is returned as well.
+    #[roto_method(rt, BmpMsg<Bytes>, aspath_origin)]
+    fn bmp_aspath_origin(
+        msg: &BmpMsg<Bytes>,
+    ) -> OriginAsn {
+        let update = if let BmpMsg::RouteMonitoring(rm) = msg {
+            if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
+                upd
+            } else {
+                return OriginAsn(None);
+            }
+        } else {
+            return OriginAsn(None);
+        };
+
+        aspath_origin(&update)
+    }
+
+
     /// Check whether the AS_PATH origin matches the given `Asn`
     #[roto_method(rt, BmpMsg<Bytes>, match_aspath_origin)]
     fn bmp_match_aspath_origin(
@@ -539,6 +646,12 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         };
         0
     }
+
+    #[roto_method(rt, u32, fmt)]
+    fn fmt_u32(n: u32) -> Arc<str> {
+        format!("{n}").into()
+    }
+    
 
     /// Return the number of withdrawals in this message
     #[roto_method(rt, BmpMsg<Bytes>, withdrawals_count)]
@@ -679,6 +792,18 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         stream.print(msg);
     }
 
+    /// Print a timestamped message to standard error
+    #[roto_method(rt, Log)]
+    fn timestamped_print(stream: &Log, msg: &Arc<str>) {
+        let stream = stream.borrow();
+        stream.print(
+            format!("[{}] {}",
+                Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
+                msg
+            )
+        );
+    }
+
     //------------ LogEntry --------------------------------------------------
 
     /// Get the current/new entry
@@ -699,6 +824,16 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     #[roto_method(rt, MutLogEntry)]
     fn custom(entry_ptr: &MutLogEntry, custom_msg: &Arc<str>) {
         let mut entry = entry_ptr.borrow_mut();
+        entry.custom = Some(custom_msg.to_string());
+    }
+
+    /// Log a custom, timestamped message based on the given string
+    /// 
+    /// Also see [`custom`].
+    #[roto_method(rt, MutLogEntry)]
+    fn timestamped_custom(entry_ptr: &MutLogEntry, custom_msg: &Arc<str>) {
+        let mut entry = entry_ptr.borrow_mut();
+        entry.timestamp = chrono::Utc::now();
         entry.custom = Some(custom_msg.to_string());
     }
 
@@ -896,6 +1031,32 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     //------------ RPKI / RTR methods ----------------------------------------
 
     rt.register_copy_type::<RovStatus>("ROV status of a `Route`").unwrap();
+    rt.register_copy_type::<RovStatusUpdate>("ROV update of a `Route`").unwrap();
+
+
+    /// Returns the `Asn` for this `VrpUpdate`
+    #[roto_method(rt, VrpUpdate, asn)]
+    fn vrp_update_origin(vrp_update: &VrpUpdate) -> Asn {
+        // We need to convert the rpki-rs Asn into the inetnum Asn, hence the
+        // into_u32->from_u32 calls.
+        Asn::from_u32(vrp_update.vrp.asn.into_u32())
+    }
+
+    /// Returns the prefix of the updated route
+    #[roto_method(rt, VrpUpdate, prefix)]
+    fn vrp_prefix(vrp_update: &VrpUpdate) -> Prefix {
+        let maxlen_pref = vrp_update.vrp.prefix;
+        Prefix::new(
+            maxlen_pref.addr(),
+            maxlen_pref.prefix_len()
+        ).unwrap()
+    }
+
+    /// Return a formatted string for `vrp_update`
+    #[roto_method(rt, VrpUpdate, fmt)]
+    fn fmt_vrp_update(vrp_update: &VrpUpdate) -> Arc<str> {
+        vrp_update.to_string().into()
+    }
 
     /// Returns 'true' if the status is 'Valid'
     #[roto_method(rt, RovStatus)]
@@ -915,6 +1076,58 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         *status == RovStatus::NotFound
     }
 
+
+    //--- RovStatusUpdate
+
+    /// Returns the prefix of the updated route
+    #[roto_method(rt, RovStatusUpdate, prefix)]
+    fn rov_prefix(rov_update: &RovStatusUpdate) -> Prefix {
+        rov_update.prefix
+    }
+
+    /// Returns the origin `asn` from the 'AS_PATH' of the updated route
+    #[roto_method(rt, RovStatusUpdate)]
+    fn origin(rov_update: &RovStatusUpdate) -> Asn {
+        rov_update.origin
+    }
+
+    /// Returns the peer `asn` from which the route was received
+    #[roto_method(rt, RovStatusUpdate, peer_asn)]
+    fn rov_peer_asn(rov_update: &RovStatusUpdate) -> Asn {
+        rov_update.peer_asn
+    }
+
+    /// Returns 'true' if the new status differs from the old status
+    #[roto_method(rt, RovStatusUpdate)]
+    fn has_changed(rov_update: &RovStatusUpdate) -> bool {
+        rov_update.previous_status != rov_update.current_status
+    }
+
+    /// Returns the old status of the route
+    #[roto_method(rt, RovStatusUpdate)]
+    fn previous_status(rov_update: &RovStatusUpdate) -> RovStatus {
+        rov_update.previous_status
+    }
+
+    /// Returns the new status of the route
+    #[roto_method(rt, RovStatusUpdate)]
+    fn current_status(rov_update: &RovStatusUpdate) -> RovStatus {
+        rov_update.current_status
+    }
+
+    /// Return a formatted string for `rov_update`
+    #[roto_method(rt, RovStatusUpdate, fmt)]
+    fn fmt_rov_update(rov_update: &RovStatusUpdate) -> Arc<str> {
+        format!(
+            "[{:?}] -> [{:?}] {} originated by {}, learned from {}",
+            rov_update.previous_status,
+            rov_update.current_status,
+            rov_update.prefix,
+            rov_update.origin,
+            rov_update.peer_asn,
+        ).as_str().into()
+    }
+
     /// Perform Route Origin Validation on the route
     ///
     /// This sets the 'rpki_info' for this Route to Valid, Invalid or
@@ -931,80 +1144,93 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
             RotondaRoute::Ipv6Unicast(nlri, _) => nlri.prefix(),
             _=> { return RovStatus::NotChecked ; } // defaults to 'NotChecked'
         };
-        let mut covered = false;
-        let mut valid = false;
+
+        let mut rov_status = RovStatus::default();
 
         if let Some(hoppath) = rr.owned_map().get::<HopPath>() {
             if let Some(origin) = hoppath.origin()
                 .and_then(|o| Hop::try_into_asn(o.clone()).ok())
             {
-                let match_options = MatchOptions {
-                    match_type: MatchType::LongestMatch,
-                    include_withdrawn: false,
-                    include_less_specifics: true,
-                    include_more_specifics: false,
-                    mui: None,
-                    include_history: IncludeHistory::None,
-                };
-
-                let guard = &rotonda_store::epoch::pin();
-                let res = match rpki.vrps.match_prefix(
-                    &prefix,
-                    &match_options,
-                    guard
-                ) {
-                    Ok(res) => res,
-                    Err(e) => {
-                        warn!("could not lookup {}: {}", &prefix, e);
-                        return RovStatus::NotChecked;
-                    }
-                };
-                // check exact/longest matches
-                covered = !res.records.is_empty();
-                'outer: for r in &res.records {
-                    for maxlen in r.meta.iter() {
-                        #[allow(clippy::collapsible_if)]
-                        if prefix.len() <= *maxlen {
-                            if r.multi_uniq_id == u32::from(origin) {
-                                valid = true;
-                                break 'outer;
-                            }
-                        }
-                    }
-                }
-
-                // check less specifics
-                if !valid {
-                    if let Some(less_specifics) = res.less_specifics {
-                        'outer: for r in less_specifics.iter() {
-                            for record in r.meta.iter() {
-                                for maxlen in record.meta.iter() {
-                                    #[allow(clippy::collapsible_if)]
-                                    if prefix.len() <= *maxlen {
-                                        if record.multi_uniq_id == u32::from(origin) {
-                                            valid = true;
-                                            break 'outer;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                rov_status = rpki.check_rov(&prefix, origin);
             }
         }
 
-
-        let rov = match (covered, valid) {
-            (true, true) => RovStatus::Valid,
-            (true, false) => RovStatus::Invalid,
-            (false, true) => unreachable!(),
-            (false, false) => RovStatus::NotFound,
-        };
-
-        rr.rotonda_pamap_mut().set_rpki_info(rov.into());
-        rov
+        rr.rotonda_pamap_mut().set_rpki_info(rov_status.into());
+        rov_status
     }
+
+
+    //------------ Lists -----------------------------------------------------
+
+    /// Add a named ASN list
+    #[roto_method(rt, MutNamedAsnLists, add)]
+    fn add_asn_list(lists: &MutNamedAsnLists, name: &Arc<str>, s: &Arc<str>) {
+        let mut lists = lists.lock().unwrap();
+        let res = AsnList::from_str(s).unwrap_or_default();
+        lists.add(name.clone(), res);
+    }
+
+    /// Add a named prefix list
+    #[roto_method(rt, MutNamedPrefixLists, add)]
+    fn add_prefix_list(lists: &MutNamedPrefixLists, name: &Arc<str>, s: &Arc<str>) {
+        let mut lists = lists.lock().unwrap();
+        let res = PrefixList::from_str(s).unwrap_or_default();
+        lists.add(name.clone(), res);
+    }
+
+    /// Returns 'true' if `asn` is in the named list
+    #[roto_method(rt, MutNamedAsnLists, contains)]
+    fn asn_list_contains(asn_list: &MutNamedAsnLists, name: &Arc<str>, asn: Asn) -> bool {
+        let asn_list = asn_list.lock().unwrap();
+        if let Some(list) = asn_list.inner.get(&*name.clone()) {
+            list.contains(asn)
+        } else {
+            false
+        }
+    }
+
+    /// Returns 'true' if the named list contains `origin`
+    ///
+    /// This method returns false if the list does not exist, or if `origin`
+    /// does not actually contain an `Asn`. The latter could occur for
+    /// announcements with an empty 'AS_PATH' attribute (iBGP).
+    #[roto_method(rt, MutNamedAsnLists, contains_origin)]
+    fn asn_list_contains_origin(asn_list: &MutNamedAsnLists, name: &Arc<str>, origin: &OriginAsn) -> bool {
+        let asn = match origin.0 {
+            Some(asn) => asn,
+            None => { return false }
+        };
+        let asn_list = asn_list.lock().unwrap();
+        if let Some(list) = asn_list.inner.get(&*name.clone()) {
+            list.contains(asn)
+        } else {
+            false
+        }
+    }
+
+    /// Returns 'true' if `prefix` is in the named list
+    #[roto_method(rt, MutNamedPrefixLists, contains)]
+    fn prefix_list_contains(prefix_list: &MutNamedPrefixLists, name: &Arc<str>, prefix: &Prefix) -> bool {
+        let prefix_list = prefix_list.lock().unwrap();
+        if let Some(list) = prefix_list.inner.get(&*name.clone()) {
+            list.contains(*prefix)
+        } else {
+         false
+        }
+    }
+
+    /// Returns 'true' if `prefix` or a less-specific is in the named list 
+    #[roto_method(rt, MutNamedPrefixLists, covers)]
+    fn prefix_list_covers(prefix_list: &MutNamedPrefixLists, name: &Arc<str>, prefix: &Prefix) -> bool {
+        let prefix_list = prefix_list.lock().unwrap();
+        if let Some(list) = prefix_list.inner.get(&*name.clone()) {
+            list.covers(*prefix)
+        } else {
+         false
+        }
+    }
+
+
 
     // currently unused
     //// --- InsertionInfo methods
@@ -1090,6 +1316,18 @@ fn aspath_contains(
     } else {
         false
     }
+}
+
+fn aspath_origin(
+    bgp_update: &BgpUpdateMessage<Bytes>,
+) -> OriginAsn {
+    OriginAsn(
+        if let Some(aspath) = bgp_update.aspath().ok().flatten() {
+            aspath.origin().and_then(|o| o.try_into_asn().ok())
+        } else {
+            None
+        }
+    )
 }
 
 fn match_aspath_origin(
@@ -1195,19 +1433,35 @@ fn fmt_pcap(buf: impl AsRef<[u8]>) -> Arc<str> {
 mod tests {
     use super::*;
 
+
     #[test]
     fn packaged_roto_script() {
-        use crate::units::bgp_tcp_in::unit::RotoFunc as BgpInFunc;
-        use crate::units::bmp_tcp_in::unit::RotoFunc as BmpInFunc;
-        use crate::units::rib_unit::unit::RotoFuncPre as RibInPreFunc;
+        use crate::units::bgp_tcp_in::unit::{
+            RotoFunc as BgpInFunc,
+            ROTO_FUNC_FILTER_NAME as ROTO_FUNC_BGP_IN_NAME
+        };
+        use crate::units::bmp_tcp_in::unit::{
+            RotoFunc as BmpInFunc,
+            ROTO_FUNC_FILTER_NAME as ROTO_FUNC_BMP_IN_NAME
+        };
+        use crate::units::rib_unit::unit::{
+            RotoFuncPre as RibInPreFunc,
+            ROTO_FUNC_PRE_FILTER_NAME as ROTO_FUNC_RIB_IN_PRE_NAME,
+            RotoFuncVrpUpdate, ROTO_FUNC_VRP_UPDATE_FILTER_NAME,
+            RotoFuncRovStatusUpdate, ROTO_FUNC_ROV_STATUS_UPDATE_NAME,
+        };
 
         let roto_script = "etc/examples/filters.roto.example";
         let i = roto::FileTree::single_file(roto_script);
         let mut c = i.compile(create_runtime().unwrap())
             .inspect_err(|e| eprintln!("{e}"))
             .unwrap();
-        let _: BgpInFunc = c.get_function("bgp_in").unwrap();
-        let _: BmpInFunc = c.get_function("bmp_in").unwrap();
-        let _: RibInPreFunc = c.get_function("rib_in_pre").unwrap();
+
+        let _: CompileListsFunc = c.get_function(COMPILE_LISTS_FUNC_NAME).unwrap();
+        let _: BgpInFunc = c.get_function(ROTO_FUNC_BGP_IN_NAME).unwrap();
+        let _: BmpInFunc = c.get_function(ROTO_FUNC_BMP_IN_NAME).unwrap();
+        let _: RibInPreFunc = c.get_function(ROTO_FUNC_RIB_IN_PRE_NAME).unwrap();
+        let _: RotoFuncVrpUpdate = c.get_function(ROTO_FUNC_VRP_UPDATE_FILTER_NAME).unwrap();
+        let _: RotoFuncRovStatusUpdate = c.get_function(ROTO_FUNC_ROV_STATUS_UPDATE_NAME).unwrap();
     }
 }

@@ -25,7 +25,7 @@ use crate::ingress::{self, IngressId};
 use crate::payload::RouterId;
 use crate::roto_runtime::Ctx;
 use crate::tracing::Tracer;
-use crate::units::rib_unit::unit::RtrCache;
+use crate::units::rib_unit::rpki::RtrCache;
 use crate::{
     comms::{Gate, GateStatus},
     payload::{Payload, Update, UpstreamStatus},
@@ -45,6 +45,7 @@ use super::util::format_source_id;
 pub struct RouterHandler {
     gate: Gate,
     roto_function: Option<RotoFunc>,
+    roto_context: Arc<std::sync::Mutex<Ctx>>,
     router_id_template: Arc<ArcSwap<String>>,
     filter_name: Arc<ArcSwap<FilterName>>,
     status_reporter: Arc<BmpTcpInStatusReporter>,
@@ -64,6 +65,7 @@ impl RouterHandler {
     pub fn new(
         gate: Gate,
         roto_function: Option<RotoFunc>,
+        roto_context: Arc<std::sync::Mutex<Ctx>>,
         router_id_template: Arc<ArcSwap<String>>,
         filter_name: Arc<ArcSwap<FilterName>>,
         status_reporter: Arc<BmpTcpInStatusReporter>,
@@ -76,6 +78,7 @@ impl RouterHandler {
         Self {
             gate,
             roto_function,
+            roto_context,
             router_id_template,
             filter_name,
             status_reporter,
@@ -129,6 +132,7 @@ impl RouterHandler {
             last_msg_at: None,
             bmp_metrics,
             roto_function: None,
+            roto_context: Arc::new(std::sync::Mutex::new(Ctx::empty())),
         };
 
         (mock, gate_agent, parent_gate)
@@ -369,22 +373,22 @@ impl RouterHandler {
             provenance
         };
 
-        let output_stream = RotoOutputStream::new_rced();
-        let mut ctx = Ctx::new(output_stream, self.rtr_cache.clone());
-        let verdict = self.roto_function.as_ref().map(|roto_function| {
+        let mut osms = smallvec![];
+        let verdict;
+        { // lock scope
+        let mut ctx = self.roto_context.lock().unwrap();
+        verdict = self.roto_function.as_ref().map(|roto_function| {
             roto_function.call(
                 &mut ctx,
-                //roto::Val(&mut output_stream),
                 roto::Val(msg.clone()),
                 roto::Val(provenance),
             )
         });
+        
 
-        let Ctx { output, ..} = ctx;
-        let output_stream = RotoOutputStream::into_inner(output).into_messages();
+        let mut output_stream = ctx.output.borrow_mut();
         if !output_stream.is_empty() {
-            let mut osms = smallvec![];
-            for entry in output_stream {
+            for entry in output_stream.drain() {
                 let osm = match entry {
                     Output::Prefix(_prefix) => {
                         OutputStreamMessage::prefix(None, Some(ingress_id))
@@ -432,8 +436,10 @@ impl RouterHandler {
                 };
                 osms.push(osm);
             }
-            self.gate.update_data(Update::OutputStream(osms)).await;
         }
+        } // end of lock scope
+            
+        self.gate.update_data(Update::OutputStream(osms)).await;
         let next_state = match verdict {
             // Default action when no roto script is used
             // is Accept (i.e. None here).

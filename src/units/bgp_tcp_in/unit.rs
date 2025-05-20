@@ -40,6 +40,8 @@ use crate::comms::{
 use crate::ingress;
 use crate::manager::{Component, WaitPoint};
 use crate::payload::Update;
+use crate::roto_runtime::Ctx;
+use crate::units::rib_unit::rpki::RtrCache;
 use crate::units::{Gate, Unit};
 
 use super::metrics::BgpTcpInMetrics;
@@ -59,7 +61,7 @@ pub(crate) type RotoFunc = roto::TypedFunc<
     roto::Verdict<(), ()>,
 >;
 
-const ROTO_FUNC_FILTER_NAME: &str = "bgp_in";
+pub const ROTO_FUNC_FILTER_NAME: &str = "bgp_in";
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct BgpTcpIn {
@@ -161,6 +163,7 @@ trait ConfigAcceptor {
     fn accept_config(
         child_name: String,
         roto_function: Option<RotoFunc>,
+        roto_context: Arc<Mutex<Ctx>>,
         gate: &Gate,
         bgp: &BgpTcpIn,
         tcp_stream: impl TcpStreamWrapper,
@@ -273,6 +276,14 @@ impl BgpTcpInRunner {
                 .ok()
             });
 
+        let mut roto_context = Ctx::empty();
+
+        if let Some(c) = arc_self.roto_compiled.clone() {
+            roto_context.prepare(&mut c.lock().unwrap());
+        }
+
+        let roto_context = Arc::new(Mutex::new(roto_context));
+
         loop {
             let listen_addr = arc_self.bgp.load().listen.clone();
 
@@ -337,6 +348,7 @@ impl BgpTcpInRunner {
                             F::accept_config(
                                 child_name,
                                 roto_function.clone(),
+                                roto_context.clone(),
                                 &arc_self.gate,
                                 &arc_self.bgp.load().clone(),
                                 tcp_stream,
@@ -550,6 +562,7 @@ impl ConfigAcceptor for BgpTcpInRunner {
     fn accept_config(
         child_name: String,
         roto_function: Option<RotoFunc>,
+        roto_context: Arc<Mutex<Ctx>>,
         gate: &Gate,
         bgp: &BgpTcpIn,
         tcp_stream: impl TcpStreamWrapper,
@@ -567,6 +580,7 @@ impl ConfigAcceptor for BgpTcpInRunner {
             &child_name,
             handle_connection(
                 roto_function,
+                roto_context,
                 gate.clone(),
                 bgp.clone(),
                 tcp_stream,
@@ -773,6 +787,7 @@ mod tests {
         fn accept_config(
             _child_name: String,
             _roto_function: Option<RotoFunc>,
+            _roto_context: Arc<std::sync::Mutex<crate::roto_runtime::Ctx>>,
             _gate: &Gate,
             _bgp: &BgpTcpIn,
             _tcp_stream: impl TcpStreamWrapper,

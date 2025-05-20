@@ -111,7 +111,7 @@ pub(crate) type RotoFunc = roto::TypedFunc<
     roto::Verdict<(), ()>,
 >;
 
-const ROTO_FUNC_FILTER_NAME: &str = "bmp_in";
+pub const ROTO_FUNC_FILTER_NAME: &str = "bmp_in";
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
@@ -395,6 +395,14 @@ impl BmpTcpInRunner {
                 .ok()
             });
 
+        let mut roto_context = Ctx::empty();
+
+        if let Some(c) = self.roto_compiled.clone() {
+            roto_context.prepare(&mut c.lock().unwrap());
+        }
+
+        let roto_context = Arc::new(std::sync::Mutex::new(roto_context));
+
         let unit_ingress_id = self.ingress_register.register();
         loop {
             let listen_addr = self.listen.clone();
@@ -483,6 +491,7 @@ impl BmpTcpInRunner {
                         let router_handler = RouterHandler::new(
                             self.gate.clone(),
                             roto_function.clone(),
+                            roto_context.clone(),
                             self.router_id_template.clone(),
                             self.filter_name.clone(),
                             child_status_reporter,

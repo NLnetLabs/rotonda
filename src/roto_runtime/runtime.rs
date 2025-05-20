@@ -1100,19 +1100,19 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     /// Returns 'true' if the new status differs from the old status
     #[roto_method(rt, RovStatusUpdate)]
     fn has_changed(rov_update: &RovStatusUpdate) -> bool {
-        rov_update.old_status != rov_update.new_status
+        rov_update.previous_status != rov_update.current_status
     }
 
     /// Returns the old status of the route
     #[roto_method(rt, RovStatusUpdate)]
-    fn old_status(rov_update: &RovStatusUpdate) -> RovStatus {
-        rov_update.old_status
+    fn previous_status(rov_update: &RovStatusUpdate) -> RovStatus {
+        rov_update.previous_status
     }
 
     /// Returns the new status of the route
     #[roto_method(rt, RovStatusUpdate)]
-    fn new_status(rov_update: &RovStatusUpdate) -> RovStatus {
-        rov_update.new_status
+    fn current_status(rov_update: &RovStatusUpdate) -> RovStatus {
+        rov_update.current_status
     }
 
     /// Return a formatted string for `rov_update`
@@ -1120,8 +1120,8 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     fn fmt_rov_update(rov_update: &RovStatusUpdate) -> Arc<str> {
         format!(
             "[{:?}] -> [{:?}] {} originated by {}, learned from {}",
-            rov_update.old_status,
-            rov_update.new_status,
+            rov_update.previous_status,
+            rov_update.current_status,
             rov_update.prefix,
             rov_update.origin,
             rov_update.peer_asn,

@@ -153,7 +153,7 @@ function rib_in_rov_status_update(rov_update: RovStatusUpdate) {
 
     if rov_update.has_changed() {
         # Only log whenever something changed to Invalid:
-        if rov_update.new_status().is_invalid() {
+        if rov_update.current_status().is_invalid() {
             output.timestamped_print("[RTR]" + rov_update.fmt())
         }
     }

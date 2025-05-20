@@ -72,11 +72,11 @@ pub struct RovStatusUpdate {
     /// The prefix of the route
     pub prefix: Prefix,
 
-    /// The old `RovStatus
-    pub old_status: RovStatus,
+    /// The previous `RovStatus`
+    pub previous_status: RovStatus,
 
-    /// The new `RovStatus
-    pub new_status: RovStatus,
+    /// The current `RovStatus`
+    pub current_status: RovStatus,
 
     /// The origin `Asn`, i.e. right-most in 'AS_PATH' of this route
     pub origin: Asn,
@@ -88,13 +88,13 @@ pub struct RovStatusUpdate {
 impl RovStatusUpdate {
     pub fn new(
         prefix: Prefix,
-        old_status: RovStatus,
-        new_status: RovStatus,
+        previous_status: RovStatus,
+        current_status: RovStatus,
         origin: Asn,
         peer_asn: Asn,
     ) -> Self {
         Self {
-            prefix, old_status, new_status, origin, peer_asn,
+            prefix, previous_status, current_status, origin, peer_asn,
         }
     }
 }

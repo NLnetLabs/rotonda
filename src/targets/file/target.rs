@@ -23,6 +23,10 @@ use crate::targets::Component;
 use crate::targets::TargetCommand;
 use crate::targets::WaitPoint;
 
+// For low-traffic logging, make sure we flush to disk at least every N secs:
+const LAST_FLUSH_TIMEOUT_SECS: u64 = 1;
+
+
 #[derive(Debug, Deserialize)]
 pub struct File {
     #[serde(flatten)]
@@ -115,21 +119,20 @@ impl FileRunner {
         //    
         //    link.connect(false).await.unwrap();
         //}
+
         sources.connect(false).await.unwrap();
         let sources2 = sources.clone();
 
         waitpoint.running().await;
-
-        //let mut last_flush = Instant::now();
 
         loop {
             let select_fut = select(
                 cmd_rx.recv().boxed(),
                 sources.query().boxed(),
             );
-            let select = match tokio::time::timeout(std::time::Duration::from_secs(1), select_fut).await {
+            let select = match tokio::time::timeout(std::time::Duration::from_secs(LAST_FLUSH_TIMEOUT_SECS), select_fut).await {
                 Ok(select) => {
-                    if self.last_flush + Duration::from_secs(1) < Instant::now() {
+                    if self.last_flush + Duration::from_secs(LAST_FLUSH_TIMEOUT_SECS) < Instant::now() {
                         self.flush().await;
                     }
                     select

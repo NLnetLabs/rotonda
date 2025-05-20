@@ -20,8 +20,8 @@ New
 
 Other changes
 
-* The File target now periodically flushes to disk, to prevent information from
-  waiting in the buffer in low traffic scenarios.
+* The `file-out` logging target now periodically flushes to disk, to prevent
+  information from waiting in the buffer in low traffic scenarios.
 
 
 ## 0.4.0 'Bold and Undaunting Youth'

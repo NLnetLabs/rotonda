@@ -894,7 +894,7 @@ impl RibUnitRunner {
                                     match action {
                                         RtrAction::Announce => {
                                             if maxlen_list.iter().any(|m| *m == maxlen) {
-                                                warn!("VRP for {}-{} from{} already in cache", prefix, maxlen, asn);
+                                                debug!("VRP for {}-{} from{} already in cache", prefix, maxlen, asn);
                                             } else {
                                                 maxlen_list.push(maxlen);
                                                 debug!("pushed VRP for {}-{} from {}", prefix, maxlen, asn)

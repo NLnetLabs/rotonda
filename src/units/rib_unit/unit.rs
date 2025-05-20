@@ -849,6 +849,43 @@ impl RibUnitRunner {
                             }
                             Err(_) => warn!("failed to update ASPAs in RTR-cache in RIB unit (Reset)"),
                         }
+
+                        let rib_arc = self.rib.clone();
+                        let rtr_cache = self.rtr_cache.clone();
+
+                        tokio::spawn(async move {
+                            let t_start = tokio::time::Instant::now();
+                            debug!("starting ROV for entire RIB");
+
+                            if let Ok(store) = rib_arc.load().store(){
+                                let guard = &rotonda_store::epoch::pin();
+                                for prefix_record in store.prefixes_iter(guard).flatten() {
+                                    let prefix = prefix_record.prefix;
+                                    for record in prefix_record.meta.into_iter() {
+                                        let mut pamap = record.meta;
+                                        if let Some(hoppath) = pamap.path_attributes().get::<HopPath>() {
+                                            if let Some(origin) = hoppath.origin()
+                                                .and_then(|o| Hop::try_into_asn(o.clone()).ok())
+                                            {
+                                                let rov_status = rtr_cache.check_rov(&prefix, origin);
+                                                pamap.set_rpki_info(rov_status.into());
+                                                let new_record = Record::new(
+                                                    record.multi_uniq_id,
+                                                    record.ltime,
+                                                    record.status,
+                                                    pamap
+                                                );
+
+                                                if let Err(e) = store.insert(&prefix, new_record, None) {
+                                                    error!("{e}");
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                debug!("ROV run done, took {}s", t_start.elapsed().as_secs());
+                            }
+                        });
                     }
                     RtrUpdate::Delta(rtr_verbs) => {
                         debug!("got RTR Serial update");

@@ -1070,7 +1070,7 @@ impl RibUnitRunner {
                                                                 //debug!("rov_status {rov_status:?} (was: {old_status:?}) for more-specific {ms_prefix} from {origin}");
                                                                 let peer_as = self.ingress_register.get(rec.multi_uniq_id).and_then(|i| i.remote_asn).unwrap_or(Asn::from_u32(0));
                                                                 rov_updates.push(
-                                                                    RovStatusUpdate::new(prefix, old_status, rov_status, origin, peer_as)
+                                                                    RovStatusUpdate::new(ms_prefix, old_status, rov_status, origin, peer_as)
                                                                 );
 
                                                                 pamap.set_rpki_info(rov_status.into());

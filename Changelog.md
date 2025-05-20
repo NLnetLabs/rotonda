@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased new version
+
+Released yyyy-mm-dd.
+
+
+Breaking changes
+
+
+New
+
+
+Bug fixes
+
+
+Known issues
+
+
+Other changes
+
+
+Acknowledgements
+
 
 ## 0.4.1 'Melolontha²'
 

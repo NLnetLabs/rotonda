@@ -205,8 +205,8 @@ impl RtrCache {
         if !valid {
             if let Some(less_specifics) = res.less_specifics {
                 'outer: for r in less_specifics.iter() {
-                    covered = covered || !r.meta.is_empty();
                     for record in r.meta.iter() {
+                        covered = covered || !record.meta.is_empty();
                         for maxlen in record.meta.iter() {
                             #[allow(clippy::collapsible_if)]
                             if prefix.len() <= *maxlen {

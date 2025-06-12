@@ -41,27 +41,27 @@ use super::{
 
 pub(crate) type RotoFuncPre = roto::TypedFunc<
     Ctx,
-    (
+    fn (
         roto::Val<roto_runtime::MutRotondaRoute>,
-    ),
+    ) ->
     roto::Verdict<(), ()>,
 >;
 pub const ROTO_FUNC_PRE_FILTER_NAME: &str = "rib_in_pre";
 
 pub(crate) type RotoFuncVrpUpdate = roto::TypedFunc<
     Ctx,
-    (
+    fn (
         roto::Val<VrpUpdate>,
-    ),
+    ) ->
     roto::Verdict<(), ()>,
 >;
 pub const ROTO_FUNC_VRP_UPDATE_FILTER_NAME: &str = "vrp_update";
 
 pub(crate) type RotoFuncRovStatusUpdate = roto::TypedFunc<
     Ctx,
-    (
+    fn (
         roto::Val<RovStatusUpdate>,
-    ),
+    ) ->
     (),
 >;
 pub const ROTO_FUNC_ROV_STATUS_UPDATE_NAME: &str = "rib_in_rov_status_update";
@@ -69,10 +69,10 @@ pub const ROTO_FUNC_ROV_STATUS_UPDATE_NAME: &str = "rib_in_rov_status_update";
 
 type RotoFuncPost = roto::TypedFunc<
     Ctx,
-    (
+    fn (
         roto::Val<RotondaRoute>,
         roto::Val<InsertionInfo>,
-    ),
+    ) ->
     roto::Verdict<(), ()>,
 >;
 

@@ -78,7 +78,7 @@ mqtt               = { version = "0.23.0", package = "rumqttc", default-features
 memmap2            = "0.9.4"
 non-empty-vec      = { version = "0.2", features = ["serde"]}
 percent-encoding   = "2.3"
-roto               = { version = "0.5.0" }
+roto               = { version = "0.6.0" }
 rotonda-store       = { workspace = true }
 serde_with         = "3"
 smallvec           = { version = "1.11", features = ["const_generics", "const_new", "union"] }

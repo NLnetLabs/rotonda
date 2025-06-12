@@ -54,10 +54,10 @@ use super::peer_config::{CombinedConfig, PeerConfigs};
 
 pub(crate) type RotoFunc = roto::TypedFunc<
     crate::roto_runtime::Ctx,
-    (
+    fn(
         roto::Val<UpdateMessage<Bytes>>,
         roto::Val<Provenance>,
-    ),
+    ) ->
     roto::Verdict<(), ()>,
 >;
 

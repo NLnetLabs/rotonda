@@ -19,7 +19,7 @@ name = "print_rotonda_std_doc"
 path = "doc/bin/print_rotonda_std_doc.rs"
 
 [workspace.package]
-version = "0.4.2"
+version = "0.4.3-dev"
 edition = "2021"
 rust-version = "1.84"
 authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]

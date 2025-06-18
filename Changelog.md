@@ -8,6 +8,9 @@ With this release, Rotonda switches to version 0.6.0 of the `roto` library.
 While many things have improved behind the scenes and under the hood, there are
 no breaking or otherwise noticeable changes for Rotonda users.
 
+An overview of the changes in `roto` 0.6.0 can be found
+[here](https://github.com/NLnetLabs/roto/blob/v0.6.0/Changelog.md).
+
 
 ## 0.4.1 'Melolontha²'
 

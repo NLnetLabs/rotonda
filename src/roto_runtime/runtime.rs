@@ -377,7 +377,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         msg: Val<BgpUpdateMessage<Bytes>>,
         to_match: Asn,
     ) -> bool {
-        aspath_contains(&*msg, to_match)
+        aspath_contains(&msg, to_match)
     }
 
     /// Returns the right-most `Asn` in the 'AS_PATH' attribute
@@ -389,7 +389,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     fn bgp_aspath_origin(
         msg: Val<BgpUpdateMessage<Bytes>>,
     ) -> Val<OriginAsn> {
-        Val(aspath_origin(&*msg))
+        Val(aspath_origin(&msg))
     }
 
     /// Check whether the AS_PATH origin matches the given `Asn`
@@ -398,7 +398,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         msg: Val<BgpUpdateMessage<Bytes>>,
         to_match: Asn,
     ) -> bool {
-        match_aspath_origin(&*msg, to_match)
+        match_aspath_origin(&msg, to_match)
     }
 
     /// Check whether this message contains the given Standard Community
@@ -407,7 +407,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         msg: Val<BgpUpdateMessage<Bytes>>,
         to_match: Val<StandardCommunity>,
     ) -> bool {
-        contains_community(&*msg, &*to_match)
+        contains_community(&msg, &to_match)
     }
 
     /// Check whether this message contains the given Large Community
@@ -416,7 +416,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         msg: Val<BgpUpdateMessage<Bytes>>,
         to_match: Val<LargeCommunity>,
     ) -> bool {
-        contains_large_community(&*msg, &*to_match)
+        contains_large_community(&msg, &to_match)
     }
 
     /// Check whether this message contains the given Path Attribute
@@ -425,25 +425,25 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         msg: Val<BgpUpdateMessage<Bytes>>,
         to_match: u8,
     ) -> bool {
-        has_attribute(&*msg, to_match)
+        has_attribute(&msg, to_match)
     }
 
     /// Return the number of announcements in this message
     #[roto_method(rt, BgpUpdateMessage<Bytes>, announcements_count)]
     fn bgp_announcements_count(msg: Val<BgpUpdateMessage<Bytes>>) -> u32 {
-        announcements_count(&*msg)
+        announcements_count(&msg)
     }
 
     /// Return the number of withdrawals in this message
     #[roto_method(rt, BgpUpdateMessage<Bytes>, withdrawals_count)]
     fn bgp_withdrawals_count(msg: Val<BgpUpdateMessage<Bytes>>) -> u32 {
-        withdrawals_count(&*msg)
+        withdrawals_count(&msg)
     }
 
     /// Return a formatted string for the AS_PATH
     #[roto_method(rt, BgpUpdateMessage<Bytes>, fmt_aspath)]
     fn bgp_fmt_aspath(msg: Val<BgpUpdateMessage<Bytes>>) -> Arc<str> {
-        fmt_aspath(&*msg)
+        fmt_aspath(&msg)
     }
 
     /// Return a formatted string for the AS_PATH origin
@@ -451,13 +451,13 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     fn bgp_fmt_aspath_origin(
         msg: Val<BgpUpdateMessage<Bytes>>,
     ) -> Arc<str> {
-        fmt_aspath_origin(&*msg)
+        fmt_aspath_origin(&msg)
     }
 
     /// Return a formatted string for the Standard Communities
     #[roto_method(rt, BgpUpdateMessage<Bytes>, fmt_communities)]
     fn bgp_fmt_communities(msg: Val<BgpUpdateMessage<Bytes>>) -> Arc<str> {
-        fmt_communities(&*msg)
+        fmt_communities(&msg)
     }
 
     /// Return a formatted string for the Large Communities
@@ -465,7 +465,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     fn bgp_fmt_large_communities(
         msg: Val<BgpUpdateMessage<Bytes>>,
     ) -> Arc<str> {
-        fmt_large_communities(&*msg)
+        fmt_large_communities(&msg)
     }
 
     /// Format this message as hexadecimal Wireshark input
@@ -593,7 +593,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
             return false;
         };
 
-        contains_community(&update, &*to_match)
+        contains_community(&update, &to_match)
     }
 
     /// Check whether this message contains the given Large Community
@@ -613,7 +613,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
             return false;
         };
 
-        contains_large_community(&update, &*to_match)
+        contains_large_community(&update, &to_match)
     }
 
     /// Check whether this message contains the given Path Attribute
@@ -1166,7 +1166,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     #[roto_method(rt, MutNamedAsnLists, add)]
     fn add_asn_list(lists: Val<MutNamedAsnLists>, name: Val<Arc<str>>, s: Val<Arc<str>>) {
         let mut lists = lists.lock().unwrap();
-        let res = AsnList::from_str(&*s).unwrap_or_default();
+        let res = AsnList::from_str(&s).unwrap_or_default();
         lists.add((*name).clone(), res);
     }
 
@@ -1174,7 +1174,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     #[roto_method(rt, MutNamedPrefixLists, add)]
     fn add_prefix_list(lists: Val<MutNamedPrefixLists>, name: Val<Arc<str>>, s: Val<Arc<str>>) {
         let mut lists = lists.lock().unwrap();
-        let res = PrefixList::from_str(&*s).unwrap_or_default();
+        let res = PrefixList::from_str(&s).unwrap_or_default();
         lists.add((*name).clone(), res);
     }
 

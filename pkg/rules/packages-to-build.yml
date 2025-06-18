@@ -69,13 +69,13 @@ include:
   # of matrix keys and values as already exist elsewhere in the matrix, but they will cause an additional tests
   # to be run in the package testing phase, which will install the package in an LXC container running the 
   # specified 'test-image' instead of the 'image' it was built in.
-  - pkg: 'rotonda'
-    image: 'rockylinux:9'
-    target: 'x86_64'
-    test-image: 'almalinux:9'
+#  - pkg: 'rotonda'
+#    image: 'rockylinux:9'
+#    target: 'x86_64'
+#    test-image: 'almalinux:9'
 
   - pkg: 'rotonda'
-    image: 'rockylinux:9'
+    image: 'almalinux:9'
     target: 'x86_64'
     test-image: 'centos:9-Stream'
 

@@ -4,7 +4,7 @@
 
 Released 2025-06-18.
 
-With this release, Rotonda switches to the latest version of the `roto` library.
+With this release, Rotonda switches to version 0.6.0 of the `roto` library.
 While many things have improved behind the scenes and under the hood, there are
 no breaking or otherwise noticeable changes for Rotonda users.
 

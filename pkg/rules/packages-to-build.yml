@@ -86,15 +86,15 @@ test-mode:
   - 'fresh-install'
 
 
-# Disable upgrade testing on Rocky Linux 9 and Debian Bookworm as we haven't published any packages for
+# Disable upgrade testing on Alma Linux 10 and Debian Bookworm as we haven't published any packages for
 # those O/S versions yet.
 test-exclude:
   - pkg: 'rotonda'
-    image: 'rockylinux:9'
+    image: 'almalinux:10'
     mode: 'upgrade-from-published'
-  - pkg: 'rotonda'
-    image: 'debian:bookworm'
-    mode: 'upgrade-from-published'
-  - pkg: 'rotonda'
-    image: 'ubuntu:noble'
-    mode: 'upgrade-from-published'
+#  - pkg: 'rotonda'
+#    image: 'debian:bookworm'
+#    mode: 'upgrade-from-published'
+#  - pkg: 'rotonda'
+#    image: 'ubuntu:noble'
+#    mode: 'upgrade-from-published'

@@ -1,26 +1,12 @@
 # Changelog
 
-## Unreleased new version
+## 0.4.2 'Bonjour des Pyrénées'
 
-Released yyyy-mm-dd.
+Released 2025-06-18.
 
-
-Breaking changes
-
-
-New
-
-
-Bug fixes
-
-
-Known issues
-
-
-Other changes
-
-
-Acknowledgements
+With this release, Rotonda switches to the latest version of the `roto` library.
+While many things have improved behind the scenes and under the hood, there are
+no breaking or otherwise noticeable changes for Rotonda users.
 
 
 ## 0.4.1 'Melolontha²'

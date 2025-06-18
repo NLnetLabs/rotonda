@@ -91,10 +91,4 @@ test-mode:
 test-exclude:
   - pkg: 'rotonda'
     image: 'almalinux:10'
-    mode: 'upgrade-from-published'
-#  - pkg: 'rotonda'
-#    image: 'debian:bookworm'
-#    mode: 'upgrade-from-published'
-#  - pkg: 'rotonda'
-#    image: 'ubuntu:noble'
-#    mode: 'upgrade-from-published'
+    # mode: 'upgrade-from-published'

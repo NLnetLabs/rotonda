@@ -88,7 +88,7 @@ test-mode:
 
 # Disable upgrade testing on Alma Linux 10 and Debian Bookworm as we haven't published any packages for
 # those O/S versions yet.
-test-exclude:
-  - pkg: 'rotonda'
-    image: 'almalinux:10'
-    # mode: 'upgrade-from-published'
+#test-exclude:
+#  - pkg: 'rotonda'
+#    image: 'almalinux:10'
+#    mode: 'upgrade-from-published'

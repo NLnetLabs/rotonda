@@ -440,7 +440,7 @@ impl BmpTcpInRunner {
                     ControlFlow::Continue(Ok((tcp_stream, client_addr))) => {
 
                         let query_ingress = IngressInfo::new()
-                            .with_parent(unit_ingress_id)
+                            .with_parent_ingress(unit_ingress_id)
                             .with_remote_addr(client_addr.ip())
                         ;
                         let router_ingress_id;

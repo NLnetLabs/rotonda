@@ -1220,10 +1220,12 @@ impl PeerAware for PeerStates {
         let mut added = false;
 
         let query_ingress = ingress::IngressInfo::new()
-            .with_parent(bmp_ingress_id)
+            .with_parent_ingress(bmp_ingress_id)
             .with_remote_addr(pph.address())
             .with_remote_asn(pph.asn())
-            .with_rib_type(pph.rib_type());
+            .with_rib_type(pph.rib_type())
+            .with_peer_type(pph.peer_type())
+            .with_distinguisher(TryInto::<[u8; 8]>::try_into(&pph.distinguisher()[..8]).unwrap());
         let peer_ingress_id;
         if let Some((ingress_id, _ingress_info)) =
             ingress_register.find_existing_peer(&query_ingress)

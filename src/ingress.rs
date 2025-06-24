@@ -202,7 +202,6 @@ impl Register {
     /// `ingress_id`, the remote address and ASN (all three must be set).
     /// Furthermore, the RIB type is compared, though that might be unset,
     /// i.e. None.
-    /// TODO ^^^ the macro needs to be adapted to support non-mandatory ones
     pub fn find_existing_peer(
         &self,
         query: &IngressInfo
@@ -213,7 +212,7 @@ impl Register {
                 {parent_ingress, remote_addr, remote_asn},
                 {rib_type, peer_type, distinguisher}
             ) {
-                    log::debug!("found existing peer, id {id}");
+                    //log::debug!("found existing peer, id {id}");
                     return Some((*id, info.clone()))
             }
         }

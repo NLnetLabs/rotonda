@@ -100,14 +100,33 @@ macro_rules! info_for_field{
     }
 }
 
-
-// Creates a boolean expression checking is_some() + equality for all fields
+// Creates a boolean expression from mandatory and optional fields in [`IngressInfo`]
+//
+// Usage:
+//
+//   find_existing_for!(info, query, {mandatory_fields*}, {optional_fields*}?)
+//
+// Note that the set of optional_fields is optional itself.
+// For all fields in mandatory_fields, we check whether the field is not None
+// in the `info` we have stored, then compare it to that field in the `query`.
+// For fields in the optional_fields, the check for not None is skipped, the
+// the field on `info` is compared to the one on `query` regardless.
 macro_rules! find_existing_for {
-    ($info:ident, $query:ident, $($field:ident),*) => {
+    (
+        $info:ident, $query:ident,
+        { $($mandatory_field:ident),*} $(,)?
+        $({ $($optional_field:ident),*})?
+    ) => {
         $(
-            $info.$field.is_some() &&
-            $info.$field == $query.$field &&
-        )*  true // just to fill up the last '&& _' from the repetition
+            $info.$mandatory_field.is_some() &&
+            $info.$mandatory_field == $query.$mandatory_field &&
+        )*
+        $(
+            $(
+                $info.$optional_field == $query.$optional_field &&
+            )*
+        )?
+    true // just to fill up the last '&& _' from the repetition
     }
 
 }
@@ -191,8 +210,8 @@ impl Register {
         let lock = self.info.read().unwrap();
         for (id, info) in lock.iter() {
             if find_existing_for!(info, query,
-                parent_ingress, remote_addr, remote_asn,
-                rib_type, peer_type, distinguisher
+                {parent_ingress, remote_addr, remote_asn},
+                {rib_type, peer_type, distinguisher}
             ) {
                     log::debug!("found existing peer, id {id}");
                     return Some((*id, info.clone()))
@@ -213,7 +232,7 @@ impl Register {
         log::debug!("query: {query:?}");
         for (id, info) in lock.iter() {
             if find_existing_for!(info, query,
-                parent_ingress, remote_addr
+                {parent_ingress, remote_addr}
             ) {
                     log::debug!("found matching bmp router, id {id}");
                     return Some((*id, info.clone()))

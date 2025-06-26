@@ -10,8 +10,17 @@ Breaking changes
 
 New
 
+* For BMP ingresses, the Peer type, Peer distinguisher, and VRF/Table name are
+  now tracked in the ingress register, and (if set) returned in HTTP API
+  responses.
 
 Bug fixes
+
+* The procedure to find known ingresses (e.g. when a BMP session is
+  re-established) would not take into account the Peer type/distinguisher and
+  VRF/Table name. This could cause mismatches, leading to routes being stored
+  in the wrong spot and/or incorrectly overwriting other routes.
+  Presumably, this only affected monitoring of Loc-RIBs.
 
 
 Known issues

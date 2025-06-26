@@ -210,7 +210,7 @@ impl Register {
         for (id, info) in lock.iter() {
             if find_existing_for!(info, query,
                 {parent_ingress, remote_addr, remote_asn},
-                {rib_type, peer_type, distinguisher}
+                {rib_type, peer_type, distinguisher, vrf_name}
             ) {
                     //log::debug!("found existing peer, id {id}");
                     return Some((*id, info.clone()))

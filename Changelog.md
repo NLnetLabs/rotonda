@@ -12,7 +12,7 @@ New
 
 * For BMP ingresses, the Peer type, Peer distinguisher, and VRF/Table name are
   now tracked in the ingress register, and (if set) returned in HTTP API
-  responses.
+  responses. ([#128](https://github.com/NLnetLabs/rotonda/pull/128))
 
 Bug fixes
 
@@ -21,7 +21,7 @@ Bug fixes
   VRF/Table name. This could cause mismatches, leading to routes being stored
   in the wrong spot and/or incorrectly overwriting other routes.
   Presumably, this only affected monitoring of Loc-RIBs.
-
+  ([#128](https://github.com/NLnetLabs/rotonda/pull/128))
 
 Known issues
 

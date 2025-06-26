@@ -24,7 +24,7 @@ pub struct Register {
 
 pub type IngressId = u32;
 
-// Used to merge IngressInfo structs, called in info_for_field!
+// Used to merge IngressInfo structs, called via info_for_field! in update_info
 macro_rules! update_field {
     ($old:ident, $new:ident, $field:ident) => {
         if $new.$field.is_some() {
@@ -56,7 +56,7 @@ macro_rules! info_for_field{
         /// is wrapped as an `Option`, giving the user (mostly connector/ingress
         /// components within Rotonda) the flexibilty to fill in what makes sense in
         /// their specific case.
-        #[derive(Clone, Debug, Default)]
+        #[derive(Clone, Debug, Default, PartialEq)]
         #[serde_with::skip_serializing_none]
         #[derive(serde::Serialize)]
         pub struct $name {
@@ -200,8 +200,8 @@ impl Register {
     ///
     /// For the peer level, the comparison is based on the parent
     /// `ingress_id`, the remote address and ASN (all three must be set).
-    /// Furthermore, the RIB type is compared, though that might be unset,
-    /// i.e. None.
+    /// Furthermore, the RIB type, Peer type, and the Peer Distinguisher are compared, though these
+    /// might be unset, i.e. None.
     pub fn find_existing_peer(
         &self,
         query: &IngressInfo
@@ -269,14 +269,151 @@ mod tests {
     use super::*;
 
     #[test]
-    fn all_fields() {
+    fn builder_and_update() {
+        let res = Register::new();
+        let id = res.register();
         let info = IngressInfo::new()
-            .with_local_asn(Asn::from_u32(1234));
-        assert_eq!(info.local_asn, Some(Asn::from_u32(1234)));
+            .with_local_asn(Asn::from_u32(65536));
+        assert_eq!(info.local_asn, Some(Asn::from_u32(65536)));
+
+        res.update_info(id, info.clone());
+        assert_eq!(
+            res.get(id), 
+            Some(info)
+        );
+
+        let newinfo = IngressInfo::new()
+            .with_local_asn(Asn::from_u32(65537));
+        res.update_info(id, newinfo.clone());
+        assert_eq!(
+            res.get(id), 
+            Some(newinfo)
+        );
+
+        let newinfo_2 = IngressInfo::new()
+            .with_rib_type(RibType::LocRib)
+        ;
+        res.update_info(id, newinfo_2.clone());
+
+        // We still expect the ASN, untouched:
+        assert_eq!(
+            res.get(id).unwrap().local_asn,
+            Some(Asn::from_u32(65537))
+        );
+
+        // And the newly set RibType
+        assert_eq!(
+            res.get(id).unwrap().rib_type,
+            Some(RibType::LocRib)
+        );
+
+
     }
 
     #[test]
-    fn non_mandatory() {
-        todo!()
+    fn non_mandatory_unset() {
+        let res = Register::new();
+        let parent_id1 = res.register();
+        let session_id1_a = res.register();
+
+        let info1_a = IngressInfo::new()
+            .with_parent_ingress(parent_id1)
+            .with_remote_addr("1.2.3.4".parse::<IpAddr>().unwrap())
+            .with_remote_asn(Asn::from_u32(65000))
+            ;
+
+        res.update_info(session_id1_a, info1_a.clone());
+
+        let query1 = IngressInfo::new()
+            .with_parent_ingress(parent_id1)
+            .with_remote_addr("1.2.3.4".parse::<IpAddr>().unwrap())
+            .with_remote_asn(Asn::from_u32(65000))
+            ;
+        assert_eq!(
+            res.find_existing_peer(&query1),
+            Some((session_id1_a, info1_a))
+        );
+
+
+    }
+
+    #[test]
+    fn non_mandatory_set() {
+        let res = Register::new();
+        let parent_id1 = res.register();
+        let session_id1_a = res.register();
+
+        let info1_a = IngressInfo::new()
+            .with_parent_ingress(parent_id1)
+            .with_peer_type(PeerType::GlobalInstance)
+            .with_remote_addr("1.2.3.4".parse::<IpAddr>().unwrap())
+            .with_remote_asn(Asn::from_u32(65000))
+            ;
+
+        res.update_info(session_id1_a, info1_a.clone());
+
+        let query1 = IngressInfo::new()
+            .with_parent_ingress(parent_id1)
+            .with_peer_type(PeerType::GlobalInstance)
+            .with_remote_addr("1.2.3.4".parse::<IpAddr>().unwrap())
+            .with_remote_asn(Asn::from_u32(65000))
+            ;
+        assert_eq!(
+            res.find_existing_peer(&query1),
+            Some((session_id1_a, info1_a))
+        );
+    }
+
+    #[test]
+    fn non_mandatory_query_missing_optional() {
+        let res = Register::new();
+        let parent_id1 = res.register();
+        let session_id1_a = res.register();
+
+        let info1_a = IngressInfo::new()
+            .with_parent_ingress(parent_id1)
+            .with_peer_type(PeerType::GlobalInstance)
+            .with_remote_addr("1.2.3.4".parse::<IpAddr>().unwrap())
+            .with_remote_asn(Asn::from_u32(65000))
+            ;
+
+        res.update_info(session_id1_a, info1_a.clone());
+
+        let query1 = IngressInfo::new()
+            .with_parent_ingress(parent_id1)
+            .with_remote_addr("1.2.3.4".parse::<IpAddr>().unwrap())
+            .with_remote_asn(Asn::from_u32(65000))
+            ;
+        assert_eq!(
+            res.find_existing_peer(&query1),
+            None,
+        );
+    }
+
+    #[test]
+    fn non_mandatory_set_but_different() {
+        let res = Register::new();
+        let parent_id1 = res.register();
+        let session_id1_a = res.register();
+
+        let info1_a = IngressInfo::new()
+            .with_parent_ingress(parent_id1)
+            .with_remote_addr("1.2.3.4".parse::<IpAddr>().unwrap())
+            .with_remote_asn(Asn::from_u32(65000))
+            .with_distinguisher([1,2,3,4,9,9,9,9])
+            ;
+
+        res.update_info(session_id1_a, info1_a.clone());
+
+        let query1 = IngressInfo::new()
+            .with_parent_ingress(parent_id1)
+            .with_remote_addr("1.2.3.4".parse::<IpAddr>().unwrap())
+            .with_remote_asn(Asn::from_u32(65000))
+            .with_distinguisher([9,9,9,9,8,8,8,8])
+            ;
+        assert_eq!(
+            res.find_existing_peer(&query1),
+            None,
+        );
     }
 }

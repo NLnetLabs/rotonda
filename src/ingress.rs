@@ -260,7 +260,8 @@ info_for_field!(IngressInfo{
    desc: String,
    local_asn: Asn,
    peer_type: PeerType,
-   distinguisher: [u8; 8]
+   distinguisher: [u8; 8],
+   vrf_name: String
 });
 
 #[cfg(test)]

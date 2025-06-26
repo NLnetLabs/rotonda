@@ -12,7 +12,7 @@ use routecore::bgp::{
     types::AfiSafiType,
 };
 use routecore::bmp::message::{
-    Message as BmpMsg, PerPeerHeader, TerminationMessage,
+    InformationTlvIter, Message as BmpMsg, PerPeerHeader, TerminationMessage
 };
 use smallvec::SmallVec;
 
@@ -380,6 +380,7 @@ impl PeerAware for Dumping {
         eor_capable: bool,
         ingress_register: Arc<ingress::Register>,
         bmp_ingress_id: ingress::IngressId,
+        tlv_iter: InformationTlvIter,
     ) -> bool {
         self.peer_states.add_peer_config(
             pph,
@@ -387,6 +388,7 @@ impl PeerAware for Dumping {
             eor_capable,
             ingress_register,
             bmp_ingress_id,
+            tlv_iter,
         )
     }
 

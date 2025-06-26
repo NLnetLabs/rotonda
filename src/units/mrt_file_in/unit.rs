@@ -221,7 +221,7 @@ impl MrtInRunner {
                 withdrawals_sent += rr_unreach.len();
 
                 let ingress_query = IngressInfo::new()
-                        .with_parent(parent_id)
+                        .with_parent_ingress(parent_id)
                         .with_remote_addr(msg.peer_addr())
                         .with_remote_asn(msg.peer_asn())
                 ;
@@ -356,7 +356,7 @@ impl MrtInRunner {
                 ingresses.update_info(
                     id,
                     IngressInfo::new()
-                        .with_parent(parent_id)
+                        .with_parent_ingress(parent_id)
                         .with_remote_addr(peer_entry.addr)
                         .with_remote_asn(peer_entry.asn)
                         .with_filename(filename.clone()),

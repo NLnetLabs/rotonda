@@ -29,6 +29,7 @@ use log::{debug, error, warn};
 use inetnum::addr::Prefix;
 use rotonda_store::prefix_record::RouteStatus;
 use routecore::bgp::fsm::session;
+use routecore::bmp::message::InformationTlvIter;
 use routecore::{
     bgp::nlri::afisafi::IsPrefix,
     bgp::nlri::afisafi::Nlri,
@@ -413,6 +414,7 @@ pub trait PeerAware {
         eor_capable: bool,
         ingress_register: Arc<ingress::Register>,
         bmp_ingress_id: ingress::IngressId,
+        tlv_iter: InformationTlvIter,
     ) -> bool;
 
     fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState>;
@@ -505,12 +507,15 @@ where
             .capabilities()
             .any(|cap| cap.typ() == CapabilityType::GracefulRestart);
 
+        let tlv_iter = msg.information_tlvs();
+
         if !self.details.add_peer_config(
             pph,
             config,
             eor_capable,
             self.ingress_register.clone(),
             self.ingress_id,
+            tlv_iter,
         ) {
             // This is unexpected. How can we already have an entry in
             // the map for a peer which is currently up (i.e. we have
@@ -1216,14 +1221,26 @@ impl PeerAware for PeerStates {
         eor_capable: bool,
         ingress_register: Arc<ingress::Register>,
         bmp_ingress_id: ingress::IngressId,
+        mut tlv_iter: InformationTlvIter,
     ) -> bool {
         let mut added = false;
 
-        let query_ingress = ingress::IngressInfo::new()
-            .with_parent(bmp_ingress_id)
+        let mut query_ingress = ingress::IngressInfo::new()
+            .with_parent_ingress(bmp_ingress_id)
             .with_remote_addr(pph.address())
             .with_remote_asn(pph.asn())
-            .with_rib_type(pph.rib_type());
+            .with_rib_type(pph.rib_type())
+            .with_peer_type(pph.peer_type())
+            .with_distinguisher(TryInto::<[u8; 8]>::try_into(&pph.distinguisher()[..8]).unwrap())
+        ;
+
+        if let Some(vrf_name) = tlv_iter
+            .find(|t| t.typ() == InformationTlvType::VrfTableName) {
+                query_ingress = query_ingress.with_vrf_name(
+                    String::from_utf8_lossy(vrf_name.value())
+                );
+        }
+
         let peer_ingress_id;
         if let Some((ingress_id, _ingress_info)) =
             ingress_register.find_existing_peer(&query_ingress)

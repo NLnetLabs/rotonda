@@ -2999,6 +2999,7 @@ dependencies = [
  "memmap2",
  "micromap",
  "non-empty-vec",
+ "paste",
  "percent-encoding",
  "pin-project-lite",
  "prometheus-parse",
@@ -3006,7 +3007,7 @@ dependencies = [
  "reqwest",
  "roto",
  "rotonda-store",
- "routecore",
+ "routecore 0.5.3-dev",
  "rpki",
  "rumqttc",
  "rumqttd",
@@ -3040,7 +3041,7 @@ dependencies = [
  "parking_lot_core",
  "rand 0.9.1",
  "roaring",
- "routecore",
+ "routecore 0.5.2",
  "serde",
  "serde_derive",
  "serde_json",
@@ -3052,6 +3053,23 @@ name = "routecore"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1dfe4daf99c74d8af82cfeab5e764d089fc47c47fcabffca35f9250f3f4a14a7"
+dependencies = [
+ "bytes",
+ "chrono",
+ "const-str",
+ "inetnum",
+ "log",
+ "octseq",
+ "paste",
+ "rayon",
+ "serde",
+ "tokio",
+]
+
+[[package]]
+name = "routecore"
+version = "0.5.3-dev"
+source = "git+https://github.com/NLnetlabs/routecore#8ed54091a3e44f99805d23c742488205434445ee"
 dependencies = [
  "bytes",
  "chrono",

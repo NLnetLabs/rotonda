@@ -6,6 +6,8 @@ pub mod common;
 pub mod comms;
 pub mod config;
 pub mod http;
+pub mod http_ng;
+pub mod cli;
 pub mod ingress;
 pub mod log;
 pub mod manager;

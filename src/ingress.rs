@@ -3,7 +3,8 @@ use std::net::IpAddr;
 use std::{collections::HashMap, path::PathBuf, sync::atomic::Ordering};
 
 use std::sync::RwLock;
-
+use std::fmt;
+use std::io::Write;
 use inetnum::asn::Asn;
 use routecore::bmp::message::{PeerType, RibType};
 use paste::paste;
@@ -23,6 +24,64 @@ pub struct Register {
 }
 
 pub type IngressId = u32;
+#[derive(serde::Serialize)]
+pub struct IdAndInfo<'a> {
+    ingress_id: IngressId,
+    #[serde(flatten)]
+    ingress_info: &'a IngressInfo,
+}
+
+
+// Marker trait to have one single `T: impl Outputable` we can work with? And at the same time
+// force implementations for all formats?
+pub trait Outputable: ToJson + ToCli  { }
+
+trait ToJson{
+    fn to_json(&self, target: impl std::io::Write) ->  Result<(), OutputError>;
+}
+
+trait ToCli{
+    fn to_cli(&self, target: impl std::io::Write) ->  Result<(), OutputError>;
+}
+
+impl Outputable for IdAndInfo<'_> {}
+impl ToJson for IdAndInfo<'_> {
+    fn to_json(&self, target: impl std::io::Write) ->  Result<(), OutputError> {
+        serde_json::to_writer(target, self).unwrap();
+        Ok(())
+    }
+}
+impl ToCli for IdAndInfo<'_> {
+    fn to_cli(&self, target: impl std::io::Write) ->  Result<(), OutputError> {
+        let mut stdout = std::io::stdout().lock();
+        let _ = writeln!(stdout);
+        let _ = writeln!(stdout, "{}:", self.ingress_id);
+        let _ = writeln!(stdout, "{:#?}:", self.ingress_info);
+        stdout.flush();
+        Ok(())
+    }
+}
+
+pub trait OutputFormat {
+    fn write(&mut self, item: impl Outputable) -> Result<(), OutputError>;
+}
+
+pub struct JsonFormat<W: std::io::Write>(pub W);
+
+impl<W: std::io::Write> OutputFormat for JsonFormat<W> {
+    fn write(&mut self, item: impl Outputable) -> Result<(), OutputError> {
+        item.to_json(&mut self.0)
+    }
+}
+
+pub struct CliFormat<W: std::io::Write>(pub W);
+
+impl<W: std::io::Write> OutputFormat for CliFormat<W> {
+    fn write(&mut self, item: impl Outputable) -> Result<(), OutputError> {
+        item.to_cli(&mut self.0)
+    }
+}
+
 
 // Used to merge IngressInfo structs, called via info_for_field! in update_info
 macro_rules! update_field {
@@ -131,6 +190,13 @@ macro_rules! find_existing_for {
 
 }
 
+pub struct OutputError {
+    error_type: OutputErrorType,
+}
+
+enum OutputErrorType {
+    Other,
+}
 
 impl Register {
     /// Create a new register
@@ -152,6 +218,35 @@ impl Register {
             ));
         }
         res
+    }
+
+    // TODO
+    // we need something like an enum in IngressInfo, describing whether something is BGP or BMP.
+    // The filter for BMP below is problematic when a BMP exporter doesn't give back a
+    // sysName+sysDesc, though we do store those. And we _should_ return them.
+    //
+    // NB on /bgp/neighbors, we return all the information learned via BMP, BGP etc.
+
+    pub fn bgp_neighbors(&self, mut target: impl OutputFormat) -> fmt::Result {
+        let lock = self.info.read().unwrap();
+        for (ingress_id, ingress_info) in lock.iter() {
+            let _ = target.write(
+                IdAndInfo { ingress_id: *ingress_id, ingress_info}
+            );
+        }
+        Ok(())
+    }
+
+    pub fn bmp_routers(&self, mut target: impl OutputFormat) -> fmt::Result {
+        let lock = self.info.read().unwrap();
+        for (ingress_id, ingress_info) in lock.iter().filter(|(_,info)|{
+            info.name.is_some() && info.desc.is_some()
+        }) {
+            let _ = target.write(
+                IdAndInfo { ingress_id: *ingress_id, ingress_info}
+            );
+        }
+        Ok(())
     }
 
     /// Request a new, unique [`IngressId`]

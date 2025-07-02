@@ -1,6 +1,7 @@
 //! Controlling the entire operation.
 
 use crate::common::file_io::TheFileIo;
+use crate::http_ng;
 use crate::roto_runtime::types::FilterName;
 use crate::roto_runtime::types::CompiledRoto;
 use crate::roto_runtime::create_runtime;
@@ -612,6 +613,8 @@ pub struct Manager {
     tracer_processor: Arc<dyn ProcessRequest>,
 
     ingresses: Arc<ingress::Register>,
+
+    http_ng_api: http_ng::Api,
 }
 
 impl Default for Manager {
@@ -629,6 +632,10 @@ impl Manager {
         )));
         let tracer = Arc::new(Tracer::new());
         let ingresses = Arc::new(ingress::Register::new());
+        let http_ng_api = http_ng::Api::new(
+            Vec::with_capacity(1), // interfaces come from config, later on
+            ingresses.clone()
+        );
 
         let (graph_svg_processor, graph_svg_rel_base_url) =
             Self::mk_svg_http_processor(
@@ -657,6 +664,7 @@ impl Manager {
             tracer,
             tracer_processor,
             ingresses,
+            http_ng_api,
         };
 
         // Register the /status/graph endpoint.
@@ -1440,6 +1448,10 @@ impl Manager {
     /// Returns a new reference the the HTTP resources collection.
     pub fn http_resources(&self) -> http::Resources {
         self.http_resources.clone()
+    }
+
+    pub fn http_ng_api_mut(&mut self) -> &mut http_ng::Api {
+        &mut self.http_ng_api
     }
 
     // Create a HTTP processor that renders the SVG unit/target configuration graph.

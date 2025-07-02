@@ -30,34 +30,80 @@ pub struct IdAndInfo<'a> {
     #[serde(flatten)]
     ingress_info: &'a IngressInfo,
 }
+pub struct BmpIdAndInfo<'a>(pub IdAndInfo<'a>);
+pub struct BgpIdAndInfo<'a>(pub IdAndInfo<'a>);
 
 
 // Marker trait to have one single `T: impl Outputable` we can work with? And at the same time
 // force implementations for all formats?
 pub trait Outputable: ToJson + ToCli  { }
+impl<T> Outputable for T where T: ToJson + ToCli { }
 
 trait ToJson{
     fn to_json(&self, target: impl std::io::Write) ->  Result<(), OutputError>;
 }
 
 trait ToCli{
-    fn to_cli(&self, target: impl std::io::Write) ->  Result<(), OutputError>;
+    fn to_cli(&self, target: &mut impl std::io::Write) ->  Result<(), OutputError>;
 }
 
-impl Outputable for IdAndInfo<'_> {}
+//impl Outputable for IdAndInfo<'_> {}
 impl ToJson for IdAndInfo<'_> {
     fn to_json(&self, target: impl std::io::Write) ->  Result<(), OutputError> {
         serde_json::to_writer(target, self).unwrap();
         Ok(())
     }
 }
-impl ToCli for IdAndInfo<'_> {
-    fn to_cli(&self, target: impl std::io::Write) ->  Result<(), OutputError> {
-        let mut stdout = std::io::stdout().lock();
-        let _ = writeln!(stdout);
-        let _ = writeln!(stdout, "{}:", self.ingress_id);
-        let _ = writeln!(stdout, "{:#?}:", self.ingress_info);
-        stdout.flush();
+
+impl ToJson for BgpIdAndInfo<'_> {
+    fn to_json(&self, target: impl std::io::Write) ->  Result<(), OutputError> {
+        serde_json::to_writer(target, &self.0).unwrap();
+        Ok(())
+    }
+}
+impl ToJson for BmpIdAndInfo<'_> {
+    fn to_json(&self, target: impl std::io::Write) ->  Result<(), OutputError> {
+        serde_json::to_writer(target, &self.0).unwrap();
+        Ok(())
+    }
+}
+
+
+// XXX we might want differently formatted output for e.g. bmp routers vs bgp peers, though both
+// are passed in as IdAndInfo. Attempt with BgpIdAndInfo and BmpIdAndInfo below.
+//impl ToCli for IdAndInfo<'_> {
+//    fn to_cli(&self, target: &mut impl std::io::Write) ->  Result<(), OutputError> {
+//        let _ = writeln!(target,
+//            "{:>}\t{:>40}\t{}",
+//            self.ingress_id,
+//            self.ingress_info.remote_addr.map(|ip| ip.to_string()).unwrap_or("no-ip".into()),
+//            self.ingress_info.name.as_ref().unwrap_or(&"no-name".into())
+//        );
+//        target.flush();
+//        Ok(())
+//    }
+//}
+impl ToCli for BgpIdAndInfo<'_> {
+    fn to_cli(&self, target: &mut impl std::io::Write) ->  Result<(), OutputError> {
+        let _ = writeln!(target,
+            "{:>}\t{:>10}\t{:>40}",
+            self.0.ingress_id,
+            self.0.ingress_info.remote_asn.map(|asn| asn.to_string()).unwrap_or("no-asn???".into()),
+            self.0.ingress_info.remote_addr.map(|ip| ip.to_string()).unwrap_or("no-ip".into()),
+        );
+        let _ = target.flush();
+        Ok(())
+    }
+}
+impl ToCli for BmpIdAndInfo<'_> {
+    fn to_cli(&self, target: &mut impl std::io::Write) ->  Result<(), OutputError> {
+        let _ = writeln!(target,
+            "{:>}\t{:>40}\t{}",
+            self.0.ingress_id,
+            self.0.ingress_info.remote_addr.map(|ip| ip.to_string()).unwrap_or("no-ip".into()),
+            self.0.ingress_info.name.as_ref().unwrap_or(&"no-name".into())
+        );
+        let _ = target.flush();
         Ok(())
     }
 }
@@ -229,9 +275,15 @@ impl Register {
 
     pub fn bgp_neighbors(&self, mut target: impl OutputFormat) -> fmt::Result {
         let lock = self.info.read().unwrap();
-        for (ingress_id, ingress_info) in lock.iter() {
+        for (ingress_id, ingress_info) in lock.iter().filter(|(_, info)|{
+            info.ingress_type == Some(IngressType::Bgp) ||
+            info.ingress_type == Some(IngressType::BgpViaBmp) ||
+            info.ingress_type == Some(IngressType::Mrt)
+        }){
             let _ = target.write(
-                IdAndInfo { ingress_id: *ingress_id, ingress_info}
+                BgpIdAndInfo(
+                    IdAndInfo { ingress_id: *ingress_id, ingress_info}
+                )
             );
         }
         Ok(())
@@ -240,10 +292,13 @@ impl Register {
     pub fn bmp_routers(&self, mut target: impl OutputFormat) -> fmt::Result {
         let lock = self.info.read().unwrap();
         for (ingress_id, ingress_info) in lock.iter().filter(|(_,info)|{
-            info.name.is_some() && info.desc.is_some()
+            info.ingress_type == Some(IngressType::Bmp)
+            //info.name.is_some() && info.desc.is_some()
         }) {
             let _ = target.write(
-                IdAndInfo { ingress_id: *ingress_id, ingress_info}
+                BmpIdAndInfo (
+                    IdAndInfo { ingress_id: *ingress_id, ingress_info}
+                )
             );
         }
         Ok(())
@@ -326,7 +381,8 @@ impl Register {
         log::debug!("query: {query:?}");
         for (id, info) in lock.iter() {
             if find_existing_for!(info, query,
-                {parent_ingress, remote_addr}
+                {parent_ingress, remote_addr, ingress_type},
+                {name}
             ) {
                     log::debug!("found matching bmp router, id {id}");
                     return Some((*id, info.clone()))
@@ -343,9 +399,21 @@ impl IngressInfo {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub enum IngressType {
+    Bmp,
+    BgpViaBmp,
+    Bgp,
+    Mrt,
+    Rtr,
+}
+
+// TODO this probably needs a 'state' (connected, disconnected, ..) ?
+// and with that, a last_active timestamp/Instant
 // This constructs the [`IngressInfo`] struct, used as values in the Register.
 info_for_field!(IngressInfo{
    unit_name: String,
+   ingress_type: IngressType,
    parent_ingress: IngressId,
    remote_addr: IpAddr,
    remote_asn: Asn,

@@ -1226,6 +1226,7 @@ impl PeerAware for PeerStates {
         let mut added = false;
 
         let mut query_ingress = ingress::IngressInfo::new()
+            .with_ingress_type(ingress::IngressType::BgpViaBmp)
             .with_parent_ingress(bmp_ingress_id)
             .with_remote_addr(pph.address())
             .with_remote_asn(pph.asn())

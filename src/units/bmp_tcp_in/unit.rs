@@ -442,8 +442,12 @@ impl BmpTcpInRunner {
                         let query_ingress = IngressInfo::new()
                             .with_parent_ingress(unit_ingress_id)
                             .with_remote_addr(client_addr.ip())
+                            .with_ingress_type(ingress::IngressType::Bmp)
                         ;
                         let router_ingress_id;
+                        // TODO the check for existing routers needs to go to where the
+                        // InitiationMessage is processed. There we have the sysName/sysDesc.
+                        // We can't fill up `query_ingress` appropriately here.
                         if let Some((ingress_id, _ingress_info)) = self.ingress_register.find_existing_bmp_router(&query_ingress) {
                             router_ingress_id = ingress_id;
                         } else {

@@ -12,12 +12,12 @@ pub struct CliApi {
 
 impl CliApi {
     pub fn bgp_neighbors(&self) {
-        let stdout = io::stdout().lock();
-        let _ = self.ingress_register.bgp_neighbors(CliFormat(stdout));
+        let mut stdout = io::stdout().lock();
+        let _ = self.ingress_register.bgp_neighbors(CliFormat(&mut stdout));
     }
 
     pub fn bmp_routers(&self) {
-        let stdout = io::stdout().lock();
-        let _ = self.ingress_register.bmp_routers(CliFormat(stdout));
+        let mut stdout = io::stdout().lock();
+        let _ = self.ingress_register.bmp_routers(CliFormat(&mut stdout));
     }
 }

@@ -72,6 +72,11 @@ impl BmpStateDetails<Initiating> {
         match bmp_msg {
             // already verified upstream
             BmpMsg::InitiationMessage(msg) => {
+                // TODO we need to do the find_existing_bmp_router check here instead of in the
+                // handler/unit, because here we have the sysName to use in the ingress query.
+                // That means that registering a new ID should also move here.
+                // With that, we'll have no ingress ID for this tcp connection until this point,
+                // but that should be fine.
                 self.ingress_register.update_info(
                     self.ingress_id,
                     ingress::IngressInfo::new()

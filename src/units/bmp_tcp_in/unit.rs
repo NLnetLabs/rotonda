@@ -448,6 +448,7 @@ impl BmpTcpInRunner {
                         // TODO the check for existing routers needs to go to where the
                         // InitiationMessage is processed. There we have the sysName/sysDesc.
                         // We can't fill up `query_ingress` appropriately here.
+                        // So, this check _and_ the .register() needs to go into initiating.rs
                         if let Some((ingress_id, _ingress_info)) = self.ingress_register.find_existing_bmp_router(&query_ingress) {
                             router_ingress_id = ingress_id;
                         } else {

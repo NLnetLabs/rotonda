@@ -1232,8 +1232,23 @@ impl PeerAware for PeerStates {
             .with_remote_asn(pph.asn())
             .with_rib_type(pph.rib_type())
             .with_peer_type(pph.peer_type())
-            .with_distinguisher(TryInto::<[u8; 8]>::try_into(&pph.distinguisher()[..8]).unwrap())
         ;
+        use routecore::bmp::message::PeerType;
+        match pph.peer_type() {
+            PeerType::GlobalInstance => { /* no Peer Distinguisher to set */ },
+            PeerType::RdInstance |
+            PeerType::LocalInstance |
+            PeerType::LocalRibInstance =>  {
+                query_ingress = query_ingress
+                    .with_distinguisher(TryInto::<[u8; 8]>::try_into(&pph.distinguisher()[..8]).unwrap());
+            },
+            PeerType::Reserved |
+            PeerType::Unassigned(_) |
+            PeerType::Experimental(_) |
+            PeerType::Unimplemented(_) => { 
+                warn!("Reserved/Unassigned Peer Type");
+            },
+        }
 
         if let Some(vrf_name) = tlv_iter
             .find(|t| t.typ() == InformationTlvType::VrfTableName) {

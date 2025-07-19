@@ -12,7 +12,7 @@ use crate::{
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use roto::Verdict;
-use std::{collections::{HashMap, HashSet}, io::prelude::*, sync::{Mutex, RwLock}};
+use std::{collections::{HashMap, HashSet}, io::prelude::*, sync::{Mutex, RwLock, Weak}};
 use rotonda_store::{errors::PrefixStoreError, match_options::{IncludeHistory, MatchOptions, MatchType, QueryResult}, prefix_record::{Record, RecordSet, RouteStatus}, rib::{config::MemoryOnlyConfig, StarCastRib}, stats::UpsertReport};
 use std::io::prelude::*;
 
@@ -339,6 +339,12 @@ impl RibUnitRunner {
                 http_processor.clone(),
                 &http_api_path,
             );
+        }
+        if let Some(arc) = Weak::upgrade(&component.http_ng_api()) {
+            debug!("got an arc from Weak::upgrade, calling add_path");
+            arc.lock().unwrap().add_path();
+        } else {
+            debug!("no arc from Weak::upgrade");
         }
 
         let roto_compiled = component.roto_compiled().clone();

@@ -180,8 +180,11 @@ fn run_with_config(
         .http
         .run(manager.metrics(), manager.http_resources())?;
 
-    manager.http_ng_api_mut().set_interfaces(config.http_ng_listen.to_vec());
-    manager.http_ng_api_mut().start();
+    //manager.http_ng_api_mut().set_interfaces(config.http_ng_listen.to_vec());
+    manager.http_ng_api().lock().unwrap().set_interfaces(config.http_ng_listen.to_vec());
+    // the .start() should be called after all units/components are ready
+    //manager.http_ng_api_mut().start();
+    manager.http_ng_api().lock().unwrap().start();
 
 
     manager.spawn(&mut config);

@@ -415,6 +415,14 @@ pub enum IngressType {
     Rtr,
 }
 
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+pub enum IngressState {
+    Connected,
+    Disconnected,
+    NonNetwork,
+}
+
 // TODO this probably needs a 'state' (connected, disconnected, ..) ?
 // and with that, a last_active timestamp/Instant
 // This constructs the [`IngressInfo`] struct, used as values in the Register.
@@ -422,6 +430,7 @@ info_for_field!(IngressInfo{
    unit_name: String,
    ingress_type: IngressType,
    parent_ingress: IngressId,
+   state: IngressState,
    remote_addr: IpAddr,
    remote_asn: Asn,
    rib_type: RibType,

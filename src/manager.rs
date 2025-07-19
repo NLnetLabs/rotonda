@@ -65,6 +65,8 @@ pub struct Component {
 
     /// A reference to the ingress sources.
     ingresses: Arc<ingress::Register>,
+
+    http_ng_api: Weak<Mutex<http_ng::Api>>,
 }
 
 #[cfg(test)]
@@ -79,6 +81,7 @@ impl Default for Component {
             roto_compiled: Default::default(),
             tracer: Default::default(),
             ingresses: Default::default(),
+            http_ng_api: Default::default(),
         }
     }
 }
@@ -94,6 +97,7 @@ impl Component {
         roto_compiled: Option<Arc<CompiledRoto>>,
         tracer: Arc<Tracer>,
         ingresses: Arc<ingress::Register>,
+        http_ng_api: Weak<Mutex<http_ng::Api>>,
     ) -> Self {
         Component {
             name: name.into(),
@@ -104,6 +108,7 @@ impl Component {
             roto_compiled,
             tracer,
             ingresses,
+            http_ng_api,
         }
     }
 
@@ -181,6 +186,10 @@ impl Component {
 
     pub fn ingresses(&self) -> Arc<ingress::Register> {
         self.ingresses.clone()
+    }
+
+    pub fn http_ng_api(&self) -> Weak<Mutex<http_ng::Api>> {
+        self.http_ng_api.clone()
     }
 }
 
@@ -614,7 +623,7 @@ pub struct Manager {
 
     ingresses: Arc<ingress::Register>,
 
-    http_ng_api: http_ng::Api,
+    http_ng_api: Arc<Mutex<http_ng::Api>>,
 }
 
 impl Default for Manager {
@@ -632,10 +641,10 @@ impl Manager {
         )));
         let tracer = Arc::new(Tracer::new());
         let ingresses = Arc::new(ingress::Register::new());
-        let http_ng_api = http_ng::Api::new(
+        let http_ng_api = Arc::new(Mutex::new(http_ng::Api::new(
             Vec::with_capacity(1), // interfaces come from config, later on
             ingresses.clone()
-        );
+        )));
 
         let (graph_svg_processor, graph_svg_rel_base_url) =
             Self::mk_svg_http_processor(
@@ -1140,6 +1149,7 @@ impl Manager {
                 self.roto_compiled.clone(),
                 self.tracer.clone(),
                 self.ingresses.clone(),
+                Arc::downgrade(&self.http_ng_api),
             );
 
             let target_type = std::mem::discriminant(&new_target);
@@ -1218,6 +1228,7 @@ impl Manager {
                 self.roto_compiled.clone(),
                 self.tracer.clone(),
                 self.ingresses.clone(),
+                Arc::downgrade(&self.http_ng_api),
             );
 
             let unit_type = std::mem::discriminant(&new_unit);
@@ -1450,9 +1461,14 @@ impl Manager {
         self.http_resources.clone()
     }
 
-    pub fn http_ng_api_mut(&mut self) -> &mut http_ng::Api {
-        &mut self.http_ng_api
+    pub fn http_ng_api(&mut self) -> &Arc<Mutex<http_ng::Api>> {
+        &self.http_ng_api
     }
+
+    //pub fn http_ng_api_mut(&mut self) -> &mut http_ng::Api {
+    //    //&mut self.http_ng_api
+    //    &self.http_ng_api.lock().unwrap()
+    //}
 
     // Create a HTTP processor that renders the SVG unit/target configuration graph.
     fn mk_svg_http_processor(

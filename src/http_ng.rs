@@ -1,11 +1,13 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use axum::{extract::{Path, State}, routing::get, response::IntoResponse};
+use log::debug;
 
 use crate::{cli::CliApi, ingress::{self, JsonFormat}};
 
 
 
+#[derive(Default)]
 pub struct Api {
     interfaces: Vec<SocketAddr>,
     ingress_register: Arc<ingress::Register>,
@@ -50,6 +52,7 @@ impl Api {
 
 
     pub fn add_path(&mut self)  {
+        debug!("in add_path");
         self.router = self.router.clone().route("/new", get(|| async { "jeej new"}));
     }
 

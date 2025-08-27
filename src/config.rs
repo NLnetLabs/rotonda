@@ -60,8 +60,8 @@ pub struct Config {
     #[serde(flatten)]
     pub http: http::Server,
 
-    #[serde_as(deserialize_as = "OneOrMany<_>")]
-    pub http_ng_listen: Vec<SocketAddr>,
+    /// The new HTTP server configuration.
+    pub http_ng_listen: Option<Vec<SocketAddr>>,
 }
 
 impl Config {

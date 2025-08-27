@@ -482,6 +482,7 @@ impl RouterHandler {
                         // A BMP initiation message received after the
                         // initiation phase will result in this type of
                         // message.
+                        // LH: is this comment still correct?
                         self.check_update_router_id(
                             addr,
                             ingress_id, //&source_id,

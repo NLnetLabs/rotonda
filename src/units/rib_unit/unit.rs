@@ -340,11 +340,15 @@ impl RibUnitRunner {
                 &http_api_path,
             );
         }
-        if let Some(arc) = Weak::upgrade(&component.http_ng_api()) {
-            debug!("got an arc from Weak::upgrade, calling add_path");
-            arc.lock().unwrap().add_path();
+
+        if let Ok(mut api) = component.http_ng_api_arc().lock() {
+            api.set_rib(rib.load().clone());
+            api.add_get("/ipv4unicast/ingress/{ingress_id}",
+                super::http_ng::ipv4unicast_for_ingress
+            );
+
         } else {
-            debug!("no arc from Weak::upgrade");
+            debug!("could not get lock on HTTP API");
         }
 
         let roto_compiled = component.roto_compiled().clone();
@@ -725,6 +729,12 @@ impl RibUnitRunner {
                 ingress_ids
                     .iter()
                     .for_each(|&id| self.signal_withdraw(id, None));
+            }
+            
+            Update::IngressReappeared(ingress_id) => {
+                debug!("Got IngressReappeared for {ingress_id}");
+                self.rib.load().mark_ingress_active(ingress_id);
+                self.rib.load().mark_ingress_active(ingress_id);
             }
 
             Update::Withdraw(ingress_id, maybe_afisafi) => {

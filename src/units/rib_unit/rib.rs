@@ -48,6 +48,7 @@ use crate::{
 
 type Store = StarCastRib<RotondaPaMap, MemoryOnlyConfig>;
 
+#[derive(Clone)]
 pub struct Rib {
     unicast: Arc<Option<Store>>,
     multicast: Arc<Option<Store>>,
@@ -181,7 +182,7 @@ impl Rib {
             route_status,
             val.rotonda_pamap().clone(),
         );
-
+        
         let res = store.insert(
             prefix, pubrec, None, // Option<TBI>
         );
@@ -303,6 +304,41 @@ impl Rib {
         }
     }
 
+    pub fn mark_ingress_active(
+        &self,
+        ingress_id: IngressId,
+    ) {
+        if let Err(e) = (*self.unicast)
+            .as_ref()
+                .unwrap()
+                .mark_mui_as_active_v4(ingress_id)
+        {
+            error!("failed to mark MUI as active in unicast v4 rib: {e}")
+        }
+        if let Err(e) = (*self.unicast)
+            .as_ref()
+                .unwrap()
+                .mark_mui_as_active_v6(ingress_id)
+        {
+            error!("failed to mark MUI as active in unicast v6 rib: {e}")
+        }
+        if let Err(e) = (*self.multicast)
+            .as_ref()
+                .unwrap()
+                .mark_mui_as_active_v4(ingress_id)
+        {
+            error!("failed to mark MUI as active in multicast v4 rib: {e}")
+        }
+        if let Err(e) = (*self.multicast)
+            .as_ref()
+                .unwrap()
+                .mark_mui_as_active_v6(ingress_id)
+        {
+            error!("failed to mark MUI as active in multicast v6 rib: {e}")
+        }
+
+    }
+
     pub fn match_prefix(
         &self,
         prefix: &Prefix,
@@ -345,7 +381,9 @@ impl Rib {
         let store = (*self.unicast)
             .as_ref()
             .ok_or(PrefixStoreError::StoreNotReadyError.to_string())?;
+
         let include_withdrawals = false;
+
         let mut res = store
             .iter_records_for_mui_v4(ingress_id, include_withdrawals, guard)
             .collect::<FatalResult<Vec<_>>>()

@@ -185,6 +185,8 @@ impl MrtInRunner {
                     );
                 }
             }
+            // XXX signal a (re)appearing peer using an Update::IngressReappeared(..) ?
+            
             (_,_) => {
                 debug!("State Change: {} -> {} in MRT, not doing anything",
                     sc.old_state(), sc.new_state()

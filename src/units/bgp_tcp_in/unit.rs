@@ -357,6 +357,8 @@ impl BgpTcpInRunner {
                                 child_status_reporter,
                                 arc_self.live_sessions.clone(),
                                 arc_self.ingresses.clone(),
+                                // XXX we need to do a find_existing_peer here instead of blindly
+                                // doing a .register().
                                 arc_self.ingresses.register(),
                             );
                         } else {

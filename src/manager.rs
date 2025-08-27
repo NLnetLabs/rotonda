@@ -66,7 +66,7 @@ pub struct Component {
     /// A reference to the ingress sources.
     ingresses: Arc<ingress::Register>,
 
-    http_ng_api: Weak<Mutex<http_ng::Api>>,
+    http_ng_api: Arc<Mutex<http_ng::Api>>,
 }
 
 #[cfg(test)]
@@ -97,7 +97,7 @@ impl Component {
         roto_compiled: Option<Arc<CompiledRoto>>,
         tracer: Arc<Tracer>,
         ingresses: Arc<ingress::Register>,
-        http_ng_api: Weak<Mutex<http_ng::Api>>,
+        http_ng_api: Arc<Mutex<http_ng::Api>>,
     ) -> Self {
         Component {
             name: name.into(),
@@ -188,7 +188,7 @@ impl Component {
         self.ingresses.clone()
     }
 
-    pub fn http_ng_api(&self) -> Weak<Mutex<http_ng::Api>> {
+    pub fn http_ng_api_arc(&self) -> Arc<Mutex<http_ng::Api>> {
         self.http_ng_api.clone()
     }
 }
@@ -1149,7 +1149,7 @@ impl Manager {
                 self.roto_compiled.clone(),
                 self.tracer.clone(),
                 self.ingresses.clone(),
-                Arc::downgrade(&self.http_ng_api),
+                self.http_ng_api.clone(),
             );
 
             let target_type = std::mem::discriminant(&new_target);
@@ -1228,7 +1228,7 @@ impl Manager {
                 self.roto_compiled.clone(),
                 self.tracer.clone(),
                 self.ingresses.clone(),
-                Arc::downgrade(&self.http_ng_api),
+                self.http_ng_api.clone(),
             );
 
             let unit_type = std::mem::discriminant(&new_unit);
@@ -1302,6 +1302,8 @@ impl Manager {
         }
 
         let graph_svg_data = self.graph_svg_data.clone();
+        let arc_api = self.http_ng_api_arc();
+
         crate::tokio::spawn("coordinator", async move {
             // Wait for all running units and targets to become ready and to
             // finish supplying responses to report-link commands, then log a
@@ -1349,6 +1351,16 @@ impl Manager {
             }
 
             graph_svg_data.swap(Arc::new((Instant::now(), reports)));
+            // XXX
+            // so we need to call (re)start here, because at this point we know for sure all other
+            // Rotonda components had a chance to add their paths to the axum router
+            // BUT
+            // on SIGHUP, we also need to apply (changes to) the main config file, e.g. interfaces
+            // to listen on, which does not happen here currently.
+            // By doing that in the signal handler in main.rs, we effectively reload the http
+            // servers twice, which is not nice.
+            
+            arc_api.lock().unwrap().restart();
         });
     }
 
@@ -1461,14 +1473,25 @@ impl Manager {
         self.http_resources.clone()
     }
 
-    pub fn http_ng_api(&mut self) -> &Arc<Mutex<http_ng::Api>> {
-        &self.http_ng_api
+    /// Returns a reference to the shared HTTP API
+    pub fn http_ng_api_arc(&mut self) -> Arc<Mutex<http_ng::Api>> {
+        self.http_ng_api.clone()
     }
 
-    //pub fn http_ng_api_mut(&mut self) -> &mut http_ng::Api {
-    //    //&mut self.http_ng_api
-    //    &self.http_ng_api.lock().unwrap()
-    //}
+    /// Reload the HTTP configuration (listening interfaces)
+    pub fn reload_http_ng_config(&mut self, config: &Config) {
+        if let Ok(mut lock) = self.http_ng_api.lock(){
+           lock.set_interfaces(config.http_ng_listen.clone().into_iter().flatten());
+        }
+    }
+
+    /// Restart the HTTP API based on the passed Rotonda `Config`
+    pub fn restart_http_ng_with_config(&mut self, config: &Config) {
+        if let Ok(mut lock) = self.http_ng_api.lock(){
+           lock.set_interfaces(config.http_ng_listen.clone().into_iter().flatten());
+           lock.restart();
+        }
+    }
 
     // Create a HTTP processor that renders the SVG unit/target configuration graph.
     fn mk_svg_http_processor(

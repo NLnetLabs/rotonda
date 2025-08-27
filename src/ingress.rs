@@ -266,13 +266,7 @@ impl Register {
         res
     }
 
-    // TODO
-    // we need something like an enum in IngressInfo, describing whether something is BGP or BMP.
-    // The filter for BMP below is problematic when a BMP exporter doesn't give back a
-    // sysName+sysDesc, though we do store those. And we _should_ return them.
-    //
     // NB on /bgp/neighbors, we return all the information learned via BMP, BGP etc.
-
     pub fn bgp_neighbors(&self, mut target: impl OutputFormat) -> fmt::Result {
         let lock = self.info.read().unwrap();
         for (ingress_id, ingress_info) in lock.iter().filter(|(_, info)|{
@@ -293,7 +287,6 @@ impl Register {
         let lock = self.info.read().unwrap();
         for (ingress_id, ingress_info) in lock.iter().filter(|(_,info)|{
             info.ingress_type == Some(IngressType::Bmp)
-            //info.name.is_some() && info.desc.is_some()
         }) {
             let _ = target.write(
                 BmpIdAndInfo (
@@ -376,7 +369,7 @@ impl Register {
     ///
     /// NB: ideally the sysName is also included when looking for existing routers. This is
     /// currently not trivial without a larger refactor. As a result, multiple BMP exporters coming
-    /// form the same remote IP address connecting to the same Rotonda BMP unit will be seen as one
+    /// from the same remote IP address connecting to the same Rotonda BMP unit will be seen as one
     /// and the same, potentionally causing confusing issues. The workaround is not checking for
     /// existing routers, causing increased memory use. As multiple exporters coming from one and
     /// the same IP address is presumably unlikely, we keep the check as-is for now.

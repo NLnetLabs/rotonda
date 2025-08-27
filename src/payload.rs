@@ -346,6 +346,8 @@ pub enum Update {
     // connection goes down and everything for the monitored sessions has to
     // be marked Withdrawn.
     WithdrawBulk(SmallVec<[IngressId; 8]>),
+    // Used to signal the RibUnit a MUI should be set to active again.
+    IngressReappeared(IngressId),
     QueryResult(
         Uuid,
         Result<QueryResult<crate::payload::RotondaPaMap>, String>,
@@ -371,6 +373,7 @@ impl Update {
             }
             Update::Withdraw(_ingress_id, _maybe_afisafi) => smallvec![],
             Update::WithdrawBulk(..) => smallvec![],
+            Update::IngressReappeared(..) => smallvec![],
             Update::QueryResult(_, _) => smallvec![],
             Update::UpstreamStatusChange(_) => smallvec![],
             Update::OutputStream(..) => smallvec![],

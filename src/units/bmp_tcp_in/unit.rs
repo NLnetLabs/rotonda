@@ -12,7 +12,7 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use futures::{future::select, pin_mut, Future};
-use log::warn;
+use log::{debug, warn};
 use routecore::bmp::message::Message as BmpMessage;
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
@@ -30,20 +30,13 @@ use crate::{
         },
         status_reporter::Chainable,
         unit::UnitActivity,
-    },
-    comms::{Gate, GateStatus, Terminated},
-    ingress::{self, IngressId, IngressInfo},
-    manager::{Component, WaitPoint},
-    roto_runtime::{
+    }, comms::{Gate, GateStatus, Terminated}, ingress::{self, IngressId, IngressInfo}, manager::{Component, WaitPoint}, payload::Update, roto_runtime::{
         types::{
             CompiledRoto, FilterName, Provenance, RotoOutputStream,
             RotoScripts
         },
         Ctx
-    },
-    tokio::TokioTaskMetrics,
-    tracing::Tracer,
-    units::Unit
+    }, tokio::TokioTaskMetrics, tracing::Tracer, units::Unit
 };
 
 use super::{
@@ -451,6 +444,7 @@ impl BmpTcpInRunner {
                         // So, this check _and_ the .register() needs to go into initiating.rs
                         if let Some((ingress_id, _ingress_info)) = self.ingress_register.find_existing_bmp_router(&query_ingress) {
                             router_ingress_id = ingress_id;
+                            self.gate.update_data(Update::IngressReappeared(ingress_id)).await;
                         } else {
                             router_ingress_id = self.ingress_register.register();
                             self.ingress_register.update_info(router_ingress_id, query_ingress);

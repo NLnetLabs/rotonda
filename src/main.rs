@@ -107,6 +107,14 @@ async fn handle_signals(
                                         );
                                     }
                                     Ok((_source, mut config)) => {
+                                        // XXX spawn() already restarts the http servers, but it
+                                        // does not apply the config (so new/altered
+                                        // http_ng_interfaces are not respected)
+                                        // calling restart_http_ng_with_config then _again_
+                                        // restarts the http tasks.
+                                        // maybe we should go for a 'reload_config' and then let
+                                        // spawn do the rest?
+                                        manager.reload_http_ng_config(&config);
                                         manager.spawn(&mut config);
                                         info!(
                                             "Configuration changes applied"
@@ -180,14 +188,10 @@ fn run_with_config(
         .http
         .run(manager.metrics(), manager.http_resources())?;
 
-    //manager.http_ng_api_mut().set_interfaces(config.http_ng_listen.to_vec());
-    manager.http_ng_api().lock().unwrap().set_interfaces(config.http_ng_listen.to_vec());
-    // the .start() should be called after all units/components are ready
-    //manager.http_ng_api_mut().start();
-    manager.http_ng_api().lock().unwrap().start();
-
-
+    manager.http_ng_api_arc().lock().unwrap().set_interfaces(config.http_ng_listen.clone().into_iter().flatten());
     manager.spawn(&mut config);
+    manager.http_ng_api_arc().lock().unwrap().start();
+
     Ok(runtime)
 }
 

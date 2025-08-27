@@ -16,7 +16,7 @@ use routecore::{
 use smallvec::SmallVec;
 
 use crate::{
-    ingress,
+    ingress::{self, IngressId},
     payload::{Payload, Update},
     units::bmp_tcp_in::state_machine::machine::{
         BmpStateIdx, PeerState, PeerStates,
@@ -216,7 +216,7 @@ impl PeerAware for Updating {
         ingress_register: Arc<ingress::Register>,
         bmp_ingress_id: ingress::IngressId,
         tlv_iter: InformationTlvIter,
-    ) -> bool {
+    ) -> (bool, Option<IngressId>) {
         self.peer_states.add_peer_config(
             pph,
             session_config,

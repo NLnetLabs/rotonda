@@ -16,6 +16,7 @@ use routecore::bmp::message::{
 };
 use smallvec::SmallVec;
 
+use crate::ingress::IngressId;
 use crate::{
     ingress,
     payload::{Payload, Update},
@@ -381,7 +382,7 @@ impl PeerAware for Dumping {
         ingress_register: Arc<ingress::Register>,
         bmp_ingress_id: ingress::IngressId,
         tlv_iter: InformationTlvIter,
-    ) -> bool {
+    ) -> (bool, Option<IngressId>) {
         self.peer_states.add_peer_config(
             pph,
             session_config,

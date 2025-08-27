@@ -59,6 +59,7 @@ use std::{
     sync::Arc,
 };
 
+use crate::ingress::IngressId;
 use crate::{
     common::{
         routecore_extra::generate_alternate_config,
@@ -403,8 +404,11 @@ pub trait PeerAware {
     /// correctly parse and interpret subsequent messages for this peer. EOR
     /// is an abbreviation of End-of-RIB [1].
     ///
-    /// Returns true if the configuration was recorded, false if configuration
-    /// for the peer already exists.
+    /// Returns a tuple of
+    ///   * a boolean which if true signals the configuration was recorded, false if configuration
+    ///   for the peer already exists.
+    ///   * optionally an `IngressId`, if a peer was found in the Ingress registry (i.e. this is a
+    ///   reconnecting peer).
     ///
     /// [1]: https://datatracker.ietf.org/doc/html/rfc4724#section-2
     fn add_peer_config(
@@ -415,7 +419,7 @@ pub trait PeerAware {
         ingress_register: Arc<ingress::Register>,
         bmp_ingress_id: ingress::IngressId,
         tlv_iter: InformationTlvIter,
-    ) -> bool;
+    ) -> (bool, Option<IngressId>);
 
     fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState>;
 
@@ -509,18 +513,20 @@ where
 
         let tlv_iter = msg.information_tlvs();
 
-        if !self.details.add_peer_config(
+        let (peer_added, existing_peer_ingress_id) =  self.details.add_peer_config(
             pph,
             config,
             eor_capable,
             self.ingress_register.clone(),
             self.ingress_id,
             tlv_iter,
-        ) {
+        );
+        if !peer_added {
             // This is unexpected. How can we already have an entry in
             // the map for a peer which is currently up (i.e. we have
             // already seen a PeerUpNotification for the peer but have
             // not seen a PeerDownNotification for the same peer)?
+            debug!("peer is already up! returning from peer_up() in BMP fsm");
             return self.mk_invalid_message_result(
                 format!(
                     "PeerUpNotification received for peer that is already 'up': {}",
@@ -537,7 +543,11 @@ where
         self.status_reporter
             .peer_up(self.router_id.clone(), eor_capable);
 
-        self.mk_other_result()
+        if let Some(existing_peer_ingress_id) = existing_peer_ingress_id {
+            self.mk_routing_update_result(Update::IngressReappeared(existing_peer_ingress_id))
+        } else {
+            self.mk_other_result()
+        }
     }
 
     pub fn peer_down(
@@ -1222,7 +1232,7 @@ impl PeerAware for PeerStates {
         ingress_register: Arc<ingress::Register>,
         bmp_ingress_id: ingress::IngressId,
         mut tlv_iter: InformationTlvIter,
-    ) -> bool {
+    ) -> (bool, Option<IngressId>) {
         let mut added = false;
 
         let mut query_ingress = ingress::IngressInfo::new()
@@ -1258,12 +1268,17 @@ impl PeerAware for PeerStates {
         }
 
         let peer_ingress_id;
+        let existing_peer_ingress_id;
         if let Some((ingress_id, _ingress_info)) =
             ingress_register.find_existing_peer(&query_ingress)
         {
+            debug!("got existing ingress_id for BGP in BMP peer {}", ingress_id); 
             peer_ingress_id = ingress_id;
+            existing_peer_ingress_id = Some(ingress_id);
         } else {
+            debug!("no existing ingress_id for BGP in BMP");
             peer_ingress_id = ingress_register.register();
+            existing_peer_ingress_id = None;
             ingress_register.update_info(peer_ingress_id, query_ingress);
         }
 
@@ -1286,7 +1301,7 @@ impl PeerAware for PeerStates {
                 ingress_id: peer_ingress_id,
             }
         });
-        added
+        (added, existing_peer_ingress_id)
     }
 
     fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState> {

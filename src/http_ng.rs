@@ -8,6 +8,7 @@ use crate::{cli::CliApi, ingress::{self, JsonFormat}, units::rib_unit::rib::Rib}
 
 
 
+#[derive(Default)]
 pub struct Api {
     /// Interfaces to listen on
     interfaces: Vec<SocketAddr>,

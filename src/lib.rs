@@ -19,5 +19,7 @@ pub mod tokio;
 pub mod tracing;
 pub mod units;
 
+pub mod representation;
+
 pub mod tests;
 pub use tests::util::bgp;

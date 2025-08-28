@@ -1,10 +1,11 @@
-use std::{cell::OnceCell, net::SocketAddr, sync::{Arc, OnceLock}};
+use std::{net::SocketAddr, sync::{Arc, OnceLock}};
 
 use axum::{extract::{Path, State}, routing::get, response::IntoResponse};
 use log::{debug, error};
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::{cli::CliApi, ingress::{self, JsonFormat}, units::rib_unit::rib::Rib};
+use crate::{ingress::{self, http_ng::IngressApi}, units::rib_unit::rib::Rib};
+use crate::representation::JsonFormat;
 
 
 
@@ -70,7 +71,7 @@ impl Api {
             serve_handles: vec![],
         };
 
-        res.ingress_register_routes();
+        IngressApi::register_routes(&mut res);
         res
     }
 
@@ -167,38 +168,4 @@ impl Api {
         self.start();
     }
 
-
-
-    // Add ingress register specific endpoints
-    fn ingress_register_routes(&mut self) {
-        self.router = self.router.clone()
-            .route("/bgp/neighbors", get(IngressApi::bgp_neighbors))
-            // TODO: /bmp/routers is not (yet) part of our Yang model.
-            .route("/bmp/routers", get(IngressApi::bmp_routers))
-        ;
-    }
-}
-
-struct IngressApi { }
-
-impl IngressApi {
-    async fn bgp_neighbors(state: State<ApiState>) -> Result<Vec<u8>, String> {
-
-            // trigger the CLI one as well just to test it
-            CliApi{ ingress_register: state.ingress_register.clone()}.bgp_neighbors();
-
-            let mut res = Vec::new();
-            state.ingress_register.bgp_neighbors(JsonFormat(&mut res));
-            Ok(res.into())
-        }
-
-    async fn bmp_routers(state: State<ApiState>) -> Result<Vec<u8>, String> {
-
-            // trigger the CLI one as well just to test it
-            CliApi{ ingress_register: state.ingress_register.clone()}.bmp_routers();
-
-            let mut res = Vec::new();
-            state.ingress_register.bmp_routers(JsonFormat(&mut res));
-            Ok(res.into())
-    }
 }

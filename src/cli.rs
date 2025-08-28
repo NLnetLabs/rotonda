@@ -3,7 +3,7 @@
 
 use std::{io, sync::Arc};
 
-use crate::ingress::{self, CliFormat};
+use crate::{ingress, representation::CliFormat};
 
 pub struct CliApi {
     pub ingress_register: Arc<ingress::Register>,

@@ -7,7 +7,7 @@ pub struct IngressApi { }
 impl IngressApi {
 
 
-    //// Add ingress register specific endpoints to a HTTP API
+    /// Add ingress register specific endpoints to a HTTP API
     pub fn register_routes(router: &mut Api) {
         router.add_get("/bgp/neighbors", Self::bgp_neighbors);
         router.add_get("/bmp/routers", Self::bmp_routers);

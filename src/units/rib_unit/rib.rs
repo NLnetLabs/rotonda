@@ -15,7 +15,7 @@ use rotonda_store::{
     epoch,
     errors::{FatalResult, PrefixStoreError},
     match_options::{MatchOptions, QueryResult},
-    prefix_record::{Meta, PrefixRecord, Record, RouteStatus},
+    prefix_record::{Meta, PrefixRecord, Record, RecordSet, RouteStatus},
     rib::{config::MemoryOnlyConfig, StarCastRib},
     stats::UpsertReport,
 };
@@ -25,13 +25,13 @@ use routecore::bgp::{
     path_selection::{OrdRoute, Rfc4271, TiebreakerInfo},
     types::AfiSafiType,
 };
-use serde::Serialize;
+use serde::{ser::{SerializeSeq, SerializeStruct}, Serialize, Serializer};
 
 use crate::{
-    ingress::IngressId,
-    payload::{RotondaPaMap, RotondaRoute, RouterId},
-    roto_runtime::types::Provenance,
+    ingress::IngressId, payload::{RotondaPaMap, RotondaRoute, RouterId}, representation::{OutputFormat, ToCli, ToJson}, roto_runtime::types::Provenance
 };
+
+use super::{http_ng::Include, QueryFilter};
 
 // -------- PhysicalRib ------------------------------------------------------
 
@@ -408,7 +408,301 @@ impl Rib {
         );
         Ok(res)
     }
+
+
+    //
+    // new methods returning results to be used by both HTTP API and CLI, i.e. types that will need
+    // impls for ToJson and ToCli so they can be impl OutputFormat
+    //
+    // For now, all these new methods are prefixed search_
+    //
+
+    /// Query the Store for routes based on Nlri/prefix
+    pub fn search_routes(
+        &self,
+        afisafi: AfiSafiType,
+        //nlri: Nlri<&[u8]>,
+        nlri: Prefix, // change to Nlri or equivalent after routecore refactor
+        //match_options: MatchOptions
+        filter: QueryFilter,
+    //) -> Result<QueryResult<RotondaPaMap>, String> {
+    ) -> Result<SearchResult<RotondaPaMap>, String> {
+        let guard = &epoch::pin();
+
+        let store = match afisafi {
+            AfiSafiType::Ipv4Unicast |
+            AfiSafiType::Ipv6Unicast => {
+                (*self.unicast)
+                    .as_ref()
+                    .ok_or(PrefixStoreError::StoreNotReadyError.to_string())?
+                }
+            AfiSafiType::Ipv4Multicast |
+            AfiSafiType::Ipv6Multicast => {
+                (*self.multicast)
+                    .as_ref()
+                    .ok_or(PrefixStoreError::StoreNotReadyError.to_string())?
+            }
+            u => {
+                return Err(format!("address family {u} unsupported"));
+            }
+        };
+
+        let match_options = &MatchOptions {
+            match_type: rotonda_store::match_options::MatchType::ExactMatch,
+            include_withdrawn: false,
+            include_less_specifics: filter.include.contains(&Include::LessSpecifics),
+            include_more_specifics: filter.include.contains(&Include::MoreSpecifics),
+            mui: filter.ingress_id,
+            include_history: rotonda_store::match_options::IncludeHistory::None,
+        };
+
+        store
+            .match_prefix(&nlri, match_options, guard)
+            .map(|res| SearchResult { query_result: res } )
+            .map_err(|err| err.to_string())
+
+    }
+
+    pub fn search_and_output_routes(
+        &self,
+        mut target: impl OutputFormat,
+        afisafi: AfiSafiType,
+        //nlri: Nlri<&[u8]>,
+        nlri: Prefix, // change to Nlri or equivalent after routecore refactor
+        //match_options: MatchOptions
+        filter: QueryFilter,
+    ) -> Result<(), String> {
+        match self.search_routes(afisafi, nlri, filter) {
+            Ok(search_results) => {
+                let _ = target.write(search_results);
+            },
+            Err(e) => { return Err(format!("store error: {e}").into()); }
+        }
+
+        Ok(())
+    }
+
+    /// Query the store based on `IngressId`/MUI
+    pub fn search_routes_for_ingress(
+        afisafi: AfiSafiType,
+        nlri: Nlri<&[u8]>,
+        ingress_id: IngressId,
+        match_options: MatchOptions
+    ) -> Result<SearchResult<RotondaPaMap>, String> {
+        todo!()
+    }
+
+    /// Query the store based on Origin AS in the AS_PATH
+    pub fn search_routes_for_origin_as(
+        afisafi: AfiSafiType,
+        origin_as: Asn,
+        match_options: MatchOptions
+    ) -> Result<SearchResult<RotondaPaMap>, String> {
+        todo!()
+    }
 }
+
+/// Wrapper around `QueryResult` from rotonda-store
+///
+/// This wrapper is used to impl the necessary traits on, to enable consistent representation
+/// between CLI, HTTP API, etc.
+pub struct SearchResult<M: Meta> {
+    query_result: QueryResult<M>
+}
+
+impl<M: Meta + Serialize> Serialize for SearchResult<M> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+
+        // TODO:
+        // - ingress data (include in Arc<Register> in SearchResults wrapper?
+        // X rpki rov status
+        // X route status
+        // - path attributes
+        //      X first go based on existing Serialize impl
+        //      - have a good look on what we did vs what we now think is best
+        //      - especially communities:
+        //          - old style was 241M vs ~90M for the 25M raw BMP input data
+        //          - can we provide multiple 'styles' of output (via some query param), e.g.
+        //              - the old, very verbose one,
+        //              - one with Martin Pels' draft applied
+        //          
+        //
+        //         
+        // - includes:
+        //  X more specifics
+        //  X less specifics
+        //  - lpm?
+        //
+        //  XXX: old format returned "data": [] (i.e. an array) so the matching prefix/nlri was
+        //  repeated $n times.
+        //  is that correct? shouldn't it be:
+        //      "data": {
+        //          "nlri": $some_nlri,
+        //          "routes": [ ... ]
+        //      },
+        //      "included": ...
+        // 
+        // the good thing about that repetition though is, that when including routes for more/less
+        // specifics in the "included" section, we can follow the exact same structure?
+        //
+        //  XXX json:api states "included" is an _array_ where we returned a object before
+        //  perhaps go with
+        //
+        //      "included": [
+        //          {
+        //              "include_type": "moreSpecifics", 
+        //                  "data": {
+        //                      "nlri": $some_nlri,
+        //                      "routes": [ { .. }, .. ]
+        //                  }
+        //          },
+        //          {
+        //              "include_type": "lessSpecifics",
+        //                  "data": {
+        //                      "nlri": $some_nlri,
+        //                      "routes": [ { .. }, .. ]
+        //                  }
+        //          }
+        //      ]
+        //              
+        //
+        //
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct IncludedData<'a, M: Meta + Serialize> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            more_specifics: Option<RecordSetWrapper<'a, M>>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            less_specifics: Option<RecordSetWrapper<'a, M>>,
+        }
+
+        let mut root = serializer.serialize_struct("nlri", 3)?;
+        root.serialize_field("meta", &None::<String>)?;
+        root.serialize_field("data", &Data {
+            nlri: self.query_result.prefix,
+            routes: RecordsWrapper(&self.query_result.records),
+        })?;
+
+        root.serialize_field("included",
+            &IncludedData {
+                more_specifics: self.query_result.more_specifics.as_ref().map(RecordSetWrapper),
+                less_specifics: self.query_result.less_specifics.as_ref().map(RecordSetWrapper),
+
+            }
+        )?;
+        root.end()
+
+    }
+}
+
+#[derive(Serialize)]
+struct Data<'a, M: Meta + Serialize> {
+    nlri: Option<Prefix>,
+    routes: RecordsWrapper<'a, M>,
+}
+
+struct RecordsWrapper<'a, M>(&'a Vec<Record<M>>);
+struct RecordWrapper<'a, M>(&'a Record<M>);
+struct RecordSetWrapper<'a, M: Meta>(&'a RecordSet<M>);
+struct PrefixRecordWrapper<'a, M: Meta>(&'a PrefixRecord<M>);
+struct RouteStatusWrapper(RouteStatus);
+
+impl<M: Meta + Serialize> Serialize for RecordsWrapper<'_, M> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+
+        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+        for e in self.0.iter() {
+            seq.serialize_element(&RecordWrapper(e))?;
+        }
+        seq.end()
+
+    }
+}
+
+impl<M: Meta + Serialize> Serialize for RecordWrapper<'_, M> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+
+        #[derive(Serialize)]
+        struct Helper<'a, M: Meta + Serialize> {
+            status: RouteStatusWrapper,
+            #[serde(flatten)]
+            pamap: &'a M
+        }
+        Helper {
+            status: RouteStatusWrapper(self.0.status),
+            pamap: &self.0.meta
+        }.serialize(serializer)
+    }
+}
+
+impl<M: Meta + Serialize> Serialize for RecordSetWrapper<'_, M> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer {
+            let mut s = serializer.serialize_seq(Some(self.0.len()))?;
+            for e in &self.0.v4 {
+               s.serialize_element(&PrefixRecordWrapper(&e))?;
+            }
+            for e in &self.0.v6 {
+               s.serialize_element(&PrefixRecordWrapper(&e))?;
+            }
+       s.end()
+    }
+}
+
+impl<M: Meta + Serialize> Serialize for PrefixRecordWrapper<'_, M> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer {
+            
+             Data {
+                nlri: Some(self.0.prefix),
+                routes: RecordsWrapper(&self.0.meta),
+            }.serialize(serializer)
+        
+    }
+}
+
+impl Serialize for RouteStatusWrapper {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer {
+        match self.0 {
+            RouteStatus::Active => serializer.serialize_str("active"),
+            RouteStatus::InActive => serializer.serialize_str("inactive"),
+            RouteStatus::Withdrawn => serializer.serialize_str("withdrawn"),
+        }
+    }
+}
+
+impl<M: Meta + Serialize> ToJson for SearchResult<M> {
+    fn to_json(&self, target: impl std::io::Write) ->  Result<(), crate::representation::OutputError> {
+        serde_json::to_writer(target, &self).unwrap();
+        Ok(())
+    }
+}
+
+
+impl<M: Meta> ToCli for SearchResult<M> {
+    fn to_cli(&self, target: &mut impl std::io::Write) ->  Result<(), crate::representation::OutputError> {
+        let _ = writeln!(target,
+            "TODO: ToCli for rib::SearchResult"
+        );
+        let _ = target.flush();
+        Ok(())
+    }
+}
+
+
 
 #[derive(Debug)]
 pub enum StoreInsertionEffect {

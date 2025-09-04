@@ -1,6 +1,14 @@
-use axum::extract::{Path, State};
+use std::{collections::HashMap, fmt::Display, net::{Ipv4Addr, Ipv6Addr}};
 
-use crate::{http_ng::ApiState, ingress::IngressId};
+use axum::extract::{Path, Query, State};
+use inetnum::{addr::Prefix, asn::Asn};
+use routecore::bgp::{communities::StandardCommunity, types::AfiSafiType};
+use serde::Deserialize;
+use serde_with::serde_as;
+use serde_with::formats::CommaSeparator;
+use serde_with::StringWithSeparator;
+
+use crate::{http_ng::{Api, ApiState}, ingress::IngressId, representation::JsonFormat};
 
 // XXX The actual querying of the store should be similar to how we query the ingress register,
 // i.e. with the Rib unit constructing one type of responses (so a wrapper around the
@@ -22,4 +30,166 @@ pub async fn ipv4unicast_for_ingress(
         None | Some(Err(_)) => "empty or error".into()
     };
     res.into()
+}
+
+/// Add ingress register specific endpoints to a HTTP API
+pub fn register_routes(router: &mut Api) {
+    router.add_get("/ribs/ipv4unicast/routes/{prefix}/{prefix_len}", search_ipv4unicast);
+    router.add_get("/ribs/ipv4unicast/routes", search_ipv4unicast_all);
+    router.add_get("/ribs/ipv6unicast/routes/{prefix}/{prefix_len}", search_ipv6unicast);
+
+    // The 'hardcoded' afisafis above take precedence over this 'catch-all' one.
+    router.add_get("/ribs/{afisafi}/routes", test_per_afisafi);
+
+
+    // Possible shortcuts:
+    router.add_get("/origin_asn/{asn}", search_origin_asn_shortcut);
+    router.add_get("/ipv4unicast/origin_asn/{asn}", search_origin_asn);
+    // or, should we do this per afisafi, a la:
+    // Because with a /origin_asn (without afisafi), we have to decide and hardcode for which
+    // address families we'll do the lookups.
+    // Perhaps, if we offer both, the /origin_asn can default to unicast stuff?
+    //
+    // Or, should all of this go as a URL query parameter?
+    // so we get /ipv4unicast/0/0?origin=211321
+}
+
+#[derive(Debug, Deserialize)]
+enum SupportedAfiSafi {
+    #[serde(rename = "ipv4unicast")]
+    Ipv4Unicast,
+    #[serde(rename = "ipv6unicast")]
+    Ipv6Unicast,
+}
+
+
+#[serde_as]
+#[derive(Debug, Deserialize)]
+#[serde(rename_all(deserialize = "camelCase"))]
+pub struct QueryFilter {
+    
+    #[serde(default)]
+    #[serde_as(as = "StringWithSeparator::<CommaSeparator, Include>")]
+    pub include: Vec<Include>,
+
+
+    pub ingress_id: Option<IngressId>,
+
+    #[serde(rename = "filter[originAsn]")]
+    pub origin_asn: Option<Asn>, 
+
+    #[serde(rename = "filter[otc]")]
+    pub otc: Option<Asn>, 
+
+    #[serde(rename = "filter[community]")]
+    pub community: Option<String>, 
+
+    #[serde(rename = "filter[largeCommunity]")]
+    pub large_community: Option<String>, 
+}
+
+#[derive(Debug, PartialEq)]
+//#[derive(Debug, Deserialize)]
+//#[serde(rename_all = "camelCase")]
+pub enum Include {
+    MoreSpecifics,
+    LessSpecifics,
+}
+
+#[derive(Debug)]
+pub struct UnknownInclude;
+impl Display for UnknownInclude {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "unknown include")
+    }
+}
+impl std::str::FromStr for Include {
+    type Err = UnknownInclude;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "moreSpecifics" => Ok(Include::MoreSpecifics),
+            "lessSpecifics" => Ok(Include::LessSpecifics),
+            _ => Err(UnknownInclude)
+        }
+    }
+}
+
+async fn test_per_afisafi(
+    Path((afisafi)): Path<(SupportedAfiSafi)>,
+    filter: Query<QueryFilter>,
+    state: State<ApiState>
+) -> Result<Vec<u8>, String> {
+
+
+    dbg!(afisafi, filter);
+    Ok("todo".into())
+}
+
+async fn search_ipv4unicast(
+    Path((prefix, prefix_len)): Path<(Ipv4Addr, u8)>,
+    Query(filter): Query<QueryFilter>,
+    state: State<ApiState>
+) -> Result<Vec<u8>, String> {
+
+    let prefix = Prefix::new_v4(prefix, prefix_len).map_err(|e| e.to_string())?;
+    let s = state.store.clone();
+    let mut res = Vec::new();
+    match s.get().map(|store|
+        store.search_and_output_routes(
+            JsonFormat(&mut res),
+            AfiSafiType::Ipv4Unicast,
+            prefix,
+            filter
+        )
+    ) {
+        Some(Ok(())) => Ok(res.into()),
+        None | Some(Err(_)) => Err("empty or error".into())
+    }
+}
+
+// XXX
+// so to search all routes, we mimic a 0/0 search
+// but most (or all) results will actually be more-specifics.
+// Should these go into the "included" part of the response? Does that make sense to the end-user?
+async fn search_ipv4unicast_all(
+    filter: Query<QueryFilter>,
+    state: State<ApiState>
+) -> Result<Vec<u8>, String> {
+    search_ipv4unicast(Path((0.into(), 0)), filter, state).await
+}
+
+async fn search_ipv6unicast(
+    Path((prefix, prefix_len)): Path<(Ipv6Addr, u8)>,
+    state: State<ApiState>
+) -> Result<Vec<u8>, String> {
+
+    dbg!(prefix, prefix_len);
+    Ok("TODO".into())
+}
+
+
+
+async fn search_origin_asn_shortcut(
+    Path(asn): Path<Asn>,
+    state: State<ApiState>
+) -> Result<Vec<u8>, String> {
+    
+
+    // actually handle
+    // /ipv4unicast/0/0?asn=$asn
+    // combined with
+    // /ipv6unciast/0/0/asn=$asn
+
+    dbg!(asn);
+    Ok("TODO".into())
+}
+
+async fn search_origin_asn(
+    Path(asn): Path<Asn>,
+    state: State<ApiState>
+) -> Result<Vec<u8>, String> {
+
+    dbg!(asn);
+    Ok("TODO".into())
 }

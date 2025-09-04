@@ -1,5 +1,6 @@
 mod http;
 mod http_ng;
+pub use http_ng::QueryFilter;
 mod metrics;
 mod status_reporter;
 

@@ -343,9 +343,8 @@ impl RibUnitRunner {
 
         if let Ok(mut api) = component.http_ng_api_arc().lock() {
             api.set_rib(rib.load().clone());
-            api.add_get("/ipv4unicast/ingress/{ingress_id}",
-                super::http_ng::ipv4unicast_for_ingress
-            );
+            super::http_ng::register_routes(&mut api);
+
 
         } else {
             debug!("could not get lock on HTTP API");

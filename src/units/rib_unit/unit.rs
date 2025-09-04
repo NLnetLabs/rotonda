@@ -291,7 +291,7 @@ impl RibUnitRunner {
     ) -> Result<Self, PrefixStoreError> {
         let unit_name = component.name().clone();
         let gate = Arc::new(gate);
-        let rib = Arc::new(ArcSwap::from_pointee(Rib::new_physical()?));
+        let rib = Arc::new(ArcSwap::from_pointee(Rib::new_physical(component.ingresses())?));
         let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> =
             Default::default();
         let pending_vrib_query_results = Arc::new(FrimMap::default());

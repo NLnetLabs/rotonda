@@ -28,7 +28,7 @@ use routecore::bgp::{
 use serde::{ser::{SerializeSeq, SerializeStruct}, Serialize, Serializer};
 
 use crate::{
-    ingress::IngressId, payload::{RotondaPaMap, RotondaRoute, RouterId}, representation::{OutputFormat, ToCli, ToJson}, roto_runtime::types::Provenance
+    ingress::{self, IngressId, IngressInfo}, payload::{RotondaPaMap, RotondaRoute, RouterId}, representation::{OutputFormat, ToCli, ToJson}, roto_runtime::types::Provenance
 };
 
 use super::{http_ng::Include, QueryFilter};
@@ -54,27 +54,30 @@ pub struct Rib {
     multicast: Arc<Option<Store>>,
     other_fams:
         HashMap<AfiSafiType, HashMap<(IngressId, Nlri<bytes::Bytes>), PaMap>>,
+    ingress_register: Arc<ingress::Register>,
 }
 
 #[derive(Copy, Clone, Debug)]
 struct Multicast(bool);
 
 impl Rib {
-    pub fn new_physical() -> Result<Self, PrefixStoreError> {
+    pub fn new_physical(ingress_register: Arc<ingress::Register>) -> Result<Self, PrefixStoreError> {
         Ok(Rib {
             unicast: Arc::new(Some(Store::try_default()?)),
             multicast: Arc::new(Some(Store::try_default()?)),
             other_fams: HashMap::new(),
+            ingress_register,
         })
     }
 
-    pub fn new_virtual() -> Self {
-        Rib {
-            unicast: Arc::new(None),
-            multicast: Arc::new(None),
-            other_fams: HashMap::new(),
-        }
-    }
+    // unused
+    //pub fn new_virtual() -> Self {
+    //    Rib {
+    //        unicast: Arc::new(None),
+    //        multicast: Arc::new(None),
+    //        other_fams: HashMap::new(),
+    //    }
+    //}
 
     // XXX LH perhaps this should become a characteristic of the Unit instead
     // of the Rib. Currently, rib_unit::unit::insert_payload() is the only
@@ -458,7 +461,7 @@ impl Rib {
 
         store
             .match_prefix(&nlri, match_options, guard)
-            .map(|res| SearchResult { query_result: res } )
+            .map(|res| SearchResult { query_result: res, ingress_register: self.ingress_register.clone() } )
             .map_err(|err| err.to_string())
 
     }
@@ -507,7 +510,8 @@ impl Rib {
 /// This wrapper is used to impl the necessary traits on, to enable consistent representation
 /// between CLI, HTTP API, etc.
 pub struct SearchResult<M: Meta> {
-    query_result: QueryResult<M>
+    query_result: QueryResult<M>,
+    ingress_register: Arc<ingress::Register>,
 }
 
 impl<M: Meta + Serialize> Serialize for SearchResult<M> {
@@ -572,24 +576,24 @@ impl<M: Meta + Serialize> Serialize for SearchResult<M> {
         //
         #[derive(Serialize)]
         #[serde(rename_all = "camelCase")]
-        struct IncludedData<'a, M: Meta + Serialize> {
+        struct IncludedData<'a, 'b, M: Meta + Serialize> {
             #[serde(skip_serializing_if = "Option::is_none")]
-            more_specifics: Option<RecordSetWrapper<'a, M>>,
+            more_specifics: Option<RecordSetWrapper<'a, 'b, M>>,
             #[serde(skip_serializing_if = "Option::is_none")]
-            less_specifics: Option<RecordSetWrapper<'a, M>>,
+            less_specifics: Option<RecordSetWrapper<'a, 'b, M>>,
         }
 
         let mut root = serializer.serialize_struct("nlri", 3)?;
         root.serialize_field("meta", &None::<String>)?;
         root.serialize_field("data", &Data {
             nlri: self.query_result.prefix,
-            routes: RecordsWrapper(&self.query_result.records),
+            routes: RecordsWrapper(&self.query_result.records, &self.ingress_register),
         })?;
 
         root.serialize_field("included",
             &IncludedData {
-                more_specifics: self.query_result.more_specifics.as_ref().map(RecordSetWrapper),
-                less_specifics: self.query_result.less_specifics.as_ref().map(RecordSetWrapper),
+                more_specifics: self.query_result.more_specifics.as_ref().map(|s| RecordSetWrapper(s, &self.ingress_register)),
+                less_specifics: self.query_result.less_specifics.as_ref().map(|s| RecordSetWrapper(s, &self.ingress_register)),
 
             }
         )?;
@@ -599,18 +603,18 @@ impl<M: Meta + Serialize> Serialize for SearchResult<M> {
 }
 
 #[derive(Serialize)]
-struct Data<'a, M: Meta + Serialize> {
+struct Data<'a, 'b, M: Meta + Serialize> {
     nlri: Option<Prefix>,
-    routes: RecordsWrapper<'a, M>,
+    routes: RecordsWrapper<'a, 'b, M>,
 }
 
-struct RecordsWrapper<'a, M>(&'a Vec<Record<M>>);
-struct RecordWrapper<'a, M>(&'a Record<M>);
-struct RecordSetWrapper<'a, M: Meta>(&'a RecordSet<M>);
-struct PrefixRecordWrapper<'a, M: Meta>(&'a PrefixRecord<M>);
+struct RecordsWrapper<'a, 'b, M>(&'a Vec<Record<M>>, &'b Arc<ingress::Register>);
+struct RecordWrapper<'a, 'b, M>(&'a Record<M>, &'b Arc<ingress::Register>);
+struct RecordSetWrapper<'a, 'b, M: Meta>(&'a RecordSet<M>, &'b Arc<ingress::Register>);
+struct PrefixRecordWrapper<'a, 'b, M: Meta>(&'a PrefixRecord<M>, &'b Arc<ingress::Register>);
 struct RouteStatusWrapper(RouteStatus);
 
-impl<M: Meta + Serialize> Serialize for RecordsWrapper<'_, M> {
+impl<M: Meta + Serialize> Serialize for RecordsWrapper<'_, '_, M> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -618,55 +622,65 @@ impl<M: Meta + Serialize> Serialize for RecordsWrapper<'_, M> {
 
         let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
         for e in self.0.iter() {
-            seq.serialize_element(&RecordWrapper(e))?;
+            seq.serialize_element(&RecordWrapper(e, self.1))?;
         }
         seq.end()
 
     }
 }
 
-impl<M: Meta + Serialize> Serialize for RecordWrapper<'_, M> {
+impl<M: Meta + Serialize> Serialize for RecordWrapper<'_, '_, M> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
 
+        // The RPKI information is stored in the value (so, RotondaPaMap) in the store.
+        // The RotondaPaMap serializes to { rpki: {}, pathAttributes: [] },
+        // so with serde(flatten) the wrapped store::Record serializes to
+        // { status: foo, rpki: bla, pathAttributes: buzz, etc .. }
+        // on 'one level'.
+
         #[derive(Serialize)]
         struct Helper<'a, M: Meta + Serialize> {
+            ingress_id: IngressId,
+            ingress_info: IngressInfo,
             status: RouteStatusWrapper,
             #[serde(flatten)]
             pamap: &'a M
         }
         Helper {
+            ingress_id: self.0.multi_uniq_id,
+            ingress_info: self.1.get(self.0.multi_uniq_id).unwrap(),
             status: RouteStatusWrapper(self.0.status),
             pamap: &self.0.meta
         }.serialize(serializer)
     }
 }
 
-impl<M: Meta + Serialize> Serialize for RecordSetWrapper<'_, M> {
+impl<M: Meta + Serialize> Serialize for RecordSetWrapper<'_, '_, M> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer {
             let mut s = serializer.serialize_seq(Some(self.0.len()))?;
             for e in &self.0.v4 {
-               s.serialize_element(&PrefixRecordWrapper(&e))?;
+               s.serialize_element(&PrefixRecordWrapper(&e, self.1))?;
             }
             for e in &self.0.v6 {
-               s.serialize_element(&PrefixRecordWrapper(&e))?;
+               s.serialize_element(&PrefixRecordWrapper(&e, self.1))?;
             }
        s.end()
     }
 }
 
-impl<M: Meta + Serialize> Serialize for PrefixRecordWrapper<'_, M> {
+impl<M: Meta + Serialize> Serialize for PrefixRecordWrapper<'_, '_, M> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer {
             
              Data {
                 nlri: Some(self.0.prefix),
-                routes: RecordsWrapper(&self.0.meta),
+                routes: RecordsWrapper(&self.0.meta, self.1),
             }.serialize(serializer)
         
     }

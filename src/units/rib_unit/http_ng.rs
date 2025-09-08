@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Display, net::{Ipv4Addr, Ipv6Addr}};
 
 use axum::extract::{Path, Query, State};
 use inetnum::{addr::Prefix, asn::Asn};
-use routecore::{bgp::{communities::StandardCommunity, types::AfiSafiType}, bmp::message::RibType};
+use routecore::{bgp::{communities::StandardCommunity, path_attributes::PathAttributeType, types::AfiSafiType}, bmp::message::RibType};
 use serde::Deserialize;
 use serde_with::serde_as;
 use serde_with::formats::CommaSeparator;
@@ -64,7 +64,7 @@ enum SupportedAfiSafi {
 
 
 #[serde_as]
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all(deserialize = "camelCase"))]
 pub struct QueryFilter {
     
@@ -90,8 +90,30 @@ pub struct QueryFilter {
     #[serde(rename = "filter[ribType]")]
     pub rib_type: Option<PeerRibType>,
 
-
     // TODO: RouteDistinguisher, 
+
+    // content parameter (defaulting to 'all') to request only the nlri without path attributes, or
+    // perhaps only specific path attributes?
+    // rfc8040 (RESTCONF) describes content=all|config|nonconfig , but we could divert from that?
+    //
+    // json:api describes 'fields[]', e.g.:
+    // ?include=author&fields[articles]=title,body&fields[people]=name
+    //
+    // We could go for e.g. fields[pathAttributes]=asPath,otc 
+    //
+    // Then to alter representation, i.e. offer 'plain' communities and the exploded human readable
+    // representation from the old API, .. what do we do/
+    //
+    // fields[communities]=humanReadable?
+    // or do we use content for that? downside of 'content' is that it seems to be less
+    // fine-grained, while fields[$foo] allows defining things on the $foo level
+
+    //#[serde_as(as = "StringWithSeparator::<CommaSeparator, PathAttributeType>")]
+    // TODO instead of u8, base this on strings
+    // for that, add impl FromStr for PathAttributeType in routecore
+    #[serde_as(as = "Option<StringWithSeparator::<CommaSeparator, u8>>")]
+    #[serde(rename = "fields[pathAttributes]")]
+    pub fields_path_attributes: Option<Vec<u8>>,
 }
 
 impl QueryFilter {
@@ -102,9 +124,7 @@ impl QueryFilter {
     }
 }
 
-#[derive(Debug, PartialEq)]
-//#[derive(Debug, Deserialize)]
-//#[serde(rename_all = "camelCase")]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Include {
     MoreSpecifics,
     LessSpecifics,

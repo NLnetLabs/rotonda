@@ -16,6 +16,7 @@ use uuid::Uuid;
 use crate::ingress::{self, IngressId};
 use crate::roto_runtime::types::{OutputStreamMessage, RouteContext};
 use crate::units::rib_unit::rpki::RpkiInfo;
+use crate::units::rib_unit::QueryFilter;
 
 // TODO: make this a reference
 pub type RouterId = String;
@@ -219,6 +220,25 @@ impl Serialize for RotondaPaMap {
         s.serialize_field("rpki", &self.rpki_info())?;
         s.serialize_field("pathAttributes", &self.path_attributes().iter().flatten()
             .filter(|pa| pa.type_code() != 14 && pa.type_code() != 15)
+            .map(|pa| pa.to_owned()).flatten().collect::<Vec<_>>())?;
+        s.end()
+    }
+}
+
+pub struct RotondaPaMapWithQueryFilter<'a, 'b>(pub &'a RotondaPaMap, pub &'b QueryFilter);
+impl<'a, 'b> Serialize for RotondaPaMapWithQueryFilter<'a, 'b> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut s = serializer.serialize_struct("route", 2)?;
+        s.serialize_field("rpki", &self.0.rpki_info())?;
+        s.serialize_field("pathAttributes", &self.0.path_attributes().iter().flatten()
+            .filter(|pa|
+                (self.1.fields_path_attributes.as_ref().map(|fpa| fpa.contains(&pa.type_code())).unwrap_or(true))
+                &&
+                pa.type_code() != 14 && pa.type_code() != 15
+                )
             .map(|pa| pa.to_owned()).flatten().collect::<Vec<_>>())?;
         s.end()
     }

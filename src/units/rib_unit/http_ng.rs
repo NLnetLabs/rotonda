@@ -88,6 +88,14 @@ pub struct QueryFilter {
     pub large_community: Option<String>, 
 }
 
+impl QueryFilter {
+    pub fn enable_more_specifics(&mut self) {
+        if !self.include.contains(&Include::MoreSpecifics) {
+            self.include.push(Include::MoreSpecifics);
+        }
+    }
+}
+
 #[derive(Debug, PartialEq)]
 //#[derive(Debug, Deserialize)]
 //#[serde(rename_all = "camelCase")]
@@ -153,9 +161,10 @@ async fn search_ipv4unicast(
 // but most (or all) results will actually be more-specifics.
 // Should these go into the "included" part of the response? Does that make sense to the end-user?
 async fn search_ipv4unicast_all(
-    filter: Query<QueryFilter>,
+    mut filter: Query<QueryFilter>,
     state: State<ApiState>
 ) -> Result<Vec<u8>, String> {
+    filter.enable_more_specifics();
     search_ipv4unicast(Path((0.into(), 0)), filter, state).await
 }
 

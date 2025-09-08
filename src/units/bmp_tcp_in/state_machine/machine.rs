@@ -1241,6 +1241,7 @@ impl PeerAware for PeerStates {
             .with_remote_addr(pph.address())
             .with_remote_asn(pph.asn())
             .with_rib_type(pph.rib_type())
+            .with_peer_rib_type((pph.is_post_policy(), pph.rib_type()))
             .with_peer_type(pph.peer_type())
         ;
         use routecore::bmp::message::PeerType;

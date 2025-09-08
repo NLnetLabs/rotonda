@@ -10,6 +10,7 @@ use routecore::bmp::message::{PeerType, RibType};
 use paste::paste;
 
 use crate::representation::{OutputError, OutputFormat, ToCli, ToJson};
+use crate::roto_runtime::types::PeerRibType;
 
 /// Register of ingress/sources, tracked in a serial way.
 ///
@@ -388,6 +389,7 @@ info_for_field!(IngressInfo{
    remote_addr: IpAddr,
    remote_asn: Asn,
    rib_type: RibType,
+   peer_rib_type: PeerRibType, // RibType + pre/post policy 
    filename: PathBuf,
    name: String,
    desc: String,

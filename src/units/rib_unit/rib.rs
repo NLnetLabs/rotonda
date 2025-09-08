@@ -20,10 +20,7 @@ use rotonda_store::{
     stats::UpsertReport,
 };
 use routecore::bgp::{
-    nlri::afisafi::{IsPrefix, Nlri},
-    path_attributes::PaMap,
-    path_selection::{OrdRoute, Rfc4271, TiebreakerInfo},
-    types::AfiSafiType,
+    aspath::HopPath, nlri::afisafi::{IsPrefix, Nlri}, path_attributes::PaMap, path_selection::{OrdRoute, Rfc4271, TiebreakerInfo}, types::{AfiSafiType, Otc}
 };
 use serde::{ser::{SerializeSeq, SerializeStruct}, Serialize, Serializer};
 
@@ -426,7 +423,6 @@ impl Rib {
         afisafi: AfiSafiType,
         //nlri: Nlri<&[u8]>,
         nlri: Prefix, // change to Nlri or equivalent after routecore refactor
-        //match_options: MatchOptions
         filter: QueryFilter,
     //) -> Result<QueryResult<RotondaPaMap>, String> {
     ) -> Result<SearchResult<RotondaPaMap>, String> {
@@ -459,10 +455,84 @@ impl Rib {
             include_history: rotonda_store::match_options::IncludeHistory::None,
         };
 
-        store
+        let mut res = store
             .match_prefix(&nlri, match_options, guard)
             .map(|res| SearchResult { query_result: res, ingress_register: self.ingress_register.clone() } )
-            .map_err(|err| err.to_string())
+            .map_err(|err| err.to_string());
+
+        // filter on:
+        // X origin asn
+        // - peer rib type
+        // - ingress_id ?
+        // - community
+        //
+        // - otc
+        // - large community
+        
+        if let Some(rib_type) = filter.rib_type {
+            let _ = res.as_mut().map(|sr| {
+                sr.query_result.records.retain(|r|{
+                    self.ingress_register.get(r.multi_uniq_id).map(|ii|
+                        dbg!(ii.peer_rib_type == Some(rib_type))
+                    ).unwrap_or(true)
+                });
+            });
+        }
+
+        if filter.origin_asn.is_some() ||
+            filter.otc.is_some() ||
+            filter.community.is_some() ||
+            filter.large_community.is_some()
+        {
+            dbg!(&filter);
+            let _ = res.as_mut().map(|sr| {
+                sr.query_result.records.retain(|r| {
+                    let path_attributes = r.meta.path_attributes();
+                    if let Some(origin_asn) = filter.origin_asn {
+                        if Some(origin_asn) != path_attributes.get::<HopPath>().and_then(|hp| hp.origin().and_then(|hop| hop.clone().try_into().ok())) {
+                            return false;
+                        }
+                    }
+                    if let Some(otc) = filter.otc {
+                        if Some(otc) != path_attributes.get::<Otc>().map(|otc| otc.0) {
+                            return false
+                        }
+                    }
+                    true
+                });
+                sr.query_result.more_specifics.as_mut().map(|rs| {
+                    //let mut f = &mut rs.v4;
+                    rs.v4.retain_mut(|pr|{
+                        //pr.meta is a Vec<Record>
+                        //so we first retain that Vec
+                        //and if it ends up being empty
+                        //we return false to clear this PrefixRecord from the RecordSet
+                        pr.meta.retain(|record| {
+                            let path_attributes = record.meta.path_attributes();
+                            if let Some(origin_asn) = filter.origin_asn {
+                                if Some(origin_asn) != path_attributes.get::<HopPath>().and_then(|hp| hp.origin().and_then(|hop| hop.clone().try_into().ok())) {
+                                    return false;
+                                }
+                            }
+                            if let Some(otc) = filter.otc {
+                                if Some(otc) != path_attributes.get::<Otc>().map(|otc| otc.0) {
+                                    return false
+                                }
+                            }
+                            true
+                        });
+
+                        !pr.meta.is_empty()
+
+                    });
+
+                });
+                // TODO also do less specifics, but first lift up this stuff into its own fn
+            });
+        }
+
+
+        res
 
     }
 

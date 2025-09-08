@@ -12,7 +12,7 @@ use rotonda_store::prefix_record::RouteStatus;
 use routecore::bgp::{
     message::UpdateMessage, nlri::afisafi::Nlri, types::AfiSafiType,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     ingress::IngressId,
@@ -392,7 +392,7 @@ impl Provenance {
 
 //------------ PeerRibType ---------------------------------------------------
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
 pub enum PeerRibType {
     InPre,
     InPost,

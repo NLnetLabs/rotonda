@@ -156,10 +156,8 @@ async fn search_ipv4unicast(
     }
 }
 
-// XXX
-// so to search all routes, we mimic a 0/0 search
-// but most (or all) results will actually be more-specifics.
-// Should these go into the "included" part of the response? Does that make sense to the end-user?
+// Search all routes, we mimic a 0/0 search, but most (or all) results will actually be
+// more-specifics. These go into the "included" part of the response.
 async fn search_ipv4unicast_all(
     mut filter: Query<QueryFilter>,
     state: State<ApiState>

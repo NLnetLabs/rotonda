@@ -462,20 +462,56 @@ impl Rib {
 
         // filter on:
         // X origin asn
-        // - peer rib type
-        // - ingress_id ?
-        // - community
+        // X peer rib type
+        // X ingress_id -> done via Store.match_prefix already
+        // X otc
         //
-        // - otc
+        // - community
         // - large community
+        // - peer distinguisher
         
-        if let Some(rib_type) = filter.rib_type {
-            let _ = res.as_mut().map(|sr| {
-                sr.query_result.records.retain(|r|{
-                    self.ingress_register.get(r.multi_uniq_id).map(|ii|
-                        dbg!(ii.peer_rib_type == Some(rib_type))
-                    ).unwrap_or(true)
+
+        let _ = res.as_mut().map(|sr| {
+            Self::apply_filter(&mut sr.query_result.records, &filter, &self.ingress_register);
+            sr.query_result.more_specifics.as_mut().map(|rs| {
+                rs.v4.retain_mut(|pr|{
+                    Self::apply_filter(&mut pr.meta, &filter, &self.ingress_register);
+                    !pr.meta.is_empty()
                 });
+                rs.v6.retain_mut(|pr|{
+                    Self::apply_filter(&mut pr.meta, &filter, &self.ingress_register);
+                    !pr.meta.is_empty()
+                });
+            });
+            sr.query_result.less_specifics.as_mut().map(|rs| {
+                rs.v4.retain_mut(|pr|{
+                    Self::apply_filter(&mut pr.meta, &filter, &self.ingress_register);
+                    !pr.meta.is_empty()
+                });
+                rs.v6.retain_mut(|pr|{
+                    Self::apply_filter(&mut pr.meta, &filter, &self.ingress_register);
+                    !pr.meta.is_empty()
+                });
+            });
+        });
+        
+        res
+
+    }
+
+    // XXX:
+    // if the results from the store are already filtered on a MUI/ingress_id, we do not need to
+    // query the ingress register over and over to fetch info like peer_rib_type
+    // In such case, we could optimize:
+    //  - fetch the required info once, pass it into apply_filter
+    //  - in apply_filter, check for such info and branch: if let Some(passed_info), etc
+    
+    fn apply_filter(records: &mut Vec<Record<RotondaPaMap>>, filter: &QueryFilter, ingress_register: &Arc<ingress::Register>) {
+        if let Some(rib_type) = filter.rib_type {
+            records.retain(|r|{
+                ingress_register.get(r.multi_uniq_id).map(|ii|
+                    ii.peer_rib_type == Some(rib_type)
+                ).unwrap_or(true)
             });
         }
 
@@ -484,56 +520,27 @@ impl Rib {
             filter.community.is_some() ||
             filter.large_community.is_some()
         {
-            dbg!(&filter);
-            let _ = res.as_mut().map(|sr| {
-                sr.query_result.records.retain(|r| {
-                    let path_attributes = r.meta.path_attributes();
-                    if let Some(origin_asn) = filter.origin_asn {
-                        if Some(origin_asn) != path_attributes.get::<HopPath>().and_then(|hp| hp.origin().and_then(|hop| hop.clone().try_into().ok())) {
-                            return false;
-                        }
+            records.retain(|r| {
+                let path_attributes = r.meta.path_attributes();
+                if let Some(otc) = filter.otc {
+                    if Some(otc) != path_attributes.get::<Otc>().map(|otc| otc.0) {
+                        return false
                     }
-                    if let Some(otc) = filter.otc {
-                        if Some(otc) != path_attributes.get::<Otc>().map(|otc| otc.0) {
-                            return false
-                        }
+                }
+                if let Some(origin_asn) = filter.origin_asn {
+                    if Some(origin_asn) != path_attributes.get::<HopPath>().and_then(|hp| hp.origin().and_then(|hop| hop.clone().try_into().ok())) {
+                        return false;
                     }
-                    true
-                });
-                sr.query_result.more_specifics.as_mut().map(|rs| {
-                    //let mut f = &mut rs.v4;
-                    rs.v4.retain_mut(|pr|{
-                        //pr.meta is a Vec<Record>
-                        //so we first retain that Vec
-                        //and if it ends up being empty
-                        //we return false to clear this PrefixRecord from the RecordSet
-                        pr.meta.retain(|record| {
-                            let path_attributes = record.meta.path_attributes();
-                            if let Some(origin_asn) = filter.origin_asn {
-                                if Some(origin_asn) != path_attributes.get::<HopPath>().and_then(|hp| hp.origin().and_then(|hop| hop.clone().try_into().ok())) {
-                                    return false;
-                                }
-                            }
-                            if let Some(otc) = filter.otc {
-                                if Some(otc) != path_attributes.get::<Otc>().map(|otc| otc.0) {
-                                    return false
-                                }
-                            }
-                            true
-                        });
-
-                        !pr.meta.is_empty()
-
-                    });
-
-                });
-                // TODO also do less specifics, but first lift up this stuff into its own fn
+                }
+                true
             });
+
+            // TODO:
+            // - communities
+            // - large communities
+            // - route distinguisher
+
         }
-
-
-        res
-
     }
 
     pub fn search_and_output_routes(

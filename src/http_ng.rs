@@ -1,11 +1,10 @@
 use std::{net::SocketAddr, sync::{Arc, OnceLock}};
 
-use axum::{extract::{Path, State}, routing::get, response::IntoResponse};
+use axum::routing::get;
 use log::{debug, error};
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::{ingress::{self, http_ng::IngressApi}, units::rib_unit::rib::Rib};
-use crate::representation::JsonFormat;
+use crate::{ingress::{self, http_ng::IngressApi}, units::rib_unit::rib::Rib, webui::WebUI};
 
 
 
@@ -72,6 +71,7 @@ impl Api {
         };
 
         IngressApi::register_routes(&mut res);
+        WebUI::register_routes(&mut res);
         res
     }
 

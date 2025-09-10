@@ -1,6 +1,6 @@
 use axum::extract::State;
 
-use crate::{cli::CliApi, http_ng::{Api, ApiState}, representation::JsonFormat};
+use crate::{cli::CliApi, http_ng::{Api, ApiState}, representation::Json};
 
 pub struct IngressApi { }
 
@@ -20,7 +20,7 @@ impl IngressApi {
             CliApi{ ingress_register: state.ingress_register.clone()}.bgp_neighbors();
 
             let mut res = Vec::new();
-            state.ingress_register.bgp_neighbors(JsonFormat(&mut res));
+            state.ingress_register.bgp_neighbors(Json(&mut res));
             Ok(res.into())
         }
 
@@ -30,7 +30,8 @@ impl IngressApi {
             CliApi{ ingress_register: state.ingress_register.clone()}.bmp_routers();
 
             let mut res = Vec::new();
-            state.ingress_register.bmp_routers(JsonFormat(&mut res));
+            //state.ingress_register.bmp_routers(JsonFormat(&mut res));
+            state.ingress_register.bmp_routers(crate::representation::Json(&mut res));
             Ok(res.into())
     }
 }

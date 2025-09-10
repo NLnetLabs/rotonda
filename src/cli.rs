@@ -3,7 +3,7 @@
 
 use std::{io, sync::Arc};
 
-use crate::{ingress, representation::CliFormat};
+use crate::{ingress, representation::Cli};
 
 pub struct CliApi {
     pub ingress_register: Arc<ingress::Register>,
@@ -13,11 +13,11 @@ pub struct CliApi {
 impl CliApi {
     pub fn bgp_neighbors(&self) {
         let mut stdout = io::stdout().lock();
-        let _ = self.ingress_register.bgp_neighbors(CliFormat(&mut stdout));
+        let _ = self.ingress_register.bgp_neighbors(Cli(&mut stdout));
     }
 
     pub fn bmp_routers(&self) {
         let mut stdout = io::stdout().lock();
-        let _ = self.ingress_register.bmp_routers(CliFormat(&mut stdout));
+        let _ = self.ingress_register.bmp_routers(Cli(&mut stdout));
     }
 }

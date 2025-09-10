@@ -25,7 +25,7 @@ use routecore::bgp::{
 use serde::{ser::{SerializeSeq, SerializeStruct}, Serialize, Serializer};
 
 use crate::{
-    ingress::{self, IngressId, IngressInfo}, payload::{RotondaPaMap, RotondaPaMapWithQueryFilter, RotondaRoute, RouterId}, representation::{OutputFormat, ToCli, ToJson}, roto_runtime::types::Provenance
+    ingress::{self, IngressId, IngressInfo}, payload::{RotondaPaMap, RotondaPaMapWithQueryFilter, RotondaRoute, RouterId}, representation::{GenOutput, Json}, roto_runtime::types::Provenance
 };
 
 use super::{http_ng::Include, QueryFilter};
@@ -549,18 +549,19 @@ impl Rib {
         }
     }
 
-    pub fn search_and_output_routes(
+    pub fn search_and_output_routes<T>(
         &self,
-        mut target: impl OutputFormat,
+        mut target: T,
         afisafi: AfiSafiType,
         //nlri: Nlri<&[u8]>,
         nlri: Prefix, // change to Nlri or equivalent after routecore refactor
-        //match_options: MatchOptions
         filter: QueryFilter,
-    ) -> Result<(), String> {
+    ) -> Result<(), String>
+        where SearchResult: GenOutput<T>
+    {
         match self.search_routes(afisafi, nlri, filter) {
             Ok(search_results) => {
-                let _ = target.write(search_results);
+                let _ = search_results.write(&mut target);
             },
             Err(e) => { return Err(format!("store error: {e}").into()); }
         }
@@ -597,6 +598,8 @@ pub struct SearchResult {
     ingress_register: Arc<ingress::Register>,
     query_filter: QueryFilter,
 }
+
+crate::genoutput_json!(SearchResult);
 
 impl Serialize for SearchResult {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -815,24 +818,6 @@ impl Serialize for RouteStatusWrapper {
             RouteStatus::InActive => serializer.serialize_str("inactive"),
             RouteStatus::Withdrawn => serializer.serialize_str("withdrawn"),
         }
-    }
-}
-
-impl ToJson for SearchResult {
-    fn to_json(&self, target: impl std::io::Write) ->  Result<(), crate::representation::OutputError> {
-        serde_json::to_writer(target, &self).unwrap();
-        Ok(())
-    }
-}
-
-
-impl ToCli for SearchResult {
-    fn to_cli(&self, target: &mut impl std::io::Write) ->  Result<(), crate::representation::OutputError> {
-        let _ = writeln!(target,
-            "TODO: ToCli for rib::SearchResult"
-        );
-        let _ = target.flush();
-        Ok(())
     }
 }
 

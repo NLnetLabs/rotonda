@@ -8,7 +8,7 @@ use serde_with::serde_as;
 use serde_with::formats::CommaSeparator;
 use serde_with::StringWithSeparator;
 
-use crate::{http_ng::{Api, ApiState}, ingress::IngressId, representation::JsonFormat, roto_runtime::types::PeerRibType};
+use crate::{http_ng::{Api, ApiState}, ingress::IngressId, roto_runtime::types::PeerRibType};
 
 // XXX The actual querying of the store should be similar to how we query the ingress register,
 // i.e. with the Rib unit constructing one type of responses (so a wrapper around the
@@ -171,7 +171,7 @@ async fn search_ipv4unicast(
     let mut res = Vec::new();
     match s.get().map(|store|
         store.search_and_output_routes(
-            JsonFormat(&mut res),
+            crate::representation::Json(&mut res),
             AfiSafiType::Ipv4Unicast,
             prefix,
             filter

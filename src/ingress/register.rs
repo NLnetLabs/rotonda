@@ -9,7 +9,8 @@ use inetnum::asn::Asn;
 use routecore::bmp::message::{PeerType, RibType};
 use paste::paste;
 
-use crate::representation::{OutputError, OutputFormat, ToCli, ToJson};
+use crate::genoutput_json;
+use crate::representation::{Cli, GenOutput, Json, OutputError};
 use crate::roto_runtime::types::PeerRibType;
 
 /// Register of ingress/sources, tracked in a serial way.
@@ -33,71 +34,52 @@ pub struct IdAndInfo<'a> {
     #[serde(flatten)]
     ingress_info: &'a IngressInfo,
 }
+
 pub struct BmpIdAndInfo<'a>(pub IdAndInfo<'a>);
 pub struct BgpIdAndInfo<'a>(pub IdAndInfo<'a>);
 
-
-
-//impl Outputable for IdAndInfo<'_> {}
-impl ToJson for IdAndInfo<'_> {
-    fn to_json(&self, target: impl std::io::Write) ->  Result<(), OutputError> {
-        serde_json::to_writer(target, self).unwrap();
+impl GenOutput<&mut crate::webui::Index> for BmpIdAndInfo<'_> {
+    fn write(&self, target: &mut &mut crate::webui::Index) -> Result<(), OutputError> {
+        target.bmp_routers.push((self.0.ingress_id, self.0.ingress_info.clone()));
         Ok(())
     }
 }
 
-impl ToJson for BgpIdAndInfo<'_> {
-    fn to_json(&self, target: impl std::io::Write) ->  Result<(), OutputError> {
-        serde_json::to_writer(target, &self.0).unwrap();
-        Ok(())
-    }
-}
-impl ToJson for BmpIdAndInfo<'_> {
-    fn to_json(&self, target: impl std::io::Write) ->  Result<(), OutputError> {
-        serde_json::to_writer(target, &self.0).unwrap();
-        Ok(())
-    }
-}
+impl<W: std::io::Write> GenOutput<Cli<W>> for BgpIdAndInfo<'_> {
+    fn write(&self, target: &mut Cli<W>) -> Result<(), OutputError> {
 
-
-// XXX we might want differently formatted output for e.g. bmp routers vs bgp peers, though both
-// are passed in as IdAndInfo. Attempt with BgpIdAndInfo and BmpIdAndInfo below.
-//impl ToCli for IdAndInfo<'_> {
-//    fn to_cli(&self, target: &mut impl std::io::Write) ->  Result<(), OutputError> {
-//        let _ = writeln!(target,
-//            "{:>}\t{:>40}\t{}",
-//            self.ingress_id,
-//            self.ingress_info.remote_addr.map(|ip| ip.to_string()).unwrap_or("no-ip".into()),
-//            self.ingress_info.name.as_ref().unwrap_or(&"no-name".into())
-//        );
-//        target.flush();
-//        Ok(())
-//    }
-//}
-impl ToCli for BgpIdAndInfo<'_> {
-    fn to_cli(&self, target: &mut impl std::io::Write) ->  Result<(), OutputError> {
-        let _ = writeln!(target,
+        let _ = writeln!(&mut target.0,
             "{:>}\t{:>10}\t{:>40}",
             self.0.ingress_id,
             self.0.ingress_info.remote_asn.map(|asn| asn.to_string()).unwrap_or("no-asn???".into()),
             self.0.ingress_info.remote_addr.map(|ip| ip.to_string()).unwrap_or("no-ip".into()),
         );
-        let _ = target.flush();
+        let _ = target.0.flush();
         Ok(())
     }
 }
-impl ToCli for BmpIdAndInfo<'_> {
-    fn to_cli(&self, target: &mut impl std::io::Write) ->  Result<(), OutputError> {
-        let _ = writeln!(target,
+
+impl<W: std::io::Write> GenOutput<Cli<W>> for BmpIdAndInfo<'_> {
+    fn write(&self, target: &mut Cli<W>) -> Result<(), OutputError> {
+
+        let _ = writeln!(&mut target.0,
             "{:>}\t{:>40}\t{}",
             self.0.ingress_id,
             self.0.ingress_info.remote_addr.map(|ip| ip.to_string()).unwrap_or("no-ip".into()),
             self.0.ingress_info.name.as_ref().unwrap_or(&"no-name".into())
         );
-        let _ = target.flush();
+        let _ = target.0.flush();
         Ok(())
     }
 }
+
+genoutput_json!(BmpIdAndInfo<'_>, 0);
+genoutput_json!(BgpIdAndInfo<'_>, 0);
+
+pub struct TestMe {
+    field: Asn,
+}
+genoutput_json!(TestMe, field);
 
 // Used to merge IngressInfo structs, called via info_for_field! in update_info
 macro_rules! update_field {
@@ -229,32 +211,32 @@ impl Register {
     }
 
     // NB on /bgp/neighbors, we return all the information learned via BMP, BGP etc.
-    pub fn bgp_neighbors(&self, mut target: impl OutputFormat) -> fmt::Result {
+    pub fn bgp_neighbors<T>(&self, mut target: T) -> fmt::Result
+        where for <'a> BgpIdAndInfo<'a>: GenOutput<T>
+    {
         let lock = self.info.read().unwrap();
         for (ingress_id, ingress_info) in lock.iter().filter(|(_, info)|{
             info.ingress_type == Some(IngressType::Bgp) ||
             info.ingress_type == Some(IngressType::BgpViaBmp) ||
             info.ingress_type == Some(IngressType::Mrt)
         }){
-            let _ = target.write(
-                BgpIdAndInfo(
-                    IdAndInfo { ingress_id: *ingress_id, ingress_info}
-                )
-            );
+            let _ = BgpIdAndInfo(
+                IdAndInfo { ingress_id: *ingress_id, ingress_info}
+            ).write(&mut target);
         }
         Ok(())
     }
 
-    pub fn bmp_routers(&self, mut target: impl OutputFormat) -> fmt::Result {
+    pub fn bmp_routers<T>(&self, mut target: T) -> fmt::Result
+        where for <'a> BmpIdAndInfo<'a>: GenOutput<T>
+     {
         let lock = self.info.read().unwrap();
         for (ingress_id, ingress_info) in lock.iter().filter(|(_,info)|{
             info.ingress_type == Some(IngressType::Bmp)
         }) {
-            let _ = target.write(
-                BmpIdAndInfo (
+            let _ = BmpIdAndInfo (
                     IdAndInfo { ingress_id: *ingress_id, ingress_info}
-                )
-            );
+                ).write(&mut target);
         }
         Ok(())
     }

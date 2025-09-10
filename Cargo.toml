@@ -92,8 +92,10 @@ rpki               = { version = "0.18.6", features = ["crypto", "rtr"] }
 futures-util       = "0.3.31"
 micromap = "0.0.19"
 paste = "1.0.15"
-axum = { version = "0.8.4", features = ["macros"] }
+axum = { version = "0.8.4", features = ["macros", "query"] }
 rotonda-conf = { path = "../../rotonda-conf" }
+serde_qs = "0.15.0"
+rshtml = "0.2.0"
 
 [target.'cfg(unix)'.dependencies]
 syslog             = "6.1"
@@ -117,6 +119,13 @@ default = ["http-api-gzip"]
 
 # Enable GZIP compression of the HTTP /metrics response
 http-api-gzip = ["flate2"]
+
+[build-dependencies]
+rshtml = "0.2.0"
+
+
+[package.metadata.rshtml]
+views = { path = "src/webui/views", layout = "layout.rs.html" } # layout is the default value
 
 [package.metadata.deb]
 name = "rotonda"

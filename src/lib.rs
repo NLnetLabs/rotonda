@@ -7,6 +7,7 @@ pub mod comms;
 pub mod config;
 pub mod http;
 pub mod http_ng;
+pub mod webui;
 pub mod cli;
 pub mod ingress;
 pub mod log;

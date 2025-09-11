@@ -726,7 +726,9 @@ where
                 // this RouteMonitoring message. There might have been a PeerUp with no flags set,
                 // so we zero out the flags byte and try again.
                 let mut raw = pph.as_ref().to_owned();
-                raw[1] = 0;
+                //raw[1] = 0;
+                //instead of zeroing everything, only zero the rib type and policy flags
+                raw[1] &= 0b1010_1111;
                 let pph_nulled_flags = PerPeerHeader::for_slice(Bytes::from(raw));
 
                 if let Some(_nulled_peer_config) = self.details.get_peer_config(&pph_nulled_flags) {

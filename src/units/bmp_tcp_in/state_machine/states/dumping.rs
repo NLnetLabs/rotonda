@@ -393,6 +393,15 @@ impl PeerAware for Dumping {
         )
     }
 
+    fn add_cloned_peer_config(
+        &mut self,
+        source_pph: &PerPeerHeader<Bytes>,
+        dst_pph: &PerPeerHeader<Bytes>,
+        ingress_id: IngressId,
+    ) -> bool {
+        self.peer_states.add_cloned_peer_config(source_pph, dst_pph, ingress_id)
+    }
+
     fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState> {
         self.peer_states.get_peers()
     }

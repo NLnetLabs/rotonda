@@ -524,9 +524,15 @@ impl Rib {
         if filter.origin_asn.is_some() ||
             filter.otc.is_some() ||
             filter.community.is_some() ||
-            filter.large_community.is_some()
+            filter.large_community.is_some() ||
+            filter.rov_status.is_some()
         {
             records.retain(|r| {
+                if let Some(rov_status) = filter.rov_status {
+                    if r.meta.rpki_info().rov_status() != rov_status {
+                        return false
+                    }
+                }
                 let path_attributes = r.meta.path_attributes();
                 if let Some(otc) = filter.otc {
                     if Some(otc) != path_attributes.get::<Otc>().map(|otc| otc.0) {
@@ -534,7 +540,9 @@ impl Rib {
                     }
                 }
                 if let Some(origin_asn) = filter.origin_asn {
-                    if Some(origin_asn) != path_attributes.get::<HopPath>().and_then(|hp| hp.origin().and_then(|hop| hop.clone().try_into().ok())) {
+                    if Some(origin_asn) != path_attributes.get::<HopPath>().and_then(|hp|
+                        hp.origin().and_then(|hop| hop.clone().try_into().ok())
+                    ) {
                         return false;
                     }
                 }

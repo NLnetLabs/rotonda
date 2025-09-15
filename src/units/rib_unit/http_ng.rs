@@ -2,14 +2,14 @@ use std::{collections::HashMap, fmt::Display, net::{Ipv4Addr, Ipv6Addr}};
 
 use axum::extract::{Path, Query, State};
 use inetnum::{addr::Prefix, asn::Asn};
-use log::warn;
+use log::{debug, warn};
 use routecore::{bgp::{communities::StandardCommunity, path_attributes::PathAttributeType, types::AfiSafiType}, bmp::message::RibType};
 use serde::Deserialize;
 use serde_with::serde_as;
 use serde_with::formats::CommaSeparator;
 use serde_with::StringWithSeparator;
 
-use crate::{http_ng::{Api, ApiState}, ingress::IngressId, roto_runtime::types::PeerRibType};
+use crate::{http_ng::{Api, ApiState}, ingress::IngressId, roto_runtime::types::PeerRibType, units::rib_unit::rpki::RovStatus};
 
 // XXX The actual querying of the store should be similar to how we query the ingress register,
 // i.e. with the Rib unit constructing one type of responses (so a wrapper around the
@@ -91,6 +91,11 @@ pub struct QueryFilter {
 
     #[serde(rename = "filter[ribType]")]
     pub rib_type: Option<PeerRibType>,
+
+
+    #[serde(rename = "filter[rovStatus]")]
+    pub rov_status: Option<RovStatus>,
+
 
     // TODO: RouteDistinguisher, 
 

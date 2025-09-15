@@ -6,7 +6,7 @@ use std::{collections::HashSet, sync::RwLock};
 use inetnum::{addr::Prefix, asn::Asn};
 use log::warn;
 use rotonda_store::{match_options::{IncludeHistory, MatchOptions, MatchType}, rib::{config::MemoryOnlyConfig, StarCastRib}};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 
 /// RPKI related information for individual routes
@@ -56,7 +56,8 @@ impl From<RovStatus> for RpkiInfo {
 
 /// RPKI Route Origin Validation status for a route
 #[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum RovStatus {
     #[default]
     NotChecked,

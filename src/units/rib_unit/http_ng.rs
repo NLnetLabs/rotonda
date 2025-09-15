@@ -2,6 +2,7 @@ use std::{collections::HashMap, fmt::Display, net::{Ipv4Addr, Ipv6Addr}};
 
 use axum::extract::{Path, Query, State};
 use inetnum::{addr::Prefix, asn::Asn};
+use log::warn;
 use routecore::{bgp::{communities::StandardCommunity, path_attributes::PathAttributeType, types::AfiSafiType}, bmp::message::RibType};
 use serde::Deserialize;
 use serde_with::serde_as;
@@ -37,14 +38,15 @@ pub fn register_routes(router: &mut Api) {
     router.add_get("/ribs/ipv4unicast/routes/{prefix}/{prefix_len}", search_ipv4unicast);
     router.add_get("/ribs/ipv4unicast/routes", search_ipv4unicast_all);
     router.add_get("/ribs/ipv6unicast/routes/{prefix}/{prefix_len}", search_ipv6unicast);
+    router.add_get("/ribs/ipv6unicast/routes", search_ipv6unicast_all);
 
     // The 'hardcoded' afisafis above take precedence over this 'catch-all' one.
-    router.add_get("/ribs/{afisafi}/routes", test_per_afisafi);
+    router.add_get("/ribs/{afisafi}/routes", generic_afisafi_all);
 
 
     // Possible shortcuts:
-    router.add_get("/origin_asn/{asn}", search_origin_asn_shortcut);
-    router.add_get("/ipv4unicast/origin_asn/{asn}", search_origin_asn);
+    //router.add_get("/origin_asn/{asn}", search_origin_asn_shortcut);
+    //router.add_get("/ipv4unicast/origin_asn/{asn}", search_origin_asn);
     // or, should we do this per afisafi, a la:
     // Because with a /origin_asn (without afisafi), we have to decide and hardcode for which
     // address families we'll do the lookups.
@@ -149,15 +151,15 @@ impl std::str::FromStr for Include {
     }
 }
 
-async fn test_per_afisafi(
+async fn generic_afisafi_all(
     Path((afisafi)): Path<(SupportedAfiSafi)>,
     filter: Query<QueryFilter>,
     state: State<ApiState>
 ) -> Result<Vec<u8>, String> {
 
-
     dbg!(afisafi, filter);
-    Ok("todo".into())
+    warn!("searching routes other than unicast not yet implemented");
+    Ok("TODO".into())
 }
 
 async fn search_ipv4unicast(
@@ -182,7 +184,7 @@ async fn search_ipv4unicast(
     }
 }
 
-// Search all routes, we mimic a 0/0 search, but most (or all) results will actually be
+// Search all routes, we mimic a 0.0.0.0/0 search, but most (or all) results will actually be
 // more-specifics. These go into the "included" part of the response.
 async fn search_ipv4unicast_all(
     mut filter: Query<QueryFilter>,
@@ -194,35 +196,58 @@ async fn search_ipv4unicast_all(
 
 async fn search_ipv6unicast(
     Path((prefix, prefix_len)): Path<(Ipv6Addr, u8)>,
+    Query(filter): Query<QueryFilter>,
     state: State<ApiState>
 ) -> Result<Vec<u8>, String> {
 
-    dbg!(prefix, prefix_len);
-    Ok("TODO".into())
+    let prefix = Prefix::new_v6(prefix, prefix_len).map_err(|e| e.to_string())?;
+    let s = state.store.clone();
+    let mut res = Vec::new();
+    match s.get().map(|store|
+        store.search_and_output_routes(
+            crate::representation::Json(&mut res),
+            AfiSafiType::Ipv6Unicast,
+            prefix,
+            filter
+        )
+    ) {
+        Some(Ok(())) => Ok(res.into()),
+        None | Some(Err(_)) => Err("empty or error".into())
+    }
+}
+
+// Search all routes, we mimic a ::/0 search, but most (or all) results will actually be
+// more-specifics. These go into the "included" part of the response.
+async fn search_ipv6unicast_all(
+    mut filter: Query<QueryFilter>,
+    state: State<ApiState>
+) -> Result<Vec<u8>, String> {
+    filter.enable_more_specifics();
+    search_ipv6unicast(Path((0.into(), 0)), filter, state).await
 }
 
 
 
-async fn search_origin_asn_shortcut(
-    Path(asn): Path<Asn>,
-    state: State<ApiState>
-) -> Result<Vec<u8>, String> {
-    
-
-    // actually handle
-    // /ipv4unicast/0/0?asn=$asn
-    // combined with
-    // /ipv6unciast/0/0/asn=$asn
-
-    dbg!(asn);
-    Ok("TODO".into())
-}
-
-async fn search_origin_asn(
-    Path(asn): Path<Asn>,
-    state: State<ApiState>
-) -> Result<Vec<u8>, String> {
-
-    dbg!(asn);
-    Ok("TODO".into())
-}
+//async fn search_origin_asn_shortcut(
+//    Path(asn): Path<Asn>,
+//    state: State<ApiState>
+//) -> Result<Vec<u8>, String> {
+//    
+//
+//    // actually handle
+//    // /ipv4unicast/0/0?asn=$asn
+//    // combined with
+//    // /ipv6unciast/0/0/asn=$asn
+//
+//    dbg!(asn);
+//    Ok("TODO".into())
+//}
+//
+//async fn search_origin_asn(
+//    Path(asn): Path<Asn>,
+//    state: State<ApiState>
+//) -> Result<Vec<u8>, String> {
+//
+//    dbg!(asn);
+//    Ok("TODO".into())
+//}

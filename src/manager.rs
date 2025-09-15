@@ -641,9 +641,11 @@ impl Manager {
         )));
         let tracer = Arc::new(Tracer::new());
         let ingresses = Arc::new(ingress::Register::new());
+        let metrics: metrics::Collection = Default::default();
         let http_ng_api = Arc::new(Mutex::new(http_ng::Api::new(
             Vec::with_capacity(1), // interfaces come from config, later on
-            ingresses.clone()
+            ingresses.clone(),
+            metrics.clone()
         )));
 
         let (graph_svg_processor, graph_svg_rel_base_url) =
@@ -664,7 +666,7 @@ impl Manager {
             running_targets: Default::default(),
             pending_gates: Default::default(),
             http_client: Default::default(),
-            metrics: Default::default(),
+            metrics: metrics.clone(),
             http_resources: Default::default(),
             roto_compiled: Default::default(),
             graph_svg_processor,

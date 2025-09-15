@@ -19,6 +19,9 @@ pub struct Api {
     /// The `ingress::Register`
     ingress_register: Arc<ingress::Register>,
 
+    /// The metrics collection
+    metrics: crate::metrics::Collection,
+
     /// The axum Router, populated with endpoints
     router: axum::Router<ApiState>,
 
@@ -37,6 +40,9 @@ pub struct ApiState {
     /// The `ingress::Register`
     pub(crate) ingress_register: Arc<ingress::Register>,
     // roto::Compiled: < >
+
+    /// The metrics collection
+    pub(crate) metrics: crate::metrics::Collection,
 }
 
 
@@ -49,14 +55,18 @@ impl Api {
     pub fn new(
         interfaces: Vec<SocketAddr>,
         ingress_register: Arc<ingress::Register>,
+        metrics: crate::metrics::Collection,
     ) -> Self {
         let state = ApiState {
             store: Default::default(),
-            ingress_register: ingress_register.clone()
+            ingress_register: ingress_register.clone(),
+            metrics: metrics.clone(),
+            
         };
 
         let router = axum::Router::<ApiState>::new()
             .route("/", get(|| async {"new HTTP api"}))
+            .route("/metrics", get(Self::metrics))
             .with_state(state)
             ;
 
@@ -65,6 +75,7 @@ impl Api {
             store: Default::default(),
             interfaces,
             ingress_register,
+            metrics,
             router,
             signal_txs: vec![],
             serve_handles: vec![],
@@ -75,11 +86,16 @@ impl Api {
         res
     }
 
+    async fn metrics(state: axum::extract::State<ApiState>) -> Result<String, String> {
+        Ok(state.metrics.assemble(crate::metrics::OutputFormat::Prometheus))
+    }
+
     /// Clone an `ApiState` based on the references to the store an ingress registry
     pub fn cloned_api_state(&self) -> ApiState {
         ApiState { 
             store: self.store.clone(),
-            ingress_register: self.ingress_register.clone()
+            ingress_register: self.ingress_register.clone(),
+            metrics: self.metrics.clone(),
         }
     }
 

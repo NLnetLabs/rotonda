@@ -4,10 +4,12 @@
 //! different transport protocols: [`Tcp`] uses plain, unencrypted TCP while
 //! [`Tls`] uses TLS.
 
+use std::error::Error;
 use std::fmt::Display;
 use std::io;
 use std::fs::File;
 use std::future::Future;
+use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic;
@@ -70,23 +72,118 @@ impl Tcp {
         let metrics = Arc::new(RtrMetrics::new(&gate));
 
         gate.process_until(waitpoint.ready()).await?;
-        // We call waitpoint.running() from within ::run() to allow this
-        // component to have a head start and fetch RTR data before other
-        // units start processing incoming routes.
-        //waitpoint.running().await;
+        tokio::spawn(async  {
+            debug!("waiting 5 secs to give rtr-in a headstart");
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            debug!("waiting done, calling waitpoint.running()");
+            waitpoint.running().await;
+        });
 
-        RtrClient::run(
-            component, waitpoint, gate, self.retry, metrics.clone(),
-            || async {
-                Ok(RtrTcpStream {
-                    sock: TcpStream::connect(&self.remote).await?,
-                    metrics: metrics.clone()
-                })
-            }
-        ).await
+        RtrRunner::new(
+            component, gate, self, metrics
+        ).run().await?;
+        Ok(())
     }
 }
 
+struct RtrRunner {
+    component: Component,
+    gate: Gate,
+    tcp: Tcp,
+    metrics: Arc<RtrMetrics>,
+}
+
+impl RtrRunner {
+    pub fn new(
+        component: Component,
+        gate: Gate,
+        tcp: Tcp,
+        metrics: Arc<RtrMetrics>
+    ) -> Self {
+        Self {
+            component, gate, tcp, metrics
+        }
+    }
+
+    pub async fn run(mut self) -> Result<(), Terminated>{
+        self.component.register_metrics(self.metrics.clone());
+        let remote = self.tcp.remote.clone();
+        let metrics = self.metrics.clone();
+        let fut = RtrClient::run(
+            self.component.name().clone(), self.gate.clone(), self.tcp.retry, self.metrics.clone(),
+            || async {
+                Ok(RtrTcpStream {
+                    sock: TcpStream::connect(remote.clone()).await?,
+                    metrics: metrics.clone(),
+                })
+            }
+        );
+
+        // We don't have to loop like in other (ingress) units, as the RtrClient itself loops and
+        // only returns in case of a terminal failure.
+        match self.process_until(fut).await {
+            ControlFlow::Continue(Ok(res)) => res,
+            ControlFlow::Continue(Err(_)) | 
+                ControlFlow::Break(Terminated) => {
+                    error!("Terminated");
+                    return Err(Terminated)
+                }
+        };
+        Ok(())
+    }
+
+
+    async fn process_until<T, U>(
+        &mut self,
+        until_fut: T,
+        ) -> ControlFlow<Terminated, Result<U, Terminated>> 
+    where
+        T: Future<Output = Result<U, Terminated>>
+    {
+        let mut until_fut = Box::pin(until_fut);
+
+        loop {
+            let process_fut = self.gate.process();
+            pin_mut!(process_fut);
+
+            let res = select(process_fut, until_fut).await;
+
+            match res {
+                Either::Left((Ok(process_fut), next_fut)) => {
+                    match process_fut {
+                        GateStatus::Active => { },
+                        GateStatus::Dormant => { },
+                        GateStatus::Reconfiguring { new_config: _ } => {
+                            warn!("Reconfiguration for RTR ingress not yet supported, \
+                                old config remains active");
+                        }
+                        GateStatus::ReportLinks { report } => {
+                            report.declare_source();
+                        }
+
+                        GateStatus::Triggered { data: _ } => {
+                            warn!("GateStatus::Triggered in RTR ingress not supported");
+                        }
+                    }
+                    until_fut = next_fut;
+                }
+                Either::Left((Err(r), _other_fut)) => {
+                    return ControlFlow::Break(Terminated)
+                }
+                Either::Right((Result::Ok(r), _other_fut)) => {
+                    return ControlFlow::Continue(Result::Ok(r))
+                }
+                Either::Right((Result::Err(_r), _other_fut)) => {
+                    return ControlFlow::Break(Terminated)
+                }
+
+            }
+
+        }
+    }
+
+
+}
 
 /*
 //------------ Tls -----------------------------------------------------------
@@ -279,15 +376,13 @@ where
         /// This method will only ever return if the RTR client encounters a fatal
         /// error.
         async fn run(
-            mut component: Component,
-            waitpoint: WaitPoint,
+            name: Arc<str>,
             mut gate: Gate,
             retry: u64,
             metrics: Arc<RtrMetrics>,
             connect: Connect,
         ) -> Result<(), Terminated> {
-            let mut rtr_target = RtrTarget::new(component.name().clone());
-            component.register_metrics(metrics.clone());
+            let mut rtr_target = RtrTarget::new(name.clone());
             let mut this = Self::new(connect, retry, metrics);
 
             // If the rtr-in connector is configured, we want to give it a
@@ -298,15 +393,7 @@ where
             // connection to the RP software is never successful. For now,
             // simply wait 5 seconds.
 
-            tokio::spawn(async  {
-                debug!("waiting 5 secs to give rtr-in a headstart");
-                tokio::time::sleep(Duration::from_secs(5)).await;
-                debug!("waiting done, calling waitpoint.running()");
-                waitpoint.running().await;
-            });
-
             loop {
-                debug!("Unit {}: Connecting ...", component.name());
                 let mut client = match this.connect(rtr_target, &mut gate).await {
                     Ok(client) => client,
                     Err(res) => {

@@ -96,6 +96,8 @@ pub struct QueryFilter {
     #[serde(rename = "filter[rovStatus]")]
     pub rov_status: Option<RovStatus>,
 
+    #[serde(rename = "filter[peerAsn]")]
+    pub peer_asn: Option<Asn>,
 
     // TODO: RouteDistinguisher, 
 

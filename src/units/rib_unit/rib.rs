@@ -520,6 +520,13 @@ impl Rib {
                 ).unwrap_or(true)
             });
         }
+        if let Some(peer_asn) = filter.peer_asn {
+            records.retain(|r|{
+                ingress_register.get(r.multi_uniq_id).map(|ii|
+                    ii.remote_asn == Some(peer_asn)
+                ).unwrap_or(true)
+            });
+        }
 
         if filter.origin_asn.is_some() ||
             filter.otc.is_some() ||

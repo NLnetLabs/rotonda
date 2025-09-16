@@ -4,13 +4,13 @@ use std::{
     hash::{BuildHasher, Hasher},
     net::IpAddr,
     ops::Deref,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use chrono::{Duration, Utc};
 use hash_hasher::{HashBuildHasher, HashedSet};
 use inetnum::{addr::Prefix, asn::Asn};
-use log::{debug, error, trace};
+use log::{debug, error, trace, warn};
 use rotonda_store::{
     epoch,
     errors::{FatalResult, PrefixStoreError},
@@ -25,7 +25,7 @@ use routecore::bgp::{
 use serde::{ser::{SerializeSeq, SerializeStruct}, Serialize, Serializer};
 
 use crate::{
-    ingress::{self, IngressId, IngressInfo}, payload::{RotondaPaMap, RotondaPaMapWithQueryFilter, RotondaRoute, RouterId}, representation::{GenOutput, Json}, roto_runtime::types::Provenance
+    ingress::{self, IngressId, IngressInfo}, payload::{RotondaPaMap, RotondaPaMapWithQueryFilter, RotondaRoute, RouterId}, representation::{GenOutput, Json}, roto_runtime::{types::{Provenance, RotoPackage}, Ctx}
 };
 
 use super::{http_ng::Include, QueryFilter};
@@ -45,6 +45,11 @@ use super::{http_ng::Include, QueryFilter};
 
 type Store = StarCastRib<RotondaPaMap, MemoryOnlyConfig>;
 
+type RotoHttpFilter = roto::TypedFunc<
+    Ctx,
+    fn (roto::Val<crate::roto_runtime::RcRotondaPaMap>,) -> roto::Verdict<(), ()>,
+>;
+
 #[derive(Clone)]
 pub struct Rib {
     unicast: Arc<Option<Store>>,
@@ -52,18 +57,36 @@ pub struct Rib {
     other_fams:
         HashMap<AfiSafiType, HashMap<(IngressId, Nlri<bytes::Bytes>), PaMap>>,
     ingress_register: Arc<ingress::Register>,
+    roto_package: Option<Arc<RotoPackage>>,
+    roto_context: Arc<Mutex<Ctx>>,
 }
 
 #[derive(Copy, Clone, Debug)]
 struct Multicast(bool);
 
 impl Rib {
-    pub fn new_physical(ingress_register: Arc<ingress::Register>) -> Result<Self, PrefixStoreError> {
+    //pub fn new_physical(ingress_register: Arc<ingress::Register>) -> Result<Self, PrefixStoreError> {
+    //    Ok(Rib {
+    //        unicast: Arc::new(Some(Store::try_default()?)),
+    //        multicast: Arc::new(Some(Store::try_default()?)),
+    //        other_fams: HashMap::new(),
+    //        ingress_register,
+    //        roto_package: None,
+    //    })
+    //}
+
+    pub fn new(
+        ingress_register: Arc<ingress::Register>,
+        roto_package: Option<Arc<RotoPackage>>,
+        roto_context: Arc<Mutex<Ctx>>,
+    ) -> Result<Self, PrefixStoreError> {
         Ok(Rib {
             unicast: Arc::new(Some(Store::try_default()?)),
             multicast: Arc::new(Some(Store::try_default()?)),
             other_fams: HashMap::new(),
             ingress_register,
+            roto_package,
+            roto_context,
         })
     }
 
@@ -473,27 +496,60 @@ impl Rib {
         
         debug!("store lookup took {:?}", std::time::Instant::now().duration_since(t0));
 
+
+        // Find the roto function from the compiled Roto Package.
+        // We do this here, once, to reduce acquiring locks and such over and over.
+        // If the query contains a filter name for which no roto function exists, this simply
+        // filters as if no filter was passed:
+
+        //let maybe_roto_function: Option<RotoHttpFilter> = filter.roto_function.as_ref().and_then(|name| {
+        //    self.roto_package.as_ref().and_then(|package| {
+        //        let mut package = package.lock().unwrap();
+        //        package.get_function(name.as_str()).ok()
+        //    })
+        //});
+
+        // Alternatively, we could return an error:
+        let maybe_roto_function: Option<RotoHttpFilter> = match filter.roto_function.as_ref() {
+            Some(name) => {
+                debug!("looking up {name} in compiled roto package");
+                if let Some(f) = self.roto_package.as_ref().and_then(|package| {
+                    let mut package = package.lock().unwrap();
+                    package.get_function(name.as_str()).ok()
+                }) {
+                    Some(f)
+                } else {
+                    error!("query for undefined roto filter");
+                    return Err(format!("no roto function '{name}' defined"));
+                }
+            }
+            None => None
+        };
+
+
+
+
         let t0 = std::time::Instant::now();
 
         let _ = res.as_mut().map(|sr| {
-            Self::apply_filter(&mut sr.query_result.records, &filter, &self.ingress_register);
+            self.apply_filter(&mut sr.query_result.records, &filter, maybe_roto_function.clone());
             sr.query_result.more_specifics.as_mut().map(|rs| {
                 rs.v4.retain_mut(|pr|{
-                    Self::apply_filter(&mut pr.meta, &filter, &self.ingress_register);
+                    self.apply_filter(&mut pr.meta, &filter, maybe_roto_function.clone());
                     !pr.meta.is_empty()
                 });
                 rs.v6.retain_mut(|pr|{
-                    Self::apply_filter(&mut pr.meta, &filter, &self.ingress_register);
+                    self.apply_filter(&mut pr.meta, &filter, maybe_roto_function.clone());
                     !pr.meta.is_empty()
                 });
             });
             sr.query_result.less_specifics.as_mut().map(|rs| {
                 rs.v4.retain_mut(|pr|{
-                    Self::apply_filter(&mut pr.meta, &filter, &self.ingress_register);
+                    self.apply_filter(&mut pr.meta, &filter, maybe_roto_function.clone());
                     !pr.meta.is_empty()
                 });
                 rs.v6.retain_mut(|pr|{
-                    Self::apply_filter(&mut pr.meta, &filter, &self.ingress_register);
+                    self.apply_filter(&mut pr.meta, &filter, maybe_roto_function.clone());
                     !pr.meta.is_empty()
                 });
             });
@@ -512,20 +568,38 @@ impl Rib {
     //  - fetch the required info once, pass it into apply_filter
     //  - in apply_filter, check for such info and branch: if let Some(passed_info), etc
     
-    fn apply_filter(records: &mut Vec<Record<RotondaPaMap>>, filter: &QueryFilter, ingress_register: &Arc<ingress::Register>) {
+    fn apply_filter(&self, records: &mut Vec<Record<RotondaPaMap>>, filter: &QueryFilter, roto_filter: Option<RotoHttpFilter>) {
         if let Some(rib_type) = filter.rib_type {
             records.retain(|r|{
-                ingress_register.get(r.multi_uniq_id).map(|ii|
+                self.ingress_register.get(r.multi_uniq_id).map(|ii|
                     ii.peer_rib_type == Some(rib_type)
                 ).unwrap_or(true)
             });
         }
         if let Some(peer_asn) = filter.peer_asn {
             records.retain(|r|{
-                ingress_register.get(r.multi_uniq_id).map(|ii|
+                self.ingress_register.get(r.multi_uniq_id).map(|ii|
                     ii.remote_asn == Some(peer_asn)
                 ).unwrap_or(true)
             });
+        }
+
+        if let Some(f) = roto_filter {
+            let mut ctx = self.roto_context.lock().unwrap();
+            records.retain_mut(|r| {
+                let rc_r: crate::roto_runtime::RcRotondaPaMap = std::mem::take(&mut r.meta).into();
+                match f.call(&mut ctx, roto::Val(rc_r.clone())) {
+                    roto::Verdict::Accept(_) => {
+                        r.meta = std::rc::Rc::into_inner(rc_r).unwrap();
+                        true
+                    }
+                    roto::Verdict::Reject(_) => {
+                        //debug!("in Reject for {}", roto_function);
+                        false
+                    }
+                }
+            });
+
         }
 
         if filter.origin_asn.is_some() ||
@@ -578,7 +652,10 @@ impl Rib {
             Ok(search_results) => {
                 let _ = search_results.write(&mut target);
             },
-            Err(e) => { return Err(format!("store error: {e}").into()); }
+            Err(e) => {
+                error!("error in search_and_output_routes: {e}");
+                return Err(format!("store error: {e}").into());
+            }
         }
 
         Ok(())

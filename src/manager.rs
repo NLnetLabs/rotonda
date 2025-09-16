@@ -58,7 +58,7 @@ pub struct Component {
     http_resources: http::Resources,
 
     /// A reference to the compiled Roto script.
-    roto_compiled: Option<Arc<RotoPackage>>,
+    roto_package: Option<Arc<RotoPackage>>,
 
     /// A reference to the Tracer
     tracer: Arc<Tracer>,
@@ -78,7 +78,7 @@ impl Default for Component {
             http_client: Default::default(),
             metrics: Default::default(),
             http_resources: Default::default(),
-            roto_compiled: Default::default(),
+            roto_package: Default::default(),
             tracer: Default::default(),
             ingresses: Default::default(),
             http_ng_api: Default::default(),
@@ -94,7 +94,7 @@ impl Component {
         http_client: HttpClient,
         metrics: metrics::Collection,
         http_resources: http::Resources,
-        roto_compiled: Option<Arc<RotoPackage>>,
+        roto_package: Option<Arc<RotoPackage>>,
         tracer: Arc<Tracer>,
         ingresses: Arc<ingress::Register>,
         http_ng_api: Arc<Mutex<http_ng::Api>>,
@@ -105,7 +105,7 @@ impl Component {
             http_client: Some(http_client),
             metrics: Some(metrics),
             http_resources,
-            roto_compiled,
+            roto_package,
             tracer,
             ingresses,
             http_ng_api,
@@ -131,10 +131,10 @@ impl Component {
         &self.http_resources
     }
 
-    pub fn roto_compiled(
+    pub fn roto_package(
         &self,
     ) -> &Option<Arc<RotoPackage>> {
-        &self.roto_compiled
+        &self.roto_package
     }
 
     pub fn tracer(&self) -> &Arc<Tracer> {

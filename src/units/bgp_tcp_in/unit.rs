@@ -123,7 +123,7 @@ impl BgpTcpIn {
             metrics.clone(),
         ));
 
-        let roto_compiled = component.roto_compiled().clone();
+        let roto_compiled = component.roto_package().clone();
 
         // Wait for other components to be, and signal to other components
         // that we are, ready to start. All units and targets start together,

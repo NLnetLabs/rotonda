@@ -188,7 +188,7 @@ impl BmpTcpIn {
             (processor, router_info)
         };
 
-        let roto_compiled = component.roto_compiled().clone();
+        let roto_compiled = component.roto_package().clone();
         let tracer = component.tracer().clone();
 
         let ingress_register = component.ingresses();

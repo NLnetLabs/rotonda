@@ -150,7 +150,7 @@ impl AsRef<[u8]> for RotondaPaMap {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct RotondaPaMap{
     // raw[0] is RpkiInfo
     // raw[1] is PduParseInfo

@@ -123,6 +123,11 @@ pub struct QueryFilter {
     #[serde_as(as = "Option<StringWithSeparator::<CommaSeparator, u8>>")]
     #[serde(rename = "fields[pathAttributes]")]
     pub fields_path_attributes: Option<Vec<u8>>,
+
+
+
+    #[serde(rename = "function[roto]")]
+    pub roto_function: Option<String>
 }
 
 impl QueryFilter {

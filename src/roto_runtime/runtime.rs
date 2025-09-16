@@ -17,6 +17,7 @@ use routecore::bgp::message::SessionConfig;
 use routecore::bgp::message::UpdateMessage as BgpUpdateMessage;
 use routecore::bgp::nlri::afisafi::IsPrefix;
 use routecore::bgp::path_attributes::LargeCommunitiesList;
+use routecore::bgp::types::Otc;
 use routecore::bmp::message::PerPeerHeader;
 use routecore::bmp::message::{Message as BmpMsg, MessageType as BmpMsgType};
 
@@ -26,7 +27,7 @@ use super::lists::{MutNamedAsnLists, MutNamedPrefixLists};
 use super::types::{
     InsertionInfo, Output, Provenance, RotoOutputStream, RouteContext,
 };
-use crate::payload::RotondaRoute;
+use crate::payload::{RotondaPaMap, RotondaRoute};
 use crate::roto_runtime::lists::{AsnList, PrefixList};
 use crate::roto_runtime::types::LogEntry;
 use crate::units::rib_unit::rpki::{RovStatus, RovStatusUpdate, RtrCache};
@@ -40,6 +41,7 @@ pub const COMPILE_LISTS_FUNC_NAME: &str = "compile_lists";
 pub(crate) type Log = Rc<RefCell<RotoOutputStream>>;
 pub(crate) type SharedRtrCache = Arc<RtrCache>;
 pub(crate) type MutRotondaRoute = Rc<RefCell<RotondaRoute>>;
+pub(crate) type RcRotondaPaMap = Rc<RotondaPaMap>;
 pub(crate) type MutLogEntry = Rc<RefCell<LogEntry>>;
 
 impl From<RotondaRoute> for MutRotondaRoute {
@@ -106,6 +108,13 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         "Route",
         "A single announced or withdrawn path",
     )?;
+
+
+    rt.register_clone_type_with_name::<RcRotondaPaMap>(
+        "Attributes",
+        "The Path attributes pertaining to a certain Route"
+    )?;
+
     rt.register_clone_type_with_name::<RouteContext>(
         "RouteContext",
         "Contextual information pertaining to the Route",
@@ -1229,6 +1238,23 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
          false
         }
     }
+
+    //---------
+
+    #[roto_method(rt, RcRotondaPaMap)]
+    fn otc(pamap: Val<RcRotondaPaMap>) -> Option<Asn> {
+        pamap.path_attributes().get::<Otc>().map(|a| a.0)
+    }
+    rt.register_clone_type_with_name::<HopPath>("aspath", "AS_PATH path attribute")?;
+    #[roto_method(rt, RcRotondaPaMap)]
+    fn aspath(pamap: Val<RcRotondaPaMap>) -> Option<Val<HopPath>> {
+        pamap.path_attributes().get::<HopPath>().map(|a| Val(a))
+    }
+    #[roto_method(rt, HopPath)]
+    fn contains(hoppath: Val<HopPath>, asn: Asn) -> bool {
+        hoppath.contains(&asn.into())
+    }
+
 
 
 

@@ -291,7 +291,67 @@ impl RibUnitRunner {
     ) -> Result<Self, PrefixStoreError> {
         let unit_name = component.name().clone();
         let gate = Arc::new(gate);
-        let rib = Arc::new(ArcSwap::from_pointee(Rib::new_physical(component.ingresses())?));
+        let roto_compiled = component.roto_package().clone();
+        let roto_function_pre: Option<RotoFuncPre> =
+            roto_compiled.clone().and_then(|c| {
+                let mut c = c.lock().unwrap();
+                c.get_function(ROTO_FUNC_PRE_FILTER_NAME)
+                .inspect_err(|_|
+                    warn!("Loaded Roto script has no filter for rib_in_pre")
+                )
+                .ok()
+            });
+
+        let roto_function_vrp_update: Option<RotoFuncVrpUpdate> =
+            roto_compiled.clone().and_then(|c| {
+                let mut c = c.lock().unwrap();
+                c.get_function(ROTO_FUNC_VRP_UPDATE_FILTER_NAME)
+                .inspect_err(|_|
+                    warn!("Loaded Roto script has no filter for rib_in_vrp_update")
+                )
+                .ok()
+            });
+
+        let roto_function_vrp_update_post: Option<RotoFuncRovStatusUpdate> =
+            roto_compiled.clone().and_then(|c| {
+                let mut c = c.lock().unwrap();
+                c.get_function(ROTO_FUNC_ROV_STATUS_UPDATE_NAME)
+                .inspect_err(|_|
+                    warn!("Loaded Roto script has no filter for rib_in_vrp_update_post")
+                )
+                .ok()
+            });
+
+        // The rib-in-post filter is not used yet.
+        let roto_function_post: Option<RotoFuncPost> = None;
+        //let roto_function_post: Option<RotoFuncPost> = roto_compiled
+        //    .and_then(|c| {
+        //        let mut c = c.lock().unwrap();
+        //        c.get_function(ROTO_FUNC_POST_FILTER_NAME)
+        //        .inspect_err(|_|
+        //            warn!("Loaded Roto script has no filter for rib_in_post")
+        //        )
+        //        .ok()
+        //    });
+
+        let rtr_cache: Arc<RtrCache> = Default::default();
+
+        let mut roto_context = Ctx::new(
+            RotoOutputStream::new_rced(),
+            rtr_cache.clone()
+        );
+
+        if let Some(c) = roto_compiled.clone() {
+            roto_context.prepare(&mut c.lock().unwrap());
+        }
+
+        let roto_context = Arc::new(Mutex::new(roto_context));
+        //let rib = Arc::new(ArcSwap::from_pointee(Rib::new_physical(component.ingresses())?));
+        let rib = Arc::new(ArcSwap::from_pointee(Rib::new(
+                    component.ingresses(),
+                    component.roto_package().clone(),
+                    roto_context.clone(),
+                    )?));
         let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> =
             Default::default();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
@@ -350,60 +410,6 @@ impl RibUnitRunner {
             debug!("could not get lock on HTTP API");
         }
 
-        let roto_compiled = component.roto_compiled().clone();
-        let roto_function_pre: Option<RotoFuncPre> =
-            roto_compiled.clone().and_then(|c| {
-                let mut c = c.lock().unwrap();
-                c.get_function(ROTO_FUNC_PRE_FILTER_NAME)
-                .inspect_err(|_|
-                    warn!("Loaded Roto script has no filter for rib_in_pre")
-                )
-                .ok()
-            });
-
-        let roto_function_vrp_update: Option<RotoFuncVrpUpdate> =
-            roto_compiled.clone().and_then(|c| {
-                let mut c = c.lock().unwrap();
-                c.get_function(ROTO_FUNC_VRP_UPDATE_FILTER_NAME)
-                .inspect_err(|_|
-                    warn!("Loaded Roto script has no filter for rib_in_vrp_update")
-                )
-                .ok()
-            });
-
-        let roto_function_vrp_update_post: Option<RotoFuncRovStatusUpdate> =
-            roto_compiled.clone().and_then(|c| {
-                let mut c = c.lock().unwrap();
-                c.get_function(ROTO_FUNC_ROV_STATUS_UPDATE_NAME)
-                .inspect_err(|_|
-                    warn!("Loaded Roto script has no filter for rib_in_vrp_update_post")
-                )
-                .ok()
-            });
-
-        // The rib-in-post filter is not used yet.
-        let roto_function_post: Option<RotoFuncPost> = None;
-        //let roto_function_post: Option<RotoFuncPost> = roto_compiled
-        //    .and_then(|c| {
-        //        let mut c = c.lock().unwrap();
-        //        c.get_function(ROTO_FUNC_POST_FILTER_NAME)
-        //        .inspect_err(|_|
-        //            warn!("Loaded Roto script has no filter for rib_in_post")
-        //        )
-        //        .ok()
-        //    });
-
-        let rtr_cache: Arc<RtrCache> = Default::default();
-
-        let mut roto_context = Ctx::new(
-            RotoOutputStream::new_rced(),
-            rtr_cache.clone()
-        );
-
-        if let Some(c) = roto_compiled.clone() {
-            roto_context.prepare(&mut c.lock().unwrap());
-        }
-
         let tracer = component.tracer().clone();
 
         Ok(Self {
@@ -411,7 +417,7 @@ impl RibUnitRunner {
             roto_function_vrp_update,
             roto_function_vrp_update_post,
             roto_function_post,
-            roto_context: Arc::new(Mutex::new(roto_context)),
+            roto_context: roto_context.clone(),
             gate,
             http_processor,
             query_limits,
@@ -443,7 +449,8 @@ impl RibUnitRunner {
         let query_limits =
             Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
         let ingress_register: Arc<ingress::Register> = Default::default();
-        let rib = Rib::new_physical(ingress_register.clone())?;
+        let ctx = Arc::new(Mutex::new(Ctx::empty()));
+        let rib = Rib::new(ingress_register.clone(), None, ctx.clone())?;
         let status_reporter = RibUnitStatusReporter::default().into();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
         let filter_name =
@@ -482,7 +489,7 @@ impl RibUnitRunner {
             roto_function_post: None,
             roto_function_vrp_update_post: None,
             ingress_register: Arc::new(ingress::Register::new()),
-            roto_context: Arc::new(Mutex::new(Ctx::empty())),
+            roto_context: ctx.clone()
         };
 
         Ok((runner, gate_agent))

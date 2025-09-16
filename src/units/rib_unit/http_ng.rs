@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display, net::{Ipv4Addr, Ipv6Addr}};
 
-use axum::extract::{Path, Query, State};
+use axum::{extract::{Path, Query, State}};
 use inetnum::{addr::Prefix, asn::Asn};
 use log::{debug, warn};
 use routecore::{bgp::{communities::StandardCommunity, path_attributes::PathAttributeType, types::AfiSafiType}, bmp::message::RibType};
@@ -162,20 +162,20 @@ async fn generic_afisafi_all(
     Path((afisafi)): Path<(SupportedAfiSafi)>,
     filter: Query<QueryFilter>,
     state: State<ApiState>
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, ApiError> {
 
     dbg!(afisafi, filter);
     warn!("searching routes other than unicast not yet implemented");
-    Ok("TODO".into())
+    Err(ApiError::InternalServerError("TODO".into()))
 }
 
 async fn search_ipv4unicast(
     Path((prefix, prefix_len)): Path<(Ipv4Addr, u8)>,
     Query(filter): Query<QueryFilter>,
     state: State<ApiState>
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, ApiError> {
 
-    let prefix = Prefix::new_v4(prefix, prefix_len).map_err(|e| e.to_string())?;
+    let prefix = Prefix::new_v4(prefix, prefix_len).map_err(|e| ApiError::BadRequest(e.to_string()))?;
     let s = state.store.clone();
     let mut res = Vec::new();
     match s.get().map(|store|
@@ -187,7 +187,8 @@ async fn search_ipv4unicast(
         )
     ) {
         Some(Ok(())) => Ok(res.into()),
-        None | Some(Err(_)) => Err("empty or error".into())
+        Some(Err(e)) => Err(ApiError::BadRequest(e)),
+        None => Err(ApiError::InternalServerError("store unavailable".into()))
     }
 }
 
@@ -196,7 +197,7 @@ async fn search_ipv4unicast(
 async fn search_ipv4unicast_all(
     mut filter: Query<QueryFilter>,
     state: State<ApiState>
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, ApiError> {
     filter.enable_more_specifics();
     search_ipv4unicast(Path((0.into(), 0)), filter, state).await
 }
@@ -205,9 +206,9 @@ async fn search_ipv6unicast(
     Path((prefix, prefix_len)): Path<(Ipv6Addr, u8)>,
     Query(filter): Query<QueryFilter>,
     state: State<ApiState>
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, ApiError> {
 
-    let prefix = Prefix::new_v6(prefix, prefix_len).map_err(|e| e.to_string())?;
+    let prefix = Prefix::new_v6(prefix, prefix_len).map_err(|e| ApiError::BadRequest(e.to_string()))?;
     let s = state.store.clone();
     let mut res = Vec::new();
     match s.get().map(|store|
@@ -219,7 +220,8 @@ async fn search_ipv6unicast(
         )
     ) {
         Some(Ok(())) => Ok(res.into()),
-        None | Some(Err(_)) => Err("empty or error".into())
+        Some(Err(e)) => Err(ApiError::BadRequest(e)),
+        None => Err(ApiError::InternalServerError("store unavailable".into()))
     }
 }
 
@@ -228,7 +230,7 @@ async fn search_ipv6unicast(
 async fn search_ipv6unicast_all(
     mut filter: Query<QueryFilter>,
     state: State<ApiState>
-) -> Result<Vec<u8>, String> {
+) -> Result<Vec<u8>, ApiError> {
     filter.enable_more_specifics();
     search_ipv6unicast(Path((0.into(), 0)), filter, state).await
 }
@@ -258,3 +260,19 @@ async fn search_ipv6unicast_all(
 //    dbg!(asn);
 //    Ok("TODO".into())
 //}
+
+
+enum ApiError {
+    BadRequest(String),
+    InternalServerError(String),
+}
+
+impl axum::response::IntoResponse for ApiError {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            ApiError::BadRequest(msg) => (axum::http::StatusCode::BAD_REQUEST, msg),
+            ApiError::InternalServerError(msg) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, msg),
+        }.into_response()
+    }
+}
+

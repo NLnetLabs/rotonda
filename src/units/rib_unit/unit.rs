@@ -442,7 +442,8 @@ impl RibUnitRunner {
         let gate = gate.into();
         let query_limits =
             Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
-        let rib = Rib::new_physical()?;
+        let ingress_register: Arc<ingress::Register> = Default::default();
+        let rib = Rib::new_physical(ingress_register.clone())?;
         let status_reporter = RibUnitStatusReporter::default().into();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
         let filter_name =
@@ -459,7 +460,7 @@ impl RibUnitRunner {
             rib_type,
             None,
             pending_vrib_query_results.clone(),
-            Arc::default(), // ingress::Register
+            ingress_register,
         ));
         let tracer = Arc::new(Tracer::new());
 

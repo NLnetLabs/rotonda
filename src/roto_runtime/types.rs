@@ -84,7 +84,7 @@ impl RotoScripts {
     }
 }
 
-pub type CompiledRoto = std::sync::Mutex<roto::Compiled>;
+pub type RotoPackage = std::sync::Mutex<roto::Package>;
 
 #[derive(Default)]
 pub struct OutputStream<M> {

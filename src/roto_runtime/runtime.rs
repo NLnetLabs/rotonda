@@ -80,8 +80,8 @@ impl Ctx {
         }
     }
 
-    pub fn prepare(&mut self, compiled: &mut roto::Compiled) {
-        let f: Result<CompileListsFunc, _> = compiled
+    pub fn prepare(&mut self, roto_package: &mut roto::Package) {
+        let f: Result<CompileListsFunc, _> = roto_package
             .get_function(COMPILE_LISTS_FUNC_NAME);
         if let Ok(f) = f {
             f.call(self);
@@ -1249,25 +1249,25 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     rt.register_constant(
         "NO_EXPORT",
         "The well-known NO_EXPORT community (RFC1997)",
-        StandardCommunity::from_wellknown(Wellknown::NoExport),
+        Val(StandardCommunity::from_wellknown(Wellknown::NoExport)),
     )?;
 
     rt.register_constant(
         "NO_ADVERTISE",
         "The well-known NO_ADVERTISE community (RFC1997)",
-        StandardCommunity::from_wellknown(Wellknown::NoAdvertise),
+        Val(StandardCommunity::from_wellknown(Wellknown::NoAdvertise)),
     )?;
 
     rt.register_constant(
         "NO_EXPORT_SUBCONFED",
         "The well-known NO_EXPORT_SUBCONFED community (RFC1997)",
-        StandardCommunity::from_wellknown(Wellknown::NoExportSubconfed),
+        Val(StandardCommunity::from_wellknown(Wellknown::NoExportSubconfed)),
     )?;
 
     rt.register_constant(
         "NO_PEER",
         "The well-known NO_PEER community (RFC3765)",
-        StandardCommunity::from_wellknown(Wellknown::NoPeer),
+        Val(StandardCommunity::from_wellknown(Wellknown::NoPeer)),
     )?;
 
 
@@ -1453,15 +1453,15 @@ mod tests {
 
         let roto_script = "etc/examples/filters.roto.example";
         let i = roto::FileTree::single_file(roto_script);
-        let mut c = i.compile(create_runtime().unwrap())
+        let mut roto_package = i.compile(&create_runtime().unwrap())
             .inspect_err(|e| eprintln!("{e}"))
             .unwrap();
 
-        let _: CompileListsFunc = c.get_function(COMPILE_LISTS_FUNC_NAME).unwrap();
-        let _: BgpInFunc = c.get_function(ROTO_FUNC_BGP_IN_NAME).unwrap();
-        let _: BmpInFunc = c.get_function(ROTO_FUNC_BMP_IN_NAME).unwrap();
-        let _: RibInPreFunc = c.get_function(ROTO_FUNC_RIB_IN_PRE_NAME).unwrap();
-        let _: RotoFuncVrpUpdate = c.get_function(ROTO_FUNC_VRP_UPDATE_FILTER_NAME).unwrap();
-        let _: RotoFuncRovStatusUpdate = c.get_function(ROTO_FUNC_ROV_STATUS_UPDATE_NAME).unwrap();
+        let _: CompileListsFunc = roto_package.get_function(COMPILE_LISTS_FUNC_NAME).unwrap();
+        let _: BgpInFunc = roto_package.get_function(ROTO_FUNC_BGP_IN_NAME).unwrap();
+        let _: BmpInFunc = roto_package.get_function(ROTO_FUNC_BMP_IN_NAME).unwrap();
+        let _: RibInPreFunc = roto_package.get_function(ROTO_FUNC_RIB_IN_PRE_NAME).unwrap();
+        let _: RotoFuncVrpUpdate = roto_package.get_function(ROTO_FUNC_VRP_UPDATE_FILTER_NAME).unwrap();
+        let _: RotoFuncRovStatusUpdate = roto_package.get_function(ROTO_FUNC_ROV_STATUS_UPDATE_NAME).unwrap();
     }
 }

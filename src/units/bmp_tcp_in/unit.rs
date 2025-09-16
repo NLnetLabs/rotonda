@@ -32,7 +32,7 @@ use crate::{
         unit::UnitActivity,
     }, comms::{Gate, GateStatus, Terminated}, ingress::{self, IngressId, IngressInfo}, manager::{Component, WaitPoint}, payload::Update, roto_runtime::{
         types::{
-            CompiledRoto, FilterName, Provenance, RotoOutputStream,
+            RotoPackage, FilterName, Provenance, RotoOutputStream,
             RotoScripts
         },
         Ctx
@@ -282,7 +282,7 @@ struct BmpTcpInRunner {
     bmp_in_metrics: Arc<BmpTcpInMetrics>,
     _state_machine_metrics: Arc<TokioTaskMetrics>,
     status_reporter: Arc<BmpTcpInStatusReporter>,
-    roto_compiled: Option<Arc<CompiledRoto>>,
+    roto_compiled: Option<Arc<RotoPackage>>,
     router_id_template: Arc<ArcSwap<String>>,
     filter_name: Arc<ArcSwap<FilterName>>,
     tracer: Arc<Tracer>,
@@ -308,7 +308,7 @@ impl BmpTcpInRunner {
         bmp_in_metrics: Arc<BmpTcpInMetrics>,
         _state_machine_metrics: Arc<TokioTaskMetrics>,
         status_reporter: Arc<BmpTcpInStatusReporter>,
-        roto_compiled: Option<Arc<CompiledRoto>>,
+        roto_compiled: Option<Arc<RotoPackage>>,
         router_id_template: Arc<ArcSwap<String>>,
         filter_name: Arc<ArcSwap<FilterName>>,
         tracer: Arc<Tracer>,

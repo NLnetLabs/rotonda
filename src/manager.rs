@@ -3,7 +3,7 @@
 use crate::common::file_io::TheFileIo;
 use crate::http_ng;
 use crate::roto_runtime::types::FilterName;
-use crate::roto_runtime::types::CompiledRoto;
+use crate::roto_runtime::types::RotoPackage;
 use crate::roto_runtime::create_runtime;
 use crate::comms::{
     DirectLink, Gate, GateAgent, GraphStatus, Link, DEF_UPDATE_QUEUE_LEN,
@@ -58,7 +58,7 @@ pub struct Component {
     http_resources: http::Resources,
 
     /// A reference to the compiled Roto script.
-    roto_compiled: Option<Arc<CompiledRoto>>,
+    roto_compiled: Option<Arc<RotoPackage>>,
 
     /// A reference to the Tracer
     tracer: Arc<Tracer>,
@@ -94,7 +94,7 @@ impl Component {
         http_client: HttpClient,
         metrics: metrics::Collection,
         http_resources: http::Resources,
-        roto_compiled: Option<Arc<CompiledRoto>>,
+        roto_compiled: Option<Arc<RotoPackage>>,
         tracer: Arc<Tracer>,
         ingresses: Arc<ingress::Register>,
         http_ng_api: Arc<Mutex<http_ng::Api>>,
@@ -133,7 +133,7 @@ impl Component {
 
     pub fn roto_compiled(
         &self,
-    ) -> &Option<Arc<CompiledRoto>> {
+    ) -> &Option<Arc<RotoPackage>> {
         &self.roto_compiled
     }
 
@@ -609,7 +609,7 @@ pub struct Manager {
     http_resources: http::Resources,
 
     /// A reference to the compiled Roto script.
-    roto_compiled: Option<Arc<CompiledRoto>>,
+    roto_package: Option<Arc<RotoPackage>>,
 
     graph_svg_processor: Arc<dyn ProcessRequest>,
 
@@ -668,7 +668,7 @@ impl Manager {
             http_client: Default::default(),
             metrics: metrics.clone(),
             http_resources: Default::default(),
-            roto_compiled: Default::default(),
+            roto_package: Default::default(),
             graph_svg_processor,
             graph_svg_data,
             file_io: TheFileIo::default(),
@@ -919,11 +919,11 @@ impl Manager {
 
         let i = roto::FileTree::read(path);
             // .map_err(|e| e.to_string())?;
-        let c = i
-            .compile(create_runtime().unwrap())
+        let roto_package = i
+            .compile(&create_runtime().unwrap())
             .map_err(|e| e.to_string())?;
 
-        self.roto_compiled = Some(Arc::new(Mutex::new(c)));
+        self.roto_package = Some(Arc::new(Mutex::new(roto_package)));
         Ok(())
     }
 
@@ -1148,7 +1148,7 @@ impl Manager {
                 self.http_client.clone(),
                 self.metrics.clone(),
                 self.http_resources.clone(),
-                self.roto_compiled.clone(),
+                self.roto_package.clone(),
                 self.tracer.clone(),
                 self.ingresses.clone(),
                 self.http_ng_api.clone(),
@@ -1227,7 +1227,7 @@ impl Manager {
                 self.http_client.clone(),
                 self.metrics.clone(),
                 self.http_resources.clone(),
-                self.roto_compiled.clone(),
+                self.roto_package.clone(),
                 self.tracer.clone(),
                 self.ingresses.clone(),
                 self.http_ng_api.clone(),

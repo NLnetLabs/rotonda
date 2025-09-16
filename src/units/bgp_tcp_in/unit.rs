@@ -29,7 +29,7 @@ use crate::common::net::{
     TcpListenerFactory, TcpStreamWrapper,
 };
 use crate::roto_runtime::types::{
-    CompiledRoto, FilterName, Provenance, RotoOutputStream, RotoScripts
+    RotoPackage, FilterName, Provenance, RotoOutputStream, RotoScripts
 };
 //use crate::common::roto::{FilterName, RotoScripts};
 use crate::common::status_reporter::{Chainable, UnitStatusReporter};
@@ -192,7 +192,7 @@ struct BgpTcpInRunner {
 
     status_reporter: Arc<BgpTcpInStatusReporter>,
 
-    roto_compiled: Option<Arc<CompiledRoto>>,
+    roto_compiled: Option<Arc<RotoPackage>>,
 
     // To send commands to a Session based on peer IP + ASN.
     live_sessions: Arc<Mutex<LiveSessions>>,
@@ -214,7 +214,7 @@ impl BgpTcpInRunner {
         gate: Gate,
         metrics: Arc<BgpTcpInMetrics>,
         status_reporter: Arc<BgpTcpInStatusReporter>,
-        roto_compiled: Option<Arc<CompiledRoto>>,
+        roto_compiled: Option<Arc<RotoPackage>>,
         ingresses: Arc<ingress::Register>,
     ) -> Self {
         BgpTcpInRunner {

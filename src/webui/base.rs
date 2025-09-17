@@ -11,7 +11,7 @@ pub struct WebUI { }
 
 impl WebUI {
     pub fn register_routes(router: &mut Api) {
-        router.add_get("/ui", Self::index);
+        router.add_get("/", Self::index);
     }
 
 

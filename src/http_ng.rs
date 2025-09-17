@@ -13,6 +13,9 @@ pub struct Api {
     /// Interfaces to listen on
     interfaces: Vec<SocketAddr>,
 
+    /// The /api/v1 or similar for this API
+    api_root: String,
+
     /// The Rib (wrapping rotonda-store)
     store: OnceLock<Arc<Rib>>,
 
@@ -65,13 +68,13 @@ impl Api {
         };
 
         let router = axum::Router::<ApiState>::new()
-            .route("/", get(|| async {"new HTTP api"}))
             .route("/metrics", get(Self::metrics))
             .with_state(state)
             ;
 
 
         let mut res = Self {
+            api_root: "".into(),
             store: Default::default(),
             interfaces,
             ingress_register,
@@ -81,8 +84,14 @@ impl Api {
             serve_handles: vec![],
         };
 
-        IngressApi::register_routes(&mut res);
+        // The web-ui lives on /
         WebUI::register_routes(&mut res);
+
+        // All other endpoints go under /api/v1
+        res.api_root = "/api/v1".into();
+
+        IngressApi::register_routes(&mut res);
+
         res
     }
 
@@ -122,7 +131,7 @@ impl Api {
             T: 'static,
     {
         self.router = self.router.clone()
-            .route(path.as_ref(), get(handler))
+            .route(&format!("{}{}", self.api_root, path.as_ref()), get(handler))
             .with_state(
                 self.cloned_api_state()
             );

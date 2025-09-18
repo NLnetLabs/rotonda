@@ -25,7 +25,7 @@ use routecore::bgp::{
 use serde::{ser::{SerializeSeq, SerializeStruct}, Serialize, Serializer};
 
 use crate::{
-    ingress::{self, IngressId, IngressInfo}, payload::{RotondaPaMap, RotondaPaMapWithQueryFilter, RotondaRoute, RouterId}, representation::{GenOutput, Json}, roto_runtime::{types::{Provenance, RotoPackage}, Ctx}
+    ingress::{self, register::{IdAndInfo, OwnedIdAndInfo}, IngressId, IngressInfo}, payload::{RotondaPaMap, RotondaPaMapWithQueryFilter, RotondaRoute, RouterId}, representation::{GenOutput, Json}, roto_runtime::{types::{Provenance, RotoPackage}, Ctx}
 };
 
 use super::{http_ng::Include, QueryFilter};
@@ -828,9 +828,8 @@ impl Serialize for RecordWrapper<'_, '_, '_> {
         //
         #[derive(Serialize)]
         struct Helper<'a> {
-            ingress_id: IngressId,
-            ingress_info: IngressInfo,
             status: RouteStatusWrapper,
+            ingress: OwnedIdAndInfo,
             #[serde(flatten)]
             pamap: &'a RotondaPaMap,
             //pamap: RotondaPaMapWithQueryFilter<'a, 'b>,//(&RotondaPaMap, &self.2),
@@ -838,9 +837,8 @@ impl Serialize for RecordWrapper<'_, '_, '_> {
 
         #[derive(Serialize)]
         struct HelperWithQueryFilter<'a, 'b> {
-            ingress_id: IngressId,
-            ingress_info: IngressInfo,
             status: RouteStatusWrapper,
+            ingress: OwnedIdAndInfo,
             #[serde(flatten)]
             pamap: RotondaPaMapWithQueryFilter<'a, 'b>,//(&RotondaPaMap, &self.2),
         }
@@ -855,16 +853,13 @@ impl Serialize for RecordWrapper<'_, '_, '_> {
         // are sure 14/15 do not end up in the store, that .filter can be removed completely.
         if self.2.fields_path_attributes.is_some() {
             HelperWithQueryFilter {
-                ingress_id: self.0.multi_uniq_id,
-                ingress_info: self.1.get(self.0.multi_uniq_id).unwrap(),
+                ingress: self.1.get_tuple(self.0.multi_uniq_id).unwrap(),
                 status: RouteStatusWrapper(self.0.status),
-                //pamap: &self.0.meta
                 pamap: RotondaPaMapWithQueryFilter(&self.0.meta, &self.2),
             }.serialize(serializer)
         } else {
             Helper {
-                ingress_id: self.0.multi_uniq_id,
-                ingress_info: self.1.get(self.0.multi_uniq_id).unwrap(),
+                ingress: self.1.get_tuple(self.0.multi_uniq_id).unwrap(),
                 status: RouteStatusWrapper(self.0.status),
                 pamap: &self.0.meta
             }.serialize(serializer)

@@ -9,7 +9,7 @@ use serde_with::serde_as;
 use serde_with::formats::CommaSeparator;
 use serde_with::StringWithSeparator;
 
-use crate::{http_ng::{Api, ApiState}, ingress::IngressId, roto_runtime::types::PeerRibType, units::rib_unit::rpki::RovStatus};
+use crate::{http_ng::{Api, ApiError, ApiState}, ingress::IngressId, roto_runtime::types::PeerRibType, units::rib_unit::rpki::RovStatus};
 
 // XXX The actual querying of the store should be similar to how we query the ingress register,
 // i.e. with the Rib unit constructing one type of responses (so a wrapper around the
@@ -267,17 +267,17 @@ async fn search_ipv6unicast_all(
 //}
 
 
-enum ApiError {
-    BadRequest(String),
-    InternalServerError(String),
-}
-
-impl axum::response::IntoResponse for ApiError {
-    fn into_response(self) -> axum::response::Response {
-        match self {
-            ApiError::BadRequest(msg) => (axum::http::StatusCode::BAD_REQUEST, msg),
-            ApiError::InternalServerError(msg) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, msg),
-        }.into_response()
-    }
-}
-
+//enum ApiError {
+//    BadRequest(String),
+//    InternalServerError(String),
+//}
+//
+//impl axum::response::IntoResponse for ApiError {
+//    fn into_response(self) -> axum::response::Response {
+//        match self {
+//            ApiError::BadRequest(msg) => (axum::http::StatusCode::BAD_REQUEST, msg),
+//            ApiError::InternalServerError(msg) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, msg),
+//        }.into_response()
+//    }
+//}
+//

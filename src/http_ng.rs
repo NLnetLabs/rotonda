@@ -194,3 +194,18 @@ impl Api {
     }
 
 }
+
+pub enum ApiError {
+    BadRequest(String),
+    InternalServerError(String),
+}
+
+impl axum::response::IntoResponse for ApiError {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            ApiError::BadRequest(msg) => (axum::http::StatusCode::BAD_REQUEST, msg),
+            ApiError::InternalServerError(msg) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, msg),
+        }.into_response()
+    }
+}
+

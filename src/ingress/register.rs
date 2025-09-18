@@ -4,7 +4,6 @@ use std::{collections::HashMap, path::PathBuf, sync::atomic::Ordering};
 
 use std::sync::RwLock;
 use std::fmt;
-use std::io::Write;
 use inetnum::asn::Asn;
 use routecore::bmp::message::{PeerType, RibType};
 use paste::paste;
@@ -30,9 +29,37 @@ pub struct Register {
 pub type IngressId = u32;
 #[derive(serde::Serialize)]
 pub struct IdAndInfo<'a> {
-    ingress_id: IngressId,
+    #[serde(rename = "id")]
+    pub ingress_id: IngressId,
     #[serde(flatten)]
-    ingress_info: &'a IngressInfo,
+    pub ingress_info: &'a IngressInfo,
+}
+
+#[derive(serde::Serialize)]
+pub struct OwnedIdAndInfo {
+    #[serde(rename = "id")]
+    pub ingress_id: IngressId,
+    #[serde(flatten)]
+    pub ingress_info: IngressInfo,
+}
+
+impl<'a> From<(IngressId, &'a IngressInfo)> for IdAndInfo<'a> {
+    fn from(value: (IngressId, &'a IngressInfo)) -> Self {
+        IdAndInfo {
+            ingress_id: value.0,
+            ingress_info: value.1
+        }
+    }
+}
+
+
+impl From<(IngressId, IngressInfo)> for OwnedIdAndInfo {
+    fn from(value: (IngressId, IngressInfo)) -> Self {
+        OwnedIdAndInfo {
+            ingress_id: value.0,
+            ingress_info: value.1
+        }
+    }
 }
 
 pub struct BmpIdAndInfo<'a>(pub IdAndInfo<'a>);

@@ -1,6 +1,6 @@
-use axum::extract::State;
+use axum::extract::{Path, State};
 
-use crate::{cli::CliApi, http_ng::{Api, ApiState}, representation::Json};
+use crate::{cli::CliApi, http_ng::{Api, ApiError, ApiState}, ingress::IngressId, representation::Json};
 
 pub struct IngressApi { }
 

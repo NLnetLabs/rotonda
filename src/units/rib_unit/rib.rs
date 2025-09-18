@@ -620,6 +620,15 @@ impl Rib {
                         return false
                     }
                 }
+                if let Some(community) = filter.community {
+                    if let Some(list) = path_attributes.get::<routecore::bgp::message::update_builder::StandardCommunitiesList>() {
+                        if !list.communities().contains(&community) {
+                            return false
+                        }
+                    } else {
+                        return false
+                    }
+                }
                 if let Some(origin_asn) = filter.origin_asn {
                     if Some(origin_asn) != path_attributes.get::<HopPath>().and_then(|hp|
                         hp.origin().and_then(|hop| hop.clone().try_into().ok())

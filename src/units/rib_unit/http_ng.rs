@@ -84,7 +84,8 @@ pub struct QueryFilter {
     pub otc: Option<Asn>, 
 
     #[serde(rename = "filter[community]")]
-    pub community: Option<String>, 
+    #[serde_as(as = "Option<serde_with::DisplayFromStr>")]
+    pub community: Option<StandardCommunity>, 
 
     #[serde(rename = "filter[largeCommunity]")]
     pub large_community: Option<String>, 

@@ -278,6 +278,68 @@ impl Register {
         self.info.read().unwrap().get(&id).cloned()
     }
 
+    /// Retrieve the information for the given [`IngressId`]
+    pub fn get_tuple(&self, id: IngressId) -> Option<OwnedIdAndInfo> {
+        self.info.read().unwrap().get(&id).map(|info|
+            (id, info.clone()).into()
+        )
+    }
+
+    // TODO add Filter parameter
+    pub fn search(&self, ) -> Vec<OwnedIdAndInfo> {
+        // Simply clone the entire thing and release the read-lock asap.
+        let mut reg = self.info.read().unwrap().clone();
+
+
+        // Then apply the filter (TODO)
+        // XXX If the cloning above proofs to be too expensive, we could 
+        // read().unwrap().iter().filter_map()
+        // or something.
+        // If that is the case, we should also revisit the fn search_and_output anyway
+
+        reg.drain().map(|(ingress_id, ingress_info)|{
+            OwnedIdAndInfo{ingress_id, ingress_info}
+        }).collect::<Vec<_>>()
+    }
+
+    /// Retrieve the information for the given [`IngressId`]
+    //pub fn get_and_output<T>(&self, ingress_id: IngressId, mut target: T) -> fmt::Result
+    //    where for <'a> IdAndInfo<'a>: GenOutput<T>
+    //{
+    //    //FIXME
+    //    //needs to go in data: IdAndInfo
+    //    //
+    //    // data: {
+    //    //  id:
+    //    //  type:
+    //    //
+    //    // }
+    //    self.info.read().unwrap().get(&ingress_id).map(|ingress_info|
+    //        IdAndInfo{ingress_id, ingress_info}.write(&mut target)
+    //    );
+    //    Ok(())
+    //}
+
+    /// Retrieve the information for the given [`IngressId`]
+    // TODO add Filter like on /ribs/
+    pub fn search_and_output<T>(&self, mut target: T) -> Result<(), OutputError> 
+        where for <'a> IdAndInfo<'a>: GenOutput<T>
+    {
+        IdAndInfo::write_seq_start(&mut target)?;
+        let lock = self.info.read().unwrap();
+        let mut iter = lock.iter();
+        if let Some((&ingress_id, ingress_info)) = iter.next() {
+            let _ = IdAndInfo::from((ingress_id, ingress_info)).write(&mut target);
+        }
+        while let Some((&ingress_id, ingress_info)) = iter.next() {
+            IdAndInfo::write_seq_sep(&mut target)?;
+            //let _ = Into::<IdAndInfo>::into((ingress_id, ingress_info)).write(&mut target);
+            IdAndInfo::from((ingress_id, ingress_info)).write(&mut target)?;
+        }
+        IdAndInfo::write_seq_end(&mut target)?;
+        Ok(())
+    }
+
     /// Find all [`IngressId`]s that are children of the given `parent`
     ///
     /// This is used in cases where for example a BMP session (the parent) is

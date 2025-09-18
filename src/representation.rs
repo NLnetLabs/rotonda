@@ -2,6 +2,15 @@
 
 pub trait GenOutput<T> {
     fn write(&self, target: &mut T) -> Result<(), OutputError>;
+    fn write_seq_start(_target: &mut T) -> Result<(), OutputError> {
+        Ok(())
+    }
+    fn write_seq_end(_target: &mut T) -> Result<(), OutputError> {
+        Ok(())
+    }
+    fn write_seq_sep(_target: &mut T) -> Result<(), OutputError> {
+        Ok(())
+    }
 }
 
 pub struct Json<W: std::io::Write>(pub W);
@@ -26,6 +35,19 @@ macro_rules! genoutput_json {
                 let _ = serde_json::to_writer(&mut target.0, &self$(.$val)?).unwrap();
                 Ok(())
             }
+            fn write_seq_start(target: &mut Json<W>) -> Result<(), crate::representation::OutputError> {
+                let _ = write!(&mut target.0, "[");
+                Ok(())
+            }
+            fn write_seq_end(target: &mut Json<W>) -> Result<(), crate::representation::OutputError> {
+                let _ = write!(&mut target.0, "]");
+                Ok(())
+            }
+            fn write_seq_sep(target: &mut Json<W>) -> Result<(), crate::representation::OutputError> {
+                let _ = write!(&mut target.0, ",");
+                Ok(())
+            }
+            
         }
     }
 }

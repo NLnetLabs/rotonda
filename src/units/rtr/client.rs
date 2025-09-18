@@ -481,7 +481,7 @@ where
             };
 
             //let state = target.state;
-            Ok(Client::new(sock, target, None))
+            Ok(Client::with_initial_version(1, sock, target, None))
         }
 
         /// Updates the data set from upstream.

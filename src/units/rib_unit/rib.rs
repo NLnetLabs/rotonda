@@ -620,6 +620,15 @@ impl Rib {
                         return false
                     }
                 }
+                if let Some(large_community) = filter.large_community {
+                    if let Some(list) = path_attributes.get::<routecore::bgp::path_attributes::LargeCommunitiesList>() {
+                        if !list.communities().contains(&large_community) {
+                            return false
+                        }
+                    } else {
+                        return false
+                    }
+                }
                 if let Some(community) = filter.community {
                     if let Some(list) = path_attributes.get::<routecore::bgp::message::update_builder::StandardCommunitiesList>() {
                         if !list.communities().contains(&community) {

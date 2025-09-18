@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt::Display, net::{Ipv4Addr, Ipv6Addr}};
 use axum::{extract::{Path, Query, State}};
 use inetnum::{addr::Prefix, asn::Asn};
 use log::{debug, warn};
-use routecore::{bgp::{communities::StandardCommunity, path_attributes::PathAttributeType, types::AfiSafiType}, bmp::message::RibType};
+use routecore::{bgp::{communities::{LargeCommunity, StandardCommunity}, path_attributes::PathAttributeType, types::AfiSafiType}, bmp::message::RibType};
 use serde::Deserialize;
 use serde_with::serde_as;
 use serde_with::formats::CommaSeparator;
@@ -88,7 +88,8 @@ pub struct QueryFilter {
     pub community: Option<StandardCommunity>, 
 
     #[serde(rename = "filter[largeCommunity]")]
-    pub large_community: Option<String>, 
+    #[serde_as(as = "Option<serde_with::DisplayFromStr>")]
+    pub large_community: Option<LargeCommunity>, 
 
     #[serde(rename = "filter[ribType]")]
     pub rib_type: Option<PeerRibType>,

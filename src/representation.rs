@@ -2,16 +2,30 @@
 
 pub trait GenOutput<T> {
     fn write(&self, target: &mut T) -> Result<(), OutputError>;
+
     fn write_seq_start(_target: &mut T) -> Result<(), OutputError> {
         Ok(())
     }
+
     fn write_seq_end(_target: &mut T) -> Result<(), OutputError> {
         Ok(())
     }
+
     fn write_seq_sep(_target: &mut T) -> Result<(), OutputError> {
         Ok(())
     }
 }
+
+// would be nice to do something like this ..
+//impl<'a, T, G: 'a + GenOutput<T>, I: Iterator<Item=&'a G>> GenOutput<T> for &'a mut I {
+//    fn write(&mut self, target: &mut T) -> Result<(), OutputError> {
+//        G::write_seq_start(target)?;
+//        for i in self.next() {
+//            i.write(target)?;
+//        }
+//        G::write_seq_end(target)
+//    }
+//}
 
 pub struct Json<W: std::io::Write>(pub W);
 pub struct Cli<W: std::io::Write>(pub W);

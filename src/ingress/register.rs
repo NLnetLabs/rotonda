@@ -9,6 +9,7 @@ use routecore::bmp::message::{PeerType, RibType};
 use paste::paste;
 
 use crate::genoutput_json;
+use crate::ingress::http_ng::QueryFilter;
 use crate::representation::{Cli, GenOutput, Json, OutputError};
 use crate::roto_runtime::types::PeerRibType;
 
@@ -100,6 +101,7 @@ impl<W: std::io::Write> GenOutput<Cli<W>> for BmpIdAndInfo<'_> {
     }
 }
 
+genoutput_json!(IdAndInfo<'_>);
 genoutput_json!(BmpIdAndInfo<'_>, 0);
 genoutput_json!(BgpIdAndInfo<'_>, 0);
 
@@ -237,33 +239,32 @@ impl Register {
         res
     }
 
-    // NB on /bgp/neighbors, we return all the information learned via BMP, BGP etc.
+
     pub fn bgp_neighbors<T>(&self, mut target: T) -> fmt::Result
         where for <'a> BgpIdAndInfo<'a>: GenOutput<T>
     {
-        let lock = self.info.read().unwrap();
-        for (ingress_id, ingress_info) in lock.iter().filter(|(_, info)|{
-            info.ingress_type == Some(IngressType::Bgp) ||
-            info.ingress_type == Some(IngressType::BgpViaBmp) ||
-            info.ingress_type == Some(IngressType::Mrt)
-        }){
-            let _ = BgpIdAndInfo(
-                IdAndInfo { ingress_id: *ingress_id, ingress_info}
-            ).write(&mut target);
+        for t in [IngressType::BgpViaBmp, IngressType::Bgp, IngressType::Mrt] {
+            let res = self.search(QueryFilter { ingress_type: Some(t), ..Default::default() });
+            for r in res {
+                let _ = BgpIdAndInfo (
+                        IdAndInfo { ingress_id: r.ingress_id, ingress_info: &r.ingress_info}
+                    ).write(&mut target);
+
+            }
         }
         Ok(())
     }
 
     pub fn bmp_routers<T>(&self, mut target: T) -> fmt::Result
         where for <'a> BmpIdAndInfo<'a>: GenOutput<T>
-     {
-        let lock = self.info.read().unwrap();
-        for (ingress_id, ingress_info) in lock.iter().filter(|(_,info)|{
-            info.ingress_type == Some(IngressType::Bmp)
-        }) {
+    {
+        let res = self.search(QueryFilter { ingress_type: Some(IngressType::Bmp), ..Default::default() });
+        for r in res {
+
             let _ = BmpIdAndInfo (
-                    IdAndInfo { ingress_id: *ingress_id, ingress_info}
+                    IdAndInfo { ingress_id: r.ingress_id, ingress_info: &r.ingress_info}
                 ).write(&mut target);
+
         }
         Ok(())
     }
@@ -285,58 +286,40 @@ impl Register {
         )
     }
 
-    // TODO add Filter parameter
-    pub fn search(&self, ) -> Vec<OwnedIdAndInfo> {
-        // Simply clone the entire thing and release the read-lock asap.
-        let mut reg = self.info.read().unwrap().clone();
+    /// Filter all ingresses based on a passed filter and return them
+    pub fn search(&self, filter: QueryFilter,) -> Vec<OwnedIdAndInfo> {
+        // ALternatively, simply clone the entire thing and release the read-lock asap.
+        //let mut reg = self.info.read().unwrap().clone();
 
+        self.info.read().unwrap().iter()
+            .filter(|(_, info)| filter.filter(info))
+            .map(|(&ingress_id, info)| OwnedIdAndInfo{ingress_id, ingress_info: info.clone()} )
+            .collect::<Vec<_>>()
 
-        // Then apply the filter (TODO)
-        // XXX If the cloning above proofs to be too expensive, we could 
-        // read().unwrap().iter().filter_map()
-        // or something.
-        // If that is the case, we should also revisit the fn search_and_output anyway
-
-        reg.drain().map(|(ingress_id, ingress_info)|{
-            OwnedIdAndInfo{ingress_id, ingress_info}
-        }).collect::<Vec<_>>()
     }
 
-    /// Retrieve the information for the given [`IngressId`]
-    //pub fn get_and_output<T>(&self, ingress_id: IngressId, mut target: T) -> fmt::Result
-    //    where for <'a> IdAndInfo<'a>: GenOutput<T>
-    //{
-    //    //FIXME
-    //    //needs to go in data: IdAndInfo
-    //    //
-    //    // data: {
-    //    //  id:
-    //    //  type:
-    //    //
-    //    // }
-    //    self.info.read().unwrap().get(&ingress_id).map(|ingress_info|
-    //        IdAndInfo{ingress_id, ingress_info}.write(&mut target)
-    //    );
-    //    Ok(())
-    //}
-
-    /// Retrieve the information for the given [`IngressId`]
-    // TODO add Filter like on /ribs/
-    pub fn search_and_output<T>(&self, mut target: T) -> Result<(), OutputError> 
+    /// Filter all ingresses based on a passed filter and write it out
+    pub fn search_and_output<T>(&self, filter: QueryFilter, mut target: T) -> Result<(), OutputError> 
         where for <'a> IdAndInfo<'a>: GenOutput<T>
     {
         IdAndInfo::write_seq_start(&mut target)?;
         let lock = self.info.read().unwrap();
-        let mut iter = lock.iter();
+
+        let mut iter = lock.iter().filter(|(_, info)| {
+            filter.filter(info)
+        });
+
         if let Some((&ingress_id, ingress_info)) = iter.next() {
             let _ = IdAndInfo::from((ingress_id, ingress_info)).write(&mut target);
         }
+
         while let Some((&ingress_id, ingress_info)) = iter.next() {
             IdAndInfo::write_seq_sep(&mut target)?;
-            //let _ = Into::<IdAndInfo>::into((ingress_id, ingress_info)).write(&mut target);
             IdAndInfo::from((ingress_id, ingress_info)).write(&mut target)?;
         }
+
         IdAndInfo::write_seq_end(&mut target)?;
+
         Ok(())
     }
 
@@ -432,7 +415,8 @@ impl IngressInfo {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum IngressType {
     Bmp,
     BgpViaBmp,

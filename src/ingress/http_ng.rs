@@ -1,6 +1,10 @@
-use axum::extract::{Path, State};
+use std::net::IpAddr;
 
-use crate::{cli::CliApi, http_ng::{Api, ApiError, ApiState}, ingress::IngressId, representation::Json};
+use axum::extract::{Path, Query, State};
+use inetnum::asn::Asn;
+use serde::Deserialize;
+
+use crate::{http_ng::{Api, ApiError, ApiState}, ingress::{IngressId, IngressInfo, IngressType}, representation::Json, roto_runtime::types::PeerRibType};
 
 pub struct IngressApi { }
 
@@ -9,29 +13,86 @@ impl IngressApi {
 
     /// Add ingress register specific endpoints to a HTTP API
     pub fn register_routes(router: &mut Api) {
-        router.add_get("/bgp/neighbors", Self::bgp_neighbors);
-        router.add_get("/bmp/routers", Self::bmp_routers);
+        router.add_get("/ingresses", Self::ingresses);
+        router.add_get("/ingresses/{ingress_id}", Self::ingress_id);
+        
     }
 
+    async fn ingress_id(Path(ingress_id): Path<IngressId>, state: State<ApiState>) -> Result<String, ApiError> {
+        //let mut res = Vec::new();
+        //let _ = state.ingress_register.get_and_output(ingress_id, Json(&mut res));
+        //Ok(res.into())
 
-    async fn bgp_neighbors(state: State<ApiState>) -> Result<Vec<u8>, String> {
+        let raw = serde_json::json!(
+            {"data": state.ingress_register.get(ingress_id)
+                .as_ref().map(|ingress_info| crate::ingress::register::IdAndInfo{ingress_id, ingress_info})
+                    
+            }
+        );
+        Ok(raw.to_string())
 
-            // trigger the CLI one as well just to test it
-            CliApi{ ingress_register: state.ingress_register.clone()}.bgp_neighbors();
+    }
 
-            let mut res = Vec::new();
-            state.ingress_register.bgp_neighbors(Json(&mut res));
-            Ok(res.into())
+    async fn ingresses(Query(filter): Query<QueryFilter>, state: State<ApiState>) -> Result<Vec<u8>, ApiError> {
+        // Approach #1:
+        //let raw = serde_json::json!(
+        //    {"data": state.ingress_register.search()}
+        //);
+        //Ok(raw.to_string())
+
+        // Alternative approach:
+        dbg!(&filter);
+        let mut raw = String::from("{\"data\":").into_bytes();
+        let _ = state.ingress_register.search_and_output(filter, Json(&mut raw));
+
+        raw.push(b'}');
+        Ok(raw)
+
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all(deserialize = "camelCase"))]
+pub struct QueryFilter {
+    
+    #[serde(rename = "filter[type]")]
+    pub ingress_type: Option<IngressType>,
+    
+    #[serde(rename = "filter[ribType]")]
+    pub rib_type: Option<PeerRibType>,
+    
+    #[serde(rename = "filter[peerAdress]")]
+    pub remote_addr: Option<IpAddr>,
+    
+    #[serde(rename = "filter[peerAsn]")]
+    pub remote_asn: Option<Asn>,
+}
+
+impl QueryFilter {
+    /// Returns true if `ingress_info` matches the  set fields in Self. 
+    ///
+    /// This can be used in a call to `iter().filter()`.
+    pub fn filter(&self, ingress_info: &IngressInfo) -> bool {
+        if self.remote_addr.is_some() {
+            if self.remote_addr != ingress_info.remote_addr {
+                return false
+            }
         }
-
-    async fn bmp_routers(state: State<ApiState>) -> Result<Vec<u8>, String> {
-
-            // trigger the CLI one as well just to test it
-            CliApi{ ingress_register: state.ingress_register.clone()}.bmp_routers();
-
-            let mut res = Vec::new();
-            //state.ingress_register.bmp_routers(JsonFormat(&mut res));
-            state.ingress_register.bmp_routers(crate::representation::Json(&mut res));
-            Ok(res.into())
+        if self.remote_asn.is_some() {
+            if self.remote_asn != ingress_info.remote_asn {
+                return false
+            }
+        }
+        if self.ingress_type.is_some() {
+            if self.ingress_type != ingress_info.ingress_type {
+                return false
+            }
+        }
+        if self.rib_type.is_some() {
+            if self.rib_type != ingress_info.peer_rib_type {
+                return false
+            }
+        }
+        true
     }
 }

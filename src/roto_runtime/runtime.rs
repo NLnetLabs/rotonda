@@ -1264,7 +1264,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     //------------ Metrics ---------------------------------------------------
 
     #[roto_method(rt, MutMetrics)]
-    fn inc(metrics: Val<MutMetrics>, name: Val<Arc<str>>, value: u64) {
+    fn increase_counter(metrics: Val<MutMetrics>, name: Val<Arc<str>>, value: u64) {
         // first try with only a read-lock (for already existing keys)
         // if that fails, try again with a write lock so the new key can get inserted.
         let updated = {
@@ -1273,6 +1273,19 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         };
         if !updated {
             metrics.write().unwrap().inc_counter((*name).clone(), value);
+        }
+    }
+
+    #[roto_method(rt, MutMetrics)]
+    fn set_gauge(metrics: Val<MutMetrics>, name: Val<Arc<str>>, value: u64) {
+        // first try with only a read-lock (for already existing keys)
+        // if that fails, try again with a write lock so the new key can get inserted.
+        let updated = {
+            let readlock = metrics.read().unwrap();
+            readlock.try_set_gauge((*name).clone(), value).is_ok()
+        };
+        if !updated {
+            metrics.write().unwrap().set_gauge((*name).clone(), value);
         }
     }
 

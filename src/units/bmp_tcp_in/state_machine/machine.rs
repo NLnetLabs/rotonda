@@ -1341,11 +1341,11 @@ impl PeerAware for PeerStates {
         if let Some((ingress_id, _ingress_info)) =
             ingress_register.find_existing_peer(&query_ingress)
         {
-            debug!("got existing ingress_id for BGP in BMP peer {}", ingress_id); 
+            //debug!("got existing ingress_id for BGP in BMP peer {}", ingress_id); 
             peer_ingress_id = ingress_id;
             existing_peer_ingress_id = Some(ingress_id);
         } else {
-            debug!("no existing ingress_id for BGP in BMP");
+            //debug!("no existing ingress_id for BGP in BMP");
             peer_ingress_id = ingress_register.register();
             existing_peer_ingress_id = None;
             ingress_register.update_info(peer_ingress_id, query_ingress);

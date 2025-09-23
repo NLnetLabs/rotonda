@@ -2,6 +2,7 @@
 
 use crate::common::file_io::TheFileIo;
 use crate::http_ng;
+use crate::roto_runtime::metrics::RotoMetricsWrapper;
 use crate::roto_runtime::types::FilterName;
 use crate::roto_runtime::types::RotoPackage;
 use crate::roto_runtime::create_runtime;
@@ -60,6 +61,9 @@ pub struct Component {
     /// A reference to the compiled Roto script.
     roto_package: Option<Arc<RotoPackage>>,
 
+    /// The metrics source for user-defined metrics in roto scripts.
+    roto_metrics: Option<Arc<RotoMetricsWrapper>>,
+
     /// A reference to the Tracer
     tracer: Arc<Tracer>,
 
@@ -79,6 +83,7 @@ impl Default for Component {
             metrics: Default::default(),
             http_resources: Default::default(),
             roto_package: Default::default(),
+            roto_metrics: Default::default(),
             tracer: Default::default(),
             ingresses: Default::default(),
             http_ng_api: Default::default(),
@@ -95,6 +100,7 @@ impl Component {
         metrics: metrics::Collection,
         http_resources: http::Resources,
         roto_package: Option<Arc<RotoPackage>>,
+        roto_metrics: Option<Arc<RotoMetricsWrapper>>,
         tracer: Arc<Tracer>,
         ingresses: Arc<ingress::Register>,
         http_ng_api: Arc<Mutex<http_ng::Api>>,
@@ -106,6 +112,7 @@ impl Component {
             metrics: Some(metrics),
             http_resources,
             roto_package,
+            roto_metrics,
             tracer,
             ingresses,
             http_ng_api,
@@ -135,6 +142,10 @@ impl Component {
         &self,
     ) -> &Option<Arc<RotoPackage>> {
         &self.roto_package
+    }
+    
+    pub fn roto_metrics(&self) -> &Option<Arc<RotoMetricsWrapper>> {
+        &self.roto_metrics
     }
 
     pub fn tracer(&self) -> &Arc<Tracer> {
@@ -611,6 +622,8 @@ pub struct Manager {
     /// A reference to the compiled Roto script.
     roto_package: Option<Arc<RotoPackage>>,
 
+    roto_metrics: Option<Arc<RotoMetricsWrapper>>,
+
     graph_svg_processor: Arc<dyn ProcessRequest>,
 
     graph_svg_data: Arc<ArcSwap<(Instant, LinkReport)>>,
@@ -642,6 +655,8 @@ impl Manager {
         let tracer = Arc::new(Tracer::new());
         let ingresses = Arc::new(ingress::Register::new());
         let metrics: metrics::Collection = Default::default();
+        let roto_metrics = Some(Arc::new(RotoMetricsWrapper::default()));
+        metrics.register("roto_metrics".into(), Arc::downgrade(roto_metrics.as_ref().unwrap()) as Weak<dyn metrics::Source>);
         let http_ng_api = Arc::new(Mutex::new(http_ng::Api::new(
             Vec::with_capacity(1), // interfaces come from config, later on
             ingresses.clone(),
@@ -669,6 +684,7 @@ impl Manager {
             metrics: metrics.clone(),
             http_resources: Default::default(),
             roto_package: Default::default(),
+            roto_metrics,
             graph_svg_processor,
             graph_svg_data,
             file_io: TheFileIo::default(),
@@ -1149,6 +1165,7 @@ impl Manager {
                 self.metrics.clone(),
                 self.http_resources.clone(),
                 self.roto_package.clone(),
+                self.roto_metrics.clone(),
                 self.tracer.clone(),
                 self.ingresses.clone(),
                 self.http_ng_api.clone(),
@@ -1228,6 +1245,7 @@ impl Manager {
                 self.metrics.clone(),
                 self.http_resources.clone(),
                 self.roto_package.clone(),
+                self.roto_metrics.clone(),
                 self.tracer.clone(),
                 self.ingresses.clone(),
                 self.http_ng_api.clone(),

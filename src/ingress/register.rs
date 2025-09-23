@@ -169,7 +169,7 @@ macro_rules! info_for_field{
             ) -> Option<$name> {
                 let mut lock = self.info.write().unwrap();
 
-                log::debug!("update_info for {id} with {new_info:?}");
+                //log::debug!("update_info for {id} with {new_info:?}");
 
                 if let Some(mut old) = lock.remove(&id) {
 

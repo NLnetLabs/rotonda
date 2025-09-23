@@ -341,6 +341,12 @@ impl RibUnitRunner {
             rtr_cache.clone()
         );
 
+        if let Some(roto_metrics) = component.roto_metrics() {
+            roto_context.set_metrics(roto_metrics.metrics.clone());
+        } else {
+            debug!("no roto_metrics available to set in Ctx in rib-unit");
+        }
+
         if let Some(c) = roto_compiled.clone() {
             roto_context.prepare(&mut c.lock().unwrap());
         }

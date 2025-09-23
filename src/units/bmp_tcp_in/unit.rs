@@ -31,11 +31,9 @@ use crate::{
         status_reporter::Chainable,
         unit::UnitActivity,
     }, comms::{Gate, GateStatus, Terminated}, ingress::{self, IngressId, IngressInfo}, manager::{Component, WaitPoint}, payload::Update, roto_runtime::{
-        types::{
-            RotoPackage, FilterName, Provenance, RotoOutputStream,
-            RotoScripts
-        },
-        Ctx
+        metrics::RotoMetricsWrapper, types::{
+            FilterName, Provenance, RotoOutputStream, RotoPackage, RotoScripts
+        }, Ctx
     }, tokio::TokioTaskMetrics, tracing::Tracer, units::Unit
 };
 
@@ -189,6 +187,7 @@ impl BmpTcpIn {
         };
 
         let roto_compiled = component.roto_package().clone();
+        let roto_metrics = component.roto_metrics().clone();
         let tracer = component.tracer().clone();
 
         let ingress_register = component.ingresses();
@@ -221,6 +220,7 @@ impl BmpTcpIn {
             state_machine_metrics,
             status_reporter,
             roto_compiled,
+            roto_metrics,
             router_id_template,
             filter_name,
             tracer,
@@ -283,6 +283,7 @@ struct BmpTcpInRunner {
     _state_machine_metrics: Arc<TokioTaskMetrics>,
     status_reporter: Arc<BmpTcpInStatusReporter>,
     roto_compiled: Option<Arc<RotoPackage>>,
+    roto_metrics: Option<Arc<RotoMetricsWrapper>>,
     router_id_template: Arc<ArcSwap<String>>,
     filter_name: Arc<ArcSwap<FilterName>>,
     tracer: Arc<Tracer>,
@@ -309,6 +310,7 @@ impl BmpTcpInRunner {
         _state_machine_metrics: Arc<TokioTaskMetrics>,
         status_reporter: Arc<BmpTcpInStatusReporter>,
         roto_compiled: Option<Arc<RotoPackage>>,
+        roto_metrics: Option<Arc<RotoMetricsWrapper>>,
         router_id_template: Arc<ArcSwap<String>>,
         filter_name: Arc<ArcSwap<FilterName>>,
         tracer: Arc<Tracer>,
@@ -327,6 +329,7 @@ impl BmpTcpInRunner {
             _state_machine_metrics,
             status_reporter,
             roto_compiled,
+            roto_metrics,
             router_id_template,
             filter_name,
             tracer,
@@ -358,7 +361,8 @@ impl BmpTcpInRunner {
             tracer: Default::default(),
             tracing_mode: Default::default(),
             ingress_register: Arc::default(),
-            roto_compiled: todo!(),
+            roto_compiled: Default::default(),
+            roto_metrics: Default::default(),
         };
 
         (runner, gate_agent)
@@ -389,6 +393,11 @@ impl BmpTcpInRunner {
             });
 
         let mut roto_context = Ctx::empty();
+
+        if let Some(roto_metrics) = self.roto_metrics.as_ref() {
+            debug!("setting roto_metrics from component in bmp-in");
+            roto_context.set_metrics(roto_metrics.metrics.clone());
+        }
 
         if let Some(c) = self.roto_compiled.clone() {
             roto_context.prepare(&mut c.lock().unwrap());

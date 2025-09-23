@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use bytes::Bytes;
 use chrono::{SecondsFormat, Utc};
@@ -29,6 +29,7 @@ use super::types::{
 };
 use crate::payload::{RotondaPaMap, RotondaRoute};
 use crate::roto_runtime::lists::{AsnList, PrefixList};
+use crate::roto_runtime::metrics::Metrics;
 use crate::roto_runtime::types::LogEntry;
 use crate::units::rib_unit::rpki::{RovStatus, RovStatusUpdate, RtrCache};
 use crate::units::rtr::client::VrpUpdate;
@@ -43,6 +44,8 @@ pub(crate) type SharedRtrCache = Arc<RtrCache>;
 pub(crate) type MutRotondaRoute = Rc<RefCell<RotondaRoute>>;
 pub(crate) type RcRotondaPaMap = Rc<RotondaPaMap>;
 pub(crate) type MutLogEntry = Rc<RefCell<LogEntry>>;
+
+pub type MutMetrics = Arc<RwLock<Metrics>>;
 
 impl From<RotondaRoute> for MutRotondaRoute {
     fn from(value: RotondaRoute) -> Self {
@@ -60,6 +63,7 @@ pub struct Ctx {
     pub rpki: SharedRtrCache,
     pub asn_lists: MutNamedAsnLists,
     pub prefix_lists: MutNamedPrefixLists,
+    pub metrics: MutMetrics,
 }
 
 unsafe impl Send for Ctx {}
@@ -71,6 +75,7 @@ impl Ctx {
             rpki,
             asn_lists: Default::default(),
             prefix_lists: Default::default(),
+            metrics: Default::default(),
         }
     }
     pub fn empty() -> Self {
@@ -79,7 +84,13 @@ impl Ctx {
             rpki: Arc::<RtrCache>::default(),
             asn_lists: Default::default(),
             prefix_lists: Default::default(),
+            metrics: Default::default(),
         }
+    }
+
+    pub fn set_metrics(&mut self, metrics: MutMetrics) {
+        debug!("setting metrics in Ctx");
+        self.metrics = metrics;
     }
 
     pub fn prepare(&mut self, roto_package: &mut roto::Package) {
@@ -147,6 +158,11 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     rt.register_clone_type_with_name::<MutNamedPrefixLists>(
         "PrefixLists",
         "Named lists of prefixes"
+    ).unwrap();
+
+    rt.register_clone_type_with_name::<MutMetrics>(
+        "Metrics",
+        "User-defined Prometheus style metrics"
     ).unwrap();
 
     rt.register_context_type::<Ctx>()?;
@@ -520,6 +536,12 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     #[roto_method(rt, BmpMsg<Bytes>)]
     fn is_peer_down(msg: Val<BmpMsg<Bytes>>) -> bool {
         msg.msg_type() == BmpMsgType::PeerDownNotification
+    }
+
+    /// Check whether this message is of type 'PeerUpNotification'
+    #[roto_method(rt, BmpMsg<Bytes>)]
+    fn is_peer_up(msg: Val<BmpMsg<Bytes>>) -> bool {
+        msg.msg_type() == BmpMsgType::PeerUpNotification
     }
 
     /// Check whether the AS_PATH contains the given `Asn`
@@ -1236,6 +1258,21 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
             list.covers(*prefix)
         } else {
          false
+        }
+    }
+
+    //------------ Metrics ---------------------------------------------------
+
+    #[roto_method(rt, MutMetrics)]
+    fn inc(metrics: Val<MutMetrics>, name: Val<Arc<str>>, value: u64) {
+        // first try with only a read-lock (for already existing keys)
+        // if that fails, try again with a write lock so the new key can get inserted.
+        let updated = {
+            let readlock = metrics.read().unwrap();
+            readlock.try_inc_counter((*name).clone(), value).is_ok()
+        };
+        if !updated {
+            metrics.write().unwrap().inc_counter((*name).clone(), value);
         }
     }
 

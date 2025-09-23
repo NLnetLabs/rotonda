@@ -432,7 +432,6 @@ impl Target {
     }
 
     pub fn append_raw(&mut self, raw: String) {
-        log::debug!("in append_raw for {}", &raw);
         match self.format {
             OutputFormat::Prometheus => {
                 writeln!(&mut self.target, "{}", &raw).unwrap();

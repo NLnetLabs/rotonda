@@ -33,7 +33,7 @@ use crate::{
     }, comms::{Gate, GateStatus, Terminated}, ingress::{self, IngressId, IngressInfo}, manager::{Component, WaitPoint}, payload::Update, roto_runtime::{
         metrics::RotoMetricsWrapper, types::{
             FilterName, Provenance, RotoOutputStream, RotoPackage, RotoScripts
-        }, Ctx
+        }, Ctx, MutIngressInfoCache
     }, tokio::TokioTaskMetrics, tracing::Tracer, units::Unit
 };
 
@@ -98,6 +98,7 @@ pub(crate) type RotoFunc = roto::TypedFunc<
     fn (
         roto::Val<BmpMessage<Bytes>>,
         roto::Val<Provenance>,
+        roto::Val<MutIngressInfoCache>
     ) ->
     roto::Verdict<(), ()>,
 >;
@@ -508,6 +509,7 @@ impl BmpTcpInRunner {
                             self.tracing_mode.clone(),
                             last_msg_at,
                             self.bmp_metrics.clone(),
+                            self.ingress_register.clone(),
                         );
 
                         F::accept_config(

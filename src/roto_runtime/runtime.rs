@@ -81,7 +81,13 @@ impl IngressInfoCache {
             register,
             ingress_info: None
         }))
-
+    }
+    pub fn for_info_rc(ingress_id: IngressId, register: Arc<ingress::Register>, ingress_info: IngressInfo) -> MutIngressInfoCache {
+        Rc::new(RefCell::new(Self {
+            ingress_id,
+            register,
+            ingress_info: Some(ingress_info),
+        }))
     }
     fn info(&mut self) -> &IngressInfo {
         if let Some(ref info) = self.ingress_info {
@@ -1320,6 +1326,9 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     fn increase_counter(metrics: Val<MutMetrics>, name: Val<Arc<str>>, value: u64) {
         // first try with only a read-lock (for already existing keys)
         // if that fails, try again with a write lock so the new key can get inserted.
+        if value == 0 {
+            return
+        }
         let updated = {
             let readlock = metrics.read().unwrap();
             readlock.try_inc_counter((*name).clone(), value).is_ok()

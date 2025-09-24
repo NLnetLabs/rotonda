@@ -247,6 +247,7 @@ impl BgpTcpInRunner {
             live_sessions: Arc::new(Mutex::new(HashMap::new())),
             ingresses: Arc::new(ingress::Register::default()),
             roto_compiled: None,
+            roto_metrics: Default::default(),
         };
 
         (runner, gate_agent)

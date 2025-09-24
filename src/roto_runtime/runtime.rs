@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::net::{IpAddr, Ipv6Addr};
 use std::rc::Rc;
 use std::str::FromStr;
 use std::sync::{Arc, RwLock};
@@ -106,6 +107,12 @@ impl IngressInfoCache {
         self.info().remote_asn.unwrap_or_else(|| {
             warn!("No remote_asn on ingress {}, this is a bug", self.ingress_id);
             Asn::from_u32(u32::MAX)
+        })
+    }
+    fn peer_address(&mut self) -> IpAddr {
+        self.info().remote_addr.unwrap_or_else(|| {
+            warn!("No remote_address on ingress {}, this is a bug", self.ingress_id);
+            Ipv6Addr::from(0).into()
         })
     }
 }
@@ -1318,6 +1325,12 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     fn ii_peer_asn(iic: Val<MutIngressInfoCache>) -> Asn {
         let mut iic = iic.borrow_mut();
         iic.peer_asn()
+    }
+
+    #[roto_method(rt, MutIngressInfoCache, peer_address)]
+    fn ii_peer_address(iic: Val<MutIngressInfoCache>) -> IpAddr {
+        let mut iic = iic.borrow_mut();
+        iic.peer_address()
     }
 
     //------------ Metrics ---------------------------------------------------

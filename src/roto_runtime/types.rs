@@ -393,6 +393,7 @@ impl Provenance {
 //------------ PeerRibType ---------------------------------------------------
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum PeerRibType {
     InPre,
     InPost,

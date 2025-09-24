@@ -61,7 +61,7 @@ pub struct QueryFilter {
     #[serde(rename = "filter[ribType]")]
     pub rib_type: Option<PeerRibType>,
     
-    #[serde(rename = "filter[peerAdress]")]
+    #[serde(rename = "filter[peerAddress]")]
     pub remote_addr: Option<IpAddr>,
     
     #[serde(rename = "filter[peerAsn]")]

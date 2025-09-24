@@ -1,7 +1,7 @@
 //! BMP message stream handler for a single connected BMP publishing client.
 use std::cell::RefCell;
 use std::hash::{self, DefaultHasher, Hash};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 use std::sync::{Arc, RwLock};
 use std::{net::SocketAddr, ops::ControlFlow};
 
@@ -404,11 +404,12 @@ impl RouterHandler {
         let ingress_info = if let Some(ref pph) = pph {
             ingress::IngressInfo::new()
                 .with_remote_asn(pph.asn())
+                .with_remote_addr(pph.address())
             
         } else {
             ingress::IngressInfo::new()
                 .with_remote_asn(Asn::from_u32(0))
-            
+                .with_remote_addr(addr.ip()) // the SocketAddr for the BMP connection
         };
 
         let mut osms = smallvec![];

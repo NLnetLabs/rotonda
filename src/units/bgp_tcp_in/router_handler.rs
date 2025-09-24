@@ -291,7 +291,6 @@ impl Processor {
                                 roto_function.call(
                                     &mut ctx,
                                     roto::Val(bgp_msg.clone()),
-                                    roto::Val(provenance),
                                     roto::Val(mutiic),
                                 )
                             });

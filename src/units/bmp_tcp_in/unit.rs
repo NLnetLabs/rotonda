@@ -97,7 +97,6 @@ pub(crate) type RotoFunc = roto::TypedFunc<
     Ctx,
     fn (
         roto::Val<BmpMessage<Bytes>>,
-        roto::Val<Provenance>,
         roto::Val<MutIngressInfoCache>
     ) ->
     roto::Verdict<(), ()>,

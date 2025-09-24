@@ -426,7 +426,6 @@ impl RouterHandler {
             roto_function.call(
                 &mut ctx,
                 roto::Val(msg.clone()),
-                roto::Val(provenance),
                 roto::Val(mutiic),
             )
         });

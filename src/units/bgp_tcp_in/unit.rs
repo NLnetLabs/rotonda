@@ -57,7 +57,6 @@ pub(crate) type RotoFunc = roto::TypedFunc<
     crate::roto_runtime::Ctx,
     fn(
         roto::Val<UpdateMessage<Bytes>>,
-        roto::Val<Provenance>,
         roto::Val<MutIngressInfoCache>,
     ) ->
     roto::Verdict<(), ()>,

@@ -28,6 +28,7 @@ use crate::common::net::{
     StandardTcpListenerFactory, StandardTcpStream, TcpListener,
     TcpListenerFactory, TcpStreamWrapper,
 };
+use crate::roto_runtime::metrics::RotoMetricsWrapper;
 use crate::roto_runtime::types::{
     RotoPackage, FilterName, Provenance, RotoOutputStream, RotoScripts
 };
@@ -40,7 +41,7 @@ use crate::comms::{
 use crate::ingress;
 use crate::manager::{Component, WaitPoint};
 use crate::payload::Update;
-use crate::roto_runtime::Ctx;
+use crate::roto_runtime::{Ctx, MutIngressInfoCache};
 use crate::units::rib_unit::rpki::RtrCache;
 use crate::units::{Gate, Unit};
 
@@ -57,6 +58,7 @@ pub(crate) type RotoFunc = roto::TypedFunc<
     fn(
         roto::Val<UpdateMessage<Bytes>>,
         roto::Val<Provenance>,
+        roto::Val<MutIngressInfoCache>,
     ) ->
     roto::Verdict<(), ()>,
 >;
@@ -116,6 +118,7 @@ impl BgpTcpIn {
         component.register_metrics(metrics.clone());
 
         let ingresses = component.ingresses();
+        let roto_metrics = component.roto_metrics().clone();
 
         // Setup status reporting
         let status_reporter = Arc::new(BgpTcpInStatusReporter::new(
@@ -147,6 +150,7 @@ impl BgpTcpIn {
             metrics,
             status_reporter,
             roto_compiled,
+            roto_metrics,
             ingresses,
         )
         .run::<_, _, StandardTcpStream, BgpTcpInRunner>(
@@ -194,6 +198,8 @@ struct BgpTcpInRunner {
 
     roto_compiled: Option<Arc<RotoPackage>>,
 
+    roto_metrics: Option<Arc<RotoMetricsWrapper>>,
+
     // To send commands to a Session based on peer IP + ASN.
     live_sessions: Arc<Mutex<LiveSessions>>,
 
@@ -215,6 +221,7 @@ impl BgpTcpInRunner {
         metrics: Arc<BgpTcpInMetrics>,
         status_reporter: Arc<BgpTcpInStatusReporter>,
         roto_compiled: Option<Arc<RotoPackage>>,
+        roto_metrics: Option<Arc<RotoMetricsWrapper>>,
         ingresses: Arc<ingress::Register>,
     ) -> Self {
         BgpTcpInRunner {
@@ -223,6 +230,7 @@ impl BgpTcpInRunner {
             metrics,
             status_reporter,
             roto_compiled,
+            roto_metrics,
             live_sessions: Arc::new(Mutex::new(HashMap::new())),
             ingresses,
         }
@@ -277,6 +285,10 @@ impl BgpTcpInRunner {
             });
 
         let mut roto_context = Ctx::empty();
+
+        if let Some(roto_metrics) = arc_self.roto_metrics.as_ref() {
+            roto_context.set_metrics(roto_metrics.metrics.clone());
+        }
 
         if let Some(c) = arc_self.roto_compiled.clone() {
             roto_context.prepare(&mut c.lock().unwrap());

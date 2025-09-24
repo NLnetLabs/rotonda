@@ -31,7 +31,7 @@ use crate::roto_runtime::types::{
     explode_announcements, explode_withdrawals, FreshRouteContext, Output, OutputStreamMessage, Provenance, RotoOutputStream,
 };
 use crate::comms::{Gate, GateStatus, Terminated};
-use crate::ingress;
+use crate::{ingress, roto_runtime};
 use crate::payload::{Payload, RotondaRoute, Update};
 use crate::roto_runtime::Ctx;
 use crate::units::bgp_tcp_in::status_reporter::BgpTcpInStatusReporter;
@@ -280,6 +280,10 @@ impl Processor {
                             let received = std::time::Instant::now();
                             { // lock scope
                             let mut ctx = self.roto_context.lock().unwrap();
+                            let mutiic = roto_runtime::IngressInfoCache::new_rc(
+                                session_ingress_id,
+                                self.ingresses.clone()
+                            );
 
                             verdict = self.roto_function.as_ref().map(
                                 |roto_function|
@@ -288,6 +292,7 @@ impl Processor {
                                     &mut ctx,
                                     roto::Val(bgp_msg.clone()),
                                     roto::Val(provenance),
+                                    roto::Val(mutiic),
                                 )
                             });
 

@@ -136,6 +136,7 @@ impl RouterHandler {
             bmp_metrics,
             roto_function: None,
             roto_context: Arc::new(std::sync::Mutex::new(Ctx::empty())),
+            ingress_register: Default::default(),
         };
 
         (mock, gate_agent, parent_gate)

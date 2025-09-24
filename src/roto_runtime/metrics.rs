@@ -37,7 +37,7 @@ impl Metrics {
             //);
             Ok(())
         } else {
-            debug!("could not counter {name}, returning Err");
+            debug!("no counter {name} yet (value: {value})");
             Err("no key for this name in metrics")
         }
     }

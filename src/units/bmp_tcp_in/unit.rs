@@ -1128,6 +1128,7 @@ mod tests {
             tracer: Default::default(),
             ingress_register: Arc::new(ingress::Register::default()),
             roto_compiled: None,
+            roto_metrics: Default::default(),
         };
 
         (runner, gate_agent, status_reporter)

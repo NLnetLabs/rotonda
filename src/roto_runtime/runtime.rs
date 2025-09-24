@@ -7,7 +7,7 @@ use bytes::Bytes;
 use chrono::{SecondsFormat, Utc};
 use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
-use log::debug;
+use log::{debug, warn};
 use routecore::bgp::aspath::{AsPath, Hop, HopPath};
 use routecore::bgp::communities::{
     LargeCommunity, StandardCommunity, Wellknown,
@@ -27,6 +27,7 @@ use super::lists::{MutNamedAsnLists, MutNamedPrefixLists};
 use super::types::{
     InsertionInfo, Output, Provenance, RotoOutputStream, RouteContext,
 };
+use crate::ingress::{self, IngressId, IngressInfo};
 use crate::payload::{RotondaPaMap, RotondaRoute};
 use crate::roto_runtime::lists::{AsnList, PrefixList};
 use crate::roto_runtime::metrics::Metrics;
@@ -46,6 +47,7 @@ pub(crate) type RcRotondaPaMap = Rc<RotondaPaMap>;
 pub(crate) type MutLogEntry = Rc<RefCell<LogEntry>>;
 
 pub type MutMetrics = Arc<RwLock<Metrics>>;
+pub type MutIngressInfoCache = Rc<RefCell<IngressInfoCache>>;
 
 impl From<RotondaRoute> for MutRotondaRoute {
     fn from(value: RotondaRoute) -> Self {
@@ -65,6 +67,43 @@ pub struct Ctx {
     pub prefix_lists: MutNamedPrefixLists,
     pub metrics: MutMetrics,
 }
+
+pub struct IngressInfoCache {
+    ingress_id: IngressId,
+    register: Arc<ingress::Register>,
+    ingress_info: Option<IngressInfo>
+}
+
+impl IngressInfoCache {
+    pub fn new_rc(ingress_id: IngressId, register: Arc<ingress::Register>) -> MutIngressInfoCache {
+        Rc::new(RefCell::new(Self {
+            ingress_id,
+            register,
+            ingress_info: None
+        }))
+
+    }
+    fn info(&mut self) -> &IngressInfo {
+        if let Some(ref info) = self.ingress_info {
+            info
+        } else {
+            if let Some(fresh_info) = self.register.get(self.ingress_id) {
+                self.ingress_info = Some(fresh_info);
+                self.ingress_info.as_ref().unwrap()
+            } else {
+                warn!("No ingress_info for {}, this is a bug", self.ingress_id);
+                panic!();
+            }
+        }
+    }
+    fn peer_asn(&mut self) -> Asn {
+        self.info().remote_asn.unwrap_or_else(|| {
+            warn!("No remote_asn on ingress {}, this is a bug", self.ingress_id);
+            Asn::from_u32(u32::MAX)
+        })
+    }
+}
+
 
 unsafe impl Send for Ctx {}
 
@@ -166,6 +205,11 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     ).unwrap();
 
     rt.register_context_type::<Ctx>()?;
+
+    rt.register_clone_type_with_name::<MutIngressInfoCache>(
+        "IngressInfo",
+        "Information pertaining to the source of the Message or Route"
+    )?;
 
     rt.register_copy_type::<InsertionInfo>(
         "Information from the RIB on an inserted route",
@@ -1259,6 +1303,15 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         } else {
          false
         }
+    }
+
+
+    //------------ IngressInfo -----------------------------------------------
+
+    #[roto_method(rt, MutIngressInfoCache, peer_asn)]
+    fn ii_peer_asn(iic: Val<MutIngressInfoCache>) -> Asn {
+        let mut iic = iic.borrow_mut();
+        iic.peer_asn()
     }
 
     //------------ Metrics ---------------------------------------------------

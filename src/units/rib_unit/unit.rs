@@ -43,6 +43,7 @@ pub(crate) type RotoFuncPre = roto::TypedFunc<
     Ctx,
     fn (
         roto::Val<roto_runtime::MutRotondaRoute>,
+        roto::Val<roto_runtime::MutIngressInfoCache>,
     ) ->
     roto::Verdict<(), ()>,
 >;
@@ -1233,7 +1234,7 @@ impl RibUnitRunner {
             let ingress_id = match &p.context {
                 RouteContext::Fresh(f) => Some(f.provenance().ingress_id),
                 RouteContext::Mrt(m) => Some(m.provenance().ingress_id),
-                _ => None,
+                RouteContext::Reprocess => unreachable!(),
             };
                 
             let osms;
@@ -1243,7 +1244,15 @@ impl RibUnitRunner {
             if let Some(ref roto_function) = self.roto_function_pre {
                 let Payload{ rx_value, context, trace_id, received } = p;
                 let mutrr: roto_runtime::MutRotondaRoute = rx_value.into();
-                match roto_function.call(&mut ctx, roto::Val(mutrr.clone())) {
+                let mutiic = roto_runtime::IngressInfoCache::new_rc(
+                    ingress_id.unwrap(),
+                    self.ingress_register.clone()
+                );
+                match roto_function.call(
+                    &mut ctx,
+                    roto::Val(mutrr.clone()),
+                    roto::Val(mutiic.clone()),
+                ) {
                     roto::Verdict::Accept(_) => {
                         let modified_rr = std::rc::Rc::into_inner(mutrr).unwrap().into_inner();
                         p = Payload {

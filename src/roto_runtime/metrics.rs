@@ -83,17 +83,26 @@ impl crate::metrics::Source for RotoMetricsWrapper {
         }
         counters.sort_by(|a, b| a.0.cmp(&b.0));
         gauges.sort_by(|a, b| a.0.cmp(&b.0));
+
+        let mut printed_counter_names: Vec<String> = vec![];
+        let mut printed_gauge_names: Vec<String> = vec![];
+
         for (name, cnt) in counters {
-            if !name.contains('{') {
-                target.append_raw(format!("# TYPE {name} counter"));
+            let base_name: String = name.splitn(2, '{').next().unwrap().into();
+            if !printed_counter_names.contains(&base_name) {
+                target.append_raw(format!("# TYPE {base_name} counter"));
+                printed_counter_names.push(base_name);
             }
 
             target.append_raw(format!("roto_user_defined_{} {}", name, cnt));
         }
         for (name, val) in gauges {
-            if !name.contains('{') {
-                target.append_raw(format!("# TYPE {name} gauge"));
+            let base_name: String = name.splitn(2, '{').next().unwrap().into();
+            if !printed_gauge_names.contains(&base_name) {
+                target.append_raw(format!("# TYPE {base_name} gauge"));
+                printed_gauge_names.push(base_name);
             }
+
             target.append_raw(format!("roto_user_defined_{} {}", name, val));
         }
     }

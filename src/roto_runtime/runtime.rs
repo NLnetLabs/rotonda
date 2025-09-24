@@ -505,13 +505,13 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     /// Return the number of announcements in this message
     #[roto_method(rt, BgpUpdateMessage<Bytes>, announcements_count)]
-    fn bgp_announcements_count(msg: Val<BgpUpdateMessage<Bytes>>) -> u32 {
+    fn bgp_announcements_count(msg: Val<BgpUpdateMessage<Bytes>>) -> u64 {
         announcements_count(&msg)
     }
 
     /// Return the number of withdrawals in this message
     #[roto_method(rt, BgpUpdateMessage<Bytes>, withdrawals_count)]
-    fn bgp_withdrawals_count(msg: Val<BgpUpdateMessage<Bytes>>) -> u32 {
+    fn bgp_withdrawals_count(msg: Val<BgpUpdateMessage<Bytes>>) -> u64 {
         withdrawals_count(&msg)
     }
 
@@ -716,7 +716,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     /// Return the number of announcements in this message
     #[roto_method(rt, BmpMsg<Bytes>, announcements_count)]
-    fn bmp_announcements_count(msg: Val<BmpMsg<Bytes>>) -> u32 {
+    fn bmp_announcements_count(msg: Val<BmpMsg<Bytes>>) -> u64 {
         if let BmpMsg::RouteMonitoring(rm) = &*msg {
             if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                 return announcements_count(&upd);
@@ -736,7 +736,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     /// Return the number of withdrawals in this message
     #[roto_method(rt, BmpMsg<Bytes>, withdrawals_count)]
-    fn bmp_withdrawals_count(msg: Val<BmpMsg<Bytes>>) -> u32 {
+    fn bmp_withdrawals_count(msg: Val<BmpMsg<Bytes>>) -> u64 {
         if let BmpMsg::RouteMonitoring(rm) = &*msg {
             if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                 return withdrawals_count(&upd);
@@ -1479,20 +1479,20 @@ fn match_aspath_origin(
     }
 }
 
-fn announcements_count(bgp_update: &BgpUpdateMessage<Bytes>) -> u32 {
+fn announcements_count(bgp_update: &BgpUpdateMessage<Bytes>) -> u64 {
     if let Ok(iter) = bgp_update.announcements() {
         iter.count().try_into().unwrap_or(u32::MAX)
     } else {
         0
-    }
+    }.into()
 }
 
-fn withdrawals_count(bgp_update: &BgpUpdateMessage<Bytes>) -> u32 {
+fn withdrawals_count(bgp_update: &BgpUpdateMessage<Bytes>) -> u64 {
     if let Ok(iter) = bgp_update.withdrawals() {
         iter.count().try_into().unwrap_or(u32::MAX)
     } else {
         0
-    }
+    }.into()
 }
 
 //------------ Formatting/printing helpers ------------------------------------

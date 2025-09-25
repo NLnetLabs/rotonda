@@ -54,12 +54,21 @@ pub struct Tcp {
     /// How long to wait before connecting again if the connection is closed.
     #[serde(default = "Tcp::default_retry")]
     retry: u64,
+
+    /// Start the RTR version negotiation with this version.
+    #[serde(default = "Tcp::default_version")]
+    initial_version: u8
 }
 
 impl Tcp {
     /// The default re-connect timeout in seconds.
     fn default_retry() -> u64 {
         60
+    }
+
+    /// The default version to start the RTR version negotiation with.
+    fn default_version() -> u8 {
+        2
     }
 
     /// Runs the unit.
@@ -110,7 +119,7 @@ impl RtrRunner {
         let remote = self.tcp.remote.clone();
         let metrics = self.metrics.clone();
         let fut = RtrClient::run(
-            self.component.name().clone(), self.gate.clone(), self.tcp.retry, self.metrics.clone(),
+            self.component.name().clone(), self.gate.clone(), self.tcp.initial_version, self.tcp.retry, self.metrics.clone(),
             || async {
                 Ok(RtrTcpStream {
                     sock: TcpStream::connect(remote.clone()).await?,
@@ -378,6 +387,7 @@ where
         async fn run(
             name: Arc<str>,
             mut gate: Gate,
+            initial_version: u8, 
             retry: u64,
             metrics: Arc<RtrMetrics>,
             connect: Connect,
@@ -394,7 +404,7 @@ where
             // simply wait 5 seconds.
 
             loop {
-                let mut client = match this.connect(rtr_target, &mut gate).await {
+                let mut client = match this.connect(rtr_target, initial_version, &mut gate).await {
                     Ok(client) => client,
                     Err(res) => {
                         info!(
@@ -447,7 +457,7 @@ where
         /// Upon failure to connect, logs the reason and returns the target for
         /// later retry.
         async fn connect(
-            &mut self, target: RtrTarget, gate: &mut Gate,
+            &mut self, target: RtrTarget, initial_version: u8, gate: &mut Gate,
         ) -> Result<Client<Socket, RtrTarget>, RtrTarget> {
             let sock = {
                 let connect = (self.connect)();
@@ -481,7 +491,7 @@ where
             };
 
             //let state = target.state;
-            Ok(Client::with_initial_version(1, sock, target, None))
+            Ok(Client::with_initial_version(initial_version, sock, target, None))
         }
 
         /// Updates the data set from upstream.

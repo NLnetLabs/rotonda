@@ -4,7 +4,6 @@ on:
   push:
     branches:
       - main
-      - towards-0.2
 
   pull_request:
     types: [review_requested, ready_for_review]
@@ -16,7 +15,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     steps:
     - uses: actions/checkout@v3
     - name: Ensure correct Rust toolchain version
@@ -26,4 +25,4 @@ jobs:
     - name: Build
       run: cargo build --verbose
     - name: Run tests
-      run: cargo test --verbose
+      run: cargo test --lib --verbose

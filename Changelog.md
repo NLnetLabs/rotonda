@@ -1,18 +1,41 @@
 # Changelog
  
-## Unreleased version
+## 0.5.0 'Mosaïque Public'
 
-Released yyyy-mm-dd.
+Released 2025-09-30.
 
 
 Breaking changes
 
+* The HTTP API has been refactored. The JSON endpoints are under different URLs
+  and their responses are slightly different from the old version. See the
+  [documentation](https://rotonda.docs.nlnetlabs.nl) for all the details.
+
+* Roto has been upgraded to version 0.7.0 which includes minor but breaking
+  syntax changes. Most notably, `function` is now `fn`. More details can be
+  found in the [Roto
+  changelog](https://github.com/NLnetLabs/roto/blob/main/Changelog.md).
+
+* The Roto filters `bgp_in`, `bmp_in` and `rib_in_pre` are now all passed the
+  new `IngressInfo` object, containing information about the *ingress* of the
+  message or route. This can be used to get the peer ASN and address for that
+  specific session, for example.
 
 New
 
 * For BMP ingresses, the Peer type, Peer distinguisher, and VRF/Table name are
   now tracked in the ingress register, and (if set) returned in HTTP API
   responses. ([#128](https://github.com/NLnetLabs/rotonda/pull/128))
+
+* The new JSON API can filter based on  user-defined Roto functions.
+
+* In Roto scripts, a new `metrics` object is introduced, enabling user-defined
+  counters/gauges for the `/metrics` Prometheus endpoint.
+
+* The RTR version is now configurable via `initial_version` on the *rtr-tcp-in*
+  unit, defaulting to version 2. While the RTR protocol describes version
+  negotiation and downgrading should happen automatically, this setting can be
+  used in case of compatibility issues between Rotonda and the cache.
 
 Bug fixes
 
@@ -23,13 +46,28 @@ Bug fixes
   Presumably, this only affected monitoring of Loc-RIBs.
   ([#128](https://github.com/NLnetLabs/rotonda/pull/128))
 
+* The RTR version negotiation now properly responds with a lower version after
+  receiving an Unsupported Version error from the cache. 
+
+
+
 Known issues
+
+* The web UI is very minimal in this version.
+
+* Multiple BMP streams with the same source IP address are currently not
+  properly distinguished, and will show up as one single connected router but
+  with the monitored BGP sessions for both streams.
+
 
 
 Other changes
 
 
 Acknowledgements
+
+We would like to very much thank Hans Kuhn for their (ongoing) input
+and support in various ways.
 
 
 ## 0.4.2 'Bonjour des Pyrénées'

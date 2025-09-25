@@ -168,28 +168,26 @@ impl Api {
     
     async fn shutdown(mut rx: mpsc::Receiver<()>) {
         rx.recv().await;
-        debug!("in Api::shutdown(), got signal");
+        //debug!("in Api::shutdown(), got signal");
         ()
         
     }
 
     /// Stop all listeners and start on the configured interfaces again
     pub fn restart(&mut self) {
-        debug!("in restart(), draining {} signal_txs...", self.signal_txs.len());
+        //debug!("in restart(), draining {} signal_txs...", self.signal_txs.len());
         for tx in self.signal_txs.drain(..) {
-            debug!("try_send for tx $x");
-            let _ = dbg!(tx.try_send(()));
+            //debug!("try_send for tx $x");
+            let _ = tx.try_send(());
         }
 
-        debug!("pre joinhandle for loop");
         for h in self.serve_handles.drain(..) {
             let handle = tokio::runtime::Handle::current();
             tokio::task::block_in_place(move || {
-                dbg!(&h.is_finished());
+                &h.is_finished();
                 let _ = handle.block_on(h);
             });
         }
-        debug!("post joinhandle for loop");
         self.start();
     }
 

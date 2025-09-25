@@ -2663,7 +2663,7 @@ mod tests {
     async fn unused_unit_should_not_be_spawned() -> Result<(), Terminate> {
         // given a config with only a single target with a link to a missing unit
         let toml = r#"
-        http_listen = []
+        #http_listen = []
 
         [units.unused-unit]
         type = "bmp-tcp-in"
@@ -2697,7 +2697,7 @@ mod tests {
     async fn added_target_should_be_spawned() -> Result<(), Terminate> {
         // given a config with only a single target with a link to a single unit
         let toml = r#"
-        http_listen = []
+        #http_listen = []
 
         [units.some-unit]
         type = "bmp-tcp-in"
@@ -2723,7 +2723,7 @@ mod tests {
 
         // when the config is modified to include a new target
         let toml = r#"
-        http_listen = []
+        #http_listen = []
 
         [units.some-unit]
         type = "bmp-tcp-in"
@@ -2757,7 +2757,7 @@ mod tests {
     async fn removed_target_should_be_terminated() -> Result<(), Terminate> {
         // given a config with only a single target with a link to a missing unit
         let toml = r#"
-        http_listen = []
+        #http_listen = []
 
         [units.some-unit]
         type = "bmp-tcp-in"
@@ -2788,7 +2788,7 @@ mod tests {
 
         // when the config is modified to remove a target
         let toml = r#"
-        http_listen = []
+        #http_listen = []
 
         [units.some-unit]
         type = "bmp-tcp-in"
@@ -2828,7 +2828,7 @@ mod tests {
     ) -> Result<(), Terminate> {
         // given a config with only a single target with a link to a missing unit
         let toml = r#"
-        http_listen = []
+         #http_listen = []
 
         [units.some-unit]
         type = "bmp-tcp-in"

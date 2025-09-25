@@ -57,10 +57,11 @@ pub struct Config {
     pub log: LogConfig,
 
     /// The HTTP server configuration.
-    #[serde(flatten)]
-    pub http: http::Server,
+    //#[serde(flatten)]
+    //pub http: http::Server,
 
     /// The new HTTP server configuration.
+    #[serde(rename = "http_listen")]
     pub http_ng_listen: Option<Vec<SocketAddr>>,
 }
 

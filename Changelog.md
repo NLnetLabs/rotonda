@@ -7,9 +7,10 @@ Released 2025-09-30.
 
 Breaking changes
 
-* The HTTP API has been refactored. The JSON endpoints are under different URLs
-  and their responses are slightly different from the old version. See the
-  [documentation](https://rotonda.docs.nlnetlabs.nl) for all the details.
+* The HTTP machinery has been refactored. The JSON endpoints are under
+  different URLs and also their responses are slightly different from the old
+  version. See the [documentation](https://rotonda.docs.nlnetlabs.nl) for all
+  the details.
 
 * Roto has been upgraded to version 0.7.0 which includes minor but breaking
   syntax changes. Most notably, `function` is now `fn`. More details can be
@@ -24,10 +25,10 @@ Breaking changes
 New
 
 * For BMP ingresses, the Peer type, Peer distinguisher, and VRF/Table name are
-  now tracked in the ingress register, and (if set) returned in HTTP API
+  now tracked in the *ingress register*, and (if set) returned in HTTP API
   responses. ([#128](https://github.com/NLnetLabs/rotonda/pull/128))
 
-* The new JSON API can filter based on  user-defined Roto functions.
+* The new JSON API can filter based on user-defined Roto functions.
 
 * In Roto scripts, a new `metrics` object is introduced, enabling user-defined
   counters/gauges for the `/metrics` Prometheus endpoint.

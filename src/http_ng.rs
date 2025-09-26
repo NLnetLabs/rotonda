@@ -200,9 +200,17 @@ pub enum ApiError {
 
 impl axum::response::IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {
+        debug!("in into_response()");
+        fn to_json(msg: String) -> String {
+            debug!("in to_json() in into_response()");
+            serde_json::json!({
+                "data": None::<()>,
+                "error": msg
+            }).to_string()
+        }
         match self {
-            ApiError::BadRequest(msg) => (axum::http::StatusCode::BAD_REQUEST, msg),
-            ApiError::InternalServerError(msg) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, msg),
+            ApiError::BadRequest(msg) => (axum::http::StatusCode::BAD_REQUEST, to_json(msg)),
+            ApiError::InternalServerError(msg) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, to_json(msg)),
         }.into_response()
     }
 }

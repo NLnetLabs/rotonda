@@ -1,6 +1,6 @@
 use std::net::IpAddr;
 
-use axum::extract::{Path, Query, State};
+use axum::{extract::{Path, Query, State}, response::IntoResponse};
 use inetnum::asn::Asn;
 use serde::Deserialize;
 
@@ -18,7 +18,9 @@ impl IngressApi {
         
     }
 
-    async fn ingress_id(Path(ingress_id): Path<IngressId>, state: State<ApiState>) -> Result<String, ApiError> {
+    async fn ingress_id(Path(ingress_id): Path<IngressId>, state: State<ApiState>)
+        -> Result<impl IntoResponse, ApiError>
+    {
         //let mut res = Vec::new();
         //let _ = state.ingress_register.get_and_output(ingress_id, Json(&mut res));
         //Ok(res.into())
@@ -29,11 +31,13 @@ impl IngressApi {
                     
             }
         );
-        Ok(raw.to_string())
+        Ok(([("content-type", "application/json")], raw.to_string()))
 
     }
 
-    async fn ingresses(Query(filter): Query<QueryFilter>, state: State<ApiState>) -> Result<Vec<u8>, ApiError> {
+    async fn ingresses(Query(filter): Query<QueryFilter>, state: State<ApiState>)
+        -> Result<impl IntoResponse, ApiError>
+    {
         // Approach #1:
         //let raw = serde_json::json!(
         //    {"data": state.ingress_register.search()}
@@ -41,13 +45,11 @@ impl IngressApi {
         //Ok(raw.to_string())
 
         // Alternative approach:
-        dbg!(&filter);
         let mut raw = String::from("{\"data\":").into_bytes();
         let _ = state.ingress_register.search_and_output(filter, Json(&mut raw));
 
         raw.push(b'}');
-        Ok(raw)
-
+        Ok(([("content-type", "application/json")], raw))
     }
 }
 

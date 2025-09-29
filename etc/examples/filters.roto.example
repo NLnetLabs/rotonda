@@ -68,7 +68,7 @@ filter bmp_in(
 ) {
     let my_asn = AS12345;
     let asn_to_log = AS65536;
-    let community_to_log = community(0xffff029a);
+    let community_to_log = Community.from("NOPEER");
 
     if bmp_msg.is_peer_down() {
         output.log_peer_down()
@@ -202,4 +202,13 @@ filter hidden_hop(attr: PathAttributes) {
         }
         None -> { reject }
     }
+}
+
+# Another example based on (Large) communities.
+filter specific_communities(attr: PathAttributes) {
+    if (not attr.contains_community(Community.from("NOPEER"))) && 
+       attr.contains_large_community(LargeCommunity.from("AS211321:1:2")) {
+        accept
+    }
+    reject
 }

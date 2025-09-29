@@ -1,6 +1,6 @@
 use std::{collections::HashMap, fmt::Display, net::{Ipv4Addr, Ipv6Addr}};
 
-use axum::{extract::{Path, Query, State}};
+use axum::{extract::{Path, Query, State}, response::IntoResponse};
 use inetnum::{addr::Prefix, asn::Asn};
 use log::{debug, warn};
 use routecore::{bgp::{communities::{LargeCommunity, StandardCommunity}, path_attributes::PathAttributeType, types::AfiSafiType}, bmp::message::RibType};
@@ -180,7 +180,7 @@ async fn search_ipv4unicast(
     Path((prefix, prefix_len)): Path<(Ipv4Addr, u8)>,
     Query(filter): Query<QueryFilter>,
     state: State<ApiState>
-) -> Result<Vec<u8>, ApiError> {
+) -> Result<impl IntoResponse, ApiError> {
 
     let prefix = Prefix::new_v4(prefix, prefix_len).map_err(|e| ApiError::BadRequest(e.to_string()))?;
     let s = state.store.clone();
@@ -193,7 +193,7 @@ async fn search_ipv4unicast(
             filter
         )
     ) {
-        Some(Ok(())) => Ok(res.into()),
+        Some(Ok(())) => Ok(([("content-type", "application/json")], res)),
         Some(Err(e)) => Err(ApiError::BadRequest(e)),
         None => Err(ApiError::InternalServerError("store unavailable".into()))
     }
@@ -204,7 +204,7 @@ async fn search_ipv4unicast(
 async fn search_ipv4unicast_all(
     mut filter: Query<QueryFilter>,
     state: State<ApiState>
-) -> Result<Vec<u8>, ApiError> {
+) -> Result<impl IntoResponse, ApiError> {
     filter.enable_more_specifics();
     search_ipv4unicast(Path((0.into(), 0)), filter, state).await
 }
@@ -213,7 +213,7 @@ async fn search_ipv6unicast(
     Path((prefix, prefix_len)): Path<(Ipv6Addr, u8)>,
     Query(filter): Query<QueryFilter>,
     state: State<ApiState>
-) -> Result<Vec<u8>, ApiError> {
+) -> Result<impl IntoResponse, ApiError> {
 
     let prefix = Prefix::new_v6(prefix, prefix_len).map_err(|e| ApiError::BadRequest(e.to_string()))?;
     let s = state.store.clone();
@@ -226,7 +226,7 @@ async fn search_ipv6unicast(
             filter
         )
     ) {
-        Some(Ok(())) => Ok(res.into()),
+        Some(Ok(())) => Ok(([("content-type", "application/json")], res)),
         Some(Err(e)) => Err(ApiError::BadRequest(e)),
         None => Err(ApiError::InternalServerError("store unavailable".into()))
     }
@@ -237,7 +237,7 @@ async fn search_ipv6unicast(
 async fn search_ipv6unicast_all(
     mut filter: Query<QueryFilter>,
     state: State<ApiState>
-) -> Result<Vec<u8>, ApiError> {
+) -> Result<impl IntoResponse, ApiError> {
     filter.enable_more_specifics();
     search_ipv6unicast(Path((0.into(), 0)), filter, state).await
 }

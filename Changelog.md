@@ -12,9 +12,9 @@ Breaking changes
   version. See the [documentation](https://rotonda.docs.nlnetlabs.nl) for all
   the details.
 
-* Roto has been upgraded to version 0.7.0 which includes minor but breaking
-  syntax changes. Most notably, `function` is now `fn`. More details can be
-  found in the [Roto
+* Roto has been upgraded to version 0.7 which includes minor but breaking syntax
+  changes. Most notably, `function` is now `fn`. More details can be found in
+  the [Roto
   changelog](https://github.com/NLnetLabs/roto/blob/main/Changelog.md).
 
 * The Roto filters `bgp_in`, `bmp_in` and `rib_in_pre` are now all passed the
@@ -24,7 +24,7 @@ Breaking changes
 
 * In Roto scripts, the `community(u32)` function to create a new Community has
   been removed in favor of the more flexible and more readable
-  `Community.from(str)` which takes either Well known community names or
+  `Community.from(str)` which takes either Well-known community names or
   the canonical form "AS12345:9999".
   Similarly, a `LargeCommunity.from(str)` is introduced, which takes the
   canonical form "AS211321:8888:9999".
@@ -74,9 +74,6 @@ Known issues
 
 * Certain error responses from the JSON endpoints are not JSON-formatted yet.
 
-
-
-Other changes
 
 
 Acknowledgements

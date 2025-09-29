@@ -208,10 +208,17 @@ impl axum::response::IntoResponse for ApiError {
                 "error": msg
             }).to_string()
         }
-        match self {
-            ApiError::BadRequest(msg) => (axum::http::StatusCode::BAD_REQUEST, to_json(msg)),
-            ApiError::InternalServerError(msg) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, to_json(msg)),
-        }.into_response()
+        (
+            [("content-type", "application/json")],
+            match self {
+                ApiError::BadRequest(msg) => {
+                    (axum::http::StatusCode::BAD_REQUEST, to_json(msg))
+                }
+                ApiError::InternalServerError(msg) => {
+                    (axum::http::StatusCode::INTERNAL_SERVER_ERROR, to_json(msg))
+                }
+            }
+        ).into_response()
     }
 }
 

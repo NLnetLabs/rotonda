@@ -232,6 +232,7 @@ impl FileRunner {
                             Update::Bulk(..)  |
                             Update::Withdraw(..)  |
                             Update::WithdrawBulk(..)  |
+                            Update::IngressReappeared(..) |
                             Update::QueryResult(..)  |
                             Update::UpstreamStatusChange(..) |
                             Update::Rtr(..) =>  { }

@@ -1,8 +1,10 @@
 mod http;
+mod http_ng;
+pub use http_ng::QueryFilter;
 mod metrics;
 mod status_reporter;
 
-mod rib;
+pub(crate) mod rib;
 
 #[cfg(test)]
 mod tests;

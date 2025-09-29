@@ -431,6 +431,17 @@ impl Target {
         self.append(metric, unit_name, |records| records.value(value))
     }
 
+    pub fn append_raw(&mut self, raw: String) {
+        match self.format {
+            OutputFormat::Prometheus => {
+                writeln!(&mut self.target, "{}", &raw).unwrap();
+            }
+            OutputFormat::Plain => todo!(),
+            #[cfg(test)]
+            OutputFormat::Test => todo!(),
+        }
+    }
+
     /// Constructs and appends the name of the given metric.
     fn append_metric_name(
         &mut self,

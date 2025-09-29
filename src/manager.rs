@@ -1,8 +1,10 @@
 //! Controlling the entire operation.
 
 use crate::common::file_io::TheFileIo;
+use crate::http_ng;
+use crate::roto_runtime::metrics::RotoMetricsWrapper;
 use crate::roto_runtime::types::FilterName;
-use crate::roto_runtime::types::CompiledRoto;
+use crate::roto_runtime::types::RotoPackage;
 use crate::roto_runtime::create_runtime;
 use crate::comms::{
     DirectLink, Gate, GateAgent, GraphStatus, Link, DEF_UPDATE_QUEUE_LEN,
@@ -57,13 +59,18 @@ pub struct Component {
     http_resources: http::Resources,
 
     /// A reference to the compiled Roto script.
-    roto_compiled: Option<Arc<CompiledRoto>>,
+    roto_package: Option<Arc<RotoPackage>>,
+
+    /// The metrics source for user-defined metrics in roto scripts.
+    roto_metrics: Option<Arc<RotoMetricsWrapper>>,
 
     /// A reference to the Tracer
     tracer: Arc<Tracer>,
 
     /// A reference to the ingress sources.
     ingresses: Arc<ingress::Register>,
+
+    http_ng_api: Arc<Mutex<http_ng::Api>>,
 }
 
 #[cfg(test)]
@@ -75,9 +82,11 @@ impl Default for Component {
             http_client: Default::default(),
             metrics: Default::default(),
             http_resources: Default::default(),
-            roto_compiled: Default::default(),
+            roto_package: Default::default(),
+            roto_metrics: Default::default(),
             tracer: Default::default(),
             ingresses: Default::default(),
+            http_ng_api: Default::default(),
         }
     }
 }
@@ -90,9 +99,11 @@ impl Component {
         http_client: HttpClient,
         metrics: metrics::Collection,
         http_resources: http::Resources,
-        roto_compiled: Option<Arc<CompiledRoto>>,
+        roto_package: Option<Arc<RotoPackage>>,
+        roto_metrics: Option<Arc<RotoMetricsWrapper>>,
         tracer: Arc<Tracer>,
         ingresses: Arc<ingress::Register>,
+        http_ng_api: Arc<Mutex<http_ng::Api>>,
     ) -> Self {
         Component {
             name: name.into(),
@@ -100,9 +111,11 @@ impl Component {
             http_client: Some(http_client),
             metrics: Some(metrics),
             http_resources,
-            roto_compiled,
+            roto_package,
+            roto_metrics,
             tracer,
             ingresses,
+            http_ng_api,
         }
     }
 
@@ -125,10 +138,14 @@ impl Component {
         &self.http_resources
     }
 
-    pub fn roto_compiled(
+    pub fn roto_package(
         &self,
-    ) -> &Option<Arc<CompiledRoto>> {
-        &self.roto_compiled
+    ) -> &Option<Arc<RotoPackage>> {
+        &self.roto_package
+    }
+    
+    pub fn roto_metrics(&self) -> &Option<Arc<RotoMetricsWrapper>> {
+        &self.roto_metrics
     }
 
     pub fn tracer(&self) -> &Arc<Tracer> {
@@ -180,6 +197,10 @@ impl Component {
 
     pub fn ingresses(&self) -> Arc<ingress::Register> {
         self.ingresses.clone()
+    }
+
+    pub fn http_ng_api_arc(&self) -> Arc<Mutex<http_ng::Api>> {
+        self.http_ng_api.clone()
     }
 }
 
@@ -599,7 +620,9 @@ pub struct Manager {
     http_resources: http::Resources,
 
     /// A reference to the compiled Roto script.
-    roto_compiled: Option<Arc<CompiledRoto>>,
+    roto_package: Option<Arc<RotoPackage>>,
+
+    roto_metrics: Option<Arc<RotoMetricsWrapper>>,
 
     graph_svg_processor: Arc<dyn ProcessRequest>,
 
@@ -612,6 +635,8 @@ pub struct Manager {
     tracer_processor: Arc<dyn ProcessRequest>,
 
     ingresses: Arc<ingress::Register>,
+
+    http_ng_api: Arc<Mutex<http_ng::Api>>,
 }
 
 impl Default for Manager {
@@ -629,6 +654,14 @@ impl Manager {
         )));
         let tracer = Arc::new(Tracer::new());
         let ingresses = Arc::new(ingress::Register::new());
+        let metrics: metrics::Collection = Default::default();
+        let roto_metrics = Some(Arc::new(RotoMetricsWrapper::default()));
+        metrics.register("roto_metrics".into(), Arc::downgrade(roto_metrics.as_ref().unwrap()) as Weak<dyn metrics::Source>);
+        let http_ng_api = Arc::new(Mutex::new(http_ng::Api::new(
+            Vec::with_capacity(1), // interfaces come from config, later on
+            ingresses.clone(),
+            metrics.clone()
+        )));
 
         let (graph_svg_processor, graph_svg_rel_base_url) =
             Self::mk_svg_http_processor(
@@ -648,15 +681,17 @@ impl Manager {
             running_targets: Default::default(),
             pending_gates: Default::default(),
             http_client: Default::default(),
-            metrics: Default::default(),
+            metrics: metrics.clone(),
             http_resources: Default::default(),
-            roto_compiled: Default::default(),
+            roto_package: Default::default(),
+            roto_metrics,
             graph_svg_processor,
             graph_svg_data,
             file_io: TheFileIo::default(),
             tracer,
             tracer_processor,
             ingresses,
+            http_ng_api,
         };
 
         // Register the /status/graph endpoint.
@@ -900,11 +935,11 @@ impl Manager {
 
         let i = roto::FileTree::read(path);
             // .map_err(|e| e.to_string())?;
-        let c = i
-            .compile(create_runtime().unwrap())
+        let roto_package = i
+            .compile(&create_runtime().unwrap())
             .map_err(|e| e.to_string())?;
 
-        self.roto_compiled = Some(Arc::new(Mutex::new(c)));
+        self.roto_package = Some(Arc::new(Mutex::new(roto_package)));
         Ok(())
     }
 
@@ -1129,9 +1164,11 @@ impl Manager {
                 self.http_client.clone(),
                 self.metrics.clone(),
                 self.http_resources.clone(),
-                self.roto_compiled.clone(),
+                self.roto_package.clone(),
+                self.roto_metrics.clone(),
                 self.tracer.clone(),
                 self.ingresses.clone(),
+                self.http_ng_api.clone(),
             );
 
             let target_type = std::mem::discriminant(&new_target);
@@ -1207,9 +1244,11 @@ impl Manager {
                 self.http_client.clone(),
                 self.metrics.clone(),
                 self.http_resources.clone(),
-                self.roto_compiled.clone(),
+                self.roto_package.clone(),
+                self.roto_metrics.clone(),
                 self.tracer.clone(),
                 self.ingresses.clone(),
+                self.http_ng_api.clone(),
             );
 
             let unit_type = std::mem::discriminant(&new_unit);
@@ -1283,6 +1322,8 @@ impl Manager {
         }
 
         let graph_svg_data = self.graph_svg_data.clone();
+        let arc_api = self.http_ng_api_arc();
+
         crate::tokio::spawn("coordinator", async move {
             // Wait for all running units and targets to become ready and to
             // finish supplying responses to report-link commands, then log a
@@ -1330,6 +1371,16 @@ impl Manager {
             }
 
             graph_svg_data.swap(Arc::new((Instant::now(), reports)));
+            // XXX
+            // so we need to call (re)start here, because at this point we know for sure all other
+            // Rotonda components had a chance to add their paths to the axum router
+            // BUT
+            // on SIGHUP, we also need to apply (changes to) the main config file, e.g. interfaces
+            // to listen on, which does not happen here currently.
+            // By doing that in the signal handler in main.rs, we effectively reload the http
+            // servers twice, which is not nice.
+            
+            arc_api.lock().unwrap().restart();
         });
     }
 
@@ -1440,6 +1491,26 @@ impl Manager {
     /// Returns a new reference the the HTTP resources collection.
     pub fn http_resources(&self) -> http::Resources {
         self.http_resources.clone()
+    }
+
+    /// Returns a reference to the shared HTTP API
+    pub fn http_ng_api_arc(&mut self) -> Arc<Mutex<http_ng::Api>> {
+        self.http_ng_api.clone()
+    }
+
+    /// Reload the HTTP configuration (listening interfaces)
+    pub fn reload_http_ng_config(&mut self, config: &Config) {
+        if let Ok(mut lock) = self.http_ng_api.lock(){
+           lock.set_interfaces(config.http_ng_listen.clone().into_iter().flatten());
+        }
+    }
+
+    /// Restart the HTTP API based on the passed Rotonda `Config`
+    pub fn restart_http_ng_with_config(&mut self, config: &Config) {
+        if let Ok(mut lock) = self.http_ng_api.lock(){
+           lock.set_interfaces(config.http_ng_listen.clone().into_iter().flatten());
+           lock.restart();
+        }
     }
 
     // Create a HTTP processor that renders the SVG unit/target configuration graph.
@@ -2592,7 +2663,7 @@ mod tests {
     async fn unused_unit_should_not_be_spawned() -> Result<(), Terminate> {
         // given a config with only a single target with a link to a missing unit
         let toml = r#"
-        http_listen = []
+        #http_listen = []
 
         [units.unused-unit]
         type = "bmp-tcp-in"
@@ -2626,7 +2697,7 @@ mod tests {
     async fn added_target_should_be_spawned() -> Result<(), Terminate> {
         // given a config with only a single target with a link to a single unit
         let toml = r#"
-        http_listen = []
+        #http_listen = []
 
         [units.some-unit]
         type = "bmp-tcp-in"
@@ -2652,7 +2723,7 @@ mod tests {
 
         // when the config is modified to include a new target
         let toml = r#"
-        http_listen = []
+        #http_listen = []
 
         [units.some-unit]
         type = "bmp-tcp-in"
@@ -2686,7 +2757,7 @@ mod tests {
     async fn removed_target_should_be_terminated() -> Result<(), Terminate> {
         // given a config with only a single target with a link to a missing unit
         let toml = r#"
-        http_listen = []
+        #http_listen = []
 
         [units.some-unit]
         type = "bmp-tcp-in"
@@ -2717,7 +2788,7 @@ mod tests {
 
         // when the config is modified to remove a target
         let toml = r#"
-        http_listen = []
+        #http_listen = []
 
         [units.some-unit]
         type = "bmp-tcp-in"
@@ -2757,7 +2828,7 @@ mod tests {
     ) -> Result<(), Terminate> {
         // given a config with only a single target with a link to a missing unit
         let toml = r#"
-        http_listen = []
+         #http_listen = []
 
         [units.some-unit]
         type = "bmp-tcp-in"

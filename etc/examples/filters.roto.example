@@ -15,7 +15,7 @@
 #   - asn_lists.contains_origin("my_asns", bmp_msg.aspath_origin())
 # 
 
-function compile_lists() {
+fn compile_lists() {
     # First parameter of `add` is the name of the list, the second is a
     # whitespace separated list of ASNs, optionally prefixed with 'AS'.
     # Non-parseable items are ignored.
@@ -40,7 +40,7 @@ function compile_lists() {
 # 'rib-in' filter-map below.
 filter bgp_in(
     bgp_msg: BgpMsg,
-    prov: Provenance,
+    ingress_info: IngressInfo,
 ) {
 
     let origin_to_log = AS65536;
@@ -64,14 +64,26 @@ filter bgp_in(
 # 'is_peer_down()' returns true if the message is a BMP PeerDownNotification.
 filter bmp_in(
     bmp_msg: BmpMsg,
-    prov: Provenance,
+    ingress_info: IngressInfo,
 ) {
     let my_asn = AS12345;
     let asn_to_log = AS65536;
-    let community_to_log = community(0xffff029a);
+    let community_to_log = Community.from("NOPEER");
 
     if bmp_msg.is_peer_down() {
         output.log_peer_down()
+    }
+
+    # Keep track of a specific deprecated (and possibly problematic) attribute.
+    # This will show up in the /metrics endpoint as
+    #
+    #   'roto_user_defined_unwanted_attribute'
+    #
+    if bmp_msg.has_attribute(28) {
+        metrics.increase_counter(
+            f"unwanted_attribute{{peer_asn=\"{ingress_info.peer_asn()}\"}}",
+            1
+        );
     }
 
     if bmp_msg.is_ibgp(my_asn) {
@@ -102,6 +114,7 @@ filter bmp_in(
 # a decision early on is more efficient.
 filter rib_in_pre(
     route: Route,
+    ingress_info: IngressInfo,
 ) {
 
     if prefix_lists.contains("my_prefixes", route.prefix()) {
@@ -149,7 +162,7 @@ filter vrp_update(vrp_update: VrpUpdate) {
 # NB: this function is only called for updates caused by RTR Serial updates, not
 # during the initial RTR Cache Reset sync or when calling `rpki.check_rov` from
 # the `rib_in_pre` filter.
-function rib_in_rov_status_update(rov_update: RovStatusUpdate) {
+fn rib_in_rov_status_update(rov_update: RovStatusUpdate) {
 
     if rov_update.has_changed() {
         # Only log whenever something changed to Invalid:
@@ -161,4 +174,41 @@ function rib_in_rov_status_update(rov_update: RovStatusUpdate) {
     if prefix_lists.covers("my_prefixes", rov_update.prefix()) {
         output.timestamped_print("[RTR] (my prefixes): " + rov_update.fmt())
     }
+}
+
+
+# The ribs/$address_family/routes endpoints take a
+# `?function[roto]=$function_name` parameter, which enables the use of a roto
+# filter like the one below to be applied on the result set.
+# 
+# The filter is applied to every route in the (candidate) result set. When
+# returning 'reject', the route will not be part of the returned results.
+#
+# In this example, we only wants routes that contain both an OTC and an AS_PATH
+# path attribute, but where the OTC ASN does not appear within that AS_PATH.
+filter hidden_hop(attr: PathAttributes) {
+    match attr.otc() {
+        Some(otc) -> {
+            match attr.aspath() {
+                Some(aspath) -> {
+                    if not aspath.contains(otc) {
+                        accept
+                    } else {
+                        reject
+                    }
+                },
+                None -> reject,
+            }
+        }
+        None -> { reject }
+    }
+}
+
+# Another example based on (Large) communities.
+filter specific_communities(attr: PathAttributes) {
+    if (not attr.contains_community(Community.from("NOPEER"))) && 
+       attr.contains_large_community(LargeCommunity.from("AS211321:1:2")) {
+        accept
+    }
+    reject
 }

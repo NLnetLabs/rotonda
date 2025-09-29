@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Rotonda WebUI</title>
+</head>
+<body>
+    <div class="container">
+        <nav>
+            @include("navigation.rs.html")
+        </nav>
+        <main>
+            <table border="1px">
+                @for (ingress_id, ingress_info) in self.bmp_routers.iter() {
+                <tr>
+                    <td>@ingress_id</td>
+                    <td>@ingress_info.remote_addr.map(|e| e.to_string()).unwrap_or("".into())</td>
+                    <td>@ingress_info.name.as_ref().map(|e| e.to_string()).unwrap_or("".into())</td>
+                </tr>
+                }
+            </table>
+
+
+        </main>
+    </div>
+</body>
+</html>

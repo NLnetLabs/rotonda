@@ -1,13 +1,14 @@
 use std::cell::RefCell;
+use std::net::{IpAddr, Ipv6Addr};
 use std::rc::Rc;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use bytes::Bytes;
 use chrono::{SecondsFormat, Utc};
 use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
-use log::debug;
+use log::{debug, warn};
 use routecore::bgp::aspath::{AsPath, Hop, HopPath};
 use routecore::bgp::communities::{
     LargeCommunity, StandardCommunity, Wellknown,
@@ -17,17 +18,20 @@ use routecore::bgp::message::SessionConfig;
 use routecore::bgp::message::UpdateMessage as BgpUpdateMessage;
 use routecore::bgp::nlri::afisafi::IsPrefix;
 use routecore::bgp::path_attributes::LargeCommunitiesList;
+use routecore::bgp::types::Otc;
 use routecore::bmp::message::PerPeerHeader;
 use routecore::bmp::message::{Message as BmpMsg, MessageType as BmpMsgType};
 
-use roto::{roto_function, roto_method, roto_static_method, Context, Val};
+use roto::{roto_method, roto_static_method, Context, Val};
 
 use super::lists::{MutNamedAsnLists, MutNamedPrefixLists};
 use super::types::{
     InsertionInfo, Output, Provenance, RotoOutputStream, RouteContext,
 };
-use crate::payload::RotondaRoute;
+use crate::ingress::{self, IngressId, IngressInfo};
+use crate::payload::{RotondaPaMap, RotondaRoute};
 use crate::roto_runtime::lists::{AsnList, PrefixList};
+use crate::roto_runtime::metrics::Metrics;
 use crate::roto_runtime::types::LogEntry;
 use crate::units::rib_unit::rpki::{RovStatus, RovStatusUpdate, RtrCache};
 use crate::units::rtr::client::VrpUpdate;
@@ -40,7 +44,11 @@ pub const COMPILE_LISTS_FUNC_NAME: &str = "compile_lists";
 pub(crate) type Log = Rc<RefCell<RotoOutputStream>>;
 pub(crate) type SharedRtrCache = Arc<RtrCache>;
 pub(crate) type MutRotondaRoute = Rc<RefCell<RotondaRoute>>;
+pub(crate) type RcRotondaPaMap = Rc<RotondaPaMap>;
 pub(crate) type MutLogEntry = Rc<RefCell<LogEntry>>;
+
+pub type MutMetrics = Arc<RwLock<Metrics>>;
+pub type MutIngressInfoCache = Rc<RefCell<IngressInfoCache>>;
 
 impl From<RotondaRoute> for MutRotondaRoute {
     fn from(value: RotondaRoute) -> Self {
@@ -58,7 +66,57 @@ pub struct Ctx {
     pub rpki: SharedRtrCache,
     pub asn_lists: MutNamedAsnLists,
     pub prefix_lists: MutNamedPrefixLists,
+    pub metrics: MutMetrics,
 }
+
+pub struct IngressInfoCache {
+    ingress_id: IngressId,
+    register: Arc<ingress::Register>,
+    ingress_info: Option<IngressInfo>
+}
+
+impl IngressInfoCache {
+    pub fn new_rc(ingress_id: IngressId, register: Arc<ingress::Register>) -> MutIngressInfoCache {
+        Rc::new(RefCell::new(Self {
+            ingress_id,
+            register,
+            ingress_info: None
+        }))
+    }
+    pub fn for_info_rc(ingress_id: IngressId, register: Arc<ingress::Register>, ingress_info: IngressInfo) -> MutIngressInfoCache {
+        Rc::new(RefCell::new(Self {
+            ingress_id,
+            register,
+            ingress_info: Some(ingress_info),
+        }))
+    }
+    fn info(&mut self) -> &IngressInfo {
+        if let Some(ref info) = self.ingress_info {
+            info
+        } else {
+            if let Some(fresh_info) = self.register.get(self.ingress_id) {
+                self.ingress_info = Some(fresh_info);
+                self.ingress_info.as_ref().unwrap()
+            } else {
+                warn!("No ingress_info for {}, this is a bug", self.ingress_id);
+                panic!();
+            }
+        }
+    }
+    fn peer_asn(&mut self) -> Asn {
+        self.info().remote_asn.unwrap_or_else(|| {
+            warn!("No remote_asn on ingress {}, this is a bug", self.ingress_id);
+            Asn::from_u32(u32::MAX)
+        })
+    }
+    fn peer_address(&mut self) -> IpAddr {
+        self.info().remote_addr.unwrap_or_else(|| {
+            warn!("No remote_address on ingress {}, this is a bug", self.ingress_id);
+            Ipv6Addr::from(0).into()
+        })
+    }
+}
+
 
 unsafe impl Send for Ctx {}
 
@@ -69,6 +127,7 @@ impl Ctx {
             rpki,
             asn_lists: Default::default(),
             prefix_lists: Default::default(),
+            metrics: Default::default(),
         }
     }
     pub fn empty() -> Self {
@@ -77,11 +136,17 @@ impl Ctx {
             rpki: Arc::<RtrCache>::default(),
             asn_lists: Default::default(),
             prefix_lists: Default::default(),
+            metrics: Default::default(),
         }
     }
 
-    pub fn prepare(&mut self, compiled: &mut roto::Compiled) {
-        let f: Result<CompileListsFunc, _> = compiled
+    pub fn set_metrics(&mut self, metrics: MutMetrics) {
+        debug!("setting metrics in Ctx");
+        self.metrics = metrics;
+    }
+
+    pub fn prepare(&mut self, roto_package: &mut roto::Package) {
+        let f: Result<CompileListsFunc, _> = roto_package
             .get_function(COMPILE_LISTS_FUNC_NAME);
         if let Ok(f) = f {
             f.call(self);
@@ -106,6 +171,13 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         "Route",
         "A single announced or withdrawn path",
     )?;
+
+
+    rt.register_clone_type_with_name::<RcRotondaPaMap>(
+        "PathAttributes",
+        "The Path attributes pertaining to a certain Route"
+    )?;
+
     rt.register_clone_type_with_name::<RouteContext>(
         "RouteContext",
         "Contextual information pertaining to the Route",
@@ -140,7 +212,17 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         "Named lists of prefixes"
     ).unwrap();
 
+    rt.register_clone_type_with_name::<MutMetrics>(
+        "Metrics",
+        "User-defined Prometheus style metrics"
+    ).unwrap();
+
     rt.register_context_type::<Ctx>()?;
+
+    rt.register_clone_type_with_name::<MutIngressInfoCache>(
+        "IngressInfo",
+        "Information pertaining to the source of the Message or Route"
+    )?;
 
     rt.register_copy_type::<InsertionInfo>(
         "Information from the RIB on an inserted route",
@@ -169,16 +251,15 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         "A BGP Large Community (RFC8092)",
     )?;
 
-    #[roto_function(rt)]
-    fn community(raw: u32) -> Val<StandardCommunity> {
-        Val(StandardCommunity::from_u32(raw))
+    #[roto_static_method(rt, StandardCommunity, from)]
+    fn community_from_str(s: Arc<str>) -> Val<StandardCommunity> {
+        Val(StandardCommunity::from_str(&s).unwrap_or(StandardCommunity::from_u32(0)))
     }
 
-    #[roto_static_method(rt, StandardCommunity, new)]
-    fn new(raw: u32) -> Val<StandardCommunity> {
-        Val(StandardCommunity::from_u32(raw))
+    #[roto_static_method(rt, LargeCommunity, from)]
+    fn large_community_from_str(s: Arc<str>) -> Val<LargeCommunity> {
+        Val(LargeCommunity::from_str(&s).unwrap_or(LargeCommunity::from([0u8;12])))
     }
-
 
     // --- Provenance methods
 
@@ -430,13 +511,13 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     /// Return the number of announcements in this message
     #[roto_method(rt, BgpUpdateMessage<Bytes>, announcements_count)]
-    fn bgp_announcements_count(msg: Val<BgpUpdateMessage<Bytes>>) -> u32 {
+    fn bgp_announcements_count(msg: Val<BgpUpdateMessage<Bytes>>) -> u64 {
         announcements_count(&msg)
     }
 
     /// Return the number of withdrawals in this message
     #[roto_method(rt, BgpUpdateMessage<Bytes>, withdrawals_count)]
-    fn bgp_withdrawals_count(msg: Val<BgpUpdateMessage<Bytes>>) -> u32 {
+    fn bgp_withdrawals_count(msg: Val<BgpUpdateMessage<Bytes>>) -> u64 {
         withdrawals_count(&msg)
     }
 
@@ -511,6 +592,12 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     #[roto_method(rt, BmpMsg<Bytes>)]
     fn is_peer_down(msg: Val<BmpMsg<Bytes>>) -> bool {
         msg.msg_type() == BmpMsgType::PeerDownNotification
+    }
+
+    /// Check whether this message is of type 'PeerUpNotification'
+    #[roto_method(rt, BmpMsg<Bytes>)]
+    fn is_peer_up(msg: Val<BmpMsg<Bytes>>) -> bool {
+        msg.msg_type() == BmpMsgType::PeerUpNotification
     }
 
     /// Check whether the AS_PATH contains the given `Asn`
@@ -635,7 +722,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     /// Return the number of announcements in this message
     #[roto_method(rt, BmpMsg<Bytes>, announcements_count)]
-    fn bmp_announcements_count(msg: Val<BmpMsg<Bytes>>) -> u32 {
+    fn bmp_announcements_count(msg: Val<BmpMsg<Bytes>>) -> u64 {
         if let BmpMsg::RouteMonitoring(rm) = &*msg {
             if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                 return announcements_count(&upd);
@@ -655,7 +742,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
     /// Return the number of withdrawals in this message
     #[roto_method(rt, BmpMsg<Bytes>, withdrawals_count)]
-    fn bmp_withdrawals_count(msg: Val<BmpMsg<Bytes>>) -> u32 {
+    fn bmp_withdrawals_count(msg: Val<BmpMsg<Bytes>>) -> u64 {
         if let BmpMsg::RouteMonitoring(rm) = &*msg {
             if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                 return withdrawals_count(&upd);
@@ -1231,6 +1318,92 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     }
 
 
+    //------------ IngressInfo -----------------------------------------------
+
+    #[roto_method(rt, MutIngressInfoCache, peer_asn)]
+    fn ii_peer_asn(iic: Val<MutIngressInfoCache>) -> Asn {
+        let mut iic = iic.borrow_mut();
+        iic.peer_asn()
+    }
+
+    #[roto_method(rt, MutIngressInfoCache, peer_address)]
+    fn ii_peer_address(iic: Val<MutIngressInfoCache>) -> IpAddr {
+        let mut iic = iic.borrow_mut();
+        iic.peer_address()
+    }
+
+    //------------ Metrics ---------------------------------------------------
+
+    #[roto_method(rt, MutMetrics)]
+    fn increase_counter(metrics: Val<MutMetrics>, name: Val<Arc<str>>, value: u64) {
+        // first try with only a read-lock (for already existing keys)
+        // if that fails, try again with a write lock so the new key can get inserted.
+        if value == 0 {
+            return
+        }
+        let updated = {
+            let readlock = metrics.read().unwrap();
+            readlock.try_inc_counter((*name).clone(), value).is_ok()
+        };
+        if !updated {
+            metrics.write().unwrap().inc_counter((*name).clone(), value);
+        }
+    }
+
+    #[roto_method(rt, MutMetrics)]
+    fn set_gauge(metrics: Val<MutMetrics>, name: Val<Arc<str>>, value: u64) {
+        // first try with only a read-lock (for already existing keys)
+        // if that fails, try again with a write lock so the new key can get inserted.
+        let updated = {
+            let readlock = metrics.read().unwrap();
+            readlock.try_set_gauge((*name).clone(), value).is_ok()
+        };
+        if !updated {
+            metrics.write().unwrap().set_gauge((*name).clone(), value);
+        }
+    }
+
+    //---------
+
+    #[roto_method(rt, RcRotondaPaMap)]
+    fn otc(pamap: Val<RcRotondaPaMap>) -> Option<Asn> {
+        pamap.path_attributes().get::<Otc>().map(|a| a.0)
+    }
+
+    #[roto_method(rt, RcRotondaPaMap, contains_community)]
+    fn pamap_contains_community(pamap: Val<RcRotondaPaMap>, to_match: Val<StandardCommunity>) -> bool {
+        if let Some(pa) = pamap.path_attributes()
+            .get::<StandardCommunitiesList>()
+        {
+            pa.communities().contains(&*to_match)
+        } else {
+            false
+        }
+    }
+
+    #[roto_method(rt, RcRotondaPaMap, contains_large_community)]
+    fn pamap_contains_large_community(pamap: Val<RcRotondaPaMap>, to_match: Val<LargeCommunity>) -> bool {
+        if let Some(pa) = pamap.path_attributes()
+            .get::<LargeCommunitiesList>()
+        {
+            pa.communities().contains(&*to_match)
+        } else {
+            false
+        }
+    }
+
+    rt.register_clone_type_with_name::<HopPath>("aspath", "AS_PATH path attribute")?;
+    #[roto_method(rt, RcRotondaPaMap)]
+    fn aspath(pamap: Val<RcRotondaPaMap>) -> Option<Val<HopPath>> {
+        pamap.path_attributes().get::<HopPath>().map(|a| Val(a))
+    }
+    #[roto_method(rt, HopPath)]
+    fn contains(hoppath: Val<HopPath>, asn: Asn) -> bool {
+        hoppath.contains(&asn.into())
+    }
+
+
+
 
     // currently unused
     //// --- InsertionInfo methods
@@ -1249,25 +1422,25 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     rt.register_constant(
         "NO_EXPORT",
         "The well-known NO_EXPORT community (RFC1997)",
-        StandardCommunity::from_wellknown(Wellknown::NoExport),
+        Val(StandardCommunity::from_wellknown(Wellknown::NoExport)),
     )?;
 
     rt.register_constant(
         "NO_ADVERTISE",
         "The well-known NO_ADVERTISE community (RFC1997)",
-        StandardCommunity::from_wellknown(Wellknown::NoAdvertise),
+        Val(StandardCommunity::from_wellknown(Wellknown::NoAdvertise)),
     )?;
 
     rt.register_constant(
         "NO_EXPORT_SUBCONFED",
         "The well-known NO_EXPORT_SUBCONFED community (RFC1997)",
-        StandardCommunity::from_wellknown(Wellknown::NoExportSubconfed),
+        Val(StandardCommunity::from_wellknown(Wellknown::NoExportSubconfed)),
     )?;
 
     rt.register_constant(
         "NO_PEER",
         "The well-known NO_PEER community (RFC3765)",
-        StandardCommunity::from_wellknown(Wellknown::NoPeer),
+        Val(StandardCommunity::from_wellknown(Wellknown::NoPeer)),
     )?;
 
 
@@ -1341,20 +1514,20 @@ fn match_aspath_origin(
     }
 }
 
-fn announcements_count(bgp_update: &BgpUpdateMessage<Bytes>) -> u32 {
+fn announcements_count(bgp_update: &BgpUpdateMessage<Bytes>) -> u64 {
     if let Ok(iter) = bgp_update.announcements() {
         iter.count().try_into().unwrap_or(u32::MAX)
     } else {
         0
-    }
+    }.into()
 }
 
-fn withdrawals_count(bgp_update: &BgpUpdateMessage<Bytes>) -> u32 {
+fn withdrawals_count(bgp_update: &BgpUpdateMessage<Bytes>) -> u64 {
     if let Ok(iter) = bgp_update.withdrawals() {
         iter.count().try_into().unwrap_or(u32::MAX)
     } else {
         0
-    }
+    }.into()
 }
 
 //------------ Formatting/printing helpers ------------------------------------
@@ -1453,15 +1626,15 @@ mod tests {
 
         let roto_script = "etc/examples/filters.roto.example";
         let i = roto::FileTree::single_file(roto_script);
-        let mut c = i.compile(create_runtime().unwrap())
+        let mut roto_package = i.compile(&create_runtime().unwrap())
             .inspect_err(|e| eprintln!("{e}"))
             .unwrap();
 
-        let _: CompileListsFunc = c.get_function(COMPILE_LISTS_FUNC_NAME).unwrap();
-        let _: BgpInFunc = c.get_function(ROTO_FUNC_BGP_IN_NAME).unwrap();
-        let _: BmpInFunc = c.get_function(ROTO_FUNC_BMP_IN_NAME).unwrap();
-        let _: RibInPreFunc = c.get_function(ROTO_FUNC_RIB_IN_PRE_NAME).unwrap();
-        let _: RotoFuncVrpUpdate = c.get_function(ROTO_FUNC_VRP_UPDATE_FILTER_NAME).unwrap();
-        let _: RotoFuncRovStatusUpdate = c.get_function(ROTO_FUNC_ROV_STATUS_UPDATE_NAME).unwrap();
+        let _: CompileListsFunc = roto_package.get_function(COMPILE_LISTS_FUNC_NAME).unwrap();
+        let _: BgpInFunc = roto_package.get_function(ROTO_FUNC_BGP_IN_NAME).unwrap();
+        let _: BmpInFunc = roto_package.get_function(ROTO_FUNC_BMP_IN_NAME).unwrap();
+        let _: RibInPreFunc = roto_package.get_function(ROTO_FUNC_RIB_IN_PRE_NAME).unwrap();
+        let _: RotoFuncVrpUpdate = roto_package.get_function(ROTO_FUNC_VRP_UPDATE_FILTER_NAME).unwrap();
+        let _: RotoFuncRovStatusUpdate = roto_package.get_function(ROTO_FUNC_ROV_STATUS_UPDATE_NAME).unwrap();
     }
 }

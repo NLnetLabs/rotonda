@@ -16,6 +16,7 @@ use uuid::Uuid;
 use crate::ingress::{self, IngressId};
 use crate::roto_runtime::types::{OutputStreamMessage, RouteContext};
 use crate::units::rib_unit::rpki::RpkiInfo;
+use crate::units::rib_unit::QueryFilter;
 
 // TODO: make this a reference
 pub type RouterId = String;
@@ -149,7 +150,7 @@ impl AsRef<[u8]> for RotondaPaMap {
     }
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Default, Clone, Eq, PartialEq)]
 pub struct RotondaPaMap{
     // raw[0] is RpkiInfo
     // raw[1] is PduParseInfo
@@ -215,65 +216,30 @@ impl Serialize for RotondaPaMap {
     where
         S: Serializer,
     {
-        let mut s = serializer.serialize_seq(None)?;
-        let mut communities: Vec<HumanReadableCommunity> = vec![];
-        for pa in self.path_attributes().iter().flatten() {
-            match pa.to_owned().unwrap() {
-                PathAttribute::StandardCommunities(list) => {
-                    for c in list.communities() {
-                        communities.push(HumanReadableCommunity(
-                            Community::from(*c),
-                        ));
-                    }
-                }
-                PathAttribute::ExtendedCommunities(list) => {
-                    for c in list.communities() {
-                        communities.push(HumanReadableCommunity(
-                            Community::from(*c),
-                        ));
-                    }
-                }
-                PathAttribute::LargeCommunities(list) => {
-                    for c in list.communities() {
-                        communities.push(HumanReadableCommunity(
-                            Community::from(*c),
-                        ));
-                    }
-                }
-                PathAttribute::Ipv6ExtendedCommunities(list) => {
-                    for c in list.communities() {
-                        communities.push(HumanReadableCommunity(
-                            Community::from(*c),
-                        ));
-                    }
-                }
+        let mut s = serializer.serialize_struct("route", 2)?;
+        s.serialize_field("rpki", &self.rpki_info())?;
+        s.serialize_field("pathAttributes", &self.path_attributes().iter().flatten()
+            .filter(|pa| pa.type_code() != 14 && pa.type_code() != 15)
+            .map(|pa| pa.to_owned()).flatten().collect::<Vec<_>>())?;
+        s.end()
+    }
+}
 
-                pa => {
-                    if pa.type_code() == 14 || pa.type_code() == 15 {
-                        debug!("not including MP_REACH/MP_UNREACH path attributes in serialized output");
-                    } else {
-                        s.serialize_element(&pa)?;
-                    }
-                }
-            }
-        }
-
-        // We need to wrap our collected communities in a struct with a field
-        // named 'communities' to get the proper JSON output.
-        // For the other path attributes, as they are actually variants of the
-        // PathAttribute enum type, their name/type is included in the JSON
-        // already.
-        // See also https://serde.rs/json.html
-
-        if !communities.is_empty() {
-            #[derive(Serialize)]
-            struct Communities {
-                communities: Vec<HumanReadableCommunity>,
-            }
-
-            let c = Communities { communities };
-            s.serialize_element(&c)?;
-        }
+pub struct RotondaPaMapWithQueryFilter<'a, 'b>(pub &'a RotondaPaMap, pub &'b QueryFilter);
+impl<'a, 'b> Serialize for RotondaPaMapWithQueryFilter<'a, 'b> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut s = serializer.serialize_struct("route", 2)?;
+        s.serialize_field("rpki", &self.0.rpki_info())?;
+        s.serialize_field("pathAttributes", &self.0.path_attributes().iter().flatten()
+            .filter(|pa|
+                (self.1.fields_path_attributes.as_ref().map(|fpa| fpa.contains(&pa.type_code())).unwrap_or(true))
+                &&
+                pa.type_code() != 14 && pa.type_code() != 15
+                )
+            .map(|pa| pa.to_owned()).flatten().collect::<Vec<_>>())?;
         s.end()
     }
 }
@@ -346,6 +312,8 @@ pub enum Update {
     // connection goes down and everything for the monitored sessions has to
     // be marked Withdrawn.
     WithdrawBulk(SmallVec<[IngressId; 8]>),
+    // Used to signal the RibUnit a MUI should be set to active again.
+    IngressReappeared(IngressId),
     QueryResult(
         Uuid,
         Result<QueryResult<crate::payload::RotondaPaMap>, String>,
@@ -371,6 +339,7 @@ impl Update {
             }
             Update::Withdraw(_ingress_id, _maybe_afisafi) => smallvec![],
             Update::WithdrawBulk(..) => smallvec![],
+            Update::IngressReappeared(..) => smallvec![],
             Update::QueryResult(_, _) => smallvec![],
             Update::UpstreamStatusChange(_) => smallvec![],
             Update::OutputStream(..) => smallvec![],

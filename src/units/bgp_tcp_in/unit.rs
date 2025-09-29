@@ -28,8 +28,9 @@ use crate::common::net::{
     StandardTcpListenerFactory, StandardTcpStream, TcpListener,
     TcpListenerFactory, TcpStreamWrapper,
 };
+use crate::roto_runtime::metrics::RotoMetricsWrapper;
 use crate::roto_runtime::types::{
-    CompiledRoto, FilterName, Provenance, RotoOutputStream, RotoScripts
+    RotoPackage, FilterName, Provenance, RotoOutputStream, RotoScripts
 };
 //use crate::common::roto::{FilterName, RotoScripts};
 use crate::common::status_reporter::{Chainable, UnitStatusReporter};
@@ -40,7 +41,7 @@ use crate::comms::{
 use crate::ingress;
 use crate::manager::{Component, WaitPoint};
 use crate::payload::Update;
-use crate::roto_runtime::Ctx;
+use crate::roto_runtime::{Ctx, MutIngressInfoCache};
 use crate::units::rib_unit::rpki::RtrCache;
 use crate::units::{Gate, Unit};
 
@@ -56,7 +57,7 @@ pub(crate) type RotoFunc = roto::TypedFunc<
     crate::roto_runtime::Ctx,
     fn(
         roto::Val<UpdateMessage<Bytes>>,
-        roto::Val<Provenance>,
+        roto::Val<MutIngressInfoCache>,
     ) ->
     roto::Verdict<(), ()>,
 >;
@@ -116,6 +117,7 @@ impl BgpTcpIn {
         component.register_metrics(metrics.clone());
 
         let ingresses = component.ingresses();
+        let roto_metrics = component.roto_metrics().clone();
 
         // Setup status reporting
         let status_reporter = Arc::new(BgpTcpInStatusReporter::new(
@@ -123,7 +125,7 @@ impl BgpTcpIn {
             metrics.clone(),
         ));
 
-        let roto_compiled = component.roto_compiled().clone();
+        let roto_compiled = component.roto_package().clone();
 
         // Wait for other components to be, and signal to other components
         // that we are, ready to start. All units and targets start together,
@@ -147,6 +149,7 @@ impl BgpTcpIn {
             metrics,
             status_reporter,
             roto_compiled,
+            roto_metrics,
             ingresses,
         )
         .run::<_, _, StandardTcpStream, BgpTcpInRunner>(
@@ -192,7 +195,9 @@ struct BgpTcpInRunner {
 
     status_reporter: Arc<BgpTcpInStatusReporter>,
 
-    roto_compiled: Option<Arc<CompiledRoto>>,
+    roto_compiled: Option<Arc<RotoPackage>>,
+
+    roto_metrics: Option<Arc<RotoMetricsWrapper>>,
 
     // To send commands to a Session based on peer IP + ASN.
     live_sessions: Arc<Mutex<LiveSessions>>,
@@ -214,7 +219,8 @@ impl BgpTcpInRunner {
         gate: Gate,
         metrics: Arc<BgpTcpInMetrics>,
         status_reporter: Arc<BgpTcpInStatusReporter>,
-        roto_compiled: Option<Arc<CompiledRoto>>,
+        roto_compiled: Option<Arc<RotoPackage>>,
+        roto_metrics: Option<Arc<RotoMetricsWrapper>>,
         ingresses: Arc<ingress::Register>,
     ) -> Self {
         BgpTcpInRunner {
@@ -223,6 +229,7 @@ impl BgpTcpInRunner {
             metrics,
             status_reporter,
             roto_compiled,
+            roto_metrics,
             live_sessions: Arc::new(Mutex::new(HashMap::new())),
             ingresses,
         }
@@ -240,6 +247,7 @@ impl BgpTcpInRunner {
             live_sessions: Arc::new(Mutex::new(HashMap::new())),
             ingresses: Arc::new(ingress::Register::default()),
             roto_compiled: None,
+            roto_metrics: Default::default(),
         };
 
         (runner, gate_agent)
@@ -277,6 +285,10 @@ impl BgpTcpInRunner {
             });
 
         let mut roto_context = Ctx::empty();
+
+        if let Some(roto_metrics) = arc_self.roto_metrics.as_ref() {
+            roto_context.set_metrics(roto_metrics.metrics.clone());
+        }
 
         if let Some(c) = arc_self.roto_compiled.clone() {
             roto_context.prepare(&mut c.lock().unwrap());
@@ -357,6 +369,8 @@ impl BgpTcpInRunner {
                                 child_status_reporter,
                                 arc_self.live_sessions.clone(),
                                 arc_self.ingresses.clone(),
+                                // XXX we need to do a find_existing_peer here instead of blindly
+                                // doing a .register().
                                 arc_self.ingresses.register(),
                             );
                         } else {

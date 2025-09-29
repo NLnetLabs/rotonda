@@ -12,7 +12,7 @@ use rotonda_store::prefix_record::RouteStatus;
 use routecore::bgp::{
     message::UpdateMessage, nlri::afisafi::Nlri, types::AfiSafiType,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{
     ingress::IngressId,
@@ -84,7 +84,7 @@ impl RotoScripts {
     }
 }
 
-pub type CompiledRoto = std::sync::Mutex<roto::Compiled>;
+pub type RotoPackage = std::sync::Mutex<roto::Package>;
 
 #[derive(Default)]
 pub struct OutputStream<M> {
@@ -392,7 +392,8 @@ impl Provenance {
 
 //------------ PeerRibType ---------------------------------------------------
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub enum PeerRibType {
     InPre,
     InPost,

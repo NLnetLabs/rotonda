@@ -11,12 +11,12 @@ use routecore::{
         nlri::afisafi::Nlri,
         types::AfiSafiType,
     },
-    bmp::message::{Message as BmpMsg, PerPeerHeader, TerminationMessage},
+    bmp::message::{InformationTlvIter, Message as BmpMsg, PerPeerHeader, TerminationMessage},
 };
 use smallvec::SmallVec;
 
 use crate::{
-    ingress,
+    ingress::{self, IngressId},
     payload::{Payload, Update},
     units::bmp_tcp_in::state_machine::machine::{
         BmpStateIdx, PeerState, PeerStates,
@@ -215,14 +215,25 @@ impl PeerAware for Updating {
         eor_capable: bool,
         ingress_register: Arc<ingress::Register>,
         bmp_ingress_id: ingress::IngressId,
-    ) -> bool {
+        tlv_iter: InformationTlvIter,
+    ) -> (bool, Option<IngressId>) {
         self.peer_states.add_peer_config(
             pph,
             session_config,
             eor_capable,
             ingress_register,
             bmp_ingress_id,
+            tlv_iter,
         )
+    }
+
+    fn add_cloned_peer_config(
+        &mut self,
+        source_pph: &PerPeerHeader<Bytes>,
+        dst_pph: &PerPeerHeader<Bytes>,
+        ingress_id: IngressId,
+    ) -> bool {
+        self.peer_states.add_cloned_peer_config(source_pph, dst_pph, ingress_id)
     }
 
     fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState> {

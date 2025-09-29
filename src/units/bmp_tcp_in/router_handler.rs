@@ -1,7 +1,7 @@
 //! BMP message stream handler for a single connected BMP publishing client.
 use std::cell::RefCell;
 use std::hash::{self, DefaultHasher, Hash};
-use std::net::IpAddr;
+use std::net::{IpAddr, Ipv6Addr};
 use std::sync::{Arc, RwLock};
 use std::{net::SocketAddr, ops::ControlFlow};
 
@@ -11,7 +11,7 @@ use chrono::{DateTime, Utc};
 use hash32::Hasher;
 use inetnum::asn::Asn;
 use log::{debug, error, info};
-use routecore::bmp::message::Message;
+use routecore::bmp::message::{Message, PeerType};
 
 use smallvec::smallvec;
 use tokio::sync::Mutex;
@@ -23,7 +23,7 @@ use crate::roto_runtime::types::{
 
 use crate::ingress::{self, IngressId};
 use crate::payload::RouterId;
-use crate::roto_runtime::Ctx;
+use crate::roto_runtime::{self, Ctx};
 use crate::tracing::Tracer;
 use crate::units::rib_unit::rpki::RtrCache;
 use crate::{
@@ -58,6 +58,7 @@ pub struct RouterHandler {
     // Link to an empty RtrCache for now. Eventually, this should point to the
     // main all-encompassing RIB.
     rtr_cache: Arc<RtrCache>,
+    ingress_register: Arc<ingress::Register>,
 }
 
 impl RouterHandler {
@@ -74,6 +75,7 @@ impl RouterHandler {
         tracing_mode: Arc<ArcSwap<TracingMode>>,
         last_msg_at: Option<Arc<RwLock<DateTime<Utc>>>>,
         bmp_metrics: Arc<BmpStateMachineMetrics>,
+        ingress_register: Arc<ingress::Register>,
     ) -> Self {
         Self {
             gate,
@@ -88,6 +90,7 @@ impl RouterHandler {
             last_msg_at,
             bmp_metrics,
             rtr_cache: Default::default(),
+            ingress_register,
         }
     }
 
@@ -133,6 +136,7 @@ impl RouterHandler {
             bmp_metrics,
             roto_function: None,
             roto_context: Arc::new(std::sync::Mutex::new(Ctx::empty())),
+            ingress_register: Default::default(),
         };
 
         (mock, gate_agent, parent_gate)
@@ -361,7 +365,7 @@ impl RouterHandler {
             Message::TerminationMessage(..) => None,
             Message::RouteMirroring(msg) => Some(msg.per_peer_header()),
         };
-        let provenance = if let Some(pph) = pph {
+        let provenance = if let Some(ref pph) = pph {
             Provenance {
                 peer_ip: pph.address(),
                 peer_asn: pph.asn(),
@@ -373,15 +377,62 @@ impl RouterHandler {
             provenance
         };
 
+        // Ideally, we do an ingress lookup here instead of somewhere deeper in the FSM. The
+        // commented code below is roughly what that should look like, though we will only enable
+        // it after the upcoming release because it will require additional work and testing.
+
+        //let query_ingress = if let Some(ref pph) = pph {
+        //    let mut tmp = ingress::IngressInfo::new()
+        //    .with_ingress_type(ingress::IngressType::BgpViaBmp)
+        //    .with_parent_ingress(ingress_id)
+        //    .with_remote_addr(pph.address())
+        //    .with_remote_asn(pph.asn())
+        //    .with_rib_type(pph.rib_type())
+        //    .with_peer_rib_type((pph.is_post_policy(), pph.rib_type()))
+        //    .with_peer_type(pph.peer_type());
+        //    if pph.peer_type() == PeerType::LocalRibInstance {
+        //        tmp = tmp.with_distinguisher(TryInto::<[u8; 8]>::try_into(&pph.distinguisher()[..8]).unwrap());
+        //    }
+        //    tmp
+        //} else {
+        //    ingress::IngressInfo::new()
+        //        .with_remote_asn(Asn::from_u32(0))
+        //};
+
+        //if let Some((ingress_id, _ingress_info)) =
+        //    self.ingress_register.find_existing_peer(&query_ingress)
+        //{ 
+        //} else {
+
+        //}
+        
+        let ingress_info = if let Some(ref pph) = pph {
+            ingress::IngressInfo::new()
+                .with_remote_asn(pph.asn())
+                .with_remote_addr(pph.address())
+            
+        } else {
+            ingress::IngressInfo::new()
+                .with_remote_asn(Asn::from_u32(0))
+                .with_remote_addr(addr.ip()) // the SocketAddr for the BMP connection
+        };
+
         let mut osms = smallvec![];
         let verdict;
         { // lock scope
         let mut ctx = self.roto_context.lock().unwrap();
+
+        let mutiic = roto_runtime::IngressInfoCache::for_info_rc(
+            0 as IngressId, 
+            self.ingress_register.clone(),
+            ingress_info,
+        );
+
         verdict = self.roto_function.as_ref().map(|roto_function| {
             roto_function.call(
                 &mut ctx,
                 roto::Val(msg.clone()),
-                roto::Val(provenance),
+                roto::Val(mutiic),
             )
         });
         
@@ -482,6 +533,7 @@ impl RouterHandler {
                         // A BMP initiation message received after the
                         // initiation phase will result in this type of
                         // message.
+                        // LH: is this comment still correct?
                         self.check_update_router_id(
                             addr,
                             ingress_id, //&source_id,

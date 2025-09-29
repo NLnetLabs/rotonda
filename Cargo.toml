@@ -21,7 +21,7 @@ path = "doc/bin/print_rotonda_std_doc.rs"
 [workspace.package]
 version = "0.4.3-dev"
 edition = "2021"
-rust-version = "1.84"
+rust-version = "1.87"
 authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]
 
 
@@ -29,7 +29,7 @@ authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]
 #members = []
 
 [workspace.dependencies]
-routecore          = { version = "0.5.2", features = ["bgp", "bmp", "serde", "fsm", "mrt"] }
+routecore          = { version = "0.6", features = ["bgp", "bmp", "serde", "fsm", "mrt"] }
 inetnum            = { version = "0.1.1", features = ["arbitrary", "serde"] }
 rotonda-store      = { version = "0.5.0" }
 log                = "0.4"
@@ -78,7 +78,7 @@ mqtt               = { version = "0.23.0", package = "rumqttc", default-features
 memmap2            = "0.9.4"
 non-empty-vec      = { version = "0.2", features = ["serde"]}
 percent-encoding   = "2.3"
-roto               = { version = "0.6.0" }
+roto               = { version = "0.7" }
 rotonda-store       = { workspace = true }
 serde_with         = "3"
 smallvec           = { version = "1.11", features = ["const_generics", "const_new", "union"] }
@@ -87,9 +87,13 @@ uuid               = { version = "1.4", features = ["v4", "fast-rng"] }
 sha2               = "0.10.8"
 csv                = "1.3.1"
 bzip2              = "0.5.0"
-rpki               = { version = "0.18.6", features = ["crypto", "rtr"] }
+rpki               = { version = "0.19.1", features = ["crypto", "rtr"] }
 futures-util       = "0.3.31"
-micromap = "0.0.19"
+micromap           = "0.0.19"
+paste              = "1.0.15"
+axum               = { version = "0.8.4", features = ["query", "http1", "http2", "tokio"], default-features = false }
+serde_qs           = "0.15.0"
+rshtml             = "0.2.0"
 
 [target.'cfg(unix)'.dependencies]
 syslog             = "6.1"
@@ -100,7 +104,9 @@ env_logger         = "0.10"
 prometheus-parse   = "0.2"
 reqwest            = { version = "0.11", default-features = false, features = ["json"] }
 rumqttd            = { version = "0.18.0", default-features = false }
-serde_json         = "1.0"
+insta = { version = "1.43.1", features = ["glob"] }
+assert_cmd = "2.0.17"
+glob = "0.3.3"
 
 [profile.release]
 strip = true
@@ -110,6 +116,13 @@ default = ["http-api-gzip"]
 
 # Enable GZIP compression of the HTTP /metrics response
 http-api-gzip = ["flate2"]
+
+[build-dependencies]
+rshtml = "0.2.0"
+
+
+[package.metadata.rshtml]
+views = { path = "src/webui/views", layout = "layout.rs.html" } # layout is the default value
 
 [package.metadata.deb]
 name = "rotonda"
@@ -137,7 +150,24 @@ copyright = "Copyright (c) 2024, NLnet Labs. All rights reserved."
 conf-files = [
     "/etc/rotonda/rotonda.conf",
 ]
-systemd-units = { unit-name = "rotonda", unit-scripts = "pkg/common", enable = false }
+systemd-units = { unit-name = "rotonda", unit-scripts = "pkg/common", enable = false, usr-merge = true } # usr-merge is needed for Bookworm/Noble and later
+
+[package.metadata.deb.variants.debian-buster]
+systemd-units = { unit-name = "rotonda", unit-scripts = "pkg/common", enable = false, usr-merge = false }
+
+[package.metadata.deb.variants.debian-bullseye]
+systemd-units = { unit-name = "rotonda", unit-scripts = "pkg/common", enable = false, usr-merge = false }
+
+[package.metadata.deb.variants.ubuntu-bionic]
+systemd-units = { unit-name = "rotonda", unit-scripts = "pkg/common", enable = false, usr-merge = false }
+
+[package.metadata.deb.variants.ubuntu-focal]
+systemd-units = { unit-name = "rotonda", unit-scripts = "pkg/common", enable = false, usr-merge = false }
+
+[package.metadata.deb.variants.ubuntu-jammy]
+systemd-units = { unit-name = "rotonda", unit-scripts = "pkg/common", enable = false, usr-merge = false }
+
+
 
 [package.metadata.deb.variants.minimal]
 

@@ -4,34 +4,31 @@ use std::{
     hash::{BuildHasher, Hasher},
     net::IpAddr,
     ops::Deref,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use chrono::{Duration, Utc};
 use hash_hasher::{HashBuildHasher, HashedSet};
 use inetnum::{addr::Prefix, asn::Asn};
-use log::{debug, error, trace};
+use log::{debug, error, trace, warn};
 use rotonda_store::{
     epoch,
     errors::{FatalResult, PrefixStoreError},
     match_options::{MatchOptions, QueryResult},
-    prefix_record::{Meta, PrefixRecord, Record, RouteStatus},
+    prefix_record::{Meta, PrefixRecord, Record, RecordSet, RouteStatus},
     rib::{config::MemoryOnlyConfig, StarCastRib},
     stats::UpsertReport,
 };
 use routecore::bgp::{
-    nlri::afisafi::{IsPrefix, Nlri},
-    path_attributes::PaMap,
-    path_selection::{OrdRoute, Rfc4271, TiebreakerInfo},
-    types::AfiSafiType,
+    aspath::HopPath, nlri::afisafi::{IsPrefix, Nlri}, path_attributes::PaMap, path_selection::{OrdRoute, Rfc4271, TiebreakerInfo}, types::{AfiSafiType, Otc}
 };
-use serde::Serialize;
+use serde::{ser::{SerializeSeq, SerializeStruct}, Serialize, Serializer};
 
 use crate::{
-    ingress::IngressId,
-    payload::{RotondaPaMap, RotondaRoute, RouterId},
-    roto_runtime::types::Provenance,
+    ingress::{self, register::{IdAndInfo, OwnedIdAndInfo}, IngressId, IngressInfo}, payload::{RotondaPaMap, RotondaPaMapWithQueryFilter, RotondaRoute, RouterId}, representation::{GenOutput, Json}, roto_runtime::{types::{Provenance, RotoPackage}, Ctx}
 };
+
+use super::{http_ng::Include, QueryFilter};
 
 // -------- PhysicalRib ------------------------------------------------------
 
@@ -48,32 +45,59 @@ use crate::{
 
 type Store = StarCastRib<RotondaPaMap, MemoryOnlyConfig>;
 
+type RotoHttpFilter = roto::TypedFunc<
+    Ctx,
+    fn (roto::Val<crate::roto_runtime::RcRotondaPaMap>,) -> roto::Verdict<(), ()>,
+>;
+
+#[derive(Clone)]
 pub struct Rib {
     unicast: Arc<Option<Store>>,
     multicast: Arc<Option<Store>>,
     other_fams:
         HashMap<AfiSafiType, HashMap<(IngressId, Nlri<bytes::Bytes>), PaMap>>,
+    ingress_register: Arc<ingress::Register>,
+    roto_package: Option<Arc<RotoPackage>>,
+    roto_context: Arc<Mutex<Ctx>>,
 }
 
 #[derive(Copy, Clone, Debug)]
 struct Multicast(bool);
 
 impl Rib {
-    pub fn new_physical() -> Result<Self, PrefixStoreError> {
+    //pub fn new_physical(ingress_register: Arc<ingress::Register>) -> Result<Self, PrefixStoreError> {
+    //    Ok(Rib {
+    //        unicast: Arc::new(Some(Store::try_default()?)),
+    //        multicast: Arc::new(Some(Store::try_default()?)),
+    //        other_fams: HashMap::new(),
+    //        ingress_register,
+    //        roto_package: None,
+    //    })
+    //}
+
+    pub fn new(
+        ingress_register: Arc<ingress::Register>,
+        roto_package: Option<Arc<RotoPackage>>,
+        roto_context: Arc<Mutex<Ctx>>,
+    ) -> Result<Self, PrefixStoreError> {
         Ok(Rib {
             unicast: Arc::new(Some(Store::try_default()?)),
             multicast: Arc::new(Some(Store::try_default()?)),
             other_fams: HashMap::new(),
+            ingress_register,
+            roto_package,
+            roto_context,
         })
     }
 
-    pub fn new_virtual() -> Self {
-        Rib {
-            unicast: Arc::new(None),
-            multicast: Arc::new(None),
-            other_fams: HashMap::new(),
-        }
-    }
+    // unused
+    //pub fn new_virtual() -> Self {
+    //    Rib {
+    //        unicast: Arc::new(None),
+    //        multicast: Arc::new(None),
+    //        other_fams: HashMap::new(),
+    //    }
+    //}
 
     // XXX LH perhaps this should become a characteristic of the Unit instead
     // of the Rib. Currently, rib_unit::unit::insert_payload() is the only
@@ -181,7 +205,7 @@ impl Rib {
             route_status,
             val.rotonda_pamap().clone(),
         );
-
+        
         let res = store.insert(
             prefix, pubrec, None, // Option<TBI>
         );
@@ -303,6 +327,41 @@ impl Rib {
         }
     }
 
+    pub fn mark_ingress_active(
+        &self,
+        ingress_id: IngressId,
+    ) {
+        if let Err(e) = (*self.unicast)
+            .as_ref()
+                .unwrap()
+                .mark_mui_as_active_v4(ingress_id)
+        {
+            error!("failed to mark MUI as active in unicast v4 rib: {e}")
+        }
+        if let Err(e) = (*self.unicast)
+            .as_ref()
+                .unwrap()
+                .mark_mui_as_active_v6(ingress_id)
+        {
+            error!("failed to mark MUI as active in unicast v6 rib: {e}")
+        }
+        if let Err(e) = (*self.multicast)
+            .as_ref()
+                .unwrap()
+                .mark_mui_as_active_v4(ingress_id)
+        {
+            error!("failed to mark MUI as active in multicast v4 rib: {e}")
+        }
+        if let Err(e) = (*self.multicast)
+            .as_ref()
+                .unwrap()
+                .mark_mui_as_active_v6(ingress_id)
+        {
+            error!("failed to mark MUI as active in multicast v6 rib: {e}")
+        }
+
+    }
+
     pub fn match_prefix(
         &self,
         prefix: &Prefix,
@@ -345,7 +404,9 @@ impl Rib {
         let store = (*self.unicast)
             .as_ref()
             .ok_or(PrefixStoreError::StoreNotReadyError.to_string())?;
+
         let include_withdrawals = false;
+
         let mut res = store
             .iter_records_for_mui_v4(ingress_id, include_withdrawals, guard)
             .collect::<FatalResult<Vec<_>>>()
@@ -370,7 +431,502 @@ impl Rib {
         );
         Ok(res)
     }
+
+
+    //
+    // new methods returning results to be used by both HTTP API and CLI, i.e. types that will need
+    // impls for ToJson and ToCli so they can be impl OutputFormat
+    //
+    // For now, all these new methods are prefixed search_
+    //
+
+    /// Query the Store for routes based on Nlri/prefix
+    pub fn search_routes(
+        &self,
+        afisafi: AfiSafiType,
+        //nlri: Nlri<&[u8]>,
+        nlri: Prefix, // change to Nlri or equivalent after routecore refactor
+        filter: QueryFilter,
+    //) -> Result<QueryResult<RotondaPaMap>, String> {
+    ) -> Result<SearchResult, String> {
+        let guard = &epoch::pin();
+
+        let store = match afisafi {
+            AfiSafiType::Ipv4Unicast |
+            AfiSafiType::Ipv6Unicast => {
+                (*self.unicast)
+                    .as_ref()
+                    .ok_or(PrefixStoreError::StoreNotReadyError.to_string())?
+                }
+            AfiSafiType::Ipv4Multicast |
+            AfiSafiType::Ipv6Multicast => {
+                (*self.multicast)
+                    .as_ref()
+                    .ok_or(PrefixStoreError::StoreNotReadyError.to_string())?
+            }
+            u => {
+                return Err(format!("address family {u} unsupported"));
+            }
+        };
+
+        let match_options = &MatchOptions {
+            match_type: rotonda_store::match_options::MatchType::ExactMatch,
+            include_withdrawn: false,
+            include_less_specifics: filter.include.contains(&Include::LessSpecifics),
+            include_more_specifics: filter.include.contains(&Include::MoreSpecifics),
+            mui: filter.ingress_id,
+            include_history: rotonda_store::match_options::IncludeHistory::None,
+        };
+
+        let t0 = std::time::Instant::now();
+        let mut res = store
+            .match_prefix(&nlri, match_options, guard)
+            .map(|res| SearchResult { query_result: res, ingress_register: self.ingress_register.clone(), query_filter: filter.clone() } )
+            .map_err(|err| err.to_string());
+
+        // filter on:
+        // X origin asn
+        // X peer rib type
+        // X ingress_id -> done via Store.match_prefix already
+        // X otc
+        //
+        // - community
+        // - large community
+        // - peer distinguisher
+        
+        debug!("store lookup took {:?}", std::time::Instant::now().duration_since(t0));
+
+
+        // Find the roto function from the compiled Roto Package.
+        // We do this here, once, to reduce acquiring locks and such over and over.
+        // If the query contains a filter name for which no roto function exists, this simply
+        // filters as if no filter was passed:
+
+        //let maybe_roto_function: Option<RotoHttpFilter> = filter.roto_function.as_ref().and_then(|name| {
+        //    self.roto_package.as_ref().and_then(|package| {
+        //        let mut package = package.lock().unwrap();
+        //        package.get_function(name.as_str()).ok()
+        //    })
+        //});
+
+        // Alternatively, we could return an error:
+        let maybe_roto_function: Option<RotoHttpFilter> = match filter.roto_function.as_ref() {
+            Some(name) => {
+                debug!("looking up {name} in compiled roto package");
+                if let Some(f) = self.roto_package.as_ref().and_then(|package| {
+                    let mut package = package.lock().unwrap();
+                    package.get_function(name.as_str()).ok()
+                }) {
+                    Some(f)
+                } else {
+                    error!("query for undefined roto filter");
+                    return Err(format!("no roto function '{name}' defined"));
+                }
+            }
+            None => None
+        };
+
+
+
+
+        let t0 = std::time::Instant::now();
+
+        let _ = res.as_mut().map(|sr| {
+            self.apply_filter(&mut sr.query_result.records, &filter, maybe_roto_function.clone());
+            sr.query_result.more_specifics.as_mut().map(|rs| {
+                rs.v4.retain_mut(|pr|{
+                    self.apply_filter(&mut pr.meta, &filter, maybe_roto_function.clone());
+                    !pr.meta.is_empty()
+                });
+                rs.v6.retain_mut(|pr|{
+                    self.apply_filter(&mut pr.meta, &filter, maybe_roto_function.clone());
+                    !pr.meta.is_empty()
+                });
+            });
+            sr.query_result.less_specifics.as_mut().map(|rs| {
+                rs.v4.retain_mut(|pr|{
+                    self.apply_filter(&mut pr.meta, &filter, maybe_roto_function.clone());
+                    !pr.meta.is_empty()
+                });
+                rs.v6.retain_mut(|pr|{
+                    self.apply_filter(&mut pr.meta, &filter, maybe_roto_function.clone());
+                    !pr.meta.is_empty()
+                });
+            });
+        });
+
+        debug!("filtering took {:?}", std::time::Instant::now().duration_since(t0));
+        
+        res
+
+    }
+
+    // XXX:
+    // if the results from the store are already filtered on a MUI/ingress_id, we do not need to
+    // query the ingress register over and over to fetch info like peer_rib_type
+    // In such case, we could optimize:
+    //  - fetch the required info once, pass it into apply_filter
+    //  - in apply_filter, check for such info and branch: if let Some(passed_info), etc
+    
+    fn apply_filter(&self, records: &mut Vec<Record<RotondaPaMap>>, filter: &QueryFilter, roto_filter: Option<RotoHttpFilter>) {
+        if let Some(rib_type) = filter.rib_type {
+            records.retain(|r|{
+                self.ingress_register.get(r.multi_uniq_id).map(|ii|
+                    ii.peer_rib_type == Some(rib_type)
+                ).unwrap_or(true)
+            });
+        }
+        if let Some(peer_asn) = filter.peer_asn {
+            records.retain(|r|{
+                self.ingress_register.get(r.multi_uniq_id).map(|ii|
+                    ii.remote_asn == Some(peer_asn)
+                ).unwrap_or(true)
+            });
+        }
+
+        if let Some(f) = roto_filter {
+            let mut ctx = self.roto_context.lock().unwrap();
+            records.retain_mut(|r| {
+                let rc_r: crate::roto_runtime::RcRotondaPaMap = std::mem::take(&mut r.meta).into();
+                match f.call(&mut ctx, roto::Val(rc_r.clone())) {
+                    roto::Verdict::Accept(_) => {
+                        r.meta = std::rc::Rc::into_inner(rc_r).unwrap();
+                        true
+                    }
+                    roto::Verdict::Reject(_) => {
+                        //debug!("in Reject for {}", roto_function);
+                        false
+                    }
+                }
+            });
+
+        }
+
+        if filter.origin_asn.is_some() ||
+            filter.otc.is_some() ||
+            filter.community.is_some() ||
+            filter.large_community.is_some() ||
+            filter.rov_status.is_some()
+        {
+            records.retain(|r| {
+                if let Some(rov_status) = filter.rov_status {
+                    if r.meta.rpki_info().rov_status() != rov_status {
+                        return false
+                    }
+                }
+                let path_attributes = r.meta.path_attributes();
+                if let Some(otc) = filter.otc {
+                    if Some(otc) != path_attributes.get::<Otc>().map(|otc| otc.0) {
+                        return false
+                    }
+                }
+                if let Some(large_community) = filter.large_community {
+                    if let Some(list) = path_attributes.get::<routecore::bgp::path_attributes::LargeCommunitiesList>() {
+                        if !list.communities().contains(&large_community) {
+                            return false
+                        }
+                    } else {
+                        return false
+                    }
+                }
+                if let Some(community) = filter.community {
+                    if let Some(list) = path_attributes.get::<routecore::bgp::message::update_builder::StandardCommunitiesList>() {
+                        if !list.communities().contains(&community) {
+                            return false
+                        }
+                    } else {
+                        return false
+                    }
+                }
+                if let Some(origin_asn) = filter.origin_asn {
+                    if Some(origin_asn) != path_attributes.get::<HopPath>().and_then(|hp|
+                        hp.origin().and_then(|hop| hop.clone().try_into().ok())
+                    ) {
+                        return false;
+                    }
+                }
+                true
+            });
+
+            // TODO:
+            // - communities
+            // - large communities
+            // - route distinguisher
+
+        }
+    }
+
+    pub fn search_and_output_routes<T>(
+        &self,
+        mut target: T,
+        afisafi: AfiSafiType,
+        //nlri: Nlri<&[u8]>,
+        nlri: Prefix, // change to Nlri or equivalent after routecore refactor
+        filter: QueryFilter,
+    ) -> Result<(), String>
+        where SearchResult: GenOutput<T>
+    {
+        match self.search_routes(afisafi, nlri, filter) {
+            Ok(search_results) => {
+                let _ = search_results.write(&mut target);
+            },
+            Err(e) => {
+                error!("error in search_and_output_routes: {e}");
+                return Err(format!("store error: {e}").into());
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Query the store based on `IngressId`/MUI
+    pub fn search_routes_for_ingress(
+        afisafi: AfiSafiType,
+        nlri: Nlri<&[u8]>,
+        ingress_id: IngressId,
+        match_options: MatchOptions
+    ) -> Result<SearchResult, String> {
+        todo!()
+    }
+
+    /// Query the store based on Origin AS in the AS_PATH
+    pub fn search_routes_for_origin_as(
+        afisafi: AfiSafiType,
+        origin_as: Asn,
+        match_options: MatchOptions
+    ) -> Result<SearchResult, String> {
+        todo!()
+    }
 }
+
+/// Wrapper around `QueryResult` from rotonda-store
+///
+/// This wrapper is used to impl the necessary traits on, to enable consistent representation
+/// between CLI, HTTP API, etc.
+pub struct SearchResult {
+    query_result: QueryResult<RotondaPaMap>,
+    ingress_register: Arc<ingress::Register>,
+    query_filter: QueryFilter,
+}
+
+crate::genoutput_json!(SearchResult);
+
+impl Serialize for SearchResult {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+
+        // TODO:
+        // - ingress data (include in Arc<Register> in SearchResults wrapper?
+        // X rpki rov status
+        // X route status
+        // - path attributes
+        //      X first go based on existing Serialize impl
+        //      - have a good look on what we did vs what we now think is best
+        //      - especially communities:
+        //          - old style was 241M vs ~90M for the 25M raw BMP input data
+        //          - can we provide multiple 'styles' of output (via some query param), e.g.
+        //              - the old, very verbose one,
+        //              - one with Martin Pels' draft applied
+        //          
+        //
+        //         
+        // - includes:
+        //  X more specifics
+        //  X less specifics
+        //  - lpm?
+        //
+        //  XXX: old format returned "data": [] (i.e. an array) so the matching prefix/nlri was
+        //  repeated $n times.
+        //  is that correct? shouldn't it be:
+        //      "data": {
+        //          "nlri": $some_nlri,
+        //          "routes": [ ... ]
+        //      },
+        //      "included": ...
+        // 
+        // the good thing about that repetition though is, that when including routes for more/less
+        // specifics in the "included" section, we can follow the exact same structure?
+        //
+        //  XXX json:api states "included" is an _array_ where we returned a object before
+        //  perhaps go with
+        //
+        //      "included": [
+        //          {
+        //              "include_type": "moreSpecifics", 
+        //                  "data": {
+        //                      "nlri": $some_nlri,
+        //                      "routes": [ { .. }, .. ]
+        //                  }
+        //          },
+        //          {
+        //              "include_type": "lessSpecifics",
+        //                  "data": {
+        //                      "nlri": $some_nlri,
+        //                      "routes": [ { .. }, .. ]
+        //                  }
+        //          }
+        //      ]
+        //              
+        //
+        //
+        #[derive(Serialize)]
+        #[serde(rename_all = "camelCase")]
+        struct IncludedData<'a, 'b, 'c> {
+            #[serde(skip_serializing_if = "Option::is_none")]
+            more_specifics: Option<RecordSetWrapper<'a, 'b, 'c>>,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            less_specifics: Option<RecordSetWrapper<'a, 'b, 'c>>,
+        }
+
+        let mut root = serializer.serialize_struct("nlri", 3)?;
+        // TODO meta:
+        // - routes pre filtering
+        // - routes post filtering (== returned items)
+        // - time to get from store
+        // - time to serialize to json? (is that possible? or should meta then be at the end of the
+        //   response perhaps?)
+        root.serialize_field("meta", &None::<String>)?;
+        root.serialize_field("data", &Data {
+            nlri: self.query_result.prefix,
+            routes: RecordsWrapper(&self.query_result.records, &self.ingress_register, &self.query_filter),
+        })?;
+
+        root.serialize_field("included",
+            &IncludedData {
+                more_specifics: self.query_result.more_specifics.as_ref().map(|s| RecordSetWrapper(s, &self.ingress_register, &self.query_filter)),
+                less_specifics: self.query_result.less_specifics.as_ref().map(|s| RecordSetWrapper(s, &self.ingress_register, &self.query_filter)),
+
+            }
+        )?;
+        root.end()
+
+    }
+}
+
+#[derive(Serialize)]
+struct Data<'a, 'b, 'c> {
+    nlri: Option<Prefix>,
+    routes: RecordsWrapper<'a, 'b, 'c>,
+}
+
+struct RecordsWrapper<'a, 'b, 'c>(&'a Vec<Record<RotondaPaMap>>, &'b Arc<ingress::Register>, &'c QueryFilter);
+struct RecordWrapper<'a, 'b, 'c>(&'a Record<RotondaPaMap>, &'b Arc<ingress::Register>, &'c QueryFilter);
+struct RecordSetWrapper<'a, 'b, 'c>(&'a RecordSet<RotondaPaMap>, &'b Arc<ingress::Register>, &'c QueryFilter);
+struct PrefixRecordWrapper<'a, 'b, 'c>(&'a PrefixRecord<RotondaPaMap>, &'b Arc<ingress::Register>, &'c QueryFilter);
+struct RouteStatusWrapper(RouteStatus);
+
+impl Serialize for RecordsWrapper<'_, '_, '_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+
+        let mut seq = serializer.serialize_seq(Some(self.0.len()))?;
+        for e in self.0.iter() {
+            seq.serialize_element(&RecordWrapper(e, self.1, self.2))?;
+        }
+        seq.end()
+
+    }
+}
+
+impl Serialize for RecordWrapper<'_, '_, '_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+
+        // The RPKI information is stored in the value (so, RotondaPaMap) in the store.
+        // The RotondaPaMap serializes to { rpki: {}, pathAttributes: [] },
+        // so with serde(flatten) the wrapped store::Record serializes to
+        // { status: foo, rpki: bla, pathAttributes: buzz, etc .. }
+        // on 'one level'.
+        //
+        #[derive(Serialize)]
+        struct Helper<'a> {
+            status: RouteStatusWrapper,
+            ingress: OwnedIdAndInfo,
+            #[serde(flatten)]
+            pamap: &'a RotondaPaMap,
+            //pamap: RotondaPaMapWithQueryFilter<'a, 'b>,//(&RotondaPaMap, &self.2),
+        }
+
+        #[derive(Serialize)]
+        struct HelperWithQueryFilter<'a, 'b> {
+            status: RouteStatusWrapper,
+            ingress: OwnedIdAndInfo,
+            #[serde(flatten)]
+            pamap: RotondaPaMapWithQueryFilter<'a, 'b>,//(&RotondaPaMap, &self.2),
+        }
+
+        // Possible optimisation: lift this wrapping (and thus branching up) into RecordsWrapper or
+        // even SearchResult.
+        // Have variants for:
+        // - NoPathAttributes, i.e. &fields[pathAttributes]=
+        // - FilteredPathAttrbutes, i.e. is_some() && !is_empty()
+        // - Default case, not specified, so we only filter out typecodes 14 and 15 (MP
+        // REACH/UNREACH) while those are stored. After the refactoring of routecore et al and we
+        // are sure 14/15 do not end up in the store, that .filter can be removed completely.
+        if self.2.fields_path_attributes.is_some() {
+            HelperWithQueryFilter {
+                ingress: self.1.get_tuple(self.0.multi_uniq_id).unwrap(),
+                status: RouteStatusWrapper(self.0.status),
+                pamap: RotondaPaMapWithQueryFilter(&self.0.meta, &self.2),
+            }.serialize(serializer)
+        } else {
+            Helper {
+                ingress: self.1.get_tuple(self.0.multi_uniq_id).unwrap(),
+                status: RouteStatusWrapper(self.0.status),
+                pamap: &self.0.meta
+            }.serialize(serializer)
+
+        }
+    }
+}
+
+impl Serialize for RecordSetWrapper<'_, '_, '_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer {
+            let mut s = serializer.serialize_seq(Some(self.0.len()))?;
+            for e in &self.0.v4 {
+               s.serialize_element(&PrefixRecordWrapper(&e, self.1, self.2))?;
+            }
+            for e in &self.0.v6 {
+               s.serialize_element(&PrefixRecordWrapper(&e, self.1, self.2))?;
+            }
+       s.end()
+    }
+}
+
+impl Serialize for PrefixRecordWrapper<'_, '_, '_> {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer {
+            
+             Data {
+                nlri: Some(self.0.prefix),
+                routes: RecordsWrapper(&self.0.meta, self.1, self.2),
+            }.serialize(serializer)
+        
+    }
+}
+
+impl Serialize for RouteStatusWrapper {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer {
+        match self.0 {
+            RouteStatus::Active => serializer.serialize_str("active"),
+            RouteStatus::InActive => serializer.serialize_str("inactive"),
+            RouteStatus::Withdrawn => serializer.serialize_str("withdrawn"),
+        }
+    }
+}
+
+
 
 #[derive(Debug)]
 pub enum StoreInsertionEffect {

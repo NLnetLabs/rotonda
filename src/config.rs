@@ -11,8 +11,10 @@ use crate::manager::{Manager, TargetSet, UnitSet};
 use clap::{Arg, ArgMatches, Command};
 use log::{error, trace};
 use serde::Deserialize;
+use serde_with::{serde_as, OneOrMany};
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{borrow, error, fmt, fs, io, ops};
@@ -37,6 +39,7 @@ const ARG_CONFIG: &str = "config";
 /// be able to pick up the path to the configuration file.
 /// [`from_arg_matches`](Self::from_arg_matches) will then load the file
 /// referenced in the command line and, upon success, return the config.
+#[serde_as]
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Config {
@@ -54,8 +57,12 @@ pub struct Config {
     pub log: LogConfig,
 
     /// The HTTP server configuration.
-    #[serde(flatten)]
-    pub http: http::Server,
+    //#[serde(flatten)]
+    //pub http: http::Server,
+
+    /// The new HTTP server configuration.
+    #[serde(rename = "http_listen")]
+    pub http_ng_listen: Option<Vec<SocketAddr>>,
 }
 
 impl Config {

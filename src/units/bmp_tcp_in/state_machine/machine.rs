@@ -29,6 +29,7 @@ use log::{debug, error, warn};
 use inetnum::addr::Prefix;
 use rotonda_store::prefix_record::RouteStatus;
 use routecore::bgp::fsm::session;
+use routecore::bmp::message::InformationTlvIter;
 use routecore::{
     bgp::nlri::afisafi::IsPrefix,
     bgp::nlri::afisafi::Nlri,
@@ -58,6 +59,7 @@ use std::{
     sync::Arc,
 };
 
+use crate::ingress::IngressId;
 use crate::{
     common::{
         routecore_extra::generate_alternate_config,
@@ -104,6 +106,7 @@ impl EoRProperties {
     }
 }
 
+#[derive(Clone)]
 pub struct PeerDetails {
     peer_bgp_id: [u8; 4],
     peer_distinguisher: [u8; 8],
@@ -111,6 +114,7 @@ pub struct PeerDetails {
     peer_id: PeerId,
 }
 
+#[derive(Clone)]
 pub struct PeerState {
     /// The settings needed to correctly parse BMP UPDATE messages sent
     /// for this peer.
@@ -402,8 +406,11 @@ pub trait PeerAware {
     /// correctly parse and interpret subsequent messages for this peer. EOR
     /// is an abbreviation of End-of-RIB [1].
     ///
-    /// Returns true if the configuration was recorded, false if configuration
-    /// for the peer already exists.
+    /// Returns a tuple of
+    ///   * a boolean which if true signals the configuration was recorded, false if configuration
+    ///   for the peer already exists.
+    ///   * optionally an `IngressId`, if a peer was found in the Ingress registry (i.e. this is a
+    ///   reconnecting peer).
     ///
     /// [1]: https://datatracker.ietf.org/doc/html/rfc4724#section-2
     fn add_peer_config(
@@ -413,7 +420,8 @@ pub trait PeerAware {
         eor_capable: bool,
         ingress_register: Arc<ingress::Register>,
         bmp_ingress_id: ingress::IngressId,
-    ) -> bool;
+        tlv_iter: InformationTlvIter,
+    ) -> (bool, Option<IngressId>);
 
     fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState>;
 
@@ -437,6 +445,18 @@ pub trait PeerAware {
         &self,
         pph: &PerPeerHeader<Bytes>,
     ) -> Option<&SessionConfig>;
+
+
+    /// Copy over all we know from one (existing) entry to a new one, for a given ingress_id.
+    ///
+    /// This is used when get_peer_config returns no known config for a RouteMon message and we
+    /// retry with the Peer Flags field set to all zeroes.
+    fn add_cloned_peer_config(
+        &mut self,
+        source_pph: &PerPeerHeader<Bytes>,
+        dst_pph: &PerPeerHeader<Bytes>,
+        ingress_id: IngressId,
+    ) -> bool;
 
     fn get_peer_ingress_id(
         &self,
@@ -505,17 +525,22 @@ where
             .capabilities()
             .any(|cap| cap.typ() == CapabilityType::GracefulRestart);
 
-        if !self.details.add_peer_config(
+        let tlv_iter = msg.information_tlvs();
+
+        let (peer_added, existing_peer_ingress_id) =  self.details.add_peer_config(
             pph,
             config,
             eor_capable,
             self.ingress_register.clone(),
             self.ingress_id,
-        ) {
+            tlv_iter,
+        );
+        if !peer_added {
             // This is unexpected. How can we already have an entry in
             // the map for a peer which is currently up (i.e. we have
             // already seen a PeerUpNotification for the peer but have
             // not seen a PeerDownNotification for the same peer)?
+            debug!("peer is already up! returning from peer_up() in BMP fsm");
             return self.mk_invalid_message_result(
                 format!(
                     "PeerUpNotification received for peer that is already 'up': {}",
@@ -532,7 +557,11 @@ where
         self.status_reporter
             .peer_up(self.router_id.clone(), eor_capable);
 
-        self.mk_other_result()
+        if let Some(existing_peer_ingress_id) = existing_peer_ingress_id {
+            self.mk_routing_update_result(Update::IngressReappeared(existing_peer_ingress_id))
+        } else {
+            self.mk_other_result()
+        }
     }
 
     pub fn peer_down(
@@ -690,17 +719,70 @@ where
 
         let pph = msg.per_peer_header();
 
-        let Some(peer_config) = self.details.get_peer_config(&pph) else {
-            self.status_reporter.peer_unknown(self.router_id.clone());
+        let peer_config = match self.details.get_peer_config(&pph) {
+            Some(peer_config) => peer_config,
+            None => {
+                // No config found means we did not observe a PeerUp with the exact same PPH as
+                // this RouteMonitoring message. There might have been a PeerUp with no flags set,
+                // so we zero out the flags byte and try again.
+                let mut raw = pph.as_ref().to_owned();
+                //raw[1] = 0;
+                //instead of zeroing everything, only zero the rib type and policy flags
+                raw[1] &= 0b1010_1111;
+                let pph_nulled_flags = PerPeerHeader::for_slice(Bytes::from(raw));
 
-            return self.mk_invalid_message_result(
-                format!(
-                    "RouteMonitoring message received for peer that is not 'up': {}",
-                    msg.per_peer_header()
-                ),
-                Some(false),
-                Some(Bytes::copy_from_slice(msg.as_ref())),
-            );
+                if let Some(_nulled_peer_config) = self.details.get_peer_config(&pph_nulled_flags) {
+                    // So there was a PeerUp for a similar PPH as this RouteMon message, though
+                    // without any flags set. We take the info we have for that one, register a new
+                    // ingress in the ingress::Register, and copy all the IngressInfo. Because the
+                    // initial PPH had no flags set, we have to explicitly set the RibType based on
+                    // the flags in the PPH of this RouteMon message.
+
+                    warn!("RouteMonitoring message received for which no PeerUp has been observed, \
+                            but there was a matching PeerUp with all peer flags 0 (Adj-RIB-In Pre-policy)");
+                    let new_ingress_id = self.ingress_register.register();
+                    let existing_ingress_id = self.details.get_peer_ingress_id(&pph_nulled_flags).unwrap();
+                    let mut adapted_ingress_info = self.ingress_register.get(existing_ingress_id).unwrap();
+                    adapted_ingress_info.peer_rib_type = Some((pph.is_post_policy(), pph.rib_type()).into());
+                    warn!("Registered a new ingress_id {} based on PeerUp with ingress_id {}, info {:?}",
+                        new_ingress_id, existing_ingress_id, adapted_ingress_info
+                    );
+                    self.ingress_register.update_info(
+                        new_ingress_id,
+                        adapted_ingress_info
+                    );
+
+                    // We also update the PeerState in the BMP FSM, which is a clone of what we
+                    // have seen before except for the (just generated) ingress_id.
+                    if !self.details.add_cloned_peer_config(&pph_nulled_flags, &pph, new_ingress_id) {
+                        // something went wrong, abort after all
+
+                        return self.mk_invalid_message_result(
+                            format!(
+                                "Could not synthesize PPH/PeerState for RouteMonitoring message lacking PeerUpNotification: {}",
+                                msg.per_peer_header()
+                            ),
+                            Some(false),
+                            Some(Bytes::copy_from_slice(msg.as_ref())),
+                        );
+                    }
+                    // We just successfully added this, so the unwrap is safe
+                    self.details.get_peer_config(&pph).unwrap()
+
+                } else {
+                    warn!("RouteMonitoring message received for which no (null-flagged) PeerUp has been observed.");
+                    self.status_reporter.peer_unknown(self.router_id.clone());
+
+                    return self.mk_invalid_message_result(
+                        format!(
+                            "RouteMonitoring message received for peer that is not 'up': {}",
+                            msg.per_peer_header()
+                        ),
+                        Some(false),
+                        Some(Bytes::copy_from_slice(msg.as_ref())),
+                    );
+                }
+            }
         };
 
         let mut peer_config = peer_config.clone();
@@ -1206,6 +1288,7 @@ impl PeerStates {
     pub fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
+
 }
 
 impl PeerAware for PeerStates {
@@ -1216,21 +1299,55 @@ impl PeerAware for PeerStates {
         eor_capable: bool,
         ingress_register: Arc<ingress::Register>,
         bmp_ingress_id: ingress::IngressId,
-    ) -> bool {
+        mut tlv_iter: InformationTlvIter,
+    ) -> (bool, Option<IngressId>) {
         let mut added = false;
 
-        let query_ingress = ingress::IngressInfo::new()
-            .with_parent(bmp_ingress_id)
+        let mut query_ingress = ingress::IngressInfo::new()
+            .with_ingress_type(ingress::IngressType::BgpViaBmp)
+            .with_parent_ingress(bmp_ingress_id)
             .with_remote_addr(pph.address())
             .with_remote_asn(pph.asn())
-            .with_rib_type(pph.rib_type());
+            .with_rib_type(pph.rib_type())
+            .with_peer_rib_type((pph.is_post_policy(), pph.rib_type()))
+            .with_peer_type(pph.peer_type())
+        ;
+        use routecore::bmp::message::PeerType;
+        match pph.peer_type() {
+            PeerType::GlobalInstance => { /* no Peer Distinguisher to set */ },
+            PeerType::RdInstance |
+            PeerType::LocalInstance |
+            PeerType::LocalRibInstance =>  {
+                query_ingress = query_ingress
+                    .with_distinguisher(TryInto::<[u8; 8]>::try_into(&pph.distinguisher()[..8]).unwrap());
+            },
+            PeerType::Reserved |
+            PeerType::Unassigned(_) |
+            PeerType::Experimental(_) |
+            PeerType::Unimplemented(_) => { 
+                warn!("Reserved/Unassigned Peer Type");
+            },
+        }
+
+        if let Some(vrf_name) = tlv_iter
+            .find(|t| t.typ() == InformationTlvType::VrfTableName) {
+                query_ingress = query_ingress.with_vrf_name(
+                    String::from_utf8_lossy(vrf_name.value())
+                );
+        }
+
         let peer_ingress_id;
+        let existing_peer_ingress_id;
         if let Some((ingress_id, _ingress_info)) =
             ingress_register.find_existing_peer(&query_ingress)
         {
+            //debug!("got existing ingress_id for BGP in BMP peer {}", ingress_id); 
             peer_ingress_id = ingress_id;
+            existing_peer_ingress_id = Some(ingress_id);
         } else {
+            //debug!("no existing ingress_id for BGP in BMP");
             peer_ingress_id = ingress_register.register();
+            existing_peer_ingress_id = None;
             ingress_register.update_info(peer_ingress_id, query_ingress);
         }
 
@@ -1253,7 +1370,7 @@ impl PeerAware for PeerStates {
                 ingress_id: peer_ingress_id,
             }
         });
-        added
+        (added, existing_peer_ingress_id)
     }
 
     fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState> {
@@ -1292,6 +1409,24 @@ impl PeerAware for PeerStates {
     ) -> Option<&SessionConfig> {
         self.0.get(pph).map(|peer_state| &peer_state.session_config)
     }
+
+    fn add_cloned_peer_config(
+        &mut self,
+        source_pph: &PerPeerHeader<Bytes>,
+        dst_pph: &PerPeerHeader<Bytes>,
+        ingress_id: IngressId,
+    ) -> bool {
+        let mut peer_state = self.0.get(source_pph).unwrap().clone();
+        peer_state.ingress_id = ingress_id;
+        if let Some(_existing) = self.0.insert(dst_pph.clone(), peer_state) {
+            warn!("Unexpected existing PeerState while trying to add_cloned_peer_config");
+            false
+        } else {
+            true
+        }
+    }
+
+
 
     //fn remove_peer(&mut self, pph: &PerPeerHeader<Bytes>) -> bool {
     fn remove_peer(

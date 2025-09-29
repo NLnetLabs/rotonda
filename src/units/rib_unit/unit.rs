@@ -12,7 +12,7 @@ use crate::{
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use roto::Verdict;
-use std::{collections::{HashMap, HashSet}, io::prelude::*, sync::{Mutex, RwLock}};
+use std::{collections::{HashMap, HashSet}, io::prelude::*, sync::{Mutex, RwLock, Weak}};
 use rotonda_store::{errors::PrefixStoreError, match_options::{IncludeHistory, MatchOptions, MatchType, QueryResult}, prefix_record::{Record, RecordSet, RouteStatus}, rib::{config::MemoryOnlyConfig, StarCastRib}, stats::UpsertReport};
 use std::io::prelude::*;
 
@@ -43,6 +43,7 @@ pub(crate) type RotoFuncPre = roto::TypedFunc<
     Ctx,
     fn (
         roto::Val<roto_runtime::MutRotondaRoute>,
+        roto::Val<roto_runtime::MutIngressInfoCache>,
     ) ->
     roto::Verdict<(), ()>,
 >;
@@ -291,57 +292,7 @@ impl RibUnitRunner {
     ) -> Result<Self, PrefixStoreError> {
         let unit_name = component.name().clone();
         let gate = Arc::new(gate);
-        let rib = Arc::new(ArcSwap::from_pointee(Rib::new_physical()?));
-        let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> =
-            Default::default();
-        let pending_vrib_query_results = Arc::new(FrimMap::default());
-
-        // Setup metrics
-        let _process_metrics = Arc::new(TokioTaskMetrics::new());
-        component.register_metrics(_process_metrics.clone());
-
-        let metrics = Arc::new(RibUnitMetrics::new(
-            &gate,
-            rib_merge_update_stats.clone(),
-        ));
-        component.register_metrics(metrics.clone());
-
-        // Setup status reporting
-        let status_reporter =
-            Arc::new(RibUnitStatusReporter::new(&unit_name, metrics.clone()));
-
-        // Setup the Roto filter source
-        let filter_name = Arc::new(ArcSwap::from_pointee(filter_name));
-
-        // Setup REST API endpoint. vRIBs listen at the vRIB HTTP prefix + /
-        // n/ where n is the index assigned to the vRIB during configuration
-        // post-processing.
-        let (http_api_path, is_sub_resource) =
-            Self::http_api_path_for_rib_type(&http_api_path, rib_type);
-        let query_limits = Arc::new(ArcSwap::from_pointee(query_limits));
-        let http_processor = PrefixesApi::new(
-            rib.clone(),
-            http_api_path.clone(),
-            query_limits.clone(),
-            rib_type,
-            vrib_upstream,
-            pending_vrib_query_results.clone(),
-            component.ingresses(),
-        );
-        let http_processor = Arc::new(http_processor);
-        if is_sub_resource {
-            component.register_sub_http_resource(
-                http_processor.clone(),
-                &http_api_path,
-            );
-        } else {
-            component.register_http_resource(
-                http_processor.clone(),
-                &http_api_path,
-            );
-        }
-
-        let roto_compiled = component.roto_compiled().clone();
+        let roto_compiled = component.roto_package().clone();
         let roto_function_pre: Option<RotoFuncPre> =
             roto_compiled.clone().and_then(|c| {
                 let mut c = c.lock().unwrap();
@@ -391,8 +342,79 @@ impl RibUnitRunner {
             rtr_cache.clone()
         );
 
+        if let Some(roto_metrics) = component.roto_metrics() {
+            roto_context.set_metrics(roto_metrics.metrics.clone());
+        } else {
+            debug!("no roto_metrics available to set in Ctx in rib-unit");
+        }
+
         if let Some(c) = roto_compiled.clone() {
             roto_context.prepare(&mut c.lock().unwrap());
+        }
+
+        let roto_context = Arc::new(Mutex::new(roto_context));
+        //let rib = Arc::new(ArcSwap::from_pointee(Rib::new_physical(component.ingresses())?));
+        let rib = Arc::new(ArcSwap::from_pointee(Rib::new(
+                    component.ingresses(),
+                    component.roto_package().clone(),
+                    roto_context.clone(),
+                    )?));
+        let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> =
+            Default::default();
+        let pending_vrib_query_results = Arc::new(FrimMap::default());
+
+        // Setup metrics
+        let _process_metrics = Arc::new(TokioTaskMetrics::new());
+        component.register_metrics(_process_metrics.clone());
+
+        let metrics = Arc::new(RibUnitMetrics::new(
+            &gate,
+            rib_merge_update_stats.clone(),
+        ));
+        component.register_metrics(metrics.clone());
+
+        // Setup status reporting
+        let status_reporter =
+            Arc::new(RibUnitStatusReporter::new(&unit_name, metrics.clone()));
+
+        // Setup the Roto filter source
+        let filter_name = Arc::new(ArcSwap::from_pointee(filter_name));
+
+        // Setup REST API endpoint. vRIBs listen at the vRIB HTTP prefix + /
+        // n/ where n is the index assigned to the vRIB during configuration
+        // post-processing.
+        let (http_api_path, is_sub_resource) =
+            Self::http_api_path_for_rib_type(&http_api_path, rib_type);
+        let query_limits = Arc::new(ArcSwap::from_pointee(query_limits));
+        let http_processor = PrefixesApi::new(
+            rib.clone(),
+            http_api_path.clone(),
+            query_limits.clone(),
+            rib_type,
+            vrib_upstream,
+            pending_vrib_query_results.clone(),
+            component.ingresses(),
+        );
+        let http_processor = Arc::new(http_processor);
+        if is_sub_resource {
+            component.register_sub_http_resource(
+                http_processor.clone(),
+                &http_api_path,
+            );
+        } else {
+            component.register_http_resource(
+                http_processor.clone(),
+                &http_api_path,
+            );
+        }
+
+        if let Ok(mut api) = component.http_ng_api_arc().lock() {
+            api.set_rib(rib.load().clone());
+            super::http_ng::register_routes(&mut api);
+
+
+        } else {
+            debug!("could not get lock on HTTP API");
         }
 
         let tracer = component.tracer().clone();
@@ -402,7 +424,7 @@ impl RibUnitRunner {
             roto_function_vrp_update,
             roto_function_vrp_update_post,
             roto_function_post,
-            roto_context: Arc::new(Mutex::new(roto_context)),
+            roto_context: roto_context.clone(),
             gate,
             http_processor,
             query_limits,
@@ -433,7 +455,9 @@ impl RibUnitRunner {
         let gate = gate.into();
         let query_limits =
             Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
-        let rib = Rib::new_physical()?;
+        let ingress_register: Arc<ingress::Register> = Default::default();
+        let ctx = Arc::new(Mutex::new(Ctx::empty()));
+        let rib = Rib::new(ingress_register.clone(), None, ctx.clone())?;
         let status_reporter = RibUnitStatusReporter::default().into();
         let pending_vrib_query_results = Arc::new(FrimMap::default());
         let filter_name =
@@ -450,7 +474,7 @@ impl RibUnitRunner {
             rib_type,
             None,
             pending_vrib_query_results.clone(),
-            Arc::default(), // ingress::Register
+            ingress_register,
         ));
         let tracer = Arc::new(Tracer::new());
 
@@ -472,7 +496,7 @@ impl RibUnitRunner {
             roto_function_post: None,
             roto_function_vrp_update_post: None,
             ingress_register: Arc::new(ingress::Register::new()),
-            roto_context: Arc::new(Mutex::new(Ctx::empty())),
+            roto_context: ctx.clone()
         };
 
         Ok((runner, gate_agent))
@@ -719,6 +743,12 @@ impl RibUnitRunner {
                 ingress_ids
                     .iter()
                     .for_each(|&id| self.signal_withdraw(id, None));
+            }
+            
+            Update::IngressReappeared(ingress_id) => {
+                debug!("Got IngressReappeared for {ingress_id}");
+                self.rib.load().mark_ingress_active(ingress_id);
+                self.rib.load().mark_ingress_active(ingress_id);
             }
 
             Update::Withdraw(ingress_id, maybe_afisafi) => {
@@ -1204,7 +1234,7 @@ impl RibUnitRunner {
             let ingress_id = match &p.context {
                 RouteContext::Fresh(f) => Some(f.provenance().ingress_id),
                 RouteContext::Mrt(m) => Some(m.provenance().ingress_id),
-                _ => None,
+                RouteContext::Reprocess => unreachable!(),
             };
                 
             let osms;
@@ -1214,7 +1244,15 @@ impl RibUnitRunner {
             if let Some(ref roto_function) = self.roto_function_pre {
                 let Payload{ rx_value, context, trace_id, received } = p;
                 let mutrr: roto_runtime::MutRotondaRoute = rx_value.into();
-                match roto_function.call(&mut ctx, roto::Val(mutrr.clone())) {
+                let mutiic = roto_runtime::IngressInfoCache::new_rc(
+                    ingress_id.unwrap(),
+                    self.ingress_register.clone()
+                );
+                match roto_function.call(
+                    &mut ctx,
+                    roto::Val(mutrr.clone()),
+                    roto::Val(mutiic.clone()),
+                ) {
                     roto::Verdict::Accept(_) => {
                         let modified_rr = std::rc::Rc::into_inner(mutrr).unwrap().into_inner();
                         p = Payload {

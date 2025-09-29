@@ -60,6 +60,11 @@ Known issues
   properly distinguished, and will show up as one single connected router but
   with the monitored BGP sessions for both streams.
 
+* The MRT endpoint is not (yet) available new HTTP API.
+
+* The built-in metrics on the `/metrics` endpoint need work and are not to be
+  trusted blindly at this point. 
+
 
 
 Other changes

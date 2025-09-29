@@ -376,6 +376,11 @@ impl RouterHandler {
         } else {
             provenance
         };
+
+        // Ideally, we do an ingress lookup here instead of somewhere deeper in the FSM. The
+        // commented code below is roughly what that should look like, though we will only enable
+        // it after the upcoming release because it will require additional work and testing.
+
         //let query_ingress = if let Some(ref pph) = pph {
         //    let mut tmp = ingress::IngressInfo::new()
         //    .with_ingress_type(ingress::IngressType::BgpViaBmp)

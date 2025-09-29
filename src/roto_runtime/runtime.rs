@@ -22,7 +22,7 @@ use routecore::bgp::types::Otc;
 use routecore::bmp::message::PerPeerHeader;
 use routecore::bmp::message::{Message as BmpMsg, MessageType as BmpMsgType};
 
-use roto::{roto_function, roto_method, roto_static_method, Context, Val};
+use roto::{roto_method, roto_static_method, Context, Val};
 
 use super::lists::{MutNamedAsnLists, MutNamedPrefixLists};
 use super::types::{
@@ -251,16 +251,15 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         "A BGP Large Community (RFC8092)",
     )?;
 
-    #[roto_function(rt)]
-    fn community(raw: u32) -> Val<StandardCommunity> {
-        Val(StandardCommunity::from_u32(raw))
+    #[roto_static_method(rt, StandardCommunity, from)]
+    fn community_from_str(s: Arc<str>) -> Val<StandardCommunity> {
+        Val(StandardCommunity::from_str(&s).unwrap_or(StandardCommunity::from_u32(0)))
     }
 
-    #[roto_static_method(rt, StandardCommunity, new)]
-    fn new(raw: u32) -> Val<StandardCommunity> {
-        Val(StandardCommunity::from_u32(raw))
+    #[roto_static_method(rt, LargeCommunity, from)]
+    fn large_community_from_str(s: Arc<str>) -> Val<LargeCommunity> {
+        Val(LargeCommunity::from_str(&s).unwrap_or(LargeCommunity::from([0u8;12])))
     }
-
 
     // --- Provenance methods
 
@@ -1370,6 +1369,29 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     fn otc(pamap: Val<RcRotondaPaMap>) -> Option<Asn> {
         pamap.path_attributes().get::<Otc>().map(|a| a.0)
     }
+
+    #[roto_method(rt, RcRotondaPaMap, contains_community)]
+    fn pamap_contains_community(pamap: Val<RcRotondaPaMap>, to_match: Val<StandardCommunity>) -> bool {
+        if let Some(pa) = pamap.path_attributes()
+            .get::<StandardCommunitiesList>()
+        {
+            pa.communities().contains(&*to_match)
+        } else {
+            false
+        }
+    }
+
+    #[roto_method(rt, RcRotondaPaMap, contains_large_community)]
+    fn pamap_contains_large_community(pamap: Val<RcRotondaPaMap>, to_match: Val<LargeCommunity>) -> bool {
+        if let Some(pa) = pamap.path_attributes()
+            .get::<LargeCommunitiesList>()
+        {
+            pa.communities().contains(&*to_match)
+        } else {
+            false
+        }
+    }
+
     rt.register_clone_type_with_name::<HopPath>("aspath", "AS_PATH path attribute")?;
     #[roto_method(rt, RcRotondaPaMap)]
     fn aspath(pamap: Val<RcRotondaPaMap>) -> Option<Val<HopPath>> {

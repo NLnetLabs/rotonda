@@ -90,7 +90,7 @@ impl crate::metrics::Source for RotoMetricsWrapper {
         for (name, cnt) in counters {
             let base_name: String = name.splitn(2, '{').next().unwrap().into();
             if !printed_counter_names.contains(&base_name) {
-                target.append_raw(format!("# TYPE {base_name} counter"));
+                target.append_raw(format!("# TYPE roto_user_defined_{base_name} counter"));
                 printed_counter_names.push(base_name);
             }
 

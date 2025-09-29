@@ -1,5 +1,28 @@
 # Changelog
  
+## Unreleased version
+
+Released yyyy-mm-dd.
+
+
+### Breaking changes
+
+
+### New
+
+
+### Bug fixes
+
+
+### Other changes
+
+
+### Known issues
+
+
+### Acknowledgements
+
+ 
 ## 0.5.0 'Mosaïque Public'
 
 Released 2025-09-30.

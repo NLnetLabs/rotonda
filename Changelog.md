@@ -22,6 +22,13 @@ Breaking changes
   message or route. This can be used to get the peer ASN and address for that
   specific session, for example.
 
+* In Roto scripts, the `community(u32)` function to create a new Community has
+  been removed in favor of the more flexible and more readable
+  `Community.from(str)` which takes either Well known community names or
+  the canonical form "AS12345:9999".
+  Similarly, a `LargeCommunity.from(str)` is introduced, which takes the
+  canonical form "AS211321:8888:9999".
+
 New
 
 * For BMP ingresses, the Peer type, Peer distinguisher, and VRF/Table name are

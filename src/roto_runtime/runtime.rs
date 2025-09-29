@@ -174,7 +174,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
 
 
     rt.register_clone_type_with_name::<RcRotondaPaMap>(
-        "Attributes",
+        "PathAttributes",
         "The Path attributes pertaining to a certain Route"
     )?;
 

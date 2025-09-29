@@ -19,7 +19,7 @@ name = "print_rotonda_std_doc"
 path = "doc/bin/print_rotonda_std_doc.rs"
 
 [workspace.package]
-version = "0.4.3-dev"
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.87"
 authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]
@@ -79,7 +79,7 @@ memmap2            = "0.9.4"
 non-empty-vec      = { version = "0.2", features = ["serde"]}
 percent-encoding   = "2.3"
 roto               = { version = "0.7" }
-rotonda-store       = { workspace = true }
+rotonda-store      = { workspace = true }
 serde_with         = "3"
 smallvec           = { version = "1.11", features = ["const_generics", "const_new", "union"] }
 tokio-metrics      = { version = "0.3", default-features = false }
@@ -104,9 +104,9 @@ env_logger         = "0.10"
 prometheus-parse   = "0.2"
 reqwest            = { version = "0.11", default-features = false, features = ["json"] }
 rumqttd            = { version = "0.18.0", default-features = false }
-insta = { version = "1.43.1", features = ["glob"] }
-assert_cmd = "2.0.17"
-glob = "0.3.3"
+insta              = { version = "1.43.1", features = ["glob"] }
+assert_cmd         = "2.0.17"
+glob               = "0.3.3"
 
 [profile.release]
 strip = true

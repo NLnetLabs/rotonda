@@ -65,6 +65,8 @@ Known issues
 * The built-in metrics on the `/metrics` endpoint need work and are not to be
   trusted blindly at this point. 
 
+* Certain error responses from the JSON endpoints are not JSON-formatted yet.
+
 
 
 Other changes

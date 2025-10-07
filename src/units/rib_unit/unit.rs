@@ -215,10 +215,6 @@ impl RibUnit {
         .await
     }
 
-    fn default_http_api_path() -> String {
-        "/prefixes/".to_string()
-    }
-
     fn default_query_limits() -> QueryLimits {
         QueryLimits::default()
     }
@@ -448,22 +444,6 @@ impl RibUnitRunner {
         };
 
         Ok((runner, gate_agent))
-    }
-
-    fn http_api_path_for_rib_type(
-        http_api_path: &str,
-        rib_type: RibType,
-    ) -> (Arc<String>, bool) {
-        let http_api_path = http_api_path.trim_end_matches('/').to_string();
-        let (http_api_path, is_sub_resource) = match rib_type {
-            RibType::Physical | RibType::Virtual => {
-                (Arc::new(format!("{http_api_path}/")), false)
-            }
-            RibType::GeneratedVirtual(index) => {
-                (Arc::new(format!("{http_api_path}/{index}/")), true)
-            }
-        };
-        (http_api_path, is_sub_resource)
     }
 
     #[cfg(test)]

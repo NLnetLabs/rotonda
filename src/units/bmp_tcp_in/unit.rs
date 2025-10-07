@@ -114,10 +114,6 @@ pub struct BmpTcpIn {
     #[serde_as(as = "Arc<DisplayFromStr>")]
     pub listen: Arc<SocketAddr>,
 
-    /// The relative path at which we should listen for HTTP query API requests
-    #[serde(default = "BmpTcpIn::default_http_api_path")]
-    http_api_path: Arc<String>,
-
     #[serde(default = "BmpTcpIn::default_router_id_template")]
     pub router_id_template: String,
 
@@ -189,7 +185,6 @@ impl BmpTcpIn {
         BmpTcpInRunner::new(
             component,
             self.listen,
-            self.http_api_path,
             gate,
             router_states,
             router_info,
@@ -211,10 +206,6 @@ impl BmpTcpIn {
         .await?;
 
         Ok(())
-    }
-
-    fn default_http_api_path() -> Arc<String> {
-        Arc::new("/routers/".to_string())
     }
 
     pub fn default_router_id_template() -> String {
@@ -247,7 +238,6 @@ trait ConfigAcceptor {
 struct BmpTcpInRunner {
     component: Arc<RwLock<Component>>,
     listen: Arc<SocketAddr>,
-    http_api_path: Arc<String>,
     gate: Gate,
     router_states: Arc<
         FrimMap<
@@ -274,7 +264,6 @@ impl BmpTcpInRunner {
     fn new(
         component: Arc<RwLock<Component>>,
         listen: Arc<SocketAddr>,
-        http_api_path: Arc<String>,
         gate: Gate,
         router_states: Arc<
             FrimMap<
@@ -298,7 +287,6 @@ impl BmpTcpInRunner {
         Self {
             component,
             listen,
-            http_api_path,
             gate,
             router_states,
             router_info,
@@ -323,7 +311,6 @@ impl BmpTcpInRunner {
         let runner = Self {
             component: Default::default(),
             listen: Arc::new("127.0.0.1:12345".parse().unwrap()),
-            http_api_path: BmpTcpIn::default_http_api_path(),
             gate,
             router_states: Default::default(),
             router_info: Default::default(),
@@ -524,7 +511,6 @@ impl BmpTcpInRunner {
                             new_config:
                                 Unit::BmpTcpIn(BmpTcpIn {
                                     listen: new_listen,
-                                    http_api_path: _http_api_path,
                                     router_id_template: new_router_id_template,
                                     filter_name: new_filter_name,
                                     tracing_mode: new_tracing_mode,
@@ -742,7 +728,6 @@ mod tests {
         let listen = Arc::new("127.0.0.1:11019".parse().unwrap());
         let new_config = BmpTcpIn {
             listen,
-            http_api_path: Default::default(),
             router_id_template: Default::default(),
             filter_name: Default::default(),
             tracing_mode: Default::default(),
@@ -809,7 +794,6 @@ mod tests {
         let listen = Arc::new("127.0.0.1:11019".parse().unwrap());
         let new_config = BmpTcpIn {
             listen,
-            http_api_path: Default::default(),
             router_id_template: Default::default(),
             filter_name: Default::default(),
             tracing_mode: Default::default(),
@@ -880,7 +864,6 @@ mod tests {
         let listen = Arc::new("127.0.0.1:11019".parse().unwrap());
         let new_config = BmpTcpIn {
             listen,
-            http_api_path: Default::default(),
             router_id_template: Default::default(),
             filter_name: Default::default(),
             tracing_mode: Default::default(),
@@ -1028,7 +1011,6 @@ mod tests {
         let runner = BmpTcpInRunner {
             component: Default::default(),
             listen: Arc::new(listen.parse().unwrap()),
-            http_api_path: Default::default(),
             gate,
             router_states: Default::default(),
             router_info: Default::default(),

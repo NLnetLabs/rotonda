@@ -50,10 +50,8 @@ pin-project-lite   = "0.2"
 rand               = "0.8"
 reqwest            = { version = "0.11", default-features = false }
 routecore          = { workspace = true }
-sanitise-file-name = "1.0"
 serde              = { version = "1.0", features = ["derive", "rc"] }
 serde_json         = { version = "1.0", features = ["preserve_order"] }
-slab               = "0.4"
 tokio              = { version = "1.44.2", features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "test-util", "time", "tracing"] }
 toml               = "0.8"
 url                = { version = "2.4", features = ["serde"] }
@@ -66,7 +64,6 @@ atomic_enum        = "0.2.0"
 flate2             = { version = "1.0", optional = true }
 anyhow             = "1.0"
 bytes              = { version = "1.5.0" }
-const_format       = "0.2"
 hex-slice          = "0.1"
 hash_hasher        = "2.0"
 hashbrown          = "0.14"
@@ -92,7 +89,6 @@ futures-util       = "0.3.31"
 micromap           = "0.0.19"
 paste              = "1.0.15"
 axum               = { version = "0.8.4", features = ["query", "http1", "http2", "tokio"], default-features = false }
-serde_qs           = "0.15.0"
 rshtml             = "0.2.0"
 
 [target.'cfg(unix)'.dependencies]
@@ -104,9 +100,6 @@ env_logger         = "0.10"
 prometheus-parse   = "0.2"
 reqwest            = { version = "0.11", default-features = false, features = ["json"] }
 rumqttd            = { version = "0.18.0", default-features = false }
-insta              = { version = "1.43.1", features = ["glob"] }
-assert_cmd         = "2.0.17"
-glob               = "0.3.3"
 
 [profile.release]
 strip = true

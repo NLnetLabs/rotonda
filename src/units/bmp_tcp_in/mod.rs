@@ -1,4 +1,3 @@
-mod http;
 mod io;
 mod metrics;
 mod router_handler;

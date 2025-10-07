@@ -5,7 +5,6 @@
 //! this module. This struct also provides the facilities to load the config
 //! file referred to in command line options.
 
-use crate::http;
 use crate::log::{LogConfig, Terminate};
 use crate::manager::{Manager, TargetSet, UnitSet};
 use clap::{Arg, ArgMatches, Command};

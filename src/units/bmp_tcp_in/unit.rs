@@ -38,7 +38,6 @@ use crate::{
 };
 
 use super::{
-    http::{RouterInfoApi, RouterListApi},
     state_machine::{BmpState, BmpStateMachineMetrics},
     types::RouterInfo,
 };
@@ -163,28 +162,7 @@ impl BmpTcpIn {
 
         let filter_name = Arc::new(ArcSwap::from_pointee(self.filter_name));
 
-        // Setup REST API endpoint
-        let (_api_processor, router_info) = {
-            let router_info = Arc::new(FrimMap::default());
-
-            let processor = Arc::new(RouterListApi::new(
-                component.http_resources().clone(),
-                self.http_api_path.clone(),
-                router_info.clone(),
-                bmp_in_metrics.clone(),
-                bmp_metrics.clone(),
-                router_id_template.clone(),
-                router_states.clone(),
-                component.ingresses().clone(),
-            ));
-
-            component.register_http_resource(
-                processor.clone(),
-                &self.http_api_path,
-            );
-
-            (processor, router_info)
-        };
+        let router_info = Arc::new(FrimMap::default());
 
         let roto_compiled = component.roto_package().clone();
         let roto_metrics = component.roto_metrics().clone();
@@ -463,13 +441,7 @@ impl BmpTcpInRunner {
                             self.router_connected(router_ingress_id),
                         )));
 
-                        let last_msg_at = {
-                            let weak_ref = Arc::downgrade(&state_machine);
-                            self.setup_router_specific_api_endpoint(
-                                weak_ref, router_ingress_id,
-                            )
-                            .await
-                        };
+                        let last_msg_at = Some(Arc::new(std::sync::RwLock::new(Utc::now())));
 
                         self.router_states
                             .insert(router_ingress_id, state_machine.clone());
@@ -644,62 +616,6 @@ impl BmpTcpInRunner {
             metrics,
             self.ingress_register.clone(),
         )
-    }
-
-    // TODO: Should we tear these individual API endpoints down when the
-    // connection to the monitored router is lost?
-    async fn setup_router_specific_api_endpoint(
-        &self,
-        state_machine: Weak<Mutex<Option<BmpState>>>,
-        ingress_id: IngressId,
-    ) -> Option<Arc<std::sync::RwLock<DateTime<Utc>>>> {
-        match self.router_info.get(&ingress_id) {
-            None => {
-                // This should never happen.
-                self.status_reporter.internal_error(format!(
-                    "Router info for ingress_id {} doesn't exist",
-                    ingress_id,
-                ));
-
-                None
-            }
-
-            Some(mut this_router_info) => {
-                // Setup a REST API endpoint for querying information
-                // about this particular monitored router.
-                let last_msg_at = this_router_info.last_msg_at.clone();
-
-                let processor = RouterInfoApi::new(
-                    self.component.read().await.http_resources().clone(),
-                    self.http_api_path.clone(),
-                    ingress_id,
-                    self.bmp_in_metrics.clone(),
-                    self.bmp_metrics.clone(),
-                    this_router_info.connected_at,
-                    last_msg_at.clone(),
-                    state_machine,
-                    self.ingress_register.clone(),
-                );
-
-                let processor = Arc::new(processor);
-
-                self.component.write().await.register_sub_http_resource(
-                    processor.clone(),
-                    &self.http_api_path,
-                );
-
-                let updatable_router_info =
-                    Arc::make_mut(&mut this_router_info);
-                updatable_router_info.api_processor = Some(processor);
-
-                self.router_info.insert(ingress_id, this_router_info);
-
-                Some(last_msg_at)
-
-                // TODO: unregister the processor if the router disconnects? (maybe after a delay so that we can
-                // still inspect the last known state for the monitored router)
-            }
-        }
     }
 }
 

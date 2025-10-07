@@ -54,7 +54,6 @@ serde              = { version = "1.0", features = ["derive", "rc"] }
 serde_json         = { version = "1.0", features = ["preserve_order"] }
 tokio              = { version = "1.44.2", features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "test-util", "time", "tracing"] }
 toml               = "0.8"
-url                = { version = "2.4", features = ["serde"] }
 
 # Dependencies specifically used by the BGP/BMP related modifications to the original RTRTR base
 allocator-api2     = "0.2"
@@ -67,14 +66,11 @@ bytes              = { version = "1.5.0" }
 hex-slice          = "0.1"
 hash_hasher        = "2.0"
 hashbrown          = "0.14"
-html-escape        = { version = "0.2" }
 inetnum            = { workspace = true }
-indoc              = "2.0"
 layout-rs          = { version = "0.1" }
 mqtt               = { version = "0.23.0", package = "rumqttc", default-features = false }
 memmap2            = "0.9.4"
 non-empty-vec      = { version = "0.2", features = ["serde"]}
-percent-encoding   = "2.3"
 roto               = { version = "0.7" }
 rotonda-store      = { workspace = true }
 serde_with         = "3"

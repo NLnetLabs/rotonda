@@ -48,9 +48,6 @@ pub struct Component {
     /// The component's type name.
     type_name: &'static str,
 
-    /// An HTTP client.
-    http_client: Option<HttpClient>,
-
     /// A reference to the metrics collection.
     metrics: Option<metrics::Collection>,
 
@@ -75,7 +72,6 @@ impl Default for Component {
         Self {
             name: "MOCK".into(),
             type_name: "MOCK",
-            http_client: Default::default(),
             metrics: Default::default(),
             roto_package: Default::default(),
             roto_metrics: Default::default(),
@@ -91,7 +87,6 @@ impl Component {
     fn new(
         name: String,
         type_name: &'static str,
-        http_client: HttpClient,
         metrics: metrics::Collection,
         roto_package: Option<Arc<RotoPackage>>,
         roto_metrics: Option<Arc<RotoMetricsWrapper>>,
@@ -102,7 +97,6 @@ impl Component {
         Component {
             name: name.into(),
             type_name,
-            http_client: Some(http_client),
             metrics: Some(metrics),
             roto_package,
             roto_metrics,
@@ -122,10 +116,6 @@ impl Component {
         self.type_name
     }
 
-    /// Returns a reference to an HTTP Client.
-    pub fn http_client(&self) -> &HttpClient {
-        self.http_client.as_ref().unwrap()
-    }
 
     pub fn roto_package(
         &self,
@@ -567,9 +557,6 @@ pub struct Manager {
     /// Gates for newly loaded, not yet spawned units.
     pending_gates: HashMap<String, (Gate, GateAgent)>,
 
-    /// An HTTP client.
-    http_client: HttpClient,
-
     /// The metrics collection maintained by this manager.
     metrics: metrics::Collection,
 
@@ -621,7 +608,6 @@ impl Manager {
             running_units: Default::default(),
             running_targets: Default::default(),
             pending_gates: Default::default(),
-            http_client: Default::default(),
             metrics: metrics.clone(),
             roto_package: Default::default(),
             roto_metrics,
@@ -1082,7 +1068,6 @@ impl Manager {
             let component = Component::new(
                 name.clone(),
                 new_target.type_name(),
-                self.http_client.clone(),
                 self.metrics.clone(),
                 self.roto_package.clone(),
                 self.roto_metrics.clone(),
@@ -1161,7 +1146,6 @@ impl Manager {
             let component = Component::new(
                 name.clone(),
                 new_unit.type_name(),
-                self.http_client.clone(),
                 self.metrics.clone(),
                 self.roto_package.clone(),
                 self.roto_metrics.clone(),

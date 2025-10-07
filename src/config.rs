@@ -5,7 +5,6 @@
 //! this module. This struct also provides the facilities to load the config
 //! file referred to in command line options.
 
-use crate::http;
 use crate::log::{LogConfig, Terminate};
 use crate::manager::{Manager, TargetSet, UnitSet};
 use clap::{Arg, ArgMatches, Command};
@@ -55,10 +54,6 @@ pub struct Config {
     /// The logging configuration.
     #[serde(flatten)]
     pub log: LogConfig,
-
-    /// The HTTP server configuration.
-    //#[serde(flatten)]
-    //pub http: http::Server,
 
     /// The new HTTP server configuration.
     #[serde(rename = "http_listen")]

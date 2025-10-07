@@ -14,7 +14,7 @@ use crate::log::Terminate;
 use crate::targets::Target;
 use crate::tracing::{MsgRelation, Trace, Tracer};
 use crate::units::Unit;
-use crate::{http, ingress, metrics};
+use crate::{ingress, metrics};
 use arc_swap::ArcSwap;
 use futures::future::{join_all, select, Either};
 use log::{debug, error, info, log_enabled, trace, warn};
@@ -32,7 +32,6 @@ use tokio::sync::Barrier;
 use uuid::Uuid;
 
 use {
-    crate::http::{PercentDecodedPath, ProcessRequest},
     hyper::{Body, Method, Request, Response},
 };
 
@@ -49,14 +48,8 @@ pub struct Component {
     /// The component's type name.
     type_name: &'static str,
 
-    /// An HTTP client.
-    http_client: Option<HttpClient>,
-
     /// A reference to the metrics collection.
     metrics: Option<metrics::Collection>,
-
-    /// A reference to the HTTP resources collection.
-    http_resources: http::Resources,
 
     /// A reference to the compiled Roto script.
     roto_package: Option<Arc<RotoPackage>>,
@@ -79,9 +72,7 @@ impl Default for Component {
         Self {
             name: "MOCK".into(),
             type_name: "MOCK",
-            http_client: Default::default(),
             metrics: Default::default(),
-            http_resources: Default::default(),
             roto_package: Default::default(),
             roto_metrics: Default::default(),
             tracer: Default::default(),
@@ -96,9 +87,7 @@ impl Component {
     fn new(
         name: String,
         type_name: &'static str,
-        http_client: HttpClient,
         metrics: metrics::Collection,
-        http_resources: http::Resources,
         roto_package: Option<Arc<RotoPackage>>,
         roto_metrics: Option<Arc<RotoMetricsWrapper>>,
         tracer: Arc<Tracer>,
@@ -108,9 +97,7 @@ impl Component {
         Component {
             name: name.into(),
             type_name,
-            http_client: Some(http_client),
             metrics: Some(metrics),
-            http_resources,
             roto_package,
             roto_metrics,
             tracer,
@@ -129,14 +116,6 @@ impl Component {
         self.type_name
     }
 
-    /// Returns a reference to an HTTP Client.
-    pub fn http_client(&self) -> &HttpClient {
-        self.http_client.as_ref().unwrap()
-    }
-
-    pub fn http_resources(&self) -> &http::Resources {
-        &self.http_resources
-    }
 
     pub fn roto_package(
         &self,
@@ -157,38 +136,6 @@ impl Component {
         if let Some(metrics) = &self.metrics {
             metrics.register(self.name.clone(), Arc::downgrade(&source));
         }
-    }
-
-    /// Register an HTTP resource.
-    pub fn register_http_resource(
-        &mut self,
-        process: Arc<dyn http::ProcessRequest>,
-        rel_base_url: &str,
-    ) {
-        debug!("registering resource {:?}", &rel_base_url);
-        self.http_resources.register(
-            Arc::downgrade(&process),
-            self.name.clone(),
-            self.type_name,
-            rel_base_url,
-            false,
-        )
-    }
-
-    /// Register a sub HTTP resource.
-    pub fn register_sub_http_resource(
-        &mut self,
-        process: Arc<dyn http::ProcessRequest>,
-        rel_base_url: &str,
-    ) {
-        debug!("registering resource {:?}", &rel_base_url);
-        self.http_resources.register(
-            Arc::downgrade(&process),
-            self.name.clone(),
-            self.type_name,
-            rel_base_url,
-            true,
-        )
     }
 
     pub fn register_ingress(&self) -> ingress::IngressId {
@@ -610,29 +557,19 @@ pub struct Manager {
     /// Gates for newly loaded, not yet spawned units.
     pending_gates: HashMap<String, (Gate, GateAgent)>,
 
-    /// An HTTP client.
-    http_client: HttpClient,
-
     /// The metrics collection maintained by this manager.
     metrics: metrics::Collection,
-
-    /// The HTTP resources collection maintained by this manager.
-    http_resources: http::Resources,
 
     /// A reference to the compiled Roto script.
     roto_package: Option<Arc<RotoPackage>>,
 
     roto_metrics: Option<Arc<RotoMetricsWrapper>>,
 
-    graph_svg_processor: Arc<dyn ProcessRequest>,
-
     graph_svg_data: Arc<ArcSwap<(Instant, LinkReport)>>,
 
     file_io: TheFileIo,
 
     tracer: Arc<Tracer>,
-
-    tracer_processor: Arc<dyn ProcessRequest>,
 
     ingresses: Arc<ingress::Register>,
 
@@ -663,15 +600,6 @@ impl Manager {
             metrics.clone()
         )));
 
-        let (graph_svg_processor, graph_svg_rel_base_url) =
-            Self::mk_svg_http_processor(
-                graph_svg_data.clone(),
-                tracer.clone(),
-            );
-
-        let (tracer_processor, tracer_rel_base_url) =
-            Self::mk_tracer_http_processor(tracer.clone());
-
         #[allow(
             clippy::let_and_return,
             clippy::default_constructed_unit_structs
@@ -680,36 +608,15 @@ impl Manager {
             running_units: Default::default(),
             running_targets: Default::default(),
             pending_gates: Default::default(),
-            http_client: Default::default(),
             metrics: metrics.clone(),
-            http_resources: Default::default(),
             roto_package: Default::default(),
             roto_metrics,
-            graph_svg_processor,
             graph_svg_data,
             file_io: TheFileIo::default(),
             tracer,
-            tracer_processor,
             ingresses,
             http_ng_api,
         };
-
-        // Register the /status/graph endpoint.
-        manager.http_resources.register(
-            Arc::downgrade(&manager.graph_svg_processor),
-            "status_graph".into(),
-            "status_graph",
-            graph_svg_rel_base_url,
-            true,
-        );
-
-        manager.http_resources.register(
-            Arc::downgrade(&manager.tracer_processor),
-            "tracer".into(),
-            "tracer",
-            tracer_rel_base_url,
-            true,
-        );
 
         manager
     }
@@ -1161,9 +1068,7 @@ impl Manager {
             let component = Component::new(
                 name.clone(),
                 new_target.type_name(),
-                self.http_client.clone(),
                 self.metrics.clone(),
-                self.http_resources.clone(),
                 self.roto_package.clone(),
                 self.roto_metrics.clone(),
                 self.tracer.clone(),
@@ -1241,9 +1146,7 @@ impl Manager {
             let component = Component::new(
                 name.clone(),
                 new_unit.type_name(),
-                self.http_client.clone(),
                 self.metrics.clone(),
-                self.http_resources.clone(),
                 self.roto_package.clone(),
                 self.roto_metrics.clone(),
                 self.tracer.clone(),
@@ -1488,11 +1391,6 @@ impl Manager {
         self.metrics.clone()
     }
 
-    /// Returns a new reference the the HTTP resources collection.
-    pub fn http_resources(&self) -> http::Resources {
-        self.http_resources.clone()
-    }
-
     /// Returns a reference to the shared HTTP API
     pub fn http_ng_api_arc(&mut self) -> Arc<Mutex<http_ng::Api>> {
         self.http_ng_api.clone()
@@ -1513,121 +1411,6 @@ impl Manager {
         }
     }
 
-    // Create a HTTP processor that renders the SVG unit/target configuration graph.
-    fn mk_svg_http_processor(
-        graph_svg_data: Arc<arc_swap::ArcSwapAny<Arc<(Instant, LinkReport)>>>,
-        tracer: Arc<Tracer>,
-    ) -> (Arc<dyn ProcessRequest>, &'static str) {
-        const REL_BASE_URL: &str = "/status/graph";
-
-        let processor = Arc::new(move |request: &Request<_>| {
-            let req_path = request.uri().decoded_path();
-            if request.method() == Method::GET
-                && req_path.starts_with(REL_BASE_URL)
-            {
-                let (_base_path, restant) =
-                    req_path.split_at(REL_BASE_URL.len());
-                let trace_id = if restant.contains("/traces/") {
-                    restant.split_at("/traces/".len()).1.parse::<u8>().ok()
-                } else {
-                    None
-                };
-                let svg =
-                    graph_svg_data.load().1.get_svg(tracer.clone(), trace_id);
-                let traces = if let Some(trace_id) = trace_id {
-                    let trace = tracer.get_trace(trace_id);
-
-                    let mut traces_html = format!(
-                        r###"
-                        <p>Showing pipeline route and processing details of trace {trace_id}:</p>
-                        <table>
-                          <tr>
-                            <th>#</th>
-                            <th>When</th>
-                            <th>What</th>
-                          </tr>
-                    "###
-                    );
-
-                    for (idx, msg) in trace.msgs().iter().enumerate() {
-                        traces_html.push_str(&format!(
-                            r###"
-                        <tr>
-                          <td>{idx}</td>
-                          <td>{}</td>
-                          <td><pre>{}</pre></td>
-                        </tr>
-                        "###,
-                            msg.timestamp, msg.msg
-                        ));
-                    }
-                    traces_html.push_str("</table>\n");
-                    traces_html
-                } else {
-                    String::new()
-                };
-                let html = format!(
-                    r###"
-                    <html lang="en">
-                    <head>
-                    <meta charset="UTF-8">
-                    <style>
-                        table {{
-                        border-collapse: collapse;
-                        }}
-                        th, td {{
-                        border: 1px solid black;
-                        padding: 2px 20px 2px 20px;
-                        }}
-                    </style>
-                    </head>
-                    <body>
-                      <svg xmlns="http://www.w3.org/2000/svg" style="width: 100%; height: 300px;">
-                         {svg}
-                      </svg>
-                      {traces}
-                    </body>
-                    </html>
-                "###
-                );
-                let body = Body::from(html);
-                let response = Response::builder()
-                    .status(hyper::StatusCode::OK)
-                    .header("Content-Type", "text/html")
-                    .body(body)
-                    .unwrap();
-
-                Some(response)
-            } else {
-                None
-            }
-        });
-
-        (processor, REL_BASE_URL)
-    }
-
-    fn mk_tracer_http_processor(
-        tracer: Arc<Tracer>,
-    ) -> (Arc<dyn ProcessRequest>, &'static str) {
-        const REL_BASE_URL: &str = "/status/traces";
-
-        let processor = Arc::new(move |request: &Request<_>| {
-            let req_path = request.uri().decoded_path();
-            if request.method() == Method::GET && req_path == REL_BASE_URL {
-                let response = Response::builder()
-                    .status(hyper::StatusCode::OK)
-                    .header("Content-Type", "text/plain")
-                    .body(Body::from(format!("{tracer:#?}")))
-                    .unwrap();
-
-                Some(response)
-            } else {
-                None
-            }
-        });
-
-        (processor, REL_BASE_URL)
-    }
 }
 
 //------------ Checkpoint ----------------------------------------------------

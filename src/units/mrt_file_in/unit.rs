@@ -36,8 +36,6 @@ use crate::manager::{Component, WaitPoint};
 use crate::payload::{Payload, RotondaPaMap, RotondaRoute, Update};
 use crate::units::{Gate, Unit};
 
-use super::api;
-
 #[derive(Clone, Debug, Deserialize)]
 pub struct MrtFileIn {
     pub filename: OneOrManyPaths,
@@ -119,20 +117,6 @@ impl MrtFileIn {
         for f in self.filename.iter() {
             let _ = queue_tx.send((f, None)).await;
         }
-
-        let endpoint_path = Arc::new(format!("/mrt/{}/", component.name()));
-        let api_processor = Arc::new(
-            api::Processor::new(
-                endpoint_path.clone(),
-                self.update_path.clone().map(Into::into),
-                queue_tx.clone(),
-                )
-            );
-
-        component.register_http_resource(
-            api_processor.clone(),
-            &endpoint_path,
-        );
 
         MrtInRunner::new(self, gate, ingresses, parent_id, queue_tx).run(queue_rx).await
     }

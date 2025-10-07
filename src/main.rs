@@ -184,10 +184,6 @@ fn run_with_config(
     // default runtime.
     let _guard = runtime.enter();
 
-    //config
-    //    .http
-    //    .run(manager.metrics(), manager.http_resources())?;
-
     manager.http_ng_api_arc().lock().unwrap().set_interfaces(config.http_ng_listen.clone().into_iter().flatten());
     manager.spawn(&mut config);
     manager.http_ng_api_arc().lock().unwrap().start();

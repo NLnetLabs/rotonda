@@ -38,7 +38,6 @@ use crate::{
 };
 
 use super::{
-    http::{RouterInfoApi, RouterListApi},
     state_machine::{BmpState, BmpStateMachineMetrics},
     types::RouterInfo,
 };
@@ -115,10 +114,6 @@ pub struct BmpTcpIn {
     #[serde_as(as = "Arc<DisplayFromStr>")]
     pub listen: Arc<SocketAddr>,
 
-    /// The relative path at which we should listen for HTTP query API requests
-    #[serde(default = "BmpTcpIn::default_http_api_path")]
-    http_api_path: Arc<String>,
-
     #[serde(default = "BmpTcpIn::default_router_id_template")]
     pub router_id_template: String,
 
@@ -163,28 +158,7 @@ impl BmpTcpIn {
 
         let filter_name = Arc::new(ArcSwap::from_pointee(self.filter_name));
 
-        // Setup REST API endpoint
-        let (_api_processor, router_info) = {
-            let router_info = Arc::new(FrimMap::default());
-
-            let processor = Arc::new(RouterListApi::new(
-                component.http_resources().clone(),
-                self.http_api_path.clone(),
-                router_info.clone(),
-                bmp_in_metrics.clone(),
-                bmp_metrics.clone(),
-                router_id_template.clone(),
-                router_states.clone(),
-                component.ingresses().clone(),
-            ));
-
-            component.register_http_resource(
-                processor.clone(),
-                &self.http_api_path,
-            );
-
-            (processor, router_info)
-        };
+        let router_info = Arc::new(FrimMap::default());
 
         let roto_compiled = component.roto_package().clone();
         let roto_metrics = component.roto_metrics().clone();
@@ -211,7 +185,6 @@ impl BmpTcpIn {
         BmpTcpInRunner::new(
             component,
             self.listen,
-            self.http_api_path,
             gate,
             router_states,
             router_info,
@@ -233,10 +206,6 @@ impl BmpTcpIn {
         .await?;
 
         Ok(())
-    }
-
-    fn default_http_api_path() -> Arc<String> {
-        Arc::new("/routers/".to_string())
     }
 
     pub fn default_router_id_template() -> String {
@@ -269,7 +238,6 @@ trait ConfigAcceptor {
 struct BmpTcpInRunner {
     component: Arc<RwLock<Component>>,
     listen: Arc<SocketAddr>,
-    http_api_path: Arc<String>,
     gate: Gate,
     router_states: Arc<
         FrimMap<
@@ -296,7 +264,6 @@ impl BmpTcpInRunner {
     fn new(
         component: Arc<RwLock<Component>>,
         listen: Arc<SocketAddr>,
-        http_api_path: Arc<String>,
         gate: Gate,
         router_states: Arc<
             FrimMap<
@@ -320,7 +287,6 @@ impl BmpTcpInRunner {
         Self {
             component,
             listen,
-            http_api_path,
             gate,
             router_states,
             router_info,
@@ -345,7 +311,6 @@ impl BmpTcpInRunner {
         let runner = Self {
             component: Default::default(),
             listen: Arc::new("127.0.0.1:12345".parse().unwrap()),
-            http_api_path: BmpTcpIn::default_http_api_path(),
             gate,
             router_states: Default::default(),
             router_info: Default::default(),
@@ -463,13 +428,7 @@ impl BmpTcpInRunner {
                             self.router_connected(router_ingress_id),
                         )));
 
-                        let last_msg_at = {
-                            let weak_ref = Arc::downgrade(&state_machine);
-                            self.setup_router_specific_api_endpoint(
-                                weak_ref, router_ingress_id,
-                            )
-                            .await
-                        };
+                        let last_msg_at = Some(Arc::new(std::sync::RwLock::new(Utc::now())));
 
                         self.router_states
                             .insert(router_ingress_id, state_machine.clone());
@@ -552,7 +511,6 @@ impl BmpTcpInRunner {
                             new_config:
                                 Unit::BmpTcpIn(BmpTcpIn {
                                     listen: new_listen,
-                                    http_api_path: _http_api_path,
                                     router_id_template: new_router_id_template,
                                     filter_name: new_filter_name,
                                     tracing_mode: new_tracing_mode,
@@ -644,62 +602,6 @@ impl BmpTcpInRunner {
             metrics,
             self.ingress_register.clone(),
         )
-    }
-
-    // TODO: Should we tear these individual API endpoints down when the
-    // connection to the monitored router is lost?
-    async fn setup_router_specific_api_endpoint(
-        &self,
-        state_machine: Weak<Mutex<Option<BmpState>>>,
-        ingress_id: IngressId,
-    ) -> Option<Arc<std::sync::RwLock<DateTime<Utc>>>> {
-        match self.router_info.get(&ingress_id) {
-            None => {
-                // This should never happen.
-                self.status_reporter.internal_error(format!(
-                    "Router info for ingress_id {} doesn't exist",
-                    ingress_id,
-                ));
-
-                None
-            }
-
-            Some(mut this_router_info) => {
-                // Setup a REST API endpoint for querying information
-                // about this particular monitored router.
-                let last_msg_at = this_router_info.last_msg_at.clone();
-
-                let processor = RouterInfoApi::new(
-                    self.component.read().await.http_resources().clone(),
-                    self.http_api_path.clone(),
-                    ingress_id,
-                    self.bmp_in_metrics.clone(),
-                    self.bmp_metrics.clone(),
-                    this_router_info.connected_at,
-                    last_msg_at.clone(),
-                    state_machine,
-                    self.ingress_register.clone(),
-                );
-
-                let processor = Arc::new(processor);
-
-                self.component.write().await.register_sub_http_resource(
-                    processor.clone(),
-                    &self.http_api_path,
-                );
-
-                let updatable_router_info =
-                    Arc::make_mut(&mut this_router_info);
-                updatable_router_info.api_processor = Some(processor);
-
-                self.router_info.insert(ingress_id, this_router_info);
-
-                Some(last_msg_at)
-
-                // TODO: unregister the processor if the router disconnects? (maybe after a delay so that we can
-                // still inspect the last known state for the monitored router)
-            }
-        }
     }
 }
 
@@ -826,7 +728,6 @@ mod tests {
         let listen = Arc::new("127.0.0.1:11019".parse().unwrap());
         let new_config = BmpTcpIn {
             listen,
-            http_api_path: Default::default(),
             router_id_template: Default::default(),
             filter_name: Default::default(),
             tracing_mode: Default::default(),
@@ -893,7 +794,6 @@ mod tests {
         let listen = Arc::new("127.0.0.1:11019".parse().unwrap());
         let new_config = BmpTcpIn {
             listen,
-            http_api_path: Default::default(),
             router_id_template: Default::default(),
             filter_name: Default::default(),
             tracing_mode: Default::default(),
@@ -964,7 +864,6 @@ mod tests {
         let listen = Arc::new("127.0.0.1:11019".parse().unwrap());
         let new_config = BmpTcpIn {
             listen,
-            http_api_path: Default::default(),
             router_id_template: Default::default(),
             filter_name: Default::default(),
             tracing_mode: Default::default(),
@@ -1112,7 +1011,6 @@ mod tests {
         let runner = BmpTcpInRunner {
             component: Default::default(),
             listen: Arc::new(listen.parse().unwrap()),
-            http_api_path: Default::default(),
             gate,
             router_states: Default::default(),
             router_info: Default::default(),

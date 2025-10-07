@@ -32,7 +32,7 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use super::{
-    http::PrefixesApi, metrics::RibUnitMetrics, rib::{Rib, RouteExtra, StoreInsertionEffect}, rpki::{RovStatus, RovStatusUpdate, RtrCache}, status_reporter::RibUnitStatusReporter
+    metrics::RibUnitMetrics, rib::{Rib, RouteExtra, StoreInsertionEffect}, rpki::{RovStatus, RovStatusUpdate, RtrCache}, status_reporter::RibUnitStatusReporter
 };
 use super::{
     rib::StoreInsertionReport, statistics::RibMergeUpdateStatistics,
@@ -176,11 +176,6 @@ pub struct RibUnit {
     /// The set of units to receive updates from.
     pub sources: NonEmpty<DirectLink>,
 
-    /// The relative path at which we should listen for HTTP query API
-    /// requests
-    #[serde(default = "RibUnit::default_http_api_path")]
-    pub http_api_path: String,
-
     #[serde(default = "RibUnit::default_query_limits")]
     pub query_limits: QueryLimits,
 
@@ -211,8 +206,6 @@ impl RibUnit {
         RibUnitRunner::new(
             gate,
             component,
-            self.http_api_path,
-            self.query_limits,
             self.filter_name.unwrap_or_default(),
             self.rib_type,
             self.vrib_upstream,
@@ -220,10 +213,6 @@ impl RibUnit {
         .map_err(|_| Terminated)?
         .run(self.sources, waitpoint)
         .await
-    }
-
-    fn default_http_api_path() -> String {
-        "/prefixes/".to_string()
     }
 
     fn default_query_limits() -> QueryLimits {
@@ -242,8 +231,6 @@ pub struct RibUnitRunner {
     #[allow(dead_code)]
     // A strong ref needs to be held to http_processor but not used otherwise
     // the HTTP resource manager will discard its registration
-    http_processor: Arc<PrefixesApi>,
-    query_limits: Arc<ArcSwap<QueryLimits>>,
     rib: Arc<ArcSwap<Rib>>, // XXX LH: why the ArcSwap here?
     rib_type: RibType,
     ingress_register: Arc<ingress::Register>,
@@ -284,8 +271,6 @@ impl RibUnitRunner {
     fn new(
         gate: Gate,
         mut component: Component,
-        http_api_path: String,
-        query_limits: QueryLimits,
         filter_name: FilterName,
         rib_type: RibType,
         vrib_upstream: Option<Link>,
@@ -380,34 +365,6 @@ impl RibUnitRunner {
         // Setup the Roto filter source
         let filter_name = Arc::new(ArcSwap::from_pointee(filter_name));
 
-        // Setup REST API endpoint. vRIBs listen at the vRIB HTTP prefix + /
-        // n/ where n is the index assigned to the vRIB during configuration
-        // post-processing.
-        let (http_api_path, is_sub_resource) =
-            Self::http_api_path_for_rib_type(&http_api_path, rib_type);
-        let query_limits = Arc::new(ArcSwap::from_pointee(query_limits));
-        let http_processor = PrefixesApi::new(
-            rib.clone(),
-            http_api_path.clone(),
-            query_limits.clone(),
-            rib_type,
-            vrib_upstream,
-            pending_vrib_query_results.clone(),
-            component.ingresses(),
-        );
-        let http_processor = Arc::new(http_processor);
-        if is_sub_resource {
-            component.register_sub_http_resource(
-                http_processor.clone(),
-                &http_api_path,
-            );
-        } else {
-            component.register_http_resource(
-                http_processor.clone(),
-                &http_api_path,
-            );
-        }
-
         if let Ok(mut api) = component.http_ng_api_arc().lock() {
             api.set_rib(rib.load().clone());
             super::http_ng::register_routes(&mut api);
@@ -426,8 +383,6 @@ impl RibUnitRunner {
             roto_function_post,
             roto_context: roto_context.clone(),
             gate,
-            http_processor,
-            query_limits,
             rib,
             rib_type,
             rtr_cache,
@@ -467,21 +422,10 @@ impl RibUnitRunner {
             Default::default();
 
         let shared_rib = Arc::new(ArcSwap::new(Arc::new(rib)));
-        let http_processor = Arc::new(PrefixesApi::new(
-            shared_rib.clone(),
-            Arc::new("dummy".to_string()),
-            query_limits.clone(),
-            rib_type,
-            None,
-            pending_vrib_query_results.clone(),
-            ingress_register,
-        ));
         let tracer = Arc::new(Tracer::new());
 
         let runner = Self {
             gate,
-            http_processor,
-            query_limits,
             rib: shared_rib,
             rib_type,
             status_reporter,
@@ -500,22 +444,6 @@ impl RibUnitRunner {
         };
 
         Ok((runner, gate_agent))
-    }
-
-    fn http_api_path_for_rib_type(
-        http_api_path: &str,
-        rib_type: RibType,
-    ) -> (Arc<String>, bool) {
-        let http_api_path = http_api_path.trim_end_matches('/').to_string();
-        let (http_api_path, is_sub_resource) = match rib_type {
-            RibType::Physical | RibType::Virtual => {
-                (Arc::new(format!("{http_api_path}/")), false)
-            }
-            RibType::GeneratedVirtual(index) => {
-                (Arc::new(format!("{http_api_path}/{index}/")), true)
-            }
-        };
-        (http_api_path, is_sub_resource)
     }
 
     #[cfg(test)]
@@ -578,7 +506,6 @@ impl RibUnitRunner {
                                     sources: new_sources,
                                     query_limits: new_query_limits,
                                     filter_name: new_filter_name,
-                                    http_api_path: new_http_api_path,
                                     //rib_keys: new_rib_keys,
                                     rib_type: new_rib_type,
                                     vrib_upstream: new_vrib_upstream,
@@ -586,32 +513,12 @@ impl RibUnitRunner {
                         } => {
                             arc_self.status_reporter.reconfigured();
 
-                            let old_http_api_path =
-                                arc_self.http_processor.http_api_path();
-                            let (new_http_api_path, _is_sub_resource) =
-                                Self::http_api_path_for_rib_type(
-                                    &new_http_api_path,
-                                    new_rib_type,
-                                );
-                            if new_http_api_path.as_str() != old_http_api_path
-                            {
-                                warn!(
-                                    "Ignoring changed http_api_path: {} -> {}",
-                                    old_http_api_path, new_http_api_path
-                                );
-                            }
-
                             if new_rib_type != arc_self.rib_type {
                                 warn!(
                                     "Ignoring changed rib_type: {:?} -> {:?}",
                                     arc_self.rib_type, new_rib_type
                                 );
                             }
-
-                            // Replace the vRIB upstream link with the new one
-                            arc_self
-                                .http_processor
-                                .set_vrib_upstream(new_vrib_upstream);
 
                             // Replace the roto script with the new one
                             let old_filter_name =
@@ -648,10 +555,6 @@ impl RibUnitRunner {
                                     }
                                 }
                             }
-
-                            arc_self
-                                .query_limits
-                                .store(Arc::new(new_query_limits));
 
                             // Register as a direct update receiver with the new
                             // set of linked gates.

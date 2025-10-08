@@ -33,7 +33,7 @@ impl Default for FilterName {
 
 // XXX LH: not a fan of calling load_filter_name from here, quite a surprising
 // side effect of deserializing a config parameter.
-impl<'a, 'de: 'a> Deserialize<'de> for FilterName {
+impl<'de> Deserialize<'de> for FilterName {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
@@ -51,7 +51,7 @@ impl<'a, 'de: 'a> Deserialize<'de> for FilterName {
 
 impl From<String> for FilterName {
     fn from(value: String) -> Self {
-        Self { 0: value }
+        Self(value)
     }
 }
 
@@ -710,7 +710,7 @@ impl<O> TryFrom<(Nlri<O>, RotondaPaMap)> for RotondaRoute {
             | Nlri::L2VpnEvpnAddpath(..) => {
                 debug!(
                     "AFI/SAFI {} not yet supported in RotondaRoute",
-                    value.0.to_string()
+                    value.0
                 );
                 return Err(());
             }

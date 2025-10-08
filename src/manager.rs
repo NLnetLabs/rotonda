@@ -12,7 +12,7 @@ use crate::comms::{
 use crate::config::{Config, ConfigFile, Marked};
 use crate::log::Terminate;
 use crate::targets::Target;
-use crate::tracing::{MsgRelation, Trace, Tracer};
+use crate::tracing::Tracer;
 use crate::units::Unit;
 use crate::{ingress, metrics};
 use arc_swap::ArcSwap;
@@ -77,6 +77,7 @@ impl Default for Component {
     }
 }
 
+#[allow(clippy::too_many_arguments)] // FIXME
 impl Component {
     /// Creates a new component from its, well, components.
     fn new(
@@ -217,76 +218,11 @@ impl LinkReport {
         }
     }
 
+    #[allow(dead_code)]
     fn get_gate_id(&self, name: &str) -> Option<Uuid> {
         self.gates.get(name).copied()
     }
 
-}
-
-fn extract_msg_indices(trace: &Trace, gate_id: Uuid) -> String {
-    let (mut msg_indices, first, last) =
-        trace.msg_indices(gate_id, MsgRelation::ALL).iter().fold(
-            (String::new(), None::<usize>, None::<usize>),
-            |(mut out, mut first, mut last), idx| {
-                match (first, last) {
-                    (None, None) => {
-                        first = Some(*idx);
-                    }
-                    (None, Some(_l)) => unreachable!(),
-                    (Some(f), None) => {
-                        match *idx {
-                            idx if idx == f + 1 => {
-                                last = Some(idx);
-                            }
-                            idx if idx > f + 1 => {
-                                if !out.is_empty() {
-                                    out.push_str(", ");
-                                }
-                                out.push_str(&format!("{}", f));
-                                first = Some(idx);
-                            }
-                            _ => unreachable!(),
-                        };
-                    }
-                    (Some(f), Some(l)) => {
-                        match *idx {
-                            idx if idx == l + 1 => {
-                                last = Some(idx);
-                            }
-                            idx if idx > l + 1 => {
-                                if !out.is_empty() {
-                                    out.push_str(", ");
-                                }
-                                out.push_str(&format!("{}-{}", f, l));
-                                first = Some(idx);
-                                last = None;
-                            }
-                            _ => {}
-                        };
-                    }
-                }
-                (out, first, last)
-            },
-        );
-
-    match (first, last) {
-        (None, None) => {}
-        (None, Some(_l)) => unreachable!(),
-        (Some(f), None) => {
-            if !msg_indices.is_empty() {
-                msg_indices.push_str(", ");
-            }
-            msg_indices.push_str(&format!("{}", f));
-        }
-        (Some(f), Some(l)) => {
-            if !msg_indices.is_empty() {
-                msg_indices.push_str(", ");
-            }
-            msg_indices.push_str(&format!("{}-{}", f, l));
-        }
-    }
-
-    format!("[{msg_indices}]")
 }
 
 #[derive(Clone, Default)]
@@ -415,6 +351,7 @@ pub struct Manager {
 
     graph_svg_data: Arc<ArcSwap<(Instant, LinkReport)>>,
 
+    #[allow(dead_code)]
     file_io: TheFileIo,
 
     tracer: Arc<Tracer>,
@@ -2089,206 +2026,205 @@ mod tests {
     //         join_handle.await.unwrap();
     //     }
 
-    use uuid::Uuid;
+    //use uuid::Uuid;
 
-    use crate::{
-        manager::extract_msg_indices,
-        tracing::{MsgRelation, Trace},
-    };
+    //use crate::{
+    //    tracing::{MsgRelation, Trace},
+    //};
 
-    #[test]
-    fn test_empty_extract_msg_indices() {
-        let empty_trace = Trace::new();
-        let gate_id = Uuid::new_v4();
-        let trace_txt = extract_msg_indices(&empty_trace, gate_id);
-        assert_eq!("[]", trace_txt);
-    }
+    //#[test]
+    //fn test_empty_extract_msg_indices() {
+    //    let empty_trace = Trace::new();
+    //    let gate_id = Uuid::new_v4();
+    //    let trace_txt = extract_msg_indices(&empty_trace, gate_id);
+    //    assert_eq!("[]", trace_txt);
+    //}
 
-    #[test]
-    fn test_single_extract_msg_indices() {
-        let mut empty_trace = Trace::new();
-        let gate_id = Uuid::new_v4();
-        empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::GATE);
-        let trace_txt = extract_msg_indices(&empty_trace, gate_id);
-        assert_eq!("[0]", trace_txt);
-    }
+    //#[test]
+    //fn test_single_extract_msg_indices() {
+    //    let mut empty_trace = Trace::new();
+    //    let gate_id = Uuid::new_v4();
+    //    empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::GATE);
+    //    let trace_txt = extract_msg_indices(&empty_trace, gate_id);
+    //    assert_eq!("[0]", trace_txt);
+    //}
 
-    #[test]
-    fn test_long_range_extract_msg_indices() {
-        let mut empty_trace = Trace::new();
-        let gate_id = Uuid::new_v4();
-        empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::GATE);
-        empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::GATE);
-        empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::GATE);
-        let trace_txt = extract_msg_indices(&empty_trace, gate_id);
-        assert_eq!("[0-2]", trace_txt);
-    }
+    //#[test]
+    //fn test_long_range_extract_msg_indices() {
+    //    let mut empty_trace = Trace::new();
+    //    let gate_id = Uuid::new_v4();
+    //    empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::GATE);
+    //    empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::GATE);
+    //    empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::GATE);
+    //    let trace_txt = extract_msg_indices(&empty_trace, gate_id);
+    //    assert_eq!("[0-2]", trace_txt);
+    //}
 
-    #[test]
-    fn test_single_range_extract_msg_indices() {
-        let mut empty_trace = Trace::new();
-        let gate_id = Uuid::new_v4();
-        empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::GATE);
-        empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::GATE);
-        let trace_txt = extract_msg_indices(&empty_trace, gate_id);
-        assert_eq!("[0-1]", trace_txt);
-    }
+    //#[test]
+    //fn test_single_range_extract_msg_indices() {
+    //    let mut empty_trace = Trace::new();
+    //    let gate_id = Uuid::new_v4();
+    //    empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::GATE);
+    //    empty_trace.append_msg(gate_id, "blah".to_owned(), MsgRelation::GATE);
+    //    let trace_txt = extract_msg_indices(&empty_trace, gate_id);
+    //    assert_eq!("[0-1]", trace_txt);
+    //}
 
-    #[test]
-    fn test_single_then_range_extract_msg_indices() {
-        let mut empty_trace = Trace::new();
-        let gate_id1 = Uuid::new_v4();
-        let gate_id2 = Uuid::new_v4();
-        empty_trace.append_msg(
-            gate_id2,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id1,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id2,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id2,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        let trace_txt = extract_msg_indices(&empty_trace, gate_id2);
-        assert_eq!("[0, 2-3]", trace_txt);
-    }
+    //#[test]
+    //fn test_single_then_range_extract_msg_indices() {
+    //    let mut empty_trace = Trace::new();
+    //    let gate_id1 = Uuid::new_v4();
+    //    let gate_id2 = Uuid::new_v4();
+    //    empty_trace.append_msg(
+    //        gate_id2,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id1,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id2,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id2,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    let trace_txt = extract_msg_indices(&empty_trace, gate_id2);
+    //    assert_eq!("[0, 2-3]", trace_txt);
+    //}
 
-    #[test]
-    fn test_single_range_single_extract_msg_indices() {
-        let mut empty_trace = Trace::new();
-        let gate_id1 = Uuid::new_v4();
-        let gate_id2 = Uuid::new_v4();
-        empty_trace.append_msg(
-            gate_id2,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id1,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id2,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id2,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id1,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id2,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        let trace_txt = extract_msg_indices(&empty_trace, gate_id2);
-        assert_eq!("[0, 2-3, 5]", trace_txt);
-    }
+    //#[test]
+    //fn test_single_range_single_extract_msg_indices() {
+    //    let mut empty_trace = Trace::new();
+    //    let gate_id1 = Uuid::new_v4();
+    //    let gate_id2 = Uuid::new_v4();
+    //    empty_trace.append_msg(
+    //        gate_id2,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id1,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id2,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id2,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id1,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id2,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    let trace_txt = extract_msg_indices(&empty_trace, gate_id2);
+    //    assert_eq!("[0, 2-3, 5]", trace_txt);
+    //}
 
-    #[test]
-    fn test_single_range_single_long_range_extract_msg_indices() {
-        let mut empty_trace = Trace::new();
-        let gate_id1 = Uuid::new_v4();
-        let gate_id2 = Uuid::new_v4();
-        empty_trace.append_msg(
-            gate_id2,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id1,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id2,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id2,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id1,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id2,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id1,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id2,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id2,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id2,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        let trace_txt = extract_msg_indices(&empty_trace, gate_id2);
-        assert_eq!("[0, 2-3, 5, 7-9]", trace_txt);
-    }
+    //#[test]
+    //fn test_single_range_single_long_range_extract_msg_indices() {
+    //    let mut empty_trace = Trace::new();
+    //    let gate_id1 = Uuid::new_v4();
+    //    let gate_id2 = Uuid::new_v4();
+    //    empty_trace.append_msg(
+    //        gate_id2,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id1,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id2,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id2,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id1,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id2,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id1,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id2,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id2,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id2,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    let trace_txt = extract_msg_indices(&empty_trace, gate_id2);
+    //    assert_eq!("[0, 2-3, 5, 7-9]", trace_txt);
+    //}
 
-    #[test]
-    fn test_range_then_single_extract_msg_indices() {
-        let mut empty_trace = Trace::new();
-        let gate_id1 = Uuid::new_v4();
-        let gate_id2 = Uuid::new_v4();
-        empty_trace.append_msg(
-            gate_id2,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id2,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id1,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        empty_trace.append_msg(
-            gate_id2,
-            "blah".to_owned(),
-            MsgRelation::GATE,
-        );
-        let trace_txt = extract_msg_indices(&empty_trace, gate_id2);
-        assert_eq!("[0-1, 3]", trace_txt);
-    }
+    //#[test]
+    //fn test_range_then_single_extract_msg_indices() {
+    //    let mut empty_trace = Trace::new();
+    //    let gate_id1 = Uuid::new_v4();
+    //    let gate_id2 = Uuid::new_v4();
+    //    empty_trace.append_msg(
+    //        gate_id2,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id2,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id1,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    empty_trace.append_msg(
+    //        gate_id2,
+    //        "blah".to_owned(),
+    //        MsgRelation::GATE,
+    //    );
+    //    let trace_txt = extract_msg_indices(&empty_trace, gate_id2);
+    //    assert_eq!("[0-1, 3]", trace_txt);
+    //}
 
     #[tokio::test(flavor = "multi_thread")]
     async fn unused_unit_should_not_be_spawned() -> Result<(), Terminate> {
@@ -2699,6 +2635,7 @@ mod tests {
     enum UnitOrTargetConfig {
         None,
         UnitConfig(Unit),
+        #[allow(dead_code)]
         TargetConfig(Target),
     }
 

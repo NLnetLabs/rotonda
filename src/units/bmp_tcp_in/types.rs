@@ -3,6 +3,7 @@ use std::sync::{Arc, RwLock};
 use chrono::{DateTime, Utc};
 
 
+#[allow(dead_code)]
 #[derive(Clone)]
 pub struct RouterInfo {
     pub connected_at: DateTime<Utc>,

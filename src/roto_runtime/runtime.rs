@@ -93,14 +93,12 @@ impl IngressInfoCache {
     fn info(&mut self) -> &IngressInfo {
         if let Some(ref info) = self.ingress_info {
             info
+        } else if let Some(fresh_info) = self.register.get(self.ingress_id) {
+            self.ingress_info = Some(fresh_info);
+            self.ingress_info.as_ref().unwrap()
         } else {
-            if let Some(fresh_info) = self.register.get(self.ingress_id) {
-                self.ingress_info = Some(fresh_info);
-                self.ingress_info.as_ref().unwrap()
-            } else {
-                warn!("No ingress_info for {}, this is a bug", self.ingress_id);
-                panic!();
-            }
+            warn!("No ingress_info for {}, this is a bug", self.ingress_id);
+            panic!();
         }
     }
     fn peer_asn(&mut self) -> Asn {
@@ -338,7 +336,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         let rr = rr.borrow_mut();
 
         if let Some(list) = rr.owned_map().get::<StandardCommunitiesList>() {
-            return list.communities().iter().any(|&c| c == *to_match);
+            return list.communities().contains(&*to_match);
         }
         false
     }
@@ -352,7 +350,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         let rr = rr.borrow_mut();
 
         if let Some(list) = rr.owned_map().get::<LargeCommunitiesList>() {
-            return list.communities().iter().any(|&c| c == *to_match);
+            return list.communities().contains(&*to_match);
         }
         false
     }
@@ -1395,7 +1393,7 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
     rt.register_clone_type_with_name::<HopPath>("aspath", "AS_PATH path attribute")?;
     #[roto_method(rt, RcRotondaPaMap)]
     fn aspath(pamap: Val<RcRotondaPaMap>) -> Option<Val<HopPath>> {
-        pamap.path_attributes().get::<HopPath>().map(|a| Val(a))
+        pamap.path_attributes().get::<HopPath>().map(Val)
     }
     #[roto_method(rt, HopPath)]
     fn contains(hoppath: Val<HopPath>, asn: Asn) -> bool {

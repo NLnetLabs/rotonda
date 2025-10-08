@@ -10,6 +10,7 @@ pub struct BgpTcpInMetrics {
     gate: Option<Arc<GateMetrics>>,
     pub listener_bound_count: Arc<AtomicUsize>,
     pub connection_accepted_count: Arc<AtomicUsize>,
+    #[allow(dead_code)]
     pub established_session_count: Arc<AtomicUsize>,
     pub connection_lost_count: Arc<AtomicUsize>,
     pub disconnect_count: Arc<AtomicUsize>,

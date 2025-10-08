@@ -23,6 +23,7 @@ pub struct RotoFilterStatusReporter {
     metrics: Arc<RotoFilterMetrics>,
 }
 
+#[allow(dead_code)]
 impl RotoFilterStatusReporter {
     pub fn new<T: Display>(name: T, metrics: Arc<RotoFilterMetrics>) -> Self {
         Self {

@@ -115,13 +115,6 @@ impl BmpTcpInStatusReporter {
             .fetch_add(1, SeqCst);
     }
 
-    pub fn message_filtering_failure<T: Display>(&self, err: T) {
-        sr_log!(error: self, "Filtering error: {}", err);
-    }
-
-    pub fn internal_error<T: Display>(&self, err: T) {
-        sr_log!(error: self, "Internal error: {}", err);
-    }
 }
 
 impl UnitStatusReporter for BmpTcpInStatusReporter {}

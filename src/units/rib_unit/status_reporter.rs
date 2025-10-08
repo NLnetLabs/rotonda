@@ -74,6 +74,7 @@ impl RibUnitStatusReporter {
         );
     }
 
+    #[allow(dead_code)]
     pub fn update_ok(
         &self,
         //router_id: Arc<RouterId>,
@@ -152,12 +153,14 @@ impl RibUnitStatusReporter {
         }
     }
 
+    #[allow(dead_code)]
     pub fn unique_prefix_count_updated(&self, num_unique_prefixes: usize) {
         self.metrics
             .num_unique_prefixes
             .store(num_unique_prefixes, SeqCst);
     }
 
+    #[allow(dead_code)]
     pub fn message_filtering_failure<T: Display>(&self, err: T) {
         sr_log!(error: self, "Filtering error: {}", err);
     }

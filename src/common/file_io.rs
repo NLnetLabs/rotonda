@@ -49,7 +49,7 @@ pub trait FileIo: Default {
 mod fileio {
     //! Filesystem I/O.
     use std::{
-        io::{Error, ErrorKind},
+        io::Error,
         path::Path,
     };
 
@@ -109,8 +109,7 @@ mod fileio {
             path: P,
         ) -> std::io::Result<String> {
             std::fs::read_to_string(path.as_ref()).map_err(|err| {
-                Error::new(
-                    ErrorKind::Other,
+                Error::other(
                     format!("For path '{}': {err}", path.as_ref().display()),
                 )
             })

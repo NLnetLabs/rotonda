@@ -67,6 +67,7 @@ impl File {
 }
 
 
+#[allow(dead_code)]
 pub struct FileRunner {
     component: Component,
     config: Config,
@@ -77,7 +78,7 @@ pub struct FileRunner {
 
 
 impl FileRunner {
-    pub fn new(config: Config, mut component: Component) -> Self {
+    pub fn new(config: Config, component: Component) -> Self {
         let ingresses = component.ingresses().clone();
         Self {
             config,

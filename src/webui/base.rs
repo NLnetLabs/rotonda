@@ -1,5 +1,4 @@
 use std::net::IpAddr;
-use std::fmt;
 
 use axum::{extract::State, response::Html};
 use inetnum::asn::Asn;
@@ -20,7 +19,7 @@ impl WebUI {
         let _ = state.ingress_register.bmp_routers(&mut page);
         page.render()
             .map(Into::into)
-            .map_err(|e| format!("rendering error: {}", e).into())
+            .map_err(|e| format!("rendering error: {}", e))
     }
 }
 

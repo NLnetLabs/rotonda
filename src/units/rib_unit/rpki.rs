@@ -142,7 +142,7 @@ impl rotonda_store::prefix_record::Meta for MaxLenList {
 
     type TBI = ();
 
-    fn as_orderable(&self, tbi: Self::TBI) -> Self::Orderable<'_> {
+    fn as_orderable(&self, _tbi: Self::TBI) -> Self::Orderable<'_> {
         todo!()
     }
 }

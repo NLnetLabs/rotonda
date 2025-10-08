@@ -137,6 +137,7 @@ impl BmpStateMachineStatusReporter {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct UpdateReportMessage {
     pub router_id: Arc<RouterId>,
@@ -150,6 +151,7 @@ pub struct UpdateReportMessage {
     pub last_invalid_withdrawal: Option<ParseError>,
 }
 
+#[allow(dead_code)]
 impl UpdateReportMessage {
     pub fn new(router_id: Arc<RouterId>) -> Self {
         Self {

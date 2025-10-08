@@ -85,7 +85,7 @@ async fn bmp_read<T: AsyncRead + Unpin>(
     match BmpMsg::from_octets(&msg_buf) {
         Ok(_) => Ok((rx, msg_buf, trace_id)),
         Err(err) => {
-            Err((rx, std::io::Error::new(ErrorKind::Other, err.to_string())))
+            Err((rx, std::io::Error::other(err.to_string())))
         }
     }
 }
@@ -179,9 +179,6 @@ impl<T: AsyncRead + Unpin> BmpStream<T> {
             }
         }
 
-        Err(std::io::Error::new(
-            ErrorKind::Other,
-            "Internal error: no receiver available",
-        ))
+        Err(std::io::Error::other("Internal error: no receiver available"))
     }
 }

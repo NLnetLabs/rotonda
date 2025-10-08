@@ -2,14 +2,6 @@
 
 use crate::ingress;
 
-pub fn calc_u8_pc(total: usize, v: usize) -> u8 {
-    if total > 0 {
-        (100.0f64 * (v as f64 / total as f64)) as u8
-    } else {
-        0u8
-    }
-}
-
 /// # Naming
 ///
 /// When logging or publishing metrics we need to be clear about what the log

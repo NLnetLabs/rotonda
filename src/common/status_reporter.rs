@@ -37,6 +37,7 @@ pub trait Chainable: Named {
 }
 
 pub trait AnyStatusReporter: Chainable {
+    #[allow(dead_code)]
     fn metrics(&self) -> Option<Arc<dyn metrics::Source>>;
 
     fn input_mismatch<T: Display, U: Debug>(&self, expected: T, received: U) {

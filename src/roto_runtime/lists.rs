@@ -34,7 +34,7 @@ pub struct AsnList {
 
 impl AsnList {
     pub fn contains(&self, asn: Asn) -> bool {
-        self.asns.iter().any(|a| *a == asn)
+        self.asns.contains(&asn)
     }
     pub fn new(asns: SmallVec<[Asn; ASN_LIST_SIZE]>) -> Self {
         Self { asns }
@@ -92,7 +92,7 @@ impl PrefixList {
         Self { prefixes }
     }
     pub fn contains(&self, prefix: Prefix) -> bool {
-        self.prefixes.iter().any(|p| *p == prefix)
+        self.prefixes.contains(&prefix)
     }
     pub fn covers(&self, prefix: Prefix) -> bool {
         self.prefixes.iter().any(|&p| p.covers(prefix))

@@ -154,9 +154,6 @@ impl Initiable for Initiating {
         self.sys_extra = sys_extra;
     }
 
-    fn sys_name(&self) -> Option<&str> {
-        self.sys_name.as_deref()
-    }
 }
 
 #[cfg(test)]

@@ -1,6 +1,6 @@
-use std::{collections::HashMap, sync::{atomic::{AtomicU64, AtomicUsize, Ordering}, Arc}};
+use std::{collections::HashMap, sync::{atomic::{AtomicU64, Ordering}, Arc}};
 
-use log::{debug, warn};
+use log::debug;
 
 
 #[derive(Eq, Hash, PartialEq)]
@@ -9,10 +9,6 @@ pub struct MetricKey {
     tags: Vec<(Arc<str>, Arc<str>)>,
 }
 
-//pub struct MetricEntry {
-//    values: AtomicUsize,
-//}
-//
 
 #[derive(Default)]
 pub struct Metrics {
@@ -88,7 +84,7 @@ impl crate::metrics::Source for RotoMetricsWrapper {
         let mut printed_gauge_names: Vec<String> = vec![];
 
         for (name, cnt) in counters {
-            let base_name: String = name.splitn(2, '{').next().unwrap().into();
+            let base_name: String = name.split('{').next().unwrap().into();
             if !printed_counter_names.contains(&base_name) {
                 target.append_raw(format!("# TYPE roto_user_defined_{base_name} counter"));
                 printed_counter_names.push(base_name);
@@ -97,7 +93,7 @@ impl crate::metrics::Source for RotoMetricsWrapper {
             target.append_raw(format!("roto_user_defined_{} {}", name, cnt));
         }
         for (name, val) in gauges {
-            let base_name: String = name.splitn(2, '{').next().unwrap().into();
+            let base_name: String = name.split('{').next().unwrap().into();
             if !printed_gauge_names.contains(&base_name) {
                 target.append_raw(format!("# TYPE {base_name} gauge"));
                 printed_gauge_names.push(base_name);

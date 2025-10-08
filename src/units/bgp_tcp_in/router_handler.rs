@@ -67,7 +67,6 @@ impl BgpSession<CombinedConfig> for Session<CombinedConfig> {
         self.negotiated()
     }
 
-    #[must_use]
     #[allow(clippy::type_complexity, clippy::type_repetition_in_bounds)]
     async fn tick(&mut self) -> Result<(), session::Error> {
         self.tick().await
@@ -90,6 +89,7 @@ struct Processor {
 
     // Link to an empty RtrCache for now. Eventually, this should point to the
     // main all-encompassing RIB.
+    #[allow(dead_code)]
     rtr_cache: Arc<RtrCache>,
 }
 
@@ -145,8 +145,8 @@ impl Processor {
         (processor, gate_agent)
     }
 
-    async fn process<'a, C: BgpConfig + ConfigExt, T: BgpSession<C>>(
-        &'a mut self,
+    async fn process<C: BgpConfig + ConfigExt, T: BgpSession<C>>(
+        &mut self,
         mut session: T,
         mut rx_sess: mpsc::Receiver<Message>,
         live_sessions: Arc<Mutex<super::unit::LiveSessions>>,

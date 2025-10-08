@@ -31,6 +31,7 @@ pub type MqttPollResult = Result<Event, ConnectionError>;
 pub trait EventLoop: Send {
     async fn poll(&mut self) -> MqttPollResult;
 
+    #[allow(dead_code)]
     fn mqtt_options(&self) -> &MqttOptions;
 
     fn network_options(&self) -> NetworkOptions;

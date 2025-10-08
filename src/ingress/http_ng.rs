@@ -75,25 +75,25 @@ impl QueryFilter {
     ///
     /// This can be used in a call to `iter().filter()`.
     pub fn filter(&self, ingress_info: &IngressInfo) -> bool {
-        if self.remote_addr.is_some() {
-            if self.remote_addr != ingress_info.remote_addr {
+        if self.remote_addr.is_some() &&
+            self.remote_addr != ingress_info.remote_addr
+        {
                 return false
-            }
         }
-        if self.remote_asn.is_some() {
-            if self.remote_asn != ingress_info.remote_asn {
-                return false
-            }
+        if self.remote_asn.is_some() &&
+            self.remote_asn != ingress_info.remote_asn
+        {
+            return false
         }
-        if self.ingress_type.is_some() {
-            if self.ingress_type != ingress_info.ingress_type {
-                return false
-            }
+        if self.ingress_type.is_some() &&
+            self.ingress_type != ingress_info.ingress_type
+        {
+            return false
         }
-        if self.rib_type.is_some() {
-            if self.rib_type != ingress_info.peer_rib_type {
-                return false
-            }
+        if self.rib_type.is_some() &&
+            self.rib_type != ingress_info.peer_rib_type
+        {
+            return false
         }
         true
     }

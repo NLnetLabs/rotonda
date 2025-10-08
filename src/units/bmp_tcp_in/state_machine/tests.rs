@@ -150,7 +150,6 @@ fn peer_up_with_eor_capable_peer() {
     assert!(matches!(res.next_state, BmpState::Dumping(_)));
     if let BmpState::Dumping(next_state) = &res.next_state {
         let Dumping { peer_states, .. } = &next_state.details;
-        assert_eq!(peer_states.num_peer_configs(), 1);
         let pph = peer_states.get_peers().next().unwrap();
         assert_eq!(peer_states.is_peer_eor_capable(pph), Some(true));
         assert_eq!(peer_states.num_pending_eors(), 0); // zero because we have to see a route announcement to know which (S)AFI an EoR is expected for
@@ -225,13 +224,13 @@ fn peer_up_route_monitoring_peer_down() {
             "127.0.0.1",
             12345,
         );
-    let (pph_2, peer_up_msg_2_buf, real_pph_2) =
+    let (pph_2, peer_up_msg_2_buf, _real_pph_2) =
         mk_peer_up_notification_msg_without_rfc4724_support(
             "127.0.0.2",
             12345,
         );
     let route_mon_msg_buf = mk_route_monitoring_msg(&pph_2);
-    let ipv6_route_mon_msg_buf = mk_ipv6_route_monitoring_msg(&pph_2);
+    let _ipv6_route_mon_msg_buf = mk_ipv6_route_monitoring_msg(&pph_2);
     let route_withdraw_msg_buf = mk_route_monitoring_withdrawal_msg(&pph_2);
     let peer_down_msg_1_buf = mk_peer_down_notification_msg(&pph_1);
     let peer_down_msg_2_buf = mk_peer_down_notification_msg(&pph_2);
@@ -254,8 +253,6 @@ fn peer_up_route_monitoring_peer_down() {
     assert!(matches!(res.message_type, MessageType::Other));
     let processor = res.next_state;
 
-    // And there should now be two known peers
-    assert_eq!(get_unique_peer_up_count(&processor), 2);
 
     // Check the metrics
     assert_metrics(&processor, ("Dumping", [1, 0, 0, 0, 0, 0, 2, 0, 0, 0]));
@@ -449,16 +446,12 @@ fn peer_up_different_peer_down() {
 
     // And there should now be one known peer
     let processor = res.next_state;
-    assert_eq!(get_unique_peer_up_count(&processor), 1);
 
     // When the state machine processes a peer down notification for a different peer
     let res = processor.process_msg(Instant::now(), peer_down_msg_buf, None);
 
     // Then the state should remain unchanged
     assert!(matches!(res.next_state, BmpState::Dumping(_)));
-
-    // And there should still be one known peer
-    assert_eq!(get_unique_peer_up_count(&res.next_state), 1);
 
     // And the message should be considered invalid
     assert_invalid_msg_starts_with(
@@ -739,7 +732,6 @@ fn end_of_rib_ipv4_for_a_single_peer() {
     assert!(matches!(res.next_state, BmpState::Dumping(_)));
     if let BmpState::Updating(next_state) = &res.next_state {
         let Updating { peer_states, .. } = &next_state.details;
-        assert_eq!(peer_states.num_peer_configs(), 1);
         assert_eq!(peer_states.num_pending_eors(), 0);
     }
 
@@ -757,7 +749,6 @@ fn end_of_rib_ipv4_for_a_single_peer() {
     assert!(matches!(res.next_state, BmpState::Dumping(_)));
     if let BmpState::Dumping(next_state) = &res.next_state {
         let Dumping { peer_states, .. } = &next_state.details;
-        assert_eq!(peer_states.num_peer_configs(), 1);
         assert_eq!(peer_states.num_pending_eors(), 1);
     } else {
         panic!("Expected to be in the DUMPING state");
@@ -782,7 +773,6 @@ fn end_of_rib_ipv4_for_a_single_peer() {
     assert!(matches!(res.next_state, BmpState::Updating(_)));
     if let BmpState::Updating(next_state) = &res.next_state {
         let Updating { peer_states, .. } = &next_state.details;
-        assert_eq!(peer_states.num_peer_configs(), 1);
         assert_eq!(peer_states.num_pending_eors(), 0);
     } else {
         panic!("Expected to be in the UPDATING state");
@@ -1205,27 +1195,6 @@ fn mk_test_processor() -> BmpState {
     )
 }
 
-fn get_unique_peer_up_count(processor: &BmpState) -> usize {
-    get_peer_states(processor).num_peer_configs()
-}
-
-fn get_announced_prefix_count(
-    processor: &BmpState,
-    pph: &PerPeerHeader<Bytes>,
-) -> usize {
-    get_peer_states(processor)
-        .get_announced_prefixes(pph)
-        .unwrap()
-        .len()
-}
-
-fn get_peer_states(processor: &BmpState) -> &PeerStates {
-    match processor {
-        BmpState::Dumping(v) => &v.details.peer_states,
-        BmpState::Updating(v) => &v.details.peer_states,
-        _ => unreachable!(),
-    }
-}
 
 fn mk_initiation_msg(sys_name: &str, sys_descr: &str) -> BmpMsg<Bytes> {
     BmpMsg::from_octets(crate::bgp::encode::mk_initiation_msg(

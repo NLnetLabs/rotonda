@@ -215,6 +215,7 @@ impl BmpTcpIn {
 
 //-------- BmpTcpInRunner ----------------------------------------------------
 
+#[allow(clippy::too_many_arguments)]
 trait ConfigAcceptor {
     fn accept_config(
         child_name: String,
@@ -236,6 +237,7 @@ trait ConfigAcceptor {
 }
 
 struct BmpTcpInRunner {
+    #[allow(dead_code)]
     component: Arc<RwLock<Component>>,
     listen: Arc<SocketAddr>,
     gate: Gate,
@@ -460,7 +462,6 @@ impl BmpTcpInRunner {
                             roto_function.clone(),
                             roto_context.clone(),
                             self.router_id_template.clone(),
-                            self.filter_name.clone(),
                             child_status_reporter,
                             state_machine,
                             self.tracer.clone(),

@@ -22,11 +22,10 @@ use tokio::{
 
 use crate::{
     comms::{DirectUpdate, Terminated},
-    ingress::IngressId,
     manager::TargetCommand,
     metrics::Target,
-    payload::{Payload, Update},
-    roto_runtime::types::{LogEntry, OutputStreamMessage, RouteContext},
+    payload::Update,
+    roto_runtime::types::{LogEntry, OutputStreamMessage},
     targets::{mqtt::config::ClientId, Target::Mqtt},
     tests::util::{
         assert_json_eq,
@@ -490,6 +489,7 @@ impl MockClient {
 }
 
 struct MockEventLoop {
+    #[allow(dead_code)]
     options: MqttOptions,
     network_options: NetworkOptions,
     mock_poll_result_rx: mpsc::UnboundedReceiver<MqttPollResult>,

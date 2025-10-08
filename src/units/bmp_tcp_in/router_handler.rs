@@ -47,7 +47,6 @@ pub struct RouterHandler {
     roto_function: Option<RotoFunc>,
     roto_context: Arc<std::sync::Mutex<Ctx>>,
     router_id_template: Arc<ArcSwap<String>>,
-    filter_name: Arc<ArcSwap<FilterName>>,
     status_reporter: Arc<BmpTcpInStatusReporter>,
     state_machine: Arc<Mutex<Option<BmpState>>>,
     tracer: Arc<Tracer>,
@@ -57,6 +56,7 @@ pub struct RouterHandler {
 
     // Link to an empty RtrCache for now. Eventually, this should point to the
     // main all-encompassing RIB.
+    #[allow(dead_code)]
     rtr_cache: Arc<RtrCache>,
     ingress_register: Arc<ingress::Register>,
 }
@@ -68,7 +68,6 @@ impl RouterHandler {
         roto_function: Option<RotoFunc>,
         roto_context: Arc<std::sync::Mutex<Ctx>>,
         router_id_template: Arc<ArcSwap<String>>,
-        filter_name: Arc<ArcSwap<FilterName>>,
         status_reporter: Arc<BmpTcpInStatusReporter>,
         state_machine: Arc<Mutex<Option<BmpState>>>,
         tracer: Arc<Tracer>,
@@ -82,7 +81,6 @@ impl RouterHandler {
             roto_function,
             roto_context,
             router_id_template,
-            filter_name,
             status_reporter,
             state_machine,
             tracer,
@@ -126,7 +124,6 @@ impl RouterHandler {
             router_id_template: Arc::new(ArcSwap::from_pointee(
                 BmpTcpIn::default_router_id_template(),
             )),
-            filter_name: Default::default(),
             rtr_cache: Default::default(),
             status_reporter: parent_status_reporter,
             state_machine,
@@ -365,7 +362,7 @@ impl RouterHandler {
             Message::TerminationMessage(..) => None,
             Message::RouteMirroring(msg) => Some(msg.per_peer_header()),
         };
-        let provenance = if let Some(ref pph) = pph {
+        let _provenance = if let Some(ref pph) = pph {
             Provenance {
                 peer_ip: pph.address(),
                 peer_asn: pph.asn(),

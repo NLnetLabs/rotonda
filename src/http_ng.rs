@@ -113,7 +113,7 @@ impl Api {
     /// When this method is called while `self.store` is already set, the call is basically a
     /// no-op.
     pub fn set_rib(&mut self, rib: Arc<Rib>) {
-        if let Err(_) = self.store.set(rib) {
+        if self.store.set(rib).is_err() {
             debug!("http_ng set_rib(): Rib already set")
         }
     }
@@ -169,8 +169,6 @@ impl Api {
     async fn shutdown(mut rx: mpsc::Receiver<()>) {
         rx.recv().await;
         //debug!("in Api::shutdown(), got signal");
-        ()
-        
     }
 
     /// Stop all listeners and start on the configured interfaces again
@@ -184,7 +182,7 @@ impl Api {
         for h in self.serve_handles.drain(..) {
             let handle = tokio::runtime::Handle::current();
             tokio::task::block_in_place(move || {
-                &h.is_finished();
+                h.is_finished();
                 let _ = handle.block_on(h);
             });
         }

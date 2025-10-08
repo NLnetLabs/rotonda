@@ -1,5 +1,3 @@
-use rotonda_store::match_options::QueryResult;
-
 use rotonda_store::prefix_record::Meta;
 use routecore::bgp::message::PduParseInfo;
 use routecore::bgp::path_attributes::OwnedPathAttributes;
@@ -9,7 +7,6 @@ use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 use smallvec::{smallvec, SmallVec};
 use std::fmt;
-use uuid::Uuid;
 
 use crate::ingress::{self, IngressId};
 use crate::roto_runtime::types::{OutputStreamMessage, RouteContext};
@@ -313,10 +310,6 @@ pub enum Update {
     WithdrawBulk(SmallVec<[IngressId; 8]>),
     // Used to signal the RibUnit a MUI should be set to active again.
     IngressReappeared(IngressId),
-    QueryResult(
-        Uuid,
-        Result<QueryResult<crate::payload::RotondaPaMap>, String>,
-    ),
     UpstreamStatusChange(UpstreamStatus),
 
     OutputStream(SmallVec<[OutputStreamMessage; 2]>),
@@ -339,7 +332,6 @@ impl Update {
             Update::Withdraw(_ingress_id, _maybe_afisafi) => smallvec![],
             Update::WithdrawBulk(..) => smallvec![],
             Update::IngressReappeared(..) => smallvec![],
-            Update::QueryResult(_, _) => smallvec![],
             Update::UpstreamStatusChange(_) => smallvec![],
             Update::OutputStream(..) => smallvec![],
             Update::Rtr(..) => smallvec![],

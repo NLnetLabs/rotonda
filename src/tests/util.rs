@@ -6,7 +6,6 @@ pub(crate) mod internal {
 
     use crate::metrics::{self, OutputFormat, Target};
 
-
     /// Tries to enable logging. Intended for use in tests.
     ///
     /// Accepts a log level name as a string, e.g. "trace".

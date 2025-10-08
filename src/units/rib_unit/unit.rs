@@ -453,7 +453,6 @@ impl RibUnitRunner {
         self.status_reporter.clone()
     }
 
-
     #[cfg(test)]
     pub(super) fn rib(&self) -> Arc<Rib> {
         self.rib.load().clone()

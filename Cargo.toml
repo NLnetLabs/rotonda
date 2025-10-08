@@ -37,37 +37,32 @@ log                = "0.4"
 
 [dependencies]
 arc-swap           = "1.6"
-chrono             = { version = "0.4", features = ["serde"] }
-clap               = { version = "4.4", features = ["cargo"] }
+chrono             = { version = "0.4", default-features = false, features = ["serde", "now"] }
+clap               = { version = "4.4", default-features = false, features = ["cargo"] }
 crossbeam-utils    = "0.8"
 fern               = "0.6"
 futures            = "0.3"
-hash32             = "0.3.1"
-hyper              = { version = "0.14", features = ["server", "stream"] }
+hash32             = "0.3.1" # this can probably go
 log                = { workspace = true }
 log-reroute        = "0.1"
 pin-project-lite   = "0.2"
-rand               = "0.8"
-reqwest            = { version = "0.11", default-features = false }
 routecore          = { workspace = true }
 serde              = { version = "1.0", features = ["derive", "rc"] }
 serde_json         = { version = "1.0", features = ["preserve_order"] }
-tokio              = { version = "1.44.2", features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "test-util", "time", "tracing"] }
-toml               = "0.8"
+tokio              = { version = "1.44", default-features = false, features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "test-util", "time", "tracing"] }
+toml               = "0.9"
 
 # Dependencies specifically used by the BGP/BMP related modifications to the original RTRTR base
-allocator-api2     = "0.2"
+allocator-api2     = "0.2" # do we still need the custom allocator?
 assert-json-diff   = "2.0"
 async-trait        = "0.1"
-atomic_enum        = "0.2.0"
+atomic_enum        = "0.2.0" # might go after refactor of bmp
 flate2             = { version = "1.0", optional = true }
-anyhow             = "1.0"
+anyhow             = "1.0" # might go after cleaning up tests
 bytes              = { version = "1.5.0" }
-hex-slice          = "0.1"
-hash_hasher        = "2.0"
-hashbrown          = "0.14"
+hashbrown          = "0.14" # will go if we remove custom alloc
+hex-slice          = "0.1" # might go after refactor of bmp
 inetnum            = { workspace = true }
-layout-rs          = { version = "0.1" }
 mqtt               = { version = "0.23.0", package = "rumqttc", default-features = false }
 memmap2            = "0.9.4"
 non-empty-vec      = { version = "0.2", features = ["serde"]}
@@ -77,11 +72,11 @@ serde_with         = "3"
 smallvec           = { version = "1.11", features = ["const_generics", "const_new", "union"] }
 tokio-metrics      = { version = "0.3", default-features = false }
 uuid               = { version = "1.4", features = ["v4", "fast-rng"] }
-sha2               = "0.10.8"
-csv                = "1.3.1"
-bzip2              = "0.5.0"
+sha2               = "0.10"
+csv                = "1.3"
+bzip2              = "0.5"
 rpki               = { version = "0.19.1", features = ["crypto", "rtr"] }
-futures-util       = "0.3.31"
+futures-util       = "0.3"
 micromap           = "0.0.19"
 paste              = "1.0.15"
 axum               = { version = "0.8.4", features = ["query", "http1", "http2", "tokio"], default-features = false }

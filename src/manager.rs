@@ -19,7 +19,6 @@ use arc_swap::ArcSwap;
 use futures::future::{join_all, select, Either};
 use log::{debug, error, info, log_enabled, trace, warn};
 use non_empty_vec::NonEmpty;
-use reqwest::Client as HttpClient;
 use serde::Deserialize;
 use std::collections::HashSet;
 use std::ops::Deref;
@@ -30,10 +29,6 @@ use std::{collections::HashMap, mem::Discriminant};
 use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Barrier;
 use uuid::Uuid;
-
-use {
-    hyper::{Body, Method, Request, Response},
-};
 
 //------------ Component -----------------------------------------------------
 
@@ -226,153 +221,6 @@ impl LinkReport {
         self.gates.get(name).copied()
     }
 
-    fn get_svg(&self, tracer: Arc<Tracer>, trace_id: Option<u8>) -> String {
-        use chrono::Utc;
-        use layout::backends::svg::SVGWriter;
-        use layout::core::base::Orientation;
-        use layout::core::color::Color;
-        use layout::core::format::RenderBackend;
-        use layout::core::geometry::Point;
-        use layout::core::style::*;
-        use layout::std_shapes::shapes::*;
-        use layout::topo::layout::VisualGraph;
-
-        let mut vg = VisualGraph::new(Orientation::LeftToRight);
-        let mut nodes = HashMap::new();
-
-        let trace =
-            trace_id.map_or_else(Trace::new, |id| tracer.get_trace(id));
-
-        // add nodes for each unit and target
-        for (unit_or_target_name, report) in &self.links {
-            let (shape_kind, style_attr) = match report
-                .graph_status()
-                .and_then(|weak_ref| weak_ref.upgrade())
-            {
-                Some(graph_status) if trace_id.is_none() => {
-                    let shape_kind = ShapeKind::new_box(&format!(
-                        "{}\n{}",
-                        &unit_or_target_name,
-                        graph_status.status_text()
-                    ));
-
-                    let line_colour = match graph_status.okay() {
-                        Some(false) => "red",
-                        Some(true) => "green",
-                        None => "black",
-                    };
-
-                    let style_attr = StyleAttr::new(
-                        Color::fast(line_colour),
-                        2,
-                        None,
-                        0,
-                        15,
-                    );
-
-                    (shape_kind, style_attr)
-                }
-
-                _ if trace_id.is_some() => {
-                    // TODO: Inefficient
-                    let mut box_colour = "black";
-                    let mut trace_txt = String::new();
-
-                    if let Some(gate_id) =
-                        self.get_gate_id(unit_or_target_name)
-                    {
-                        let msg_indices =
-                            trace.msg_indices(gate_id, MsgRelation::ALL);
-                        if !msg_indices.is_empty() {
-                            box_colour = "blue";
-                            trace_txt = extract_msg_indices(&trace, gate_id);
-                        }
-                    }
-
-                    (
-                        ShapeKind::new_box(&format!(
-                            "{}\n{}",
-                            &unit_or_target_name, trace_txt
-                        )),
-                        StyleAttr::new(
-                            Color::fast(box_colour),
-                            2,
-                            None,
-                            0,
-                            15,
-                        ),
-                    )
-                }
-
-                _ => (
-                    ShapeKind::new_box(unit_or_target_name),
-                    StyleAttr::new(Color::fast("black"), 2, None, 0, 15),
-                ),
-            };
-
-            let node = Element::create(
-                shape_kind,
-                style_attr,
-                Orientation::LeftToRight,
-                Point::new(100., 100.),
-            );
-            let handle = vg.add_node(node);
-            nodes.insert(unit_or_target_name.clone(), handle);
-        }
-
-        // add graph edges
-        for (unit_or_target_name, report) in &self.links {
-            let links = report.into_vec();
-            for link in links {
-                let link_type = match link.link_type {
-                    LinkType::Queued => "queued",
-                    LinkType::Direct => "direct",
-                };
-
-                let gate_name = self
-                    .gates
-                    .iter()
-                    .find(|(_, &id)| id == link.gate_id)
-                    .map_or("unknown", |(name, _id)| name);
-                debug!("Gate: id={} name={gate_name}", link.gate_id);
-
-                let mut arrow = Arrow::simple(link_type);
-                if trace_id.is_some()
-                    && !trace
-                        .msg_indices(link.gate_id, MsgRelation::GATE)
-                        .is_empty()
-                {
-                    arrow.look = StyleAttr::new(
-                        Color::fast("blue"),
-                        2,
-                        Option::Some(Color::fast("blue")),
-                        0,
-                        15,
-                    )
-                }
-
-                let to_node = nodes.get(unit_or_target_name).unwrap();
-                if let Some(from_node) = nodes.get(gate_name) {
-                    vg.add_edge(arrow, *from_node, *to_node);
-                } else {
-                    // This can happen if a unit or target didn't honor a new
-                    // set of sources announced to it via a reconfigure
-                    // message.
-                    error!("Internal error: Component '{unit_or_target_name}' has broken link {} to non-existent gate {}", link.id, link.gate_id);
-                }
-            }
-        }
-
-        let mut svg = SVGWriter::new();
-        let last_updated = Utc::now();
-        vg.do_it(false, false, false, &mut svg);
-        svg.draw_text(
-            Point::new(200., 20.),
-            &format!("Last updated: {}", last_updated.to_rfc2822()),
-            &StyleAttr::simple(),
-        );
-        svg.finalize()
-    }
 }
 
 fn extract_msg_indices(trace: &Trace, gate_id: Uuid) -> String {

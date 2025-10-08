@@ -17,7 +17,6 @@ use rotonda_store::{errors::PrefixStoreError, match_options::{IncludeHistory, Ma
 use std::io::prelude::*;
 
 use chrono::Utc;
-use hash_hasher::{HashBuildHasher, HashedSet};
 use log::{debug, error, info, log_enabled, trace, warn};
 use non_empty_vec::NonEmpty;
 

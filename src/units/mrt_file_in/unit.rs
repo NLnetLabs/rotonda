@@ -11,7 +11,6 @@ use flate2::read::GzDecoder;
 use futures::future::{select, Either};
 use futures::{pin_mut, FutureExt, TryFutureExt};
 use log::{debug, error, info, warn};
-use rand::seq::SliceRandom;
 use rotonda_store::prefix_record::RouteStatus;
 use routecore::bgp::fsm::state_machine::State;
 use routecore::bgp::message::{Message as BgpMsg, PduParseInfo};

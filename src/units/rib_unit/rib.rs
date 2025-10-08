@@ -8,7 +8,6 @@ use std::{
 };
 
 use chrono::{Duration, Utc};
-use hash_hasher::{HashBuildHasher, HashedSet};
 use inetnum::{addr::Prefix, asn::Asn};
 use log::{debug, error, trace, warn};
 use rotonda_store::{
@@ -998,7 +997,6 @@ mod tests {
         alloc::System, net::IpAddr, ops::Deref, str::FromStr, sync::Arc,
     };
 
-    use hashbrown::hash_map::DefaultHashBuilder;
     use inetnum::{addr::Prefix, asn::Asn};
     //use roto::types::{
     //    builtin::{BuiltinTypeValue, NlriStatus, PrefixRoute, RotondaId},

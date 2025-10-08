@@ -178,6 +178,7 @@ where
         }
     }
 
+    #[allow(dead_code)]
     pub fn contains_key(&self, key: &K) -> bool {
         self.get(key).is_some()
     }
@@ -190,7 +191,7 @@ where
             .map(|(_k, v)| v.clone())
     }
 
-    pub fn entry(&self, key: K) -> Entry<K, V> {
+    pub fn entry(&self, key: K) -> Entry<'_, K, V> {
         match self.get(&key) {
             Some(v) => Entry::Occupied(v),
             None => Entry::Vacant(self, key),

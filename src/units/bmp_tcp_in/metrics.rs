@@ -132,9 +132,9 @@ impl BmpTcpInMetrics {
         }
     }
 
-    pub fn contains(&self, router_id: &Arc<RouterId>) -> bool {
-        self.routers.contains_key(router_id)
-    }
+    //pub fn contains(&self, router_id: &Arc<RouterId>) -> bool {
+    //    self.routers.contains_key(router_id)
+    //}
 
     /// Warning: This fn will create a metric set for the given router id if
     /// it doesn't already exist. Use `contains()` to test if metrics exist

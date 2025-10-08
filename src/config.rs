@@ -10,7 +10,7 @@ use crate::manager::{Manager, TargetSet, UnitSet};
 use clap::{Arg, ArgMatches, Command};
 use log::{error, trace};
 use serde::Deserialize;
-use serde_with::{serde_as, OneOrMany};
+use serde_with::serde_as;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::net::SocketAddr;
@@ -662,7 +662,7 @@ pub struct ConfigPath(PathBuf);
 
 impl ConfigPath {
     thread_local!(
-        static BASE_PATH: RefCell<Option<PathBuf>> = RefCell::new(None)
+        static BASE_PATH: RefCell<Option<PathBuf>> = const { RefCell::new(None) }
     );
 
     fn set_base_path(path: PathBuf) {

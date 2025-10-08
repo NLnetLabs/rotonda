@@ -11,7 +11,6 @@ use flate2::read::GzDecoder;
 use futures::future::{select, Either};
 use futures::{pin_mut, FutureExt, TryFutureExt};
 use log::{debug, error, info, warn};
-use rand::seq::SliceRandom;
 use rotonda_store::prefix_record::RouteStatus;
 use routecore::bgp::fsm::state_machine::State;
 use routecore::bgp::message::{Message as BgpMsg, PduParseInfo};
@@ -65,7 +64,7 @@ impl Iterator for PathsIterator<'_> {
     }
 }
 impl OneOrManyPaths {
-    pub fn iter(&self) -> PathsIterator {
+    pub fn iter(&self) -> PathsIterator<'_> {
         match self {
             OneOrManyPaths::One(p) => {
                 PathsIterator::One(Some(p.clone().into()))
@@ -75,6 +74,7 @@ impl OneOrManyPaths {
     }
 }
 
+#[allow(dead_code)]
 pub struct MrtInRunner {
     config: MrtFileIn,
     gate: Gate,
@@ -95,7 +95,7 @@ pub type QueueEntry = (
 impl MrtFileIn {
     pub async fn run(
         self,
-        mut component: Component,
+        component: Component,
         gate: Gate,
         mut waitpoint: WaitPoint,
     ) -> Result<(), crate::comms::Terminated> {
@@ -506,7 +506,6 @@ impl MrtInRunner {
                         let mut hasher = Sha256::new();
                         let mut file = std::fs::File::open(&p).unwrap();
 
-                        let t0 = Instant::now();
                         let _bytes_written = std::io::copy(&mut file, &mut hasher).unwrap();
                         let hash_bytes = hasher.finalize();
                         let hash_str = format!("{:x}", hash_bytes);
@@ -558,7 +557,7 @@ impl MrtInRunner {
                         GateStatus::Reconfiguring {
                             new_config:
                                 Unit::MrtFileIn(MrtFileIn {
-                                    filename: new_filename,
+                                    filename: _new_filename,
                                     ..
                                 }),
                         } => {

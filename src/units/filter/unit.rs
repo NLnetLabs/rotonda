@@ -52,6 +52,7 @@ struct RotoFilterRunner {
     gate: Arc<Gate>,
     status_reporter: Arc<RotoFilterStatusReporter>,
     filter_name: Arc<ArcSwap<FilterName>>,
+    #[allow(dead_code)]
     tracer: Arc<Tracer>,
 }
 
@@ -92,8 +93,9 @@ impl RotoFilterRunner {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)] // this will go anyway
     fn mock(
-        roto_script: &str,
+        _roto_script: &str,
         filter_name: &str,
     ) -> (Self, crate::comms::GateAgent) {
         //use crate::common::roto::RotoScriptOrigin;

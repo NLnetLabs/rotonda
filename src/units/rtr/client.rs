@@ -176,7 +176,7 @@ impl RtrRunner {
                     }
                     until_fut = next_fut;
                 }
-                Either::Left((Err(r), _other_fut)) => {
+                Either::Left((Err(_r), _other_fut)) => {
                     return ControlFlow::Break(Terminated)
                 }
                 Either::Right((Result::Ok(r), _other_fut)) => {
@@ -356,9 +356,6 @@ struct RtrClient<Connect> {
 
     /// The unit’s metrics.
     metrics: Arc<RtrMetrics>,
-
-    /// The unit's cache.
-    cache: Vec<Payload>,
 }
 
 impl<Connect> RtrClient<Connect> {
@@ -369,7 +366,6 @@ impl<Connect> RtrClient<Connect> {
             retry,
             status: Default::default(),
             metrics,
-            cache: Vec::new(),
         }
     }
 }
@@ -675,7 +671,7 @@ impl PayloadTarget for RtrTarget {
     }
 
     fn apply(
-        &mut self, update: Self::Update, timing: Timing
+        &mut self, _update: Self::Update, _timing: Timing
     ) -> Result<(), PayloadError> {
         todo!()
     }

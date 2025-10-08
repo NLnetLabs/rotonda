@@ -8,7 +8,6 @@ use std::{
 };
 
 use chrono::{Duration, Utc};
-use hash_hasher::{HashBuildHasher, HashedSet};
 use inetnum::{addr::Prefix, asn::Asn};
 use log::{debug, error, trace, warn};
 use rotonda_store::{
@@ -54,6 +53,7 @@ type RotoHttpFilter = roto::TypedFunc<
 pub struct Rib {
     unicast: Arc<Option<Store>>,
     multicast: Arc<Option<Store>>,
+    #[allow(dead_code)]
     other_fams:
         HashMap<AfiSafiType, HashMap<(IngressId, Nlri<bytes::Bytes>), PaMap>>,
     ingress_register: Arc<ingress::Register>,
@@ -206,13 +206,9 @@ impl Rib {
             val.rotonda_pamap().clone(),
         );
         
-        let res = store.insert(
+        store.insert(
             prefix, pubrec, None, // Option<TBI>
-        );
-
-        //println!("store counters {}", store.prefixes_count());
-
-        res
+        )
     }
 
     pub fn withdraw_for_ingress(
@@ -533,7 +529,7 @@ impl Rib {
 
         let _ = res.as_mut().map(|sr| {
             self.apply_filter(&mut sr.query_result.records, &filter, maybe_roto_function.clone());
-            sr.query_result.more_specifics.as_mut().map(|rs| {
+            if let Some(rs) = sr.query_result.more_specifics.as_mut() {
                 rs.v4.retain_mut(|pr|{
                     self.apply_filter(&mut pr.meta, &filter, maybe_roto_function.clone());
                     !pr.meta.is_empty()
@@ -542,8 +538,8 @@ impl Rib {
                     self.apply_filter(&mut pr.meta, &filter, maybe_roto_function.clone());
                     !pr.meta.is_empty()
                 });
-            });
-            sr.query_result.less_specifics.as_mut().map(|rs| {
+            }
+            if let Some(rs) = sr.query_result.less_specifics.as_mut() {
                 rs.v4.retain_mut(|pr|{
                     self.apply_filter(&mut pr.meta, &filter, maybe_roto_function.clone());
                     !pr.meta.is_empty()
@@ -552,7 +548,7 @@ impl Rib {
                     self.apply_filter(&mut pr.meta, &filter, maybe_roto_function.clone());
                     !pr.meta.is_empty()
                 });
-            });
+            }
         });
 
         debug!("filtering took {:?}", std::time::Instant::now().duration_since(t0));
@@ -672,7 +668,7 @@ impl Rib {
             },
             Err(e) => {
                 error!("error in search_and_output_routes: {e}");
-                return Err(format!("store error: {e}").into());
+                return Err(format!("store error: {e}"));
             }
         }
 
@@ -681,19 +677,19 @@ impl Rib {
 
     /// Query the store based on `IngressId`/MUI
     pub fn search_routes_for_ingress(
-        afisafi: AfiSafiType,
-        nlri: Nlri<&[u8]>,
-        ingress_id: IngressId,
-        match_options: MatchOptions
+        _afisafi: AfiSafiType,
+        _nlri: Nlri<&[u8]>,
+        _ingress_id: IngressId,
+        _match_options: MatchOptions
     ) -> Result<SearchResult, String> {
         todo!()
     }
 
     /// Query the store based on Origin AS in the AS_PATH
     pub fn search_routes_for_origin_as(
-        afisafi: AfiSafiType,
-        origin_as: Asn,
-        match_options: MatchOptions
+        _afisafi: AfiSafiType,
+        _origin_as: Asn,
+        _match_options: MatchOptions
     ) -> Result<SearchResult, String> {
         todo!()
     }
@@ -873,7 +869,7 @@ impl Serialize for RecordWrapper<'_, '_, '_> {
             HelperWithQueryFilter {
                 ingress: self.1.get_tuple(self.0.multi_uniq_id).unwrap(),
                 status: RouteStatusWrapper(self.0.status),
-                pamap: RotondaPaMapWithQueryFilter(&self.0.meta, &self.2),
+                pamap: RotondaPaMapWithQueryFilter(&self.0.meta, self.2),
             }.serialize(serializer)
         } else {
             Helper {
@@ -892,10 +888,10 @@ impl Serialize for RecordSetWrapper<'_, '_, '_> {
         S: Serializer {
             let mut s = serializer.serialize_seq(Some(self.0.len()))?;
             for e in &self.0.v4 {
-               s.serialize_element(&PrefixRecordWrapper(&e, self.1, self.2))?;
+               s.serialize_element(&PrefixRecordWrapper(e, self.1, self.2))?;
             }
             for e in &self.0.v6 {
-               s.serialize_element(&PrefixRecordWrapper(&e, self.1, self.2))?;
+               s.serialize_element(&PrefixRecordWrapper(e, self.1, self.2))?;
             }
        s.end()
     }
@@ -931,64 +927,13 @@ impl Serialize for RouteStatusWrapper {
 #[derive(Debug)]
 pub enum StoreInsertionEffect {
     RoutesWithdrawn(usize),
+    #[allow(dead_code)]
     RoutesRemoved(usize),
     RouteAdded,
     RouteUpdated,
 }
 
-// XXX this will go, or will perhaps live in rotonda_store
-#[derive(Debug)]
-pub struct StoreInsertionReport {
-    pub change: StoreInsertionEffect,
 
-    /// The number of items stored at the prefix after the MergeUpdate operation.
-    pub item_count: usize,
-
-    /// The time taken to perform the MergeUpdate operation.
-    pub op_duration: Duration,
-}
-
-//------------ StoredValue ---------------------------------------------------
-
-#[derive(Debug, Clone)]
-pub struct StoredValue {
-    value: bytes::Bytes,
-    hash: u64,
-    disk_id: u64,
-    i_time: u64,
-}
-
-// --- Route related helpers ------------------------------------------------------------------------------------------
-
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub struct PeerId {
-    pub ip: Option<IpAddr>,
-    pub asn: Option<Asn>,
-}
-
-impl PeerId {
-    fn new(ip: Option<IpAddr>, asn: Option<Asn>) -> Self {
-        Self { ip, asn }
-    }
-}
-
-impl From<IpAddr> for PeerId {
-    fn from(ip_addr: IpAddr) -> Self {
-        PeerId::new(Some(ip_addr), None)
-    }
-}
-
-pub trait RouteExtra {
-    fn withdraw(&mut self);
-
-    fn peer_id(&self) -> Option<PeerId>;
-
-    fn router_id(&self) -> Option<Arc<RouterId>>;
-
-    fn announced_by(&self, peer_id: &PeerId) -> bool;
-
-    fn is_withdrawn(&self) -> bool;
-}
 
 // --- Tests ----------------------------------------------------------------------------------------------------------
 
@@ -998,7 +943,6 @@ mod tests {
         alloc::System, net::IpAddr, ops::Deref, str::FromStr, sync::Arc,
     };
 
-    use hashbrown::hash_map::DefaultHashBuilder;
     use inetnum::{addr::Prefix, asn::Asn};
     //use roto::types::{
     //    builtin::{BuiltinTypeValue, NlriStatus, PrefixRoute, RotondaId},

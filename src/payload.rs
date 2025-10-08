@@ -1,13 +1,11 @@
-use log::debug;
 use rotonda_store::match_options::QueryResult;
 
 use rotonda_store::prefix_record::Meta;
-use routecore::bgp::communities::{Community, HumanReadableCommunity};
 use routecore::bgp::message::PduParseInfo;
-use routecore::bgp::path_attributes::{OwnedPathAttributes, PathAttribute};
+use routecore::bgp::path_attributes::OwnedPathAttributes;
 use routecore::bgp::path_selection::TiebreakerInfo;
 use routecore::bgp::types::AfiSafiType;
-use serde::ser::{SerializeSeq, SerializeStruct};
+use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 use smallvec::{smallvec, SmallVec};
 use std::fmt;
@@ -220,7 +218,7 @@ impl Serialize for RotondaPaMap {
         s.serialize_field("rpki", &self.rpki_info())?;
         s.serialize_field("pathAttributes", &self.path_attributes().iter().flatten()
             .filter(|pa| pa.type_code() != 14 && pa.type_code() != 15)
-            .map(|pa| pa.to_owned()).flatten().collect::<Vec<_>>())?;
+            .flat_map(|pa| pa.to_owned()).collect::<Vec<_>>())?;
         s.end()
     }
 }
@@ -239,7 +237,7 @@ impl<'a, 'b> Serialize for RotondaPaMapWithQueryFilter<'a, 'b> {
                 &&
                 pa.type_code() != 14 && pa.type_code() != 15
                 )
-            .map(|pa| pa.to_owned()).flatten().collect::<Vec<_>>())?;
+            .flat_map(|pa| pa.to_owned()).collect::<Vec<_>>())?;
         s.end()
     }
 }
@@ -301,6 +299,7 @@ impl Payload {
 
 //------------ Update --------------------------------------------------------
 
+#[allow(clippy::large_enum_variant)] // FIXME
 #[derive(Clone, Debug)]
 pub enum Update {
     Single(Payload),

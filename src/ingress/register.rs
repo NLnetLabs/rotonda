@@ -313,7 +313,7 @@ impl Register {
             let _ = IdAndInfo::from((ingress_id, ingress_info)).write(&mut target);
         }
 
-        while let Some((&ingress_id, ingress_info)) = iter.next() {
+        for (&ingress_id, ingress_info) in iter {
             IdAndInfo::write_seq_sep(&mut target)?;
             IdAndInfo::from((ingress_id, ingress_info)).write(&mut target)?;
         }

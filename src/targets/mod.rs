@@ -32,7 +32,6 @@ use serde::Deserialize;
 /// The component for outputting data.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type")]
-
 pub enum Target {
     #[serde(rename = "file-out")]
     File(file::target::File),

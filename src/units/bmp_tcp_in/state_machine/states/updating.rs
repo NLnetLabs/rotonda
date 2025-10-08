@@ -202,9 +202,6 @@ impl Initiable for Updating {
         self.sys_extra = sys_extra;
     }
 
-    fn sys_name(&self) -> Option<&str> {
-        Some(self.sys_name.as_str())
-    }
 }
 
 impl PeerAware for Updating {
@@ -269,10 +266,6 @@ impl PeerAware for Updating {
         self.peer_states.remove_peer(pph)
     }
 
-    fn num_peer_configs(&self) -> usize {
-        self.peer_states.num_peer_configs()
-    }
-
     fn is_peer_eor_capable(
         &self,
         pph: &PerPeerHeader<Bytes>,
@@ -300,26 +293,4 @@ impl PeerAware for Updating {
         self.peer_states.num_pending_eors()
     }
 
-    fn add_announced_prefix(
-        &mut self,
-        pph: &PerPeerHeader<Bytes>,
-        nlri: Nlri<bytes::Bytes>,
-    ) -> bool {
-        self.peer_states.add_announced_prefix(pph, nlri)
-    }
-
-    fn remove_announced_prefix(
-        &mut self,
-        pph: &PerPeerHeader<Bytes>,
-        nlri: &Nlri<bytes::Bytes>,
-    ) {
-        self.peer_states.remove_announced_prefix(pph, nlri)
-    }
-
-    fn get_announced_prefixes(
-        &self,
-        pph: &PerPeerHeader<Bytes>,
-    ) -> Option<std::collections::hash_set::Iter<Nlri<bytes::Bytes>>> {
-        self.peer_states.get_announced_prefixes(pph)
-    }
 }

@@ -237,7 +237,7 @@ impl BmpStateDetails<Dumping> {
         if let Ok(Some(afi_safi)) = update.is_eor() {
             if self
                 .details
-                .remove_pending_eor(pph, (afi_safi).try_into().unwrap())
+                .remove_pending_eor(pph, afi_safi)
             {
                 // The last pending EOR has been removed and so this signifies
                 // the end of the initial table dump, if we're in the Dumping
@@ -368,9 +368,6 @@ impl Initiable for Dumping {
         self.sys_extra = sys_extra;
     }
 
-    fn sys_name(&self) -> Option<&str> {
-        Some(self.sys_name.as_str())
-    }
 }
 
 impl PeerAware for Dumping {
@@ -435,10 +432,6 @@ impl PeerAware for Dumping {
         self.peer_states.remove_peer(pph)
     }
 
-    fn num_peer_configs(&self) -> usize {
-        self.peer_states.num_peer_configs()
-    }
-
     fn is_peer_eor_capable(
         &self,
         pph: &PerPeerHeader<Bytes>,
@@ -466,26 +459,4 @@ impl PeerAware for Dumping {
         self.peer_states.num_pending_eors()
     }
 
-    fn add_announced_prefix(
-        &mut self,
-        pph: &PerPeerHeader<Bytes>,
-        nlri: Nlri<bytes::Bytes>,
-    ) -> bool {
-        self.peer_states.add_announced_prefix(pph, nlri)
-    }
-
-    fn remove_announced_prefix(
-        &mut self,
-        pph: &PerPeerHeader<Bytes>,
-        nlri: &Nlri<bytes::Bytes>,
-    ) {
-        self.peer_states.remove_announced_prefix(pph, nlri)
-    }
-
-    fn get_announced_prefixes(
-        &self,
-        pph: &PerPeerHeader<Bytes>,
-    ) -> Option<std::collections::hash_set::Iter<Nlri<bytes::Bytes>>> {
-        self.peer_states.get_announced_prefixes(pph)
-    }
 }

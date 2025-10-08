@@ -22,6 +22,7 @@ use hex_slice::AsHex;
 use std::sync::RwLock;
 const MAX_RECENT_PARSE_ERRORS: usize = 10;
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, Default)]
 pub struct ParseError {
     pub when: DateTime<Utc>,
@@ -81,6 +82,7 @@ impl ParseErrorsRingBuffer {
         }
     }
 
+    #[allow(dead_code)]
     pub fn get(&self) -> (Vec<ParseError>, Vec<ParseError>) {
         if let Ok(locked) = self.errors.read() {
             if locked.len() < MAX_RECENT_PARSE_ERRORS {

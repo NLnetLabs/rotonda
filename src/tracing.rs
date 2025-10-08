@@ -103,7 +103,7 @@ impl Eq for TraceMsg {}
 
 //----------- Trace ----------------------------------------------------------
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Trace {
     msgs: Vec<TraceMsg>,
 }

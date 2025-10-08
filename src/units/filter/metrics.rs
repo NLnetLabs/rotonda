@@ -22,6 +22,7 @@ pub struct RotoFilterMetrics {
     pub num_filtered_messages: Arc<AtomicUsize>,
 }
 
+#[allow(dead_code)]
 impl RotoFilterMetrics {
     pub fn router_metrics(
         &self,

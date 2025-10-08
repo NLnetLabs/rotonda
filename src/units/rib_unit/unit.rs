@@ -17,7 +17,6 @@ use rotonda_store::{errors::PrefixStoreError, match_options::{IncludeHistory, Ma
 use std::io::prelude::*;
 
 use chrono::Utc;
-use hash_hasher::{HashBuildHasher, HashedSet};
 use log::{debug, error, info, log_enabled, trace, warn};
 use non_empty_vec::NonEmpty;
 
@@ -32,11 +31,9 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use super::{
-    metrics::RibUnitMetrics, rib::{Rib, RouteExtra, StoreInsertionEffect}, rpki::{RovStatus, RovStatusUpdate, RtrCache}, status_reporter::RibUnitStatusReporter
+    metrics::RibUnitMetrics, rib::{Rib, StoreInsertionEffect}, rpki::{RovStatus, RovStatusUpdate, RtrCache}, status_reporter::RibUnitStatusReporter
 };
-use super::{
-    rib::StoreInsertionReport, statistics::RibMergeUpdateStatistics,
-};
+use super::statistics::RibMergeUpdateStatistics;
 
 
 pub(crate) type RotoFuncPre = roto::TypedFunc<
@@ -176,6 +173,7 @@ pub struct RibUnit {
     /// The set of units to receive updates from.
     pub sources: NonEmpty<DirectLink>,
 
+    // TODO remove query_limits
     #[serde(default = "RibUnit::default_query_limits")]
     pub query_limits: QueryLimits,
 
@@ -191,6 +189,7 @@ pub struct RibUnit {
     #[serde(default)]
     pub rib_type: RibType,
 
+    //TODO remove vrib_upstream
     /// Virtual RIB upstream physical RIB. Only used when rib_type is Virtual.
     #[serde(default)]
     pub vrib_upstream: Option<Link>,
@@ -225,7 +224,7 @@ pub struct RibUnitRunner {
     roto_function_pre: Option<RotoFuncPre>,
     roto_function_vrp_update: Option<RotoFuncVrpUpdate>,
     roto_function_vrp_update_post: Option<RotoFuncRovStatusUpdate>,
-    roto_function_post: Option<RotoFuncPost>,
+    _roto_function_post: Option<RotoFuncPost>,
     roto_context: Arc<Mutex<Ctx>>,
     gate: Arc<Gate>,
     #[allow(dead_code)]
@@ -236,10 +235,13 @@ pub struct RibUnitRunner {
     ingress_register: Arc<ingress::Register>,
     rtr_cache: Arc<RtrCache>,
     filter_name: Arc<ArcSwap<FilterName>>,
+    #[allow(dead_code)] // this will go
     pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
+    #[allow(dead_code)] // this will go
     rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
     status_reporter: Arc<RibUnitStatusReporter>,
     _process_metrics: Arc<TokioTaskMetrics>,
+    #[allow(dead_code)] // this will go
     tracer: Arc<Tracer>,
 }
 
@@ -273,7 +275,7 @@ impl RibUnitRunner {
         mut component: Component,
         filter_name: FilterName,
         rib_type: RibType,
-        vrib_upstream: Option<Link>,
+        _vrib_upstream: Option<Link>,
     ) -> Result<Self, PrefixStoreError> {
         let unit_name = component.name().clone();
         let gate = Arc::new(gate);
@@ -309,7 +311,7 @@ impl RibUnitRunner {
             });
 
         // The rib-in-post filter is not used yet.
-        let roto_function_post: Option<RotoFuncPost> = None;
+        let _roto_function_post: Option<RotoFuncPost> = None;
         //let roto_function_post: Option<RotoFuncPost> = roto_compiled
         //    .and_then(|c| {
         //        let mut c = c.lock().unwrap();
@@ -380,7 +382,7 @@ impl RibUnitRunner {
             roto_function_pre,
             roto_function_vrp_update,
             roto_function_vrp_update_post,
-            roto_function_post,
+            _roto_function_post,
             roto_context: roto_context.clone(),
             gate,
             rib,
@@ -398,17 +400,17 @@ impl RibUnitRunner {
 
     #[cfg(test)]
     pub(crate) fn mock(
-        roto_script: &str,
+        _roto_script: &str,
         rib_type: RibType,
     ) -> Result<(Self, crate::comms::GateAgent), PrefixStoreError> {
         //use crate::common::roto::RotoScriptOrigin;
 
         use crate::roto_runtime::types::RotoScripts;
 
-        let roto_scripts = RotoScripts::default();
+        let _roto_scripts = RotoScripts::default();
         let (gate, gate_agent) = Gate::new(0);
         let gate = gate.into();
-        let query_limits =
+        let _query_limits =
             Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
         let ingress_register: Arc<ingress::Register> = Default::default();
         let ctx = Arc::new(Mutex::new(Ctx::empty()));
@@ -437,7 +439,7 @@ impl RibUnitRunner {
             tracer,
             roto_function_pre: None,
             roto_function_vrp_update: None,
-            roto_function_post: None,
+            _roto_function_post: None,
             roto_function_vrp_update_post: None,
             ingress_register: Arc::new(ingress::Register::new()),
             roto_context: ctx.clone()
@@ -451,10 +453,6 @@ impl RibUnitRunner {
         self.status_reporter.clone()
     }
 
-    #[cfg(test)]
-    pub(super) fn gate(&self) -> Arc<Gate> {
-        self.gate.clone()
-    }
 
     #[cfg(test)]
     pub(super) fn rib(&self) -> Arc<Rib> {
@@ -504,11 +502,11 @@ impl RibUnitRunner {
                             new_config:
                                 Unit::RibUnit(RibUnit {
                                     sources: new_sources,
-                                    query_limits: new_query_limits,
+                                    query_limits: _new_query_limits,
                                     filter_name: new_filter_name,
                                     //rib_keys: new_rib_keys,
                                     rib_type: new_rib_type,
-                                    vrib_upstream: new_vrib_upstream,
+                                    vrib_upstream: _new_vrib_upstream,
                                 }),
                         } => {
                             arc_self.status_reporter.reconfigured();
@@ -663,28 +661,8 @@ impl RibUnitRunner {
                 self.gate.update_data(update).await;
             }
 
-            Update::QueryResult(uuid, upstream_query_result) => {
-                trace!("Re-processing received query {uuid} result");
-                let processed_res = match upstream_query_result {
-                    Ok(res) => Ok(self.reprocess_query_results(res).await),
-                    Err(err) => Err(err),
-                };
-
-                // Were we waiting for this result?
-                if let Some(tx) =
-                    self.pending_vrib_query_results.remove(&uuid)
-                {
-                    // Yes, send the result to the waiting HTTP request processing task
-                    trace!("Notifying waiting HTTP request processor of query {uuid} results");
-                    let tx = Arc::try_unwrap(tx).unwrap(); // TODO: handle this unwrap
-                    tx.send(processed_res).unwrap(); // TODO: handle this unwrap
-                } else {
-                    // No, pass it on to the next virtual RIB
-                    trace!("Sending re-processed triggered query {uuid} results downstream");
-                    self.gate
-                        .update_data(Update::QueryResult(uuid, processed_res))
-                        .await;
-                }
+            Update::QueryResult(..) => {
+                todo!("remove QueryResult from Update enum");
             }
             Update::Rtr(rtr_update) => {
                 use crate::units::RtrUpdate;
@@ -1333,225 +1311,6 @@ impl RibUnitRunner {
         osms
     }
 
-    async fn reprocess_query_results(
-        &self,
-        //res: QueryResult<RotondaRoute>,
-        res: QueryResult<RotondaPaMap>,
-    ) -> QueryResult<RotondaPaMap> {
-        let mut processed_res = QueryResult::<RotondaPaMap> {
-            match_type: res.match_type,
-            prefix: res.prefix,
-            records: vec![],
-            less_specifics: None,
-            more_specifics: None,
-        };
-
-        let is_in_prefix_meta_set = !res.records.is_empty();
-
-        for record in res.records {
-            let (mui, ltime, status) =
-                (record.multi_uniq_id, record.ltime, record.status);
-
-            if let Some(meta) = self.reprocess_rib_value(record.meta).await {
-                processed_res.records.push(
-                    Record::<RotondaPaMap>::new(
-                        mui, ltime, status, meta,
-                    ),
-                );
-            }
-        }
-
-        if let Some(record_set) = &res.less_specifics {
-            processed_res.less_specifics =
-                self.reprocess_record_set(record_set).await;
-        }
-
-        if let Some(record_set) = &res.more_specifics {
-            processed_res.more_specifics =
-                self.reprocess_record_set(record_set).await;
-        }
-
-        if log_enabled!(log::Level::Trace) {
-            let is_out_prefix_meta_set =
-                !processed_res.records.is_empty();
-            let exact_match_diff = (is_in_prefix_meta_set as u8)
-                - (is_out_prefix_meta_set as u8);
-            let less_specifics_diff =
-                res.less_specifics.map_or(0, |v| v.len())
-                    - processed_res
-                        .less_specifics
-                        .as_ref()
-                        .map_or(0, |v| v.len());
-            let more_specifics_diff =
-                res.more_specifics.map_or(0, |v| v.len())
-                    - processed_res
-                        .more_specifics
-                        .as_ref()
-                        .map_or(0, |v| v.len());
-            if exact_match_diff != 0
-                || less_specifics_diff != 0
-                || more_specifics_diff != 0
-            {
-                trace!("Virtual RIB reprocessing of QueryResult discarded some results: exact: {}, less_specific: {}, more_specific: {}",
-                    exact_match_diff, less_specifics_diff, more_specifics_diff);
-            }
-        }
-
-        processed_res
-    }
-
-    /// Re-process a value from our Rib through our roto script.
-    ///
-    /// Used by virtual RIBs when a query result flows through them from West to East as a result of a query from a virtual
-    /// RIB to the East made against a physical RIB to the West.
-    async fn reprocess_rib_value(
-        &self,
-        //rib_value: RotondaRoute,
-        rib_value: RotondaPaMap,
-    ) -> Option<RotondaPaMap> {
-        /*
-        let mut new_values = HashedSet::with_capacity_and_hasher(
-            1,
-            HashBuildHasher::default(),
-        );
-        */
-
-        let tracer = BoundTracer::new(self.tracer.clone(), self.gate.id());
-
-        // XXX where is our ingress_id ?
-        //let prov = self.ingresses.get(
-
-        // XXX What is the RouteContext for a re-processed RibValue?
-        // We can add a bool to RouteContext signalling we are
-        // re-processing a value and the bgp_pdu is (likely) not available
-        // in this context. Then, Roto filters can act upon that bool.
-        // This might cause discrepancies between 'normal' processing and
-        // re-processing, though.
-
-        //let ctx = RouteContext::for_reprocessing(
-        //    NlriStatus::UpToDate, // XXX is this
-        //    provenance,
-        //);
-        let _ctx = RouteContext::for_reprocessing();
-
-        trace!("Re-processing route");
-        todo!(); // figure out how to construct a Payload when we do not have
-                 // the RotondaRoute anymore, only the RotondaPamap.
-                 // This will depend on what type the roto function expects.
-                 // If it needs the RotondaRoute, we need to change the
-                 // signature of fn reprocess_rib_value and call it
-                 // differently from reprocess_record_set and
-                 // reprocess_query_results
-                 /*
-                 let payload = Payload::new(
-                     rib_value,
-                     ctx.clone(),
-                     None
-                 );
-                 */
-
-        todo!() // filter using new roto
-
-        // LH:
-        // Let's see if I get this straight. It seems that payload.filter(..)
-        // comes from trait Filterable which always returns a
-        // SmallVec<Payload> even if the input is a single Payload.
-        // However, we work on a single RibValue here, so whatever comes out
-        // of the filter is a SmallVec of either 0 or 1 items.
-        // or perhaps not: can a single Payload going in result in both the
-        // input Payload (PrefixRoute) _AND_ a OutputStreamMessage (is that
-        // something going out South?)
-
-        //let res: Option<RibValue>;
-
-        /*
-            if let Ok(filtered_payloads) = Self::VM.with(|vm| {
-                payload.filter(
-                    |value, received, trace_id, context| {
-                        self.roto_scripts.exec_with_tracer(
-                            vm,
-                            &self.filter_name.load(),
-                            value,
-                            received,
-                            tracer.clone(),
-                            trace_id,
-                            context
-                        )
-                    },
-                    |_source_id| {
-                        /* TODO:
-                         * self.status_reporter.message_filtered(source_id) */
-                    }
-                )
-            }) {
-                // LH: so, filtered_payloads is a mixed SmallVec where a Payload
-                // can be either a Output Stream Message ('south') and/or a
-                // Payload to be passed on east-wards.
-                filtered_payloads
-                    .into_iter()
-                    //.filter(|payload| {
-                    .find(|payload| {
-                        !matches!(
-                            payload.rx_value,
-                            TypeValue::OutputStreamMessage(_)
-                        )
-                    })
-                .map(|payload| {
-                    // Add this processed query result route into the new query result
-                    //let hash = self
-                    //    .rib
-                    //    .load()
-                    //    .precompute_hash_code(&payload.rx_value);
-                    /*
-                       PreHashedTypeValue::new(
-                       payload.rx_value,
-                       route.provenance(),
-                    /*hash*/)
-                    .into()
-                        */
-                        payload.rx_value.try_into().unwrap()
-                })
-            } else {
-                None
-            }//;
-
-            //res
-
-            //if new_values.is_empty() {
-            //    None
-            //} else {
-            //    Some(new_values.into())
-            //}
-        */
-    }
-
-    async fn reprocess_record_set(
-        &self,
-        //record_set: &RecordSet<RotondaRoute>,
-        record_set: &RecordSet<RotondaPaMap>,
-        //) -> Option<RecordSet<RotondaRoute>> {
-    ) -> Option<RecordSet<RotondaPaMap>> {
-        //let mut new_record_set = RecordSet::<RotondaRoute>::new();
-        let mut new_record_set = RecordSet::<RotondaPaMap>::new();
-
-        for record in record_set.iter() {
-            // XXX can we safely do this?
-            for mut pub_rec in record.meta {
-                if let Some(rib_value) =
-                    self.reprocess_rib_value(pub_rec.meta).await
-                {
-                    pub_rec.meta = rib_value;
-                    new_record_set.push(record.prefix, vec![pub_rec]);
-                }
-            }
-        }
-
-        if !new_record_set.is_empty() {
-            Some(new_record_set)
-        } else {
-            None
-        }
-    }
 }
 
 // --- Tests -----------------------------------------------------------------

@@ -115,7 +115,7 @@ impl<T: Allocator + Send + Sync> metrics::Source for TrackingAllocator<T> {
 mod tests {
     use std::{alloc::System, sync::Arc};
 
-    use hashbrown::hash_map::DefaultHashBuilder;
+    use hashbrown::DefaultHashBuilder;
 
     use crate::tests::util::internal::get_testable_metrics_snapshot;
 

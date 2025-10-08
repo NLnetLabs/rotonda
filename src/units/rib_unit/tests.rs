@@ -1,8 +1,6 @@
 use crate::common::status_reporter::AnyStatusReporter;
 use crate::roto_runtime::types::{explode_announcements, explode_withdrawals, FreshRouteContext, Provenance, RouteContext};
-use crate::tests::util::internal::{
-    get_testable_metrics_snapshot, MOCK_ROUTER_ID,
-};
+use crate::tests::util::internal::get_testable_metrics_snapshot;
 use crate::units::RibType;
 use crate::{
     bgp::encode::{mk_bgp_update, Announcements, Prefixes},
@@ -528,7 +526,6 @@ async fn time_store_op_durations() {
 
 #[ignore]
 #[tokio::test(flavor = "multi_thread")]
-#[cfg(not(tarpaulin))]
 async fn count_insert_retries_during_forced_contention() {
     /*
     const DELAY: Duration = Duration::from_millis(10);
@@ -741,6 +738,7 @@ fn mk_route_update_with_communities(
     //))))
 }
 
+#[allow(dead_code)]
 async fn is_filtered(_runner: &RibUnitRunner, _update: Update) -> bool {
     todo!() // before we start using this again, adapt it to the new codebase
             /*

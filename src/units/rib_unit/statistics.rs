@@ -9,13 +9,6 @@ pub struct CumAvg {
 }
 
 impl CumAvg {
-    pub fn add(&mut self, v: u64) {
-        let v = v as f64;
-        let n = self.n as f64;
-        self.ca = (v + (n * self.ca)) / (n + 1.0);
-        self.n += 1;
-    }
-
     pub fn value(&self) -> f64 {
         self.ca
     }
@@ -61,32 +54,6 @@ pub struct RibMergeUpdateStatistics {
     other: RwLock<TimingBuckets>,
 }
 
-impl RibMergeUpdateStatistics {
-    pub fn add(
-        &self,
-        microseconds: u64,
-        hashset_size: usize,
-        withdraw: bool,
-    ) {
-        let bucket = match withdraw {
-            true => &self.withdraw,
-            false => &self.other,
-        };
-
-        let mut unlocked_bucket = bucket.write().unwrap();
-
-        let range = match hashset_size {
-            0..=1 => &mut unlocked_bucket.le1,
-            2..=10 => &mut unlocked_bucket.le10,
-            11..=100 => &mut unlocked_bucket.le100,
-            101..=1000 => &mut unlocked_bucket.le1000,
-            1001..=10000 => &mut unlocked_bucket.le10000,
-            _ => &mut unlocked_bucket.leInf,
-        };
-
-        range.add(microseconds);
-    }
-}
 
 impl std::fmt::Display for RibMergeUpdateStatistics {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

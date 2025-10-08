@@ -1,4 +1,3 @@
-#![cfg(not(tarpaulin_include))]
 use clap::{crate_authors, crate_version, error::ErrorKind, Command};
 use futures::{
     future::{select, Either},

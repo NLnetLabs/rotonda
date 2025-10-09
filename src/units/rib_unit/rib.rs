@@ -29,19 +29,6 @@ use crate::{
 
 use super::{http_ng::Include, QueryFilter};
 
-// -------- PhysicalRib ------------------------------------------------------
-
-// XXX is this actually used for something in the Store right now?
-// impl Meta for RotondaRoute {
-//     type Orderable<'a> = OrdRoute<'a, Rfc4271>;
-
-//     type TBI = TiebreakerInfo;
-
-//     fn as_orderable(&self, _tbi: Self::TBI) -> Self::Orderable<'_> {
-//         todo!()
-//     }
-// }
-
 type Store = StarCastRib<RotondaPaMap, MemoryOnlyConfig>;
 
 type RotoHttpFilter = roto::TypedFunc<
@@ -65,16 +52,6 @@ pub struct Rib {
 struct Multicast(bool);
 
 impl Rib {
-    //pub fn new_physical(ingress_register: Arc<ingress::Register>) -> Result<Self, PrefixStoreError> {
-    //    Ok(Rib {
-    //        unicast: Arc::new(Some(Store::try_default()?)),
-    //        multicast: Arc::new(Some(Store::try_default()?)),
-    //        other_fams: HashMap::new(),
-    //        ingress_register,
-    //        roto_package: None,
-    //    })
-    //}
-
     pub fn new(
         ingress_register: Arc<ingress::Register>,
         roto_package: Option<Arc<RotoPackage>>,
@@ -88,24 +65,6 @@ impl Rib {
             roto_package,
             roto_context,
         })
-    }
-
-    // unused
-    //pub fn new_virtual() -> Self {
-    //    Rib {
-    //        unicast: Arc::new(None),
-    //        multicast: Arc::new(None),
-    //        other_fams: HashMap::new(),
-    //    }
-    //}
-
-    // XXX LH perhaps this should become a characteristic of the Unit instead
-    // of the Rib. Currently, rib_unit::unit::insert_payload() is the only
-    // place that calls this is_physical() and uses it for an early return.
-    // Instead, we could make it a bool flag on the Unit and get rid of the
-    // Option wrapped stores in Rib itself?
-    pub fn is_physical(&self) -> bool {
-        self.unicast.is_some()
     }
 
     pub fn store(&self) -> Result<&Store, PrefixStoreError> {

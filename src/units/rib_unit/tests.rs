@@ -1,7 +1,6 @@
 use crate::common::status_reporter::AnyStatusReporter;
 use crate::roto_runtime::types::{explode_announcements, explode_withdrawals, FreshRouteContext, Provenance, RouteContext};
 use crate::tests::util::internal::get_testable_metrics_snapshot;
-use crate::units::RibType;
 use crate::{
     bgp::encode::{mk_bgp_update, Announcements, Prefixes},
     payload::{Payload, Update},
@@ -51,7 +50,7 @@ async fn process_non_route_update() {
 
 #[tokio::test]
 async fn process_update_single_route() {
-    let (runner, _) = RibUnitRunner::mock("", RibType::Physical).unwrap();
+    let (runner, _) = RibUnitRunner::mock("").unwrap();
 
     // Given a BGP update containing a single route announcement
     let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
@@ -71,7 +70,7 @@ async fn process_update_single_route() {
 #[tokio::test]
 #[ignore = "this is really different after refactoring of the store"]
 async fn process_update_withdraw_unannounced_route() {
-    let (runner, _) = RibUnitRunner::mock("", RibType::Physical).unwrap();
+    let (runner, _) = RibUnitRunner::mock("").unwrap();
 
     // Given a BGP update containing a single route withdrawal
     let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
@@ -101,7 +100,7 @@ async fn process_update_withdraw_unannounced_route() {
 
 #[tokio::test]
 async fn process_update_same_route_twice() {
-    let (runner, _) = RibUnitRunner::mock("", RibType::Physical).unwrap();
+    let (runner, _) = RibUnitRunner::mock("").unwrap();
 
     // Given a BGP update containing a single route announcement
     let prefix = Prefix::from_str("127.0.0.1/32").unwrap();
@@ -142,10 +141,7 @@ async fn process_update_same_route_twice() {
 #[tokio::test]
 async fn process_update_equivalent_route_twice() {
     /*
-    let (runner, _) = RibUnitRunner::mock(
-        "",
-        RibType::Physical,
-    );
+    let (runner, _) = RibUnitRunner::mock("");
 
     // Given a BGP update containing a single route announcement
     let prefix = Prefix::from_str("127.0.0.1/32").unwrap();

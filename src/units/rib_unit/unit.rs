@@ -140,34 +140,6 @@ pub struct QueryLimits {
     pub more_specifics: MoreSpecifics,
 }
 
-#[derive(Copy, Clone, Debug, Default, Deserialize)]
-pub enum RibType {
-    /// A physical RIB has zero or one roto scripts and a prefix store.
-    /// Queries to its HTTP API are answered using the local store.
-    #[default]
-    Physical,
-
-    /// A virtual RIB has one roto script and no prefix store. Queries to its
-    /// HTTP API are answered by sending a command to the nearest physical Rib
-    /// to the West of the virtual RIB. A `Link` to the gate of that physical
-    /// Rib is automatically injected as the vrib_upstream value in the
-    /// RibUnit config below by the config loading process so that it can be
-    /// used to send a GateCommand::Query message upstream to the physical Rib
-    /// unit that owns the Gate that the Link refers to.
-    Virtual,
-
-    /// The index (zero-based) indicates how far from the physical RIB this
-    /// vRIB is. This is used to suffix the HTTP API path differently for each
-    /// vRIB compared to each other and the pRIB.
-    GeneratedVirtual(u8),
-}
-
-impl PartialEq for RibType {
-    fn eq(&self, other: &Self) -> bool {
-        core::mem::discriminant(self) == core::mem::discriminant(other)
-    }
-}
-
 #[derive(Clone, Debug, Deserialize)]
 pub struct RibUnit {
     /// The set of units to receive updates from.
@@ -184,15 +156,6 @@ pub struct RibUnit {
     /// one with its `rib_type` set to `Virtual`.
     #[serde(default)]
     pub filter_name: Option<FilterName>,
-
-    /// What type of RIB is this?
-    #[serde(default)]
-    pub rib_type: RibType,
-
-    //TODO remove vrib_upstream
-    /// Virtual RIB upstream physical RIB. Only used when rib_type is Virtual.
-    #[serde(default)]
-    pub vrib_upstream: Option<Link>,
 }
 
 impl RibUnit {
@@ -206,8 +169,6 @@ impl RibUnit {
             gate,
             component,
             self.filter_name.unwrap_or_default(),
-            self.rib_type,
-            self.vrib_upstream,
         )
         .map_err(|_| Terminated)?
         .run(self.sources, waitpoint)
@@ -231,12 +192,9 @@ pub struct RibUnitRunner {
     // A strong ref needs to be held to http_processor but not used otherwise
     // the HTTP resource manager will discard its registration
     rib: Arc<ArcSwap<Rib>>, // XXX LH: why the ArcSwap here?
-    rib_type: RibType,
     ingress_register: Arc<ingress::Register>,
     rtr_cache: Arc<RtrCache>,
     filter_name: Arc<ArcSwap<FilterName>>,
-    #[allow(dead_code)] // this will go
-    pending_vrib_query_results: Arc<PendingVirtualRibQueryResults>,
     #[allow(dead_code)] // this will go
     rib_merge_update_stats: Arc<RibMergeUpdateStatistics>,
     status_reporter: Arc<RibUnitStatusReporter>,
@@ -262,20 +220,12 @@ impl std::fmt::Debug for RibUnitRunner {
 
 impl AnyDirectUpdate for RibUnitRunner {}
 
-pub type QueryId = Uuid;
-pub type QueryOperationResult = Result<QueryResult<RotondaPaMap>, String>;
-pub type QueryOperationResultSender = oneshot::Sender<QueryOperationResult>;
-pub type PendingVirtualRibQueryResults =
-    FrimMap<QueryId, Arc<QueryOperationResultSender>>;
-
 impl RibUnitRunner {
     #[allow(clippy::too_many_arguments)]
     fn new(
         gate: Gate,
         mut component: Component,
         filter_name: FilterName,
-        rib_type: RibType,
-        _vrib_upstream: Option<Link>,
     ) -> Result<Self, PrefixStoreError> {
         let unit_name = component.name().clone();
         let gate = Arc::new(gate);
@@ -340,7 +290,6 @@ impl RibUnitRunner {
         }
 
         let roto_context = Arc::new(Mutex::new(roto_context));
-        //let rib = Arc::new(ArcSwap::from_pointee(Rib::new_physical(component.ingresses())?));
         let rib = Arc::new(ArcSwap::from_pointee(Rib::new(
                     component.ingresses(),
                     component.roto_package().clone(),
@@ -348,7 +297,6 @@ impl RibUnitRunner {
                     )?));
         let rib_merge_update_stats: Arc<RibMergeUpdateStatistics> =
             Default::default();
-        let pending_vrib_query_results = Arc::new(FrimMap::default());
 
         // Setup metrics
         let _process_metrics = Arc::new(TokioTaskMetrics::new());
@@ -386,12 +334,10 @@ impl RibUnitRunner {
             roto_context: roto_context.clone(),
             gate,
             rib,
-            rib_type,
             rtr_cache,
             ingress_register: component.ingresses(),
             status_reporter,
             filter_name,
-            pending_vrib_query_results,
             _process_metrics,
             rib_merge_update_stats,
             tracer,
@@ -401,7 +347,6 @@ impl RibUnitRunner {
     #[cfg(test)]
     pub(crate) fn mock(
         _roto_script: &str,
-        rib_type: RibType,
     ) -> Result<(Self, crate::comms::GateAgent), PrefixStoreError> {
         //use crate::common::roto::RotoScriptOrigin;
 
@@ -416,7 +361,6 @@ impl RibUnitRunner {
         let ctx = Arc::new(Mutex::new(Ctx::empty()));
         let rib = Rib::new(ingress_register.clone(), None, ctx.clone())?;
         let status_reporter = RibUnitStatusReporter::default().into();
-        let pending_vrib_query_results = Arc::new(FrimMap::default());
         let filter_name =
             Arc::new(ArcSwap::from_pointee(FilterName::default()));
         let _process_metrics = Arc::new(TokioTaskMetrics::new());
@@ -429,11 +373,9 @@ impl RibUnitRunner {
         let runner = Self {
             gate,
             rib: shared_rib,
-            rib_type,
             status_reporter,
             rtr_cache: Default::default(),
             filter_name,
-            pending_vrib_query_results,
             _process_metrics,
             rib_merge_update_stats,
             tracer,
@@ -503,19 +445,9 @@ impl RibUnitRunner {
                                     sources: new_sources,
                                     query_limits: _new_query_limits,
                                     filter_name: new_filter_name,
-                                    //rib_keys: new_rib_keys,
-                                    rib_type: new_rib_type,
-                                    vrib_upstream: _new_vrib_upstream,
                                 }),
                         } => {
                             arc_self.status_reporter.reconfigured();
-
-                            if new_rib_type != arc_self.rib_type {
-                                warn!(
-                                    "Ignoring changed rib_type: {:?} -> {:?}",
-                                    arc_self.rib_type, new_rib_type
-                                );
-                            }
 
                             // Replace the roto script with the new one
                             let old_filter_name =
@@ -574,36 +506,8 @@ impl RibUnitRunner {
                             report.set_graph_status(arc_self.gate.metrics());
                         }
 
-                        GateStatus::Triggered {
-                            data:
-                                TriggerData::MatchPrefix(
-                                    uuid,
-                                    prefix,
-                                    match_options,
-                                ),
-                        } => {
-                            assert!(matches!(
-                                arc_self.rib_type,
-                                RibType::Physical
-                            ));
-
-                            let res = {
-                                // XXX LH as long as the HTTP API (and
-                                // TriggerData) is limited to 'simple
-                                // prefixes', we default to unicast for now.
-                                // Eventually, this should facilitate all
-                                // afisafis.
-                                arc_self
-                                    .rib
-                                    .load()
-                                    .match_prefix(&prefix, &match_options)
-                            };
-
-                            trace!("Sending query {uuid} results downstream");
-                            arc_self
-                                .gate
-                                .update_data(Update::QueryResult(uuid, res))
-                                .await;
+                        GateStatus::Triggered { .. } => {
+                            unimplemented!("got a GateStatus::Triggered")
                         }
 
                         _ => { /* Nothing to do */ }
@@ -660,9 +564,6 @@ impl RibUnitRunner {
                 self.gate.update_data(update).await;
             }
 
-            Update::QueryResult(..) => {
-                todo!("remove QueryResult from Update enum");
-            }
             Update::Rtr(rtr_update) => {
                 use crate::units::RtrUpdate;
                 use rpki::rtr::Payload as RtrPayload;
@@ -1190,9 +1091,6 @@ impl RibUnitRunner {
 
     pub fn insert_payload(&self, payload: &Payload) {
         let rib = self.rib.load();
-        if !rib.is_physical() {
-            return;
-        }
 
         let pre_insert = std::time::Instant::now();
 

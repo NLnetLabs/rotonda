@@ -12,7 +12,6 @@ use log::{error, trace};
 use serde::Deserialize;
 use serde_with::serde_as;
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -20,9 +19,6 @@ use std::{borrow, error, fmt, fs, io, ops};
 use toml::{Spanned, Value};
 
 //------------ Constants -----------------------------------------------------
-
-const CFG_UNITS: &str = "units";
-const CFG_TARGETS: &str = "targets";
 
 const ARG_CONFIG: &str = "config";
 
@@ -346,6 +342,10 @@ impl ConfigFile {
     }
 
     pub fn new(bytes: Vec<u8>, source: Source) -> Result<Self, io::Error> {
+        // LH: leaving this comment here to figure out at a later point where/how we can improve
+        //     the TOML loading. Note that the vrib part does not make sense anymore as we've
+        //     removed all the vrib stuff.
+        //
         // Handle the special case of a rib unit that is actually a physical
         // rib unit and one or more virtual rib units. Rather than have the
         // user manually configure these separate rib units by hand in the
@@ -370,7 +370,7 @@ impl ConfigFile {
         // this expansion capability to give at least some verification that
         // it is not obviously broken, but it's not enough.
         let config_str = String::from_utf8_lossy(&bytes);
-        let mut toml: Value =
+        let toml: Value =
             if let Ok(toml) = toml::de::from_str(&config_str) {
                 toml
             } else {
@@ -379,17 +379,6 @@ impl ConfigFile {
                     "Cannot parse config file",
                 ));
             };
-        let mut source_remappings = None;
-
-        if let Some(Value::Table(units)) = toml.get_mut(CFG_UNITS) {
-            source_remappings = Some(Self::expand_shorthand_vribs(units))
-        }
-
-        if let Some(source_remappings) = source_remappings {
-            if let Some(Value::Table(targets)) = toml.get_mut(CFG_TARGETS) {
-                Self::remap_sources(targets, &source_remappings);
-            }
-        }
 
         let config_str = toml::to_string(&toml).unwrap();
 
@@ -432,185 +421,6 @@ impl ConfigFile {
         let line = line - 1;
         let col = self.line_starts[line] - pos;
         LineCol { line, col }
-    }
-
-    fn expand_shorthand_vribs(
-        units: &mut toml::Table,
-    ) -> HashMap<String, String> {
-        let mut extra_units = HashMap::<String, Value>::new();
-        let mut source_remappings = HashMap::<String, String>::new();
-
-        for (unit_name, unit_table_value) in units.iter_mut() {
-            if let Value::Table(unit_table) = unit_table_value {
-                let unit_type = unit_table.get("type");
-                let rib_type = unit_table.get("rib_type");
-                #[allow(clippy::collapsible_if)]
-                if unit_type == Some(&Value::String("rib".to_string())) {
-                    if Option::is_none(&rib_type)
-                        || rib_type
-                            == Some(&Value::String("Physical".to_string()))
-                    {
-                        if let Some(Value::Array(filter_names)) =
-                            unit_table.remove("filter_names")
-                        {
-                            if filter_names.len() > 1 {
-                                // This is a shorthand definition of a physical RIB with one or more virtual RIBs.
-                                // Split them out, e.g.:
-                                //
-                                //     [unit.shorthand_unit]
-                                //     sources = ["a"]
-                                //     type = "rib"
-                                //     filter_names = ["pRib.roto", "vRib1.roto", "vRib2.roto"]
-                                //
-                                //     [unit.some_other_unit]
-                                //     sources = ["shorthand_unit"]
-                                //
-                                // Expands to:
-                                //
-                                //     [unit.shorthand_unit]
-                                //     sources = ["a"]
-                                //     type = "rib"
-                                //     filter_name = "pRib.roto"             # <-- changed
-                                //     rib_type = "Physical"                 # <-- new
-                                //
-                                //     [unit.some_other_unit]
-                                //     sources = ["shorthand_unit"]          # <-- no longer correct, see *1 below
-                                //
-                                //     [unit.shorthand_unit-vRIB-0]          # new
-                                //     sources = ["shorthand_unit"]
-                                //     type = "rib"
-                                //     filter_name = "vRib1.roto"
-                                //     vrib_upstream = "shorthand_unit"
-                                //
-                                //     [unit.shorthand_unit-vRIB-0.rib_type] # new
-                                //     GeneratedVirtual = 0
-                                //
-                                //     [unit.shorthand_unit-vRIB-1]
-                                //     sources = ["shorthand_unit-vRIB-0"]   # new
-                                //     type = "rib"
-                                //     filter_name = "vRib2.roto"
-                                //     vrib_upstream = "shorthand_unit"
-                                //
-                                //     [unit.shorthand_unit-vRIB-1.rib_type] # new
-                                //     GeneratedVirtual = 1
-                                let mut source = unit_name.clone();
-                                for (n, filter_name) in
-                                    filter_names[1..].iter().enumerate()
-                                {
-                                    let mut new_unit_table =
-                                        unit_table.clone();
-                                    let new_unit_name =
-                                        format!("{unit_name}-vRIB-{n}");
-                                    new_unit_table.insert(
-                                        "sources".to_string(),
-                                        Value::Array(vec![Value::String(
-                                            source.clone(),
-                                        )]),
-                                    );
-                                    new_unit_table.insert(
-                                        "filter_name".to_string(),
-                                        filter_name.clone(),
-                                    );
-                                    let mut rib_type_table =
-                                        toml::map::Map::new();
-                                    rib_type_table.insert(
-                                        "GeneratedVirtual".to_string(),
-                                        Value::Integer(n.try_into().unwrap()),
-                                    );
-                                    new_unit_table.insert(
-                                        "rib_type".to_string(),
-                                        Value::Table(rib_type_table),
-                                    );
-                                    new_unit_table.insert(
-                                        "vrib_upstream".to_string(),
-                                        Value::String(unit_name.clone()),
-                                    );
-                                    extra_units.insert(
-                                        new_unit_name.clone(),
-                                        Value::Table(new_unit_table),
-                                    );
-                                    source = new_unit_name;
-                                }
-
-                                // Replace the multiple roto script paths used
-                                // by the physical rib unit with just the
-                                // first roto script path.
-                                unit_table.insert(
-                                    "filter_name".to_string(),
-                                    filter_names[0].clone(),
-                                );
-
-                                // This unit should no longer be the source of
-                                // another unit, rather the last vRIB that we
-                                // added should replace it as source in all
-                                // places it was used before. See *1 below.
-                                source_remappings
-                                    .insert(unit_name.clone(), source);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Self::remap_sources(units, &source_remappings);
-
-        // Add the generated vRIB units into the unit set.
-        units.extend(extra_units);
-
-        source_remappings
-    }
-
-    fn remap_sources(
-        units: &mut toml::Table,
-        source_remappings: &HashMap<String, String>,
-    ) {
-        for (_unit_name, unit_table_value) in units.iter_mut() {
-            if let Value::Table(unit_table) = unit_table_value {
-                if let Some(source) = unit_table.get_mut("source") {
-                    match source {
-                        Value::String(old_source) => {
-                            if let Some(new_source) =
-                                source_remappings.get(old_source)
-                            {
-                                old_source.clone_from(new_source);
-                            }
-                        }
-
-                        _ => unreachable!(),
-                    }
-                }
-                if let Some(sources) = unit_table.get_mut("sources") {
-                    match sources {
-                        Value::String(old_source) => {
-                            if let Some(new_source) =
-                                source_remappings.get(old_source)
-                            {
-                                old_source.clone_from(new_source);
-                            }
-                        }
-
-                        Value::Array(old_sources) => {
-                            for old_source in old_sources {
-                                match old_source {
-                                    Value::String(old_source) => {
-                                        if let Some(new_source) =
-                                            source_remappings.get(old_source)
-                                        {
-                                            old_source.clone_from(new_source);
-                                        }
-                                    }
-
-                                    _ => unreachable!(),
-                                }
-                            }
-                        }
-
-                        _ => unreachable!(),
-                    }
-                }
-            }
-        }
     }
 }
 

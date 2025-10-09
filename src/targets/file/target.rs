@@ -234,7 +234,6 @@ impl FileRunner {
                             Update::Withdraw(..)  |
                             Update::WithdrawBulk(..)  |
                             Update::IngressReappeared(..) |
-                            Update::QueryResult(..)  |
                             Update::UpstreamStatusChange(..) |
                             Update::Rtr(..) =>  { }
                     }
@@ -277,7 +276,6 @@ impl DirectUpdate for FileRunner {
             Update::Bulk(..)  |
             Update::Withdraw(..)  |
             Update::WithdrawBulk(..)  |
-            Update::QueryResult(..)  |
             Update::UpstreamStatusChange(..) =>  { }
         }
     }

@@ -101,7 +101,7 @@ strip = true
 default = ["http-api-gzip", "cranelift-jit/selinux-fix"]
 
 # Enable GZIP compression of the HTTP /metrics response
-http-api-gzip = ["flate2"]
+http-api-gzip = ["flate2", "tower-http"]
 
 [build-dependencies]
 rshtml = "0.3.0"

@@ -92,6 +92,7 @@ futures-util       = "0.3.31"
 micromap           = "0.0.19"
 paste              = "1.0.15"
 axum               = { version = "0.8.4", features = ["query", "http1", "http2", "tokio"], default-features = false }
+tower-http         = { version = "0.5.2", features = ["compression-gzip"], optional = true }
 serde_qs           = "0.15.0"
 rshtml             = "0.2.0"
 
@@ -115,7 +116,7 @@ strip = true
 default = ["http-api-gzip"]
 
 # Enable GZIP compression of the HTTP /metrics response
-http-api-gzip = ["flate2"]
+http-api-gzip = ["flate2", "tower-http"]
 
 [build-dependencies]
 rshtml = "0.2.0"

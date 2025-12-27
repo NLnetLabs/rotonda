@@ -171,8 +171,9 @@ impl ChannelWriter {
         }
         let chunk = Bytes::copy_from_slice(&self.buffer);
         self.buffer.clear();
-        let _ = self.sender.blocking_send(Ok(chunk));
-        Ok(())
+        self.sender
+            .blocking_send(Ok(chunk))
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "receiver dropped"))
     }
 }
 
@@ -180,7 +181,7 @@ impl io::Write for ChannelWriter {
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.buffer.extend_from_slice(buf);
         if self.buffer.len() >= STREAM_CHUNK_SIZE {
-            let _ = self.send_buffer();
+            self.send_buffer()?;
         }
         Ok(buf.len())
     }

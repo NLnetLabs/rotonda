@@ -74,6 +74,7 @@ html-escape        = { version = "0.2" }
 inetnum            = { workspace = true }
 indoc              = "2.0"
 layout-rs          = { version = "0.1" }
+libc               = "0.2"
 mqtt               = { version = "0.23.0", package = "rumqttc", default-features = false }
 memmap2            = "0.9.4"
 non-empty-vec      = { version = "0.2", features = ["serde"]}

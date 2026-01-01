@@ -49,7 +49,9 @@ use super::metrics::BgpTcpInMetrics;
 use super::router_handler::handle_connection;
 use super::status_reporter::BgpTcpInStatusReporter;
 
-use super::peer_config::{CombinedConfig, PeerConfigs};
+use super::peer_config::{CombinedConfig, PeerConfigs, PrefixOrExact};
+use super::tcp_md5;
+use super::ListenerMd5Config;
 
 //----------- BgpTcpIn -------------------------------------------------------
 
@@ -260,7 +262,7 @@ impl BgpTcpInRunner {
     ) -> Result<(), Terminated>
     where
         T: TcpListenerFactory<U>,
-        U: TcpListener<V>,
+        U: TcpListener<V> + ListenerMd5Config,
         V: TcpStreamWrapper,
         F: ConfigAcceptor,
     {
@@ -324,6 +326,7 @@ impl BgpTcpInRunner {
                 };
 
             status_reporter.listener_listening(&listen_addr);
+            arc_self.configure_listener_md5(&listener);
 
             'inner: loop {
                 match arc_self.process_until(listener.accept()).await {
@@ -455,6 +458,32 @@ impl BgpTcpInRunner {
                     self.status_reporter.terminated();
                     return ControlFlow::Break(Terminated);
                 }
+            }
+        }
+    }
+
+    fn configure_listener_md5<U>(&self, listener: &U)
+    where
+        U: ListenerMd5Config,
+    {
+        let cfg = self.bgp.load();
+        for (remote, peer_cfg) in cfg.peer_configs.iter() {
+            let Some(md5_key) = peer_cfg.md5_key() else {
+                continue;
+            };
+            let (addr, prefix_len) = match remote {
+                PrefixOrExact::Exact(addr) => (*addr, None),
+                PrefixOrExact::Prefix(prefix) => (prefix.addr(), Some(prefix.len())),
+            };
+            if let Err(err) = listener.configure_md5(
+                addr,
+                prefix_len,
+                md5_key.as_bytes(),
+            ) {
+                error!(
+                    "Failed to configure TCP MD5 on listener for {}: {}",
+                    addr, err
+                );
             }
         }
     }
@@ -590,6 +619,28 @@ impl ConfigAcceptor for BgpTcpInRunner {
         let (cmds_tx, cmds_rx) = mpsc::channel(10 * 10); //XXX this is limiting and
                                                          //causes loss
         let tcp_stream = tcp_stream.into_inner().unwrap(); // SAFETY: StandardTcpStream::into_inner() always returns Ok(...)
+        if let Some(md5_key) = cfg.md5_key() {
+            match tcp_stream.peer_addr() {
+                Ok(peer_addr) => {
+                    if let Err(err) = tcp_md5::configure_tcp_md5(
+                        &tcp_stream,
+                        peer_addr.ip(),
+                        md5_key.as_bytes(),
+                    ) {
+                        error!(
+                            "Failed to configure TCP MD5 for {}: {}",
+                            peer_addr.ip(),
+                            err
+                        );
+                        return;
+                    }
+                }
+                Err(err) => {
+                    error!("Failed to read peer address for MD5: {}", err);
+                    return;
+                }
+            }
+        }
         crate::tokio::spawn(
             &child_name,
             handle_connection(

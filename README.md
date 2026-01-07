@@ -24,7 +24,13 @@ install and use Rotonda.
 > 0.x versions.
 >
 > For more information on upcoming features and changes see the 
-> [ROADMAP](ROADMAP.md)
+> [roadmap](https://community.nlnetlabs.nl/t/rotonda-roadmap-for-2026/34/5).
+
+Go to the [community forum](https://community.nlnetlabs.nl/c/rotonda/5) to
+get support from the community, exchange experiences, open issues, and more.
+
+Rather than opening issues on GitHub we encourage you to open topics on our
+forum.
 
 ## GOALS
 

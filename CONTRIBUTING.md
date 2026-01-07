@@ -103,10 +103,11 @@ Before you start contributing code, ensure that the issue you are tackling has
 been properly discussed either on [Discourse] or the [issue tracker]. Do not
 submit pull requests for changes that have not been discussed.
 
-You can contribute code by opening a pull request. Before you do you
-should check that you code passes all tests and adheres to the [style
-guide](#style-guide). You do not have to update `Changelog.md`. That will be
-updated when a release is tagged.
+You can contribute code by opening a pull request against the branch called
+`dev`. Opening a PR against any other branch will have to be rebased to `dev`.
+Before you do you should check that you code passes all tests and adheres to
+the [style guide](#style-guide). You do not have to update `Changelog.md`.
+That will be updated when a release is tagged.
 
 You run the code, you'll need to have a working and recent enough Rust
 toolchain installed. The [just] tool can also come in handy to run some common
@@ -114,10 +115,14 @@ commands on this repository.
 
 Keep the following in mind while submitting your code:
 
+ - Work on a branch of your own created branched of the branch called `dev` in
+   our repository.
+ - Start the name of your branch with `feature-` or `bugfix-` or another
+   small functional description. Add a small description of the content of
+   the changes/additions, e.g. 'tcp-ao', so the full branch name would be
+   `feature-tcp-ao`.
  - Make sure to link the appropriate issue for your change. If there is none,
    make the issue and discuss the change before submitting the PR.
- - Make the title and description descriptive. For example, do not make the
-   title just "Fix #345", but include a description.
  - Use descriptive commit messages.
  - Your code can only be merged once the CI is green.
  - Keep your PRs self-contained and do not include unrelated changes. It's

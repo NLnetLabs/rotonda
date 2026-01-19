@@ -1,6 +1,6 @@
 # Changelog
  
-## Unreleased version
+## 0.5.1
 
 Released yyyy-mm-dd.
 
@@ -10,6 +10,7 @@ Released yyyy-mm-dd.
 
 ### New
 
+* Added `filter[peerAddress]` to the `/ribs` HTTP endpoint.
 
 ### Bug fixes
 

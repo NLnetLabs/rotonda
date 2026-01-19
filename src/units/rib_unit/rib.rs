@@ -531,10 +531,19 @@ impl Rib {
                 ).unwrap_or(true)
             });
         }
+
         if let Some(peer_asn) = filter.peer_asn {
             records.retain(|r|{
                 self.ingress_register.get(r.multi_uniq_id).map(|ii|
                     ii.remote_asn == Some(peer_asn)
+                ).unwrap_or(true)
+            });
+        }
+
+        if let Some(peer_addr) = filter.peer_addr {
+            records.retain(|r|{
+                self.ingress_register.get(r.multi_uniq_id).map(|ii|
+                    ii.remote_addr == Some(peer_addr)
                 ).unwrap_or(true)
             });
         }

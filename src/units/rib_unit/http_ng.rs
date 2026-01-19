@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display, net::{Ipv4Addr, Ipv6Addr}};
+use std::{collections::HashMap, fmt::Display, net::{IpAddr, Ipv4Addr, Ipv6Addr}};
 
 use axum::{extract::{Path, Query, State}, response::IntoResponse};
 use inetnum::{addr::Prefix, asn::Asn};
@@ -78,6 +78,9 @@ pub struct QueryFilter {
 
     #[serde(rename = "filter[peerAsn]")]
     pub peer_asn: Option<Asn>,
+
+    #[serde(rename = "filter[peerAddress]")]
+    pub peer_addr: Option<IpAddr>,
 
     // TODO: RouteDistinguisher, 
 

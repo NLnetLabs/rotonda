@@ -32,15 +32,15 @@ pub struct Cli<W: std::io::Write>(pub W);
 // For Html, GenOutput is implemented on the specific Html structs (deriving RsHtml) directly.
 
 
-/// Generate a GenOutput<Json<_>> using serde_json.
-///
-/// Usage:
-///     
-///     // Will serialize SomeType
-///     genoutput_json!(SomeType)
-///
-///     // Will serialize SomeWrapperType.0
-///     genoutput_json!(SomeWrapperType, 0)
+// Generate a GenOutput<Json<_>> using serde_json.
+//
+// Usage:
+//     
+//     // Will serialize SomeType
+//     genoutput_json!(SomeType)
+//
+//     // Will serialize SomeWrapperType.0
+//     genoutput_json!(SomeWrapperType, 0)
 #[macro_export]
 macro_rules! genoutput_json {
     ($type:ty $(, $val:tt )? ) => {

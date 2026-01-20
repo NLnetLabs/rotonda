@@ -12,6 +12,10 @@ Released yyyy-mm-dd.
 
 * Added `filter[peerAddress]` to the `/ribs` HTTP endpoint.
 
+* HTTP API responses now include the `NextHop` part of the `MP_REACH_NLRI` path
+  attribute.
+
+
 ### Bug fixes
 
 

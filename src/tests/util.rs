@@ -992,10 +992,8 @@ pub mod bgp {
                                     //mp_reach_nlri.put_u16(AfiSafiType::Ipv6Unicast.into());
                                     //mp_reach_nlri
                                     //    .put_u8(u8::from(AfiSafiType::Unicast));
-                                    if let NextHop::Unicast(IpAddr::V6(
-                                        addr,
-                                    ))
-                                    | NextHop::Ipv6LL(addr, _)
+                                    if let NextHop::Unicast(IpAddr::V6(addr))
+                                    | NextHop::Ipv6LL{global: addr, ..}
                                     | NextHop::Multicast(IpAddr::V6(
                                         addr,
                                     )) = next_hop.0

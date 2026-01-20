@@ -214,7 +214,7 @@ impl Serialize for RotondaPaMap {
         let mut s = serializer.serialize_struct("route", 2)?;
         s.serialize_field("rpki", &self.rpki_info())?;
         s.serialize_field("pathAttributes", &self.path_attributes().iter().flatten()
-            .filter(|pa| pa.type_code() != 14 && pa.type_code() != 15)
+            .filter(|pa| pa.type_code() != 15)
             .flat_map(|pa| pa.to_owned()).collect::<Vec<_>>())?;
         s.end()
     }
@@ -231,8 +231,7 @@ impl<'a, 'b> Serialize for RotondaPaMapWithQueryFilter<'a, 'b> {
         s.serialize_field("pathAttributes", &self.0.path_attributes().iter().flatten()
             .filter(|pa|
                 (self.1.fields_path_attributes.as_ref().map(|fpa| fpa.contains(&pa.type_code())).unwrap_or(true))
-                &&
-                pa.type_code() != 14 && pa.type_code() != 15
+                && pa.type_code() != 15
                 )
             .flat_map(|pa| pa.to_owned()).collect::<Vec<_>>())?;
         s.end()

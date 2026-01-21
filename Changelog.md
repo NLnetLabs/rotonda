@@ -33,6 +33,8 @@ Released yyyy-mm-dd.
 
 ### Acknowledgements
 
+We would like to very much thank Rein Fernhout (LevitatingBusinessMan) for
+their (ongoing) input and support in various ways.
  
 ## 0.5.0 'Mosaïque Public'
 

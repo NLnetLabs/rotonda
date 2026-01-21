@@ -2564,7 +2564,7 @@ dependencies = [
  "reqwest",
  "roto",
  "rotonda-store",
- "routecore 0.6.0",
+ "routecore 0.6.1-dev",
  "rpki",
  "rshtml",
  "rumqttc",
@@ -2623,9 +2623,8 @@ dependencies = [
 
 [[package]]
 name = "routecore"
-version = "0.6.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd112010be5c122118434730359fde7843640df7afccb4a6b3a0c73ab073d634"
+version = "0.6.1-dev"
+source = "git+https://github.com/NLnetLabs/routecore?branch=dev#e1c42e6e961f151647b55e7c68b932ea5ff7d619"
 dependencies = [
  "bytes",
  "chrono",

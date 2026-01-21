@@ -19,6 +19,12 @@ Released yyyy-mm-dd.
 ### Bug fixes
 
 
+* SELinux on CentOS panic on startup
+ ([#132](https://github.com/NLnetLabs/rotonda/issues/132),
+ [roto#259](https://github.com/NLnetLabs/roto/issues/259),
+ [#150](https://github.com/NLnetLabs/rotonda/pull/150))
+
+
 ### Other changes
 
 

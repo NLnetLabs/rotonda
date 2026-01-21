@@ -82,6 +82,7 @@ micromap           = "0.1.0"
 paste              = "1.0.15"
 axum               = { version = "0.8.6", features = ["query", "http1", "http2", "tokio"], default-features = false }
 rshtml             = "0.3.0"
+cranelift-jit      = "*"
 
 [target.'cfg(unix)'.dependencies]
 syslog             = "7.0"
@@ -97,7 +98,7 @@ rumqttd            = { version = "0.20.0", default-features = false }
 strip = true
 
 [features]
-default = ["http-api-gzip"]
+default = ["http-api-gzip", "cranelift-jit/selinux-fix"]
 
 # Enable GZIP compression of the HTTP /metrics response
 http-api-gzip = ["flate2"]

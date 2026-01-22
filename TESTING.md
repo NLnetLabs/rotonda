@@ -2,52 +2,31 @@
 
 The tests of Rotonda live in a few places:
 
- - the `/tests`
  - unit tests in the source code
  - doctests in the source code
+ - end-to-end tests in a separate, private repo called REEDS
+
 
 Running these tests is done with a single command:
 ```
 cargo test --all-features --release
 ```
 
-Use with `cargo nextest` is probably possible, but, well, untested.
 
-## Snapshot testing
+## End-to-end testing (REEDS)
 
-Some of the tests use snapshot testing using [insta]. You can run
-them with the regular Rust test runner, but to change them, you might want to
-install `cargo-insta` with `cargo install cargo-insta`. See the [insta] website for more information.
+The end-to-end tests for Rotonda are maintained in a separate repository that
+is private. Keeping it private enables us to store real-world network data,
+which is used as input in the test suites.
 
-## Valgrind
+While this makes the end-to-end tests invisible, we do encourage contributors
+to think about what types of input data would be required to test their
+contributions in an end-to-end fashion. For example, when a PR adds certain new
+fields to the response of an API endpoint, we should create a test where the
+input (e.g. pcap or binary BMP) contains PDUs that result in API responses
+featuring the newly added output.
 
-If you want to submit `unsafe` code to Rotonda, we require that the entire
-test suite is run under [Valgrind]. To do that locally, you'll need to install
-Valgrind and `cargo-valgrind`.
-
-If you have [just] installed, you can run the test suite under valgrind with
-
-```
-just valgrind
-```
-
-But you can also use the full expression without [just] if you prefer:
-
-```
-VALGRINDFLAGS="--suppressions=valgrind_suppressions.supp" cargo valgrind test --all-targets
-```
-
-## MIRI
-
-A subset of tests is also run under MIRI, which is even more strict than
-Valgrind, but also cannot run all tests.
-
-You can run the relevant tests under MIRI with:
-
-```
-MIRIFLAGS=-Zmiri-disable-isolation cargo +nightly miri test
-```
-
-[insta]: https://insta.rs/
-[Valgrind]: https://valgrind.org/
-[just]: https://just.systems/man/en/
+Ideally, a PR is accompanied with a pcap or likewise (perhaps transferred to
+use in private) for us to create an end-to-end test from. This might not always
+be trivial: in that case, please reach out to discuss how we can proceed to get
+proper testing in place.

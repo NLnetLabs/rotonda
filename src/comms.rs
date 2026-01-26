@@ -1830,14 +1830,14 @@ struct SubscribeResponse {
 #[cfg(test)]
 mod tests {
     use chrono::SubsecRound;
+    use rotonda_store::prefix_record::RouteStatus;
     use smallvec::smallvec;
     use tokio::sync::Notify;
 
     use crate::{
-        payload::Payload,
-        tests::util::internal::{
+        payload::Payload, tests::util::internal::{
             enable_logging, get_testable_metrics_snapshot,
-        },
+        }
     };
 
     use super::*;
@@ -1848,7 +1848,7 @@ mod tests {
 
         use routecore::bgp::{message::PduParseInfo, nlri::afisafi::Ipv4UnicastNlri, path_attributes::OwnedPathAttributes};
 
-        use crate::{payload::{RotondaPaMap, RotondaRoute}, roto_runtime::types::RouteContext};
+        use crate::{payload::{RotondaPaMap, RotondaRoute}};
 
         // Lifecycle of a connected gate and link:
         //
@@ -1925,8 +1925,10 @@ mod tests {
                         )
                     )
                 ),
-                RouteContext::for_reprocessing(),
-                None
+                None,
+                1234, // IngressId
+                RouteStatus::Active,
+
             )
         }
 

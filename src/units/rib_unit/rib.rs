@@ -24,7 +24,7 @@ use routecore::bgp::{
 use serde::{ser::{SerializeSeq, SerializeStruct}, Serialize, Serializer};
 
 use crate::{
-    ingress::{self, register::{IdAndInfo, OwnedIdAndInfo}, IngressId, IngressInfo}, payload::{RotondaPaMap, RotondaPaMapWithQueryFilter, RotondaRoute, RouterId}, representation::{GenOutput, Json}, roto_runtime::{types::{Provenance, RotoPackage}, Ctx}
+    ingress::{self, register::{IdAndInfo, OwnedIdAndInfo}, IngressId, IngressInfo}, payload::{RotondaPaMap, RotondaPaMapWithQueryFilter, RotondaRoute, RouterId}, representation::{GenOutput, Json}, roto_runtime::{types::{RotoPackage}, Ctx}
 };
 
 use super::{http_ng::Include, QueryFilter};
@@ -79,8 +79,8 @@ impl Rib {
         &self,
         val: &RotondaRoute,
         route_status: RouteStatus,
-        provenance: Provenance,
         ltime: u64,
+        ingress_id: IngressId,
     ) -> Result<UpsertReport, String> {
         let res = match val {
             RotondaRoute::Ipv4Unicast(n, ..) => self.insert_prefix(
@@ -88,32 +88,32 @@ impl Rib {
                 Multicast(false),
                 val,
                 route_status,
-                provenance,
                 ltime,
+                ingress_id,
             ),
             RotondaRoute::Ipv6Unicast(n, ..) => self.insert_prefix(
                 &n.prefix(),
                 Multicast(false),
                 val,
                 route_status,
-                provenance,
                 ltime,
+                ingress_id,
             ),
             RotondaRoute::Ipv4Multicast(n, ..) => self.insert_prefix(
                 &n.prefix(),
                 Multicast(true),
                 val,
                 route_status,
-                provenance,
                 ltime,
+                ingress_id,
             ),
             RotondaRoute::Ipv6Multicast(n, ..) => self.insert_prefix(
                 &n.prefix(),
                 Multicast(true),
                 val,
                 route_status,
-                provenance,
                 ltime,
+                ingress_id,
             ),
         };
         res.map_err(|e| e.to_string())
@@ -125,8 +125,8 @@ impl Rib {
         multicast: Multicast,
         val: &RotondaRoute,
         route_status: RouteStatus,
-        provenance: Provenance, // for ingress_id / mui
         ltime: u64,
+        ingress_id: IngressId,
     ) -> Result<UpsertReport, PrefixStoreError> {
         // Check whether our self.rib is Some(..) or bail out.
         let arc_store = match multicast.0 {
@@ -138,7 +138,7 @@ impl Rib {
             .as_ref()
             .ok_or(PrefixStoreError::StoreNotReadyError)?;
 
-        let mui = provenance.ingress_id;
+        let mui = ingress_id;
 
         if route_status == RouteStatus::Withdrawn {
             // instead of creating an empty PrefixRoute for this Prefix and

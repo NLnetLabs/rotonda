@@ -1,5 +1,5 @@
 use crate::common::status_reporter::AnyStatusReporter;
-use crate::roto_runtime::types::{explode_announcements, explode_withdrawals, FreshRouteContext, Provenance, RouteContext};
+use crate::roto_runtime::types::{explode_announcements, explode_withdrawals};
 use crate::tests::util::internal::get_testable_metrics_snapshot;
 use crate::{
     bgp::encode::{mk_bgp_update, Announcements, Prefixes},
@@ -688,29 +688,16 @@ fn mk_route_update_with_communities(
     .unwrap();
 
     let ingress_id = 1;
-    let peer_ip = "1.2.3.4".parse().unwrap();
-    let peer_asn = "AS1234".parse().unwrap();
-    let provenance = Provenance::for_bgp(ingress_id, peer_ip, peer_asn);
 
-    let ctx: RouteContext = FreshRouteContext::new(
-        roto_update_msg.clone(),
-        RouteStatus::Active,
-        provenance,
-    ).into();
     let mut bulk = SmallVec::new();
 
     for r in rws {
-        bulk.push(Payload::new(r, ctx.clone(), None));
+        bulk.push(Payload::new(r, None, ingress_id, RouteStatus::Active));
     }
 
-    let ctx: RouteContext = FreshRouteContext::new(
-        roto_update_msg,
-        RouteStatus::Withdrawn,
-        provenance,
-    ).into();
 
     for w in wdws {
-        bulk.push(Payload::new(w, ctx.clone(), None));
+        bulk.push(Payload::new(w, None, ingress_id, RouteStatus::Withdrawn));
     }
     Update::Bulk(bulk)
 

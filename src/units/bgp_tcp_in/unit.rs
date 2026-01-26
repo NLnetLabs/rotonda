@@ -30,7 +30,7 @@ use crate::common::net::{
 };
 use crate::roto_runtime::metrics::RotoMetricsWrapper;
 use crate::roto_runtime::types::{
-    RotoPackage, FilterName, Provenance, RotoOutputStream, RotoScripts
+    RotoPackage, FilterName, RotoOutputStream, RotoScripts
 };
 //use crate::common::roto::{FilterName, RotoScripts};
 use crate::common::status_reporter::{Chainable, UnitStatusReporter};

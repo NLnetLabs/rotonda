@@ -7,7 +7,7 @@ use crate::{
         Terminated, TriggerData,
     }, ingress, manager::{Component, WaitPoint}, payload::{
         Payload, RotondaPaMap, RotondaRoute, RouterId, Update, UpstreamStatus
-    }, roto_runtime::{self, types::{FilterName, InsertionInfo, Output, OutputStream, OutputStreamMessage, RotoOutputStream, RouteContext}, CompileListsFunc, Ctx, COMPILE_LISTS_FUNC_NAME}, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::{rib_unit::rpki::MaxLenList, rtr::client::VrpUpdate, Unit}
+    }, roto_runtime::{self, types::{FilterName, InsertionInfo, Output, OutputStream, OutputStreamMessage, RotoOutputStream}, CompileListsFunc, Ctx, COMPILE_LISTS_FUNC_NAME}, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::{rib_unit::rpki::MaxLenList, rtr::client::VrpUpdate, Unit}
 };
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
@@ -1012,21 +1012,15 @@ impl RibUnitRunner {
         let mut res = SmallVec::<[Payload; 8]>::new();
 
         for mut p in payload {
-            let ingress_id = match &p.context {
-                RouteContext::Fresh(f) => Some(f.provenance().ingress_id),
-                RouteContext::Mrt(m) => Some(m.provenance().ingress_id),
-                RouteContext::Reprocess => unreachable!(),
-            };
-                
             let osms;
             { // scope for lock
             let mut ctx = self.roto_context.lock().unwrap();
 
             if let Some(ref roto_function) = self.roto_function_pre {
-                let Payload{ rx_value, context, trace_id, received } = p;
+                let Payload{ rx_value, trace_id, received, ingress_id, route_status} = p;
                 let mutrr: roto_runtime::MutRotondaRoute = rx_value.into();
                 let mutiic = roto_runtime::IngressInfoCache::new_rc(
-                    ingress_id.unwrap(),
+                    ingress_id, //.unwrap(),
                     self.ingress_register.clone()
                 );
                 match roto_function.call(
@@ -1038,9 +1032,10 @@ impl RibUnitRunner {
                         let modified_rr = std::rc::Rc::into_inner(mutrr).unwrap().into_inner();
                         p = Payload {
                             rx_value: modified_rr,
-                            context,
                             trace_id,
                             received,
+                            ingress_id,
+                            route_status,
                         };
                         self.insert_payload(&p);
                         res.push(p.clone());
@@ -1050,9 +1045,10 @@ impl RibUnitRunner {
                         let modified_rr = std::rc::Rc::into_inner(mutrr).unwrap().into_inner();
                         p = Payload {
                             rx_value: modified_rr,
-                            context,
                             trace_id,
                             received,
+                            ingress_id,
+                            route_status,
                         };
                     }
                 }
@@ -1065,7 +1061,7 @@ impl RibUnitRunner {
             let mut output_stream  = ctx.output.borrow_mut();
             osms = self.process_output_stream(
                 Some(&p.rx_value),
-                ingress_id,
+                Some(p.ingress_id),
                 &mut output_stream,
             );
             }
@@ -1094,24 +1090,12 @@ impl RibUnitRunner {
 
         let pre_insert = std::time::Instant::now();
 
-        let (route_status, provenance) = match &payload.context {
-            RouteContext::Fresh(ctx) => (ctx.status, ctx.provenance),
-            RouteContext::Mrt(ctx) => (ctx.status, ctx.provenance),
-            RouteContext::Reprocess => {
-                error!(
-                    "unexpected RouteContext::Reprocess in insert_payload"
-                );
-                self.status_reporter.insert_failed(
-                    &payload.rx_value,
-                    "unexpected RouteContext::Reprocess",
-                );
-                return;
-            }
-        };
+        let route_status = payload.route_status;
+        let ingress_id = payload.ingress_id;
 
         let ltime = 0_u64; // XXX should come from Payload
 
-        match rib.insert(&payload.rx_value, route_status, provenance, ltime) {
+        match rib.insert(&payload.rx_value, route_status, ltime, ingress_id) {
             Ok(report) => {
                 let post_insert = std::time::Instant::now();
                 let store_op_delay = pre_insert.duration_since(post_insert);
@@ -1124,7 +1108,7 @@ impl RibUnitRunner {
                 };
 
                 self.status_reporter.insert_ok(
-                    provenance.ingress_id,
+                    ingress_id,
                     store_op_delay,
                     propagation_delay,
                     report.cas_count.try_into().unwrap_or(u32::MAX),
@@ -1132,7 +1116,7 @@ impl RibUnitRunner {
                 );
                 if route_status == RouteStatus::Withdrawn {
                     self.status_reporter.insert_ok(
-                    provenance.ingress_id,
+                    ingress_id,
                     store_op_delay,
                     propagation_delay,
                     //num_retries,

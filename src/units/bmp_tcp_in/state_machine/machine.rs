@@ -68,8 +68,8 @@ use crate::{
     ingress,
     payload::{Payload, RouterId, Update},
     roto_runtime::types::{
-        explode_announcements, explode_withdrawals, FreshRouteContext,
-        PeerId, PeerRibType, Provenance,
+        explode_announcements, explode_withdrawals, 
+        PeerId, PeerRibType,
     },
 };
 
@@ -897,51 +897,6 @@ where
         let mut update_report_msg =
             UpdateReportMessage::new(self.router_id.clone());
 
-        //let bgp_msg = BytesRecord::<BgpUpdateMessage>::from(bgp_msg.clone());
-
-        //let provenance = Provenance::mock();
-
-        let provenance = Provenance::for_bmp(
-            ingress_id,
-            pph.address(),
-            pph.asn(),
-            pph.address(), // FIXME wrong: need the BMP router addr here
-            //pph.distinguisher(),
-            [0; 9], // FIXME also wrong
-            PeerRibType::from((pph.is_post_policy(), pph.adj_rib_type())),
-            //timestamp: pph.timestamp(),
-            //// router_id: router_id.finish() as u32,
-            //peer_id: PeerId::new(pph.address(), pph.asn()),
-            //peer_bgp_id: pph.bgp_id().into(),
-            //peer_distuingisher: <[u8; 8]>::try_from(pph.distinguisher()).unwrap(),
-            //peer_rib_type: PeerRibType::from((pph.is_post_policy(), pph.adj_rib_type())),
-            //connection_id: self.source_id.socket_addr(),
-        );
-
-        //let ctx = FreshRouteContext:: new(
-        //    Some(bgp_msg.clone()),
-        //    NlriStatus::InConvergence,
-        //    provenance
-        //);
-        let context = FreshRouteContext::new(
-            bgp_msg.clone(),
-            RouteStatus::Active,
-            provenance,
-        );
-
-        /*
-        payloads.extend(
-            announcements.into_iter().map(|rws|{
-                //mk_payload(rws, received, context.clone())
-            Payload::with_received(
-                rws,
-                ctx.clone().into(),
-                None,
-                received
-            )
-            })
-        );
-        */
 
         if !rr_reach.is_empty() {
             //update_report_msg.inc_valid_announcements();
@@ -957,42 +912,23 @@ where
                 update_report_msg.inc_valid_announcements();
                 Payload::with_received(
                     rr,
-                    context.clone().into(),
                     None,
                     received,
+                    ingress_id,
+                    RouteStatus::Active,
                 )
             }),
         );
 
-        /*
-        let context = FreshRouteContext{
-            nlri_status: NlriStatus::Withdrawn,
-            ..context
-        };
-        */
-        let context = FreshRouteContext {
-            status: RouteStatus::Withdrawn,
-            ..context
-        };
-
-        /*
-        payloads.extend(
-            withdrawals.into_iter().map(|rws|{
-                //mk_payload(rws, received, context.clone())
-            Payload::with_received(
-                rws,
-                ctx.clone().into(),
-                None,
-                received
-            )
-            })
-        );
-        */
-
         payloads.extend(rr_unreach.into_iter().map(|rr| {
-            //mk_payload(wds, received, context.clone())
             update_report_msg.inc_valid_withdrawals();
-            Payload::with_received(rr, context.clone().into(), None, received)
+            Payload::with_received(
+                rr,
+                None,
+                received,
+                ingress_id,
+                RouteStatus::Withdrawn
+            )
         }));
 
         Ok((payloads, update_report_msg))

@@ -27,7 +27,7 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinSet;
 
 use crate::config::ConfigPath;
-use crate::roto_runtime::types::{explode_announcements, explode_withdrawals, FreshRouteContext, MrtContext, Provenance, RouteContext};
+use crate::roto_runtime::types::{explode_announcements, explode_withdrawals};
 use crate::common::unit::UnitActivity;
 use crate::comms::{GateStatus, Terminated};
 use crate::ingress::{self, IngressId, IngressInfo};
@@ -226,39 +226,24 @@ impl MrtInRunner {
                     new_id
                 };
 
-                let provenance = Provenance::for_bgp(
-                    ingress_id,
-                    msg.peer_addr(),
-                    msg.peer_asn(),
-                );
-
-                // or do we need a RouteContext::Fresh here?
-                let context = MrtContext {
-                    status: RouteStatus::Active,
-                    provenance
-                };
-
                 payloads.extend(
                     rr_reach.into_iter().map(|rr|
                         Payload::with_received(
                             rr,
-                            RouteContext::Mrt(context.clone()),
                             None,
                             received,
+                            ingress_id,
+                            RouteStatus::Active,
                         )
                     ));
-
-                let context = MrtContext {
-                    status: RouteStatus::Withdrawn,
-                    ..context
-                };
 
                 payloads.extend(rr_unreach.into_iter().map(|rr|
                         Payload::with_received(
                             rr,
-                            RouteContext::Mrt(context.clone()),
                             None,
-                            received
+                            received,
+                            ingress_id,
+                            RouteStatus::Withdrawn,
                         )
                 ));
                 let update = payloads.into();
@@ -352,7 +337,7 @@ impl MrtInRunner {
 
 
             let rib_entries = mrt_file.rib_entries()?;
-            for (afisafi, peer_id, peer_entry, prefix, raw_attr) in rib_entries {
+            for (afisafi, peer_id, _peer_entry, prefix, raw_attr) in rib_entries {
                 let rr = match afisafi {
                     AfiSafiType::Ipv4Unicast => {
                         RotondaRoute::Ipv4Unicast(
@@ -382,13 +367,8 @@ impl MrtInRunner {
                         continue
                     }
                 };
-                let provenance = Provenance::for_bgp(
-                    ingress_map[usize::from(peer_id)],
-                    peer_entry.addr,
-                    peer_entry.asn,
-                );
-                let ctx = RouteContext::for_mrt_dump(provenance);
-                let update = Update::Single(Payload::new(rr, ctx, None));
+                let ingress_id = ingress_map[usize::from(peer_id)];
+                let update = Update::Single(Payload::new(rr, None, ingress_id, RouteStatus::Active));
 
                 gate.update_data(update).await;
                 

@@ -28,7 +28,7 @@ use routecore::bgp::fsm::session::{
 };
 
 use crate::roto_runtime::types::{
-    explode_announcements, explode_withdrawals, FreshRouteContext, Output, OutputStreamMessage, Provenance, RotoOutputStream,
+    explode_announcements, explode_withdrawals, Output, OutputStreamMessage, RotoOutputStream,
 };
 use crate::comms::{Gate, GateStatus, Terminated};
 use crate::{ingress, roto_runtime};
@@ -265,15 +265,10 @@ impl Processor {
                             // We can only receive UPDATE messages over an
                             // established session, so not having a
                             // NegotiatedConfig should never happen.
-                            let Some(negotiated) = session.negotiated() else {
+                            let Some(_negotiated) = session.negotiated() else {
                                 error!("unexpected state: no NegotiatedConfig for session");
                                 break
                             };
-                            let provenance = Provenance::for_bgp(
-                                session_ingress_id,
-                                negotiated.remote_addr(),
-                                negotiated.remote_asn(),
-                            );
 
                             let verdict;
                             let mut osms = smallvec![];
@@ -359,7 +354,7 @@ impl Processor {
                                     let update = self.process_update(
                                         received,
                                         bgp_msg,
-                                        provenance,
+                                        session_ingress_id,
                                     ).await;
                                     match update {
                                         Ok(update) => {
@@ -493,7 +488,7 @@ impl Processor {
         &mut self,
         received: std::time::Instant,
         bgp_msg: UpdateMessage<bytes::Bytes>,
-        provenance: Provenance,
+        ingress_id: ingress::IngressId,
     ) -> Result<Update, session::Error> {
         // When sending both v4 and v6 nlri using exabgp, exa sends a v4
         // NextHop in a v6 MP_REACH_NLRI, which is invalid.
@@ -527,34 +522,26 @@ impl Processor {
         //  RotondaRoute announcements:
         let rr_reach = explode_announcements(&bgp_msg)?;
         let rr_unreach = explode_withdrawals(&bgp_msg)?;
-        let context = FreshRouteContext::new(
-            bgp_msg.clone(),
-            RouteStatus::Active,
-            provenance,
-        );
 
         payloads.extend(
             rr_reach.into_iter().map(|rr| {
                 Payload::with_received(
                     rr,
-                    context.clone().into(),
                     None,
                     received,
+                    ingress_id,
+                    RouteStatus::Active,
                 )
             }),
         );
 
-        let context = FreshRouteContext {
-            status: RouteStatus::Withdrawn,
-            ..context
-        };
-
         payloads.extend(rr_unreach.into_iter().map(|rr|
             Payload::with_received(
                 rr,
-                context.clone().into(),
                 None,
-                received
+                received,
+                ingress_id,
+                RouteStatus::Withdrawn,
             )));
 
         Ok(payloads.into())

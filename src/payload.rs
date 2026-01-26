@@ -1,4 +1,4 @@
-use rotonda_store::prefix_record::Meta;
+use rotonda_store::prefix_record::{Meta, RouteStatus};
 use routecore::bgp::message::PduParseInfo;
 use routecore::bgp::path_attributes::OwnedPathAttributes;
 use routecore::bgp::path_selection::TiebreakerInfo;
@@ -9,7 +9,7 @@ use smallvec::{smallvec, SmallVec};
 use std::fmt;
 
 use crate::ingress::{self, IngressId};
-use crate::roto_runtime::types::{OutputStreamMessage, RouteContext};
+use crate::roto_runtime::types::OutputStreamMessage;
 use crate::units::rib_unit::rpki::RpkiInfo;
 use crate::units::rib_unit::QueryFilter;
 
@@ -247,9 +247,10 @@ impl From<OwnedPathAttributes> for RotondaPaMap {
 #[derive(Clone, Debug, Eq)]
 pub struct Payload {
     pub rx_value: RotondaRoute, //RouteWorkshop<N>, //was: TypeValue,
-    pub context: RouteContext,
     pub trace_id: Option<u8>,
     pub received: std::time::Instant,
+    pub ingress_id: IngressId,
+    pub route_status: RouteStatus,
 }
 
 impl PartialEq for Payload {
@@ -263,28 +264,32 @@ impl PartialEq for Payload {
 impl Payload {
     pub fn new(
         rx_value: RotondaRoute,
-        context: RouteContext,
         trace_id: Option<u8>,
+        ingress_id: IngressId,
+        route_status: RouteStatus,
     ) -> Self {
         Self {
             rx_value,
-            context,
             trace_id,
             received: std::time::Instant::now(),
+            ingress_id,
+            route_status,
         }
     }
 
     pub fn with_received(
         rx_value: RotondaRoute,
-        context: RouteContext,
         trace_id: Option<u8>,
         received: std::time::Instant,
+        ingress_id: IngressId,
+        route_status: RouteStatus,
     ) -> Self {
         Self {
             rx_value,
-            context,
             trace_id,
             received,
+            ingress_id,
+            route_status,
         }
     }
 

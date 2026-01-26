@@ -32,7 +32,7 @@ use crate::{
         unit::UnitActivity,
     }, comms::{Gate, GateStatus, Terminated}, ingress::{self, IngressId, IngressInfo}, manager::{Component, WaitPoint}, payload::Update, roto_runtime::{
         metrics::RotoMetricsWrapper, types::{
-            FilterName, Provenance, RotoOutputStream, RotoPackage, RotoScripts
+            FilterName, RotoOutputStream, RotoPackage, RotoScripts
         }, Ctx, MutIngressInfoCache
     }, tokio::TokioTaskMetrics, tracing::Tracer, units::Unit
 };

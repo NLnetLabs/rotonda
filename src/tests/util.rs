@@ -1609,6 +1609,7 @@ pub mod net {
     use crate::common::net::{
         TcpListener, TcpListenerFactory, TcpStreamWrapper,
     };
+    use crate::units::bgp_tcp_in::ListenerMd5Config;
 
     /// A mock TcpListenerFactory that stores a callback supplied by the
     /// unit test thereby allowing the unit test to determine if binding to
@@ -1698,6 +1699,23 @@ pub mod net {
             &self,
         ) -> std::io::Result<(MockTcpStreamWrapper, SocketAddr)> {
             self.0().await
+        }
+    }
+
+    impl<T, Fut> ListenerMd5Config for MockTcpListener<T, Fut>
+    where
+        T: Fn() -> Fut,
+        Fut: Future<
+            Output = std::io::Result<(MockTcpStreamWrapper, SocketAddr)>,
+        >,
+    {
+        fn configure_md5(
+            &self,
+            _addr: std::net::IpAddr,
+            _prefix_len: Option<u8>,
+            _key: &[u8],
+        ) -> std::io::Result<()> {
+            Ok(())
         }
     }
 

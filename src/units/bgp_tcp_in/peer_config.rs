@@ -13,6 +13,7 @@
 //! that we want to move this configuration to Roto in the future.
 
 use std::collections::BTreeMap;
+use std::fmt;
 use std::net::IpAddr;
 
 use inetnum::addr::Prefix;
@@ -103,18 +104,39 @@ impl PeerConfigs {
     pub fn get_exact(&self, key: &PrefixOrExact) -> Option<&PeerConfig> {
         self.0.get(key)
     }
+
+    pub fn iter(
+        &self,
+    ) -> impl Iterator<Item = (&PrefixOrExact, &PeerConfig)> {
+        self.0.iter()
+    }
 }
 
 /// Configuration for a remote BGP peer.
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct PeerConfig {
     name: String,
     remote_asn: OneOrManyAsns,
     hold_time: Option<u16>,
     #[serde(default)]
+    md5_key: Option<String>,
+    #[serde(default)]
     protocols: Vec<AfiSafiType>,
     #[serde(default)]
     addpath: Vec<AfiSafiType>,
+}
+
+impl fmt::Debug for PeerConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("PeerConfig")
+            .field("name", &self.name)
+            .field("remote_asn", &self.remote_asn)
+            .field("hold_time", &self.hold_time)
+            .field("protocols", &self.protocols)
+            .field("addpath", &self.addpath)
+            .field("md5_key", &self.md5_key.as_ref().map(|_| "<redacted>"))
+            .finish()
+    }
 }
 
 impl PeerConfig {
@@ -124,6 +146,7 @@ impl PeerConfig {
             name: "MOCK".to_string(),
             remote_asn: OneOrManyAsns::Many(vec![]),
             hold_time: None,
+            md5_key: None,
             protocols: vec![],
             addpath: vec![],
         }
@@ -145,12 +168,17 @@ impl PeerConfig {
         }
         self.remote_asn.contains(remote)
     }
+
+    pub fn md5_key(&self) -> Option<&str> {
+        self.md5_key.as_deref().filter(|value| !value.is_empty())
+    }
 }
 
 impl PartialEq for PeerConfig {
     fn eq(&self, other: &PeerConfig) -> bool {
         self.remote_asn == other.remote_asn
             && self.hold_time == other.hold_time
+            && self.md5_key == other.md5_key
     }
 }
 
@@ -266,6 +294,7 @@ hold_time = 10
 name = "Peer-exact"
 remote_asn = 100
 hold_time = 10
+md5_key = "s3cr3t"
 
 [peers."2.3.4.7"]
 name = "Explicit-protocols"
@@ -296,6 +325,7 @@ addpath = ["Ipv4Unicast", "Ipv6Unicast"]
         let cfg2 = cfg.peer_configs.get(ip2).unwrap();
         assert!(cfg.peer_configs.get(ip2).unwrap().1.name == "Peer-exact");
         assert!(!cfg2.1.accept_remote_asn(Asn::from_u32(1234)));
+        assert_eq!(cfg2.1.md5_key(), Some("s3cr3t"));
 
         let cfg3 = cfg
             .peer_configs

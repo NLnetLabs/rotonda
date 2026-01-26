@@ -36,7 +36,7 @@ impl TcpListenerFactory<StandardTcpListener> for StandardTcpListenerFactory {
     }
 }
 
-pub struct StandardTcpListener(::tokio::net::TcpListener);
+pub struct StandardTcpListener(pub(crate) ::tokio::net::TcpListener);
 
 /// A thin wrapper around the real Tokio TcpListener bind call.
 #[async_trait::async_trait]

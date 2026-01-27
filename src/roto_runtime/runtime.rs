@@ -59,11 +59,11 @@ impl From<RotondaRoute> for MutRotondaRoute {
 /// Context used for all components.
 #[derive(Context, Clone)]
 pub struct RotondaCtx {
-    pub output: Log,
-    pub rpki: SharedRtrCache,
-    pub asn_lists: MutNamedAsnLists,
-    pub prefix_lists: MutNamedPrefixLists,
-    pub metrics: MutMetrics,
+    pub output: Val<Log>,
+    pub rpki: Val<SharedRtrCache>,
+    pub asn_lists: Val<MutNamedAsnLists>,
+    pub prefix_lists: Val<MutNamedPrefixLists>,
+    pub metrics: Val<MutMetrics>,
 }
 
 pub struct IngressInfoCache {
@@ -118,26 +118,26 @@ unsafe impl Send for RotondaCtx {}
 impl RotondaCtx {
     pub fn new(log: Log, rpki: SharedRtrCache) -> Self {
         Self {
-            output: log,
-            rpki,
-            asn_lists: Default::default(),
-            prefix_lists: Default::default(),
-            metrics: Default::default(),
+            output: Val(log),
+            rpki: Val(rpki),
+            asn_lists: Val(Default::default()),
+            prefix_lists: Val(Default::default()),
+            metrics: Val(Default::default()),
         }
     }
     pub fn empty() -> Self {
         Self {
-            output: RotoOutputStream::new_rced(),
-            rpki: Arc::<RtrCache>::default(),
-            asn_lists: Default::default(),
-            prefix_lists: Default::default(),
-            metrics: Default::default(),
+            output: Val(RotoOutputStream::new_rced()),
+            rpki: Val(Arc::<RtrCache>::default()),
+            asn_lists: Val(Default::default()),
+            prefix_lists: Val(Default::default()),
+            metrics: Val(Default::default()),
         }
     }
 
     pub fn set_metrics(&mut self, metrics: MutMetrics) {
         debug!("setting metrics in Ctx");
-        self.metrics = metrics;
+        self.metrics = Val(metrics);
     }
 
     pub fn prepare(&mut self, roto_package: &mut roto::Package<roto::Ctx<RotondaCtx>>) {

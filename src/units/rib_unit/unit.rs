@@ -7,7 +7,7 @@ use crate::{
         Terminated, TriggerData,
     }, ingress, manager::{Component, WaitPoint}, payload::{
         Payload, RotondaPaMap, RotondaRoute, RouterId, Update, UpstreamStatus
-    }, roto_runtime::{self, types::{FilterName, InsertionInfo, Output, OutputStream, OutputStreamMessage, RotoOutputStream}, CompileListsFunc, Ctx, COMPILE_LISTS_FUNC_NAME}, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::{rib_unit::rpki::MaxLenList, rtr::client::VrpUpdate, Unit}
+    }, roto_runtime::{self, types::{FilterName, InsertionInfo, Output, OutputStream, OutputStreamMessage, RotoOutputStream}, CompileListsFunc, RotondaCtx, COMPILE_LISTS_FUNC_NAME}, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::{rib_unit::rpki::MaxLenList, rtr::client::VrpUpdate, Unit}
 };
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
@@ -37,7 +37,7 @@ use super::statistics::RibMergeUpdateStatistics;
 
 
 pub(crate) type RotoFuncPre = roto::TypedFunc<
-    Ctx,
+    roto::Ctx<RotondaCtx>,
     fn (
         roto::Val<roto_runtime::MutRotondaRoute>,
         roto::Val<roto_runtime::MutIngressInfoCache>,
@@ -47,7 +47,7 @@ pub(crate) type RotoFuncPre = roto::TypedFunc<
 pub const ROTO_FUNC_PRE_FILTER_NAME: &str = "rib_in_pre";
 
 pub(crate) type RotoFuncVrpUpdate = roto::TypedFunc<
-    Ctx,
+    roto::Ctx<RotondaCtx>,
     fn (
         roto::Val<VrpUpdate>,
     ) ->
@@ -56,7 +56,7 @@ pub(crate) type RotoFuncVrpUpdate = roto::TypedFunc<
 pub const ROTO_FUNC_VRP_UPDATE_FILTER_NAME: &str = "vrp_update";
 
 pub(crate) type RotoFuncRovStatusUpdate = roto::TypedFunc<
-    Ctx,
+    roto::Ctx<RotondaCtx>,
     fn (
         roto::Val<RovStatusUpdate>,
     ) ->
@@ -66,7 +66,7 @@ pub const ROTO_FUNC_ROV_STATUS_UPDATE_NAME: &str = "rib_in_rov_status_update";
 
 
 type RotoFuncPost = roto::TypedFunc<
-    Ctx,
+    roto::Ctx<RotondaCtx>,
     fn (
         roto::Val<RotondaRoute>,
         roto::Val<InsertionInfo>,
@@ -186,7 +186,7 @@ pub struct RibUnitRunner {
     roto_function_vrp_update: Option<RotoFuncVrpUpdate>,
     roto_function_vrp_update_post: Option<RotoFuncRovStatusUpdate>,
     _roto_function_post: Option<RotoFuncPost>,
-    roto_context: Arc<Mutex<Ctx>>,
+    roto_context: Arc<Mutex<RotondaCtx>>,
     gate: Arc<Gate>,
     #[allow(dead_code)]
     // A strong ref needs to be held to http_processor but not used otherwise
@@ -274,7 +274,7 @@ impl RibUnitRunner {
 
         let rtr_cache: Arc<RtrCache> = Default::default();
 
-        let mut roto_context = Ctx::new(
+        let mut roto_context = RotondaCtx::new(
             RotoOutputStream::new_rced(),
             rtr_cache.clone()
         );
@@ -358,7 +358,7 @@ impl RibUnitRunner {
         let _query_limits =
             Arc::new(ArcSwap::from_pointee(QueryLimits::default()));
         let ingress_register: Arc<ingress::Register> = Default::default();
-        let ctx = Arc::new(Mutex::new(Ctx::empty()));
+        let ctx = Arc::new(Mutex::new(RotondaCtx::empty()));
         let rib = Rib::new(ingress_register.clone(), None, ctx.clone())?;
         let status_reporter = RibUnitStatusReporter::default().into();
         let filter_name =

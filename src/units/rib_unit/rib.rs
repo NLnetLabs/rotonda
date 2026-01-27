@@ -24,7 +24,7 @@ use routecore::bgp::{
 use serde::{ser::{SerializeSeq, SerializeStruct}, Serialize, Serializer};
 
 use crate::{
-    ingress::{self, register::{IdAndInfo, OwnedIdAndInfo}, IngressId, IngressInfo}, payload::{RotondaPaMap, RotondaPaMapWithQueryFilter, RotondaRoute, RouterId}, representation::{GenOutput, Json}, roto_runtime::{types::{RotoPackage}, Ctx}
+    ingress::{self, register::{IdAndInfo, OwnedIdAndInfo}, IngressId, IngressInfo}, payload::{RotondaPaMap, RotondaPaMapWithQueryFilter, RotondaRoute, RouterId}, representation::{GenOutput, Json}, roto_runtime::{types::{RotoPackage}, RotondaCtx}
 };
 
 use super::{http_ng::Include, QueryFilter};
@@ -32,7 +32,7 @@ use super::{http_ng::Include, QueryFilter};
 type Store = StarCastRib<RotondaPaMap, MemoryOnlyConfig>;
 
 type RotoHttpFilter = roto::TypedFunc<
-    Ctx,
+    roto::Ctx<RotondaCtx>,
     fn (roto::Val<crate::roto_runtime::RcRotondaPaMap>,) -> roto::Verdict<(), ()>,
 >;
 
@@ -45,7 +45,7 @@ pub struct Rib {
         HashMap<AfiSafiType, HashMap<(IngressId, Nlri<bytes::Bytes>), PaMap>>,
     ingress_register: Arc<ingress::Register>,
     roto_package: Option<Arc<RotoPackage>>,
-    roto_context: Arc<Mutex<Ctx>>,
+    roto_context: Arc<Mutex<RotondaCtx>>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -55,7 +55,7 @@ impl Rib {
     pub fn new(
         ingress_register: Arc<ingress::Register>,
         roto_package: Option<Arc<RotoPackage>>,
-        roto_context: Arc<Mutex<Ctx>>,
+        roto_context: Arc<Mutex<RotondaCtx>>,
     ) -> Result<Self, PrefixStoreError> {
         Ok(Rib {
             unicast: Arc::new(Some(Store::try_default()?)),

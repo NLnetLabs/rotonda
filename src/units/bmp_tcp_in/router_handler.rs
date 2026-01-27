@@ -23,7 +23,7 @@ use crate::roto_runtime::types::{
 
 use crate::ingress::{self, IngressId};
 use crate::payload::RouterId;
-use crate::roto_runtime::{self, Ctx};
+use crate::roto_runtime::{self, RotondaCtx};
 use crate::tracing::Tracer;
 use crate::units::rib_unit::rpki::RtrCache;
 use crate::{
@@ -45,7 +45,7 @@ use super::util::format_source_id;
 pub struct RouterHandler {
     gate: Gate,
     roto_function: Option<RotoFunc>,
-    roto_context: Arc<std::sync::Mutex<Ctx>>,
+    roto_context: Arc<std::sync::Mutex<RotondaCtx>>,
     router_id_template: Arc<ArcSwap<String>>,
     status_reporter: Arc<BmpTcpInStatusReporter>,
     state_machine: Arc<Mutex<Option<BmpState>>>,
@@ -66,7 +66,7 @@ impl RouterHandler {
     pub fn new(
         gate: Gate,
         roto_function: Option<RotoFunc>,
-        roto_context: Arc<std::sync::Mutex<Ctx>>,
+        roto_context: Arc<std::sync::Mutex<RotondaCtx>>,
         router_id_template: Arc<ArcSwap<String>>,
         status_reporter: Arc<BmpTcpInStatusReporter>,
         state_machine: Arc<Mutex<Option<BmpState>>>,
@@ -132,7 +132,7 @@ impl RouterHandler {
             last_msg_at: None,
             bmp_metrics,
             roto_function: None,
-            roto_context: Arc::new(std::sync::Mutex::new(Ctx::empty())),
+            roto_context: Arc::new(std::sync::Mutex::new(RotondaCtx::empty())),
             ingress_register: Default::default(),
         };
 

@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     ingress::IngressId,
     manager,
-    payload::{RotondaPaMap, RotondaRoute},
+    payload::{RotondaPaMap, RotondaRoute}, roto_runtime::RotondaCtx,
 };
 
 use super::MutLogEntry;
@@ -82,7 +82,7 @@ impl RotoScripts {
     }
 }
 
-pub type RotoPackage = std::sync::Mutex<roto::Package>;
+pub type RotoPackage = std::sync::Mutex<roto::Package<roto::Ctx<RotondaCtx>>>;
 
 #[derive(Default)]
 pub struct OutputStream<M> {

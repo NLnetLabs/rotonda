@@ -625,10 +625,9 @@ impl Manager {
             return Ok(());
         };
 
-        let i = roto::FileTree::read(path);
-            // .map_err(|e| e.to_string())?;
-        let roto_package = i
-            .compile(&create_runtime().unwrap())
+        let roto_package = roto::FileTree::read(path)
+            .map_err(|e| e.to_string())?
+            .compile(&create_runtime()?)
             .map_err(|e| e.to_string())?;
 
         self.roto_package = Some(Arc::new(Mutex::new(roto_package)));

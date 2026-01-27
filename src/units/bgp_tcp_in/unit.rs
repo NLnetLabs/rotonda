@@ -41,7 +41,7 @@ use crate::comms::{
 use crate::ingress;
 use crate::manager::{Component, WaitPoint};
 use crate::payload::Update;
-use crate::roto_runtime::{Ctx, MutIngressInfoCache};
+use crate::roto_runtime::{RotondaCtx, MutIngressInfoCache};
 use crate::units::rib_unit::rpki::RtrCache;
 use crate::units::{Gate, Unit};
 
@@ -54,12 +54,12 @@ use super::peer_config::{CombinedConfig, PeerConfigs};
 //----------- BgpTcpIn -------------------------------------------------------
 
 pub(crate) type RotoFunc = roto::TypedFunc<
-    crate::roto_runtime::Ctx,
+    roto::Ctx<crate::roto_runtime::RotondaCtx>,
     fn(
         roto::Val<UpdateMessage<Bytes>>,
         roto::Val<MutIngressInfoCache>,
     ) ->
-    roto::Verdict<(), ()>,
+    roto::Verdict<(), ()>
 >;
 
 pub const ROTO_FUNC_FILTER_NAME: &str = "bgp_in";
@@ -166,7 +166,7 @@ trait ConfigAcceptor {
     fn accept_config(
         child_name: String,
         roto_function: Option<RotoFunc>,
-        roto_context: Arc<Mutex<Ctx>>,
+        roto_context: Arc<Mutex<RotondaCtx>>,
         gate: &Gate,
         bgp: &BgpTcpIn,
         tcp_stream: impl TcpStreamWrapper,
@@ -284,7 +284,7 @@ impl BgpTcpInRunner {
                 .ok()
             });
 
-        let mut roto_context = Ctx::empty();
+        let mut roto_context = RotondaCtx::empty();
 
         if let Some(roto_metrics) = arc_self.roto_metrics.as_ref() {
             roto_context.set_metrics(roto_metrics.metrics.clone());
@@ -576,7 +576,7 @@ impl ConfigAcceptor for BgpTcpInRunner {
     fn accept_config(
         child_name: String,
         roto_function: Option<RotoFunc>,
-        roto_context: Arc<Mutex<Ctx>>,
+        roto_context: Arc<Mutex<RotondaCtx>>,
         gate: &Gate,
         bgp: &BgpTcpIn,
         tcp_stream: impl TcpStreamWrapper,
@@ -635,7 +635,7 @@ mod tests {
         }, units::bgp_tcp_in::{
             peer_config::{PeerConfig, PrefixOrExact},
             status_reporter::BgpTcpInStatusReporter,
-            unit::{BgpTcpIn, BgpTcpInRunner, ConfigAcceptor, LiveSessions},
+            unit::{BgpTcpIn, BgpTcpInRunner, ConfigAcceptor, LiveSessions, RotoFunc},
         }
     };
 
@@ -798,7 +798,7 @@ mod tests {
         fn accept_config(
             _child_name: String,
             _roto_function: Option<RotoFunc>,
-            _roto_context: Arc<std::sync::Mutex<crate::roto_runtime::Ctx>>,
+            _roto_context: Arc<std::sync::Mutex<crate::roto_runtime::RotondaCtx>>,
             _gate: &Gate,
             _bgp: &BgpTcpIn,
             _tcp_stream: impl TcpStreamWrapper,

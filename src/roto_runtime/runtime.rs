@@ -37,7 +37,7 @@ use crate::units::rib_unit::rpki::{RovStatus, RovStatusUpdate, RtrCache};
 use crate::units::rtr::client::VrpUpdate;
 
 
-pub type CompileListsFunc = roto::TypedFunc<Ctx, fn () -> ()>;
+pub type CompileListsFunc = roto::TypedFunc<roto::Ctx<RotondaCtx>, fn () -> ()>;
 pub const COMPILE_LISTS_FUNC_NAME: &str = "compile_lists";
 
 
@@ -58,7 +58,7 @@ impl From<RotondaRoute> for MutRotondaRoute {
 
 /// Context used for all components.
 #[derive(Context, Clone)]
-pub struct Ctx {
+pub struct RotondaCtx {
     pub output: Log,
     pub rpki: SharedRtrCache,
     pub asn_lists: MutNamedAsnLists,
@@ -113,9 +113,9 @@ impl IngressInfoCache {
 }
 
 
-unsafe impl Send for Ctx {}
+unsafe impl Send for RotondaCtx {}
 
-impl Ctx {
+impl RotondaCtx {
     pub fn new(log: Log, rpki: SharedRtrCache) -> Self {
         Self {
             output: log,
@@ -140,7 +140,7 @@ impl Ctx {
         self.metrics = metrics;
     }
 
-    pub fn prepare(&mut self, roto_package: &mut roto::Package) {
+    pub fn prepare(&mut self, roto_package: &mut roto::Package<roto::Ctx<RotondaCtx>>) {
         let f: Result<CompileListsFunc, _> = roto_package
             .get_function(COMPILE_LISTS_FUNC_NAME);
         if let Ok(f) = f {
@@ -158,8 +158,9 @@ impl Ctx {
 #[derive(Copy, Clone, Debug)]
 pub struct OriginAsn(pub Option<Asn>);
 
-pub fn create_runtime() -> Result<roto::Runtime, String> {
-    let mut rt = roto::Runtime::new();
+pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> {
+    let mut rt = roto::Runtime::new().with_context_type::<RotondaCtx>()?;
+
 
     // --- General types
     rt.register_clone_type_with_name::<MutRotondaRoute>(
@@ -206,8 +207,6 @@ pub fn create_runtime() -> Result<roto::Runtime, String> {
         "Metrics",
         "User-defined Prometheus style metrics"
     ).unwrap();
-
-    rt.register_context_type::<Ctx>()?;
 
     rt.register_clone_type_with_name::<MutIngressInfoCache>(
         "IngressInfo",

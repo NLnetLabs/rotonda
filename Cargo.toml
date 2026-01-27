@@ -67,7 +67,7 @@ inetnum            = { workspace = true }
 mqtt               = { version = "0.23.0", package = "rumqttc", default-features = false }
 memmap2            = "0.9.8"
 non-empty-vec      = { version = "0.2", features = ["serde"]}
-roto               = { version = "0.7" } # 0.8 available, requires changes
+roto               = { version = "0.10" } # 0.8 available, requires changes
 rotonda-store      = { workspace = true }
 serde_with         = "3"
 smallvec           = { version = "1.15", features = ["const_generics", "const_new", "union"] }

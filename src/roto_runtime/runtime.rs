@@ -169,7 +169,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
         impl Val<MutRotondaRoute> {
 
             /// Return the prefix for this `RotondaRoute`
-            fn route_prefix(rr: Val<MutRotondaRoute>) -> Prefix {
+            fn prefix(rr: Val<MutRotondaRoute>) -> Prefix {
                 let rr = rr.borrow_mut();
                 match *rr {
                     RotondaRoute::Ipv4Unicast(n, ..) => n.prefix(),
@@ -1187,15 +1187,18 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
         /// A BGP Standard Community (RFC1997)
         #[copy] type Community = Val<StandardCommunity>;
 
-        fn community_from_str(s: Arc<str>) -> Val<StandardCommunity> {
-            Val(StandardCommunity::from_str(&s).unwrap_or(StandardCommunity::from_u32(0)))
+        impl Val<StandardCommunity> {
+            fn from(s: Arc<str>) -> Val<StandardCommunity> {
+                Val(StandardCommunity::from_str(&s).unwrap_or(StandardCommunity::from_u32(0)))
+            }
         }
 
         /// A BGP Large Community (RFC8092)
         #[copy] type LargeCommunity = Val<LargeCommunity>;
-
-        fn large_community_from_str(s: Arc<str>) -> Val<LargeCommunity> {
-            Val(LargeCommunity::from_str(&s).unwrap_or(LargeCommunity::from([0u8;12])))
+        impl Val<LargeCommunity> {
+            fn from(s: Arc<str>) -> Val<LargeCommunity> {
+                Val(LargeCommunity::from_str(&s).unwrap_or(LargeCommunity::from([0u8;12])))
+            }
         }
 
         /// ROV status of a `Route`
@@ -1546,8 +1549,9 @@ mod tests {
         };
 
         let roto_script = "etc/examples/filters.roto.example";
-        let i = roto::FileTree::single_file(roto_script);
-        let mut roto_package = i.compile(&create_runtime().unwrap())
+        let mut roto_package = 
+            roto::FileTree::single_file(roto_script).unwrap()
+            .compile(&create_runtime().unwrap())
             .inspect_err(|e| eprintln!("{e}"))
             .unwrap();
 

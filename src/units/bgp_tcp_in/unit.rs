@@ -635,7 +635,7 @@ mod tests {
         }, units::bgp_tcp_in::{
             peer_config::{PeerConfig, PrefixOrExact},
             status_reporter::BgpTcpInStatusReporter,
-            unit::{BgpTcpIn, BgpTcpInRunner, ConfigAcceptor, LiveSessions, RotoFunc},
+            unit::{BgpTcpIn, BgpTcpInRunner, ConfigAcceptor, LiveSessions},
         }
     };
 

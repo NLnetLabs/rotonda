@@ -1,6 +1,8 @@
 use std::{net::SocketAddr, sync::{Arc, OnceLock}};
 
 use axum::routing::get;
+#[cfg(feature = "http-api-gzip")]
+use tower_http::compression::CompressionLayer;
 use log::{debug, error};
 use tokio::{sync::mpsc, task::JoinHandle};
 
@@ -146,9 +148,14 @@ impl Api {
             let (signal_tx, signal_rx) = mpsc::channel::<()>(1);
             self.signal_txs.push(signal_tx);
 
-            let app = self.router.clone().with_state(
+            let mut app = self.router.clone().with_state(
                 self.cloned_api_state()
             );
+
+            #[cfg(feature = "http-api-gzip")]
+            {
+                app = app.layer(CompressionLayer::new());
+            }
 
             let h = tokio::spawn(async move {
                 let listener = match tokio::net::TcpListener::bind(interface).await {
@@ -219,4 +226,3 @@ impl axum::response::IntoResponse for ApiError {
         ).into_response()
     }
 }
-

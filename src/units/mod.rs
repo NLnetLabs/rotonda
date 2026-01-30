@@ -29,6 +29,8 @@ pub use rib_unit:: unit:: RibUnit;
 pub mod rtr;
 pub use rtr::client::RtrUpdate;
 
+pub(crate) mod rotoro_quic_in;
+
 //------------ Unit ----------------------------------------------------------
 
 use crate::comms::Gate;
@@ -53,6 +55,9 @@ pub enum Unit {
 
     #[serde(rename = "rtr-tcp-in")]
     RtrTcpIn(rtr::client::Tcp),
+
+    #[serde(rename = "rotoro-quic-in")]
+    RotoroQuicIn(rotoro_quic_in::unit::RotoroQuicIn),
 }
 
 impl Unit {
@@ -76,6 +81,9 @@ impl Unit {
             Unit::RtrTcpIn(unit) => {
                 unit.run(component, gate, waitpoint).await
             }
+            Unit::RotoroQuicIn(unit) => {
+                unit.run(component, gate, waitpoint).await
+            }
         };
     }
 
@@ -86,6 +94,7 @@ impl Unit {
             Unit::RibUnit(_) => "rib",
             Unit::MrtFileIn(_) => "mrt-file-in",
             Unit::RtrTcpIn(_) => "rtr-tcp-in",
+            Unit::RotoroQuicIn(_) => "rotoro-quic-in",
         }
     }
 }

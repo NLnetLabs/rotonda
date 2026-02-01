@@ -1,6 +1,8 @@
-use std::{collections::HashMap, fmt::Display, net::{Ipv4Addr, Ipv6Addr}};
+use std::{fmt::Display, io, net::{Ipv4Addr, Ipv6Addr}};
+use std::io::Write;
 
-use axum::{extract::{Path, Query, State}, response::IntoResponse};
+use axum::{body::Body, extract::{Path, Query, State}, response::IntoResponse};
+use bytes::Bytes;
 use inetnum::{addr::Prefix, asn::Asn};
 use log::{debug, warn};
 use routecore::{bgp::{communities::{LargeCommunity, StandardCommunity}, path_attributes::PathAttributeType, types::AfiSafiType}, bmp::message::RibType};
@@ -8,8 +10,10 @@ use serde::Deserialize;
 use serde_with::serde_as;
 use serde_with::formats::CommaSeparator;
 use serde_with::StringWithSeparator;
+use tokio::sync::mpsc;
+use tokio_stream::wrappers::ReceiverStream;
 
-use crate::{http_ng::{Api, ApiError, ApiState}, ingress::IngressId, roto_runtime::types::PeerRibType, units::rib_unit::rpki::RovStatus};
+use crate::{http_ng::{Api, ApiError, ApiState}, ingress::IngressId, representation::{GenOutput, Json}, roto_runtime::types::PeerRibType, units::rib_unit::rpki::RovStatus};
 
 // XXX The actual querying of the store should be similar to how we query the ingress register,
 // i.e. with the Rib unit constructing one type of responses (so a wrapper around the
@@ -146,6 +150,62 @@ pub enum Include {
     LessSpecifics,
 }
 
+const STREAM_CHUNK_SIZE: usize = 256 * 1024;
+
+struct ChannelWriter {
+    sender: mpsc::Sender<Result<Bytes, io::Error>>,
+    buffer: Vec<u8>,
+}
+
+impl ChannelWriter {
+    fn new(sender: mpsc::Sender<Result<Bytes, io::Error>>) -> Self {
+        Self {
+            sender,
+            buffer: Vec::with_capacity(STREAM_CHUNK_SIZE),
+        }
+    }
+
+    fn send_buffer(&mut self) -> io::Result<()> {
+        if self.buffer.is_empty() {
+            return Ok(());
+        }
+        let chunk = Bytes::copy_from_slice(&self.buffer);
+        self.buffer.clear();
+        self.sender
+            .blocking_send(Ok(chunk))
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "receiver dropped"))
+    }
+}
+
+impl io::Write for ChannelWriter {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        self.buffer.extend_from_slice(buf);
+        if self.buffer.len() >= STREAM_CHUNK_SIZE {
+            self.send_buffer()?;
+        }
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.send_buffer()
+    }
+}
+
+fn stream_search_result(
+    search_result: super::rib::SearchResult,
+) -> impl IntoResponse {
+    let (tx, rx) = mpsc::channel::<Result<Bytes, io::Error>>(64);
+    let stream = ReceiverStream::new(rx);
+
+    tokio::task::spawn_blocking(move || {
+        let mut writer = ChannelWriter::new(tx);
+        let _ = search_result.write(&mut Json(&mut writer));
+        let _ = writer.flush();
+    });
+
+    ([("content-type", "application/json")], Body::from_stream(stream))
+}
+
 #[derive(Debug)]
 pub struct UnknownInclude;
 impl Display for UnknownInclude {
@@ -184,19 +244,13 @@ async fn search_ipv4unicast(
 
     let prefix = Prefix::new_v4(prefix, prefix_len).map_err(|e| ApiError::BadRequest(e.to_string()))?;
     let s = state.store.clone();
-    let mut res = Vec::new();
-    match s.get().map(|store|
-        store.search_and_output_routes(
-            crate::representation::Json(&mut res),
-            AfiSafiType::Ipv4Unicast,
-            prefix,
-            filter
-        )
-    ) {
-        Some(Ok(())) => Ok(([("content-type", "application/json")], res)),
-        Some(Err(e)) => Err(ApiError::BadRequest(e)),
-        None => Err(ApiError::InternalServerError("store unavailable".into()))
-    }
+    let search_result = match s.get() {
+        Some(store) => store.search_routes(AfiSafiType::Ipv4Unicast, prefix, filter)
+            .map_err(ApiError::BadRequest)?,
+        None => return Err(ApiError::InternalServerError("store unavailable".into())),
+    };
+
+    Ok(stream_search_result(search_result))
 }
 
 // Search all routes, we mimic a 0.0.0.0/0 search, but most (or all) results will actually be
@@ -217,19 +271,13 @@ async fn search_ipv6unicast(
 
     let prefix = Prefix::new_v6(prefix, prefix_len).map_err(|e| ApiError::BadRequest(e.to_string()))?;
     let s = state.store.clone();
-    let mut res = Vec::new();
-    match s.get().map(|store|
-        store.search_and_output_routes(
-            crate::representation::Json(&mut res),
-            AfiSafiType::Ipv6Unicast,
-            prefix,
-            filter
-        )
-    ) {
-        Some(Ok(())) => Ok(([("content-type", "application/json")], res)),
-        Some(Err(e)) => Err(ApiError::BadRequest(e)),
-        None => Err(ApiError::InternalServerError("store unavailable".into()))
-    }
+    let search_result = match s.get() {
+        Some(store) => store.search_routes(AfiSafiType::Ipv6Unicast, prefix, filter)
+            .map_err(ApiError::BadRequest)?,
+        None => return Err(ApiError::InternalServerError("store unavailable".into())),
+    };
+
+    Ok(stream_search_result(search_result))
 }
 
 // Search all routes, we mimic a ::/0 search, but most (or all) results will actually be

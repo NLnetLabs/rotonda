@@ -18,6 +18,7 @@
 mod file;
 mod mqtt;
 mod null;
+mod rotoro_quic_out;
 
 pub use mqtt::DEF_MQTT_PORT;
 
@@ -41,6 +42,9 @@ pub enum Target {
 
     #[serde(rename = "null-out")]
     Null(null::Target),
+
+    #[serde(rename = "rotoro-quic-out")]
+    Rotoro(rotoro_quic_out::target::RotoroQuicOut),
 }
 
 impl Target {
@@ -61,6 +65,9 @@ impl Target {
             Target::Null(target) => {
                 target.run(component, cmd, waitpoint).await
             }
+            Target::Rotoro(target) => {
+                target.run(component, cmd, waitpoint).await
+            }
         }
     }
 
@@ -69,6 +76,7 @@ impl Target {
             Target::File(_) => "file-out",
             Target::Mqtt(_) => "mqtt-out",
             Target::Null(_) => "null-out",
+            Target::Rotoro(_) => "rotoro-quit-out",
         }
     }
 }

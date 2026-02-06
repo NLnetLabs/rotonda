@@ -1,7 +1,7 @@
 use std::{future::Future, net::SocketAddr, ops::ControlFlow, sync::Arc};
 
 use futures::{future::{Either, select}, pin_mut};
-use log::{error, info};
+use log::{debug, error, info};
 use quinn::rustls::{self, pki_types::PrivatePkcs8KeyDer};
 use serde::Deserialize;
 
@@ -20,8 +20,8 @@ impl RotoroQuicIn {
     }
     
     pub async fn run(
-
-        self, mut component: Component,
+        self,
+        mut component: Component,
         gate: Gate,
         mut waitpoint: WaitPoint,
     ) -> Result<(), Terminated>
@@ -29,12 +29,13 @@ impl RotoroQuicIn {
 
         let cert = rcgen::generate_simple_self_signed(vec!["localhost".into()]).unwrap();
         let key = PrivatePkcs8KeyDer::from(cert.signing_key.serialize_der());
+        std::fs::write("./certs/selfsigned.der", &cert.cert.der()).unwrap();
         let cert = cert.cert.into();
 
-        let Ok(mut server_crypto) = rustls::ServerConfig::builder()
+        let Ok(server_crypto) = rustls::ServerConfig::builder()
             .with_no_client_auth()
             .with_single_cert(vec![cert], key.into()) else {
-                error!("");
+                error!("failed to create ServerConfig");
                 return Err(Terminated);
 
             };
@@ -45,8 +46,10 @@ impl RotoroQuicIn {
             quinn::ServerConfig::with_crypto(
                 Arc::new(quinn::crypto::rustls::QuicServerConfig::try_from(server_crypto).unwrap()));
 
-        //let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
-        //transport_config.max_concurrent_uni_streams(0_u8.into());
+        dbg!(&server_config);
+
+        let transport_config = Arc::get_mut(&mut server_config.transport).unwrap();
+        transport_config.max_concurrent_uni_streams(10_u8.into());
 
         let Ok(endpoint) = quinn::Endpoint::server(server_config, self.listen) else {
             error!("");
@@ -56,10 +59,13 @@ impl RotoroQuicIn {
         gate.process_until(waitpoint.ready()).await?;
         waitpoint.running().await;
 
-        RotoroRunner::new(
+        let res = RotoroRunner::new(
             gate,
             endpoint,
-        ).run().await
+        ).run().await;
+        debug!("end of RotoroQuicIn::run()");
+        res
+
     }
 }
 pub struct RotoroRunner {
@@ -77,31 +83,135 @@ impl RotoroRunner {
     }
     async fn run(self) -> Result<(), Terminated> {
 
-        loop {
+        debug!("RotoroRunnerin run()");
+        //let Some(incoming) = self.endpoint.accept().await
+        //    else { return Err(Terminated) };
+
+        //let mut rx = match incoming.await.unwrap().accept_uni().await {
+        //    Ok(rx) => rx,
+        //    Err(_) => todo!(),
+        //};
+
+        'outer: loop {
             let fut = self.endpoint.accept();
             match self.process_until(fut).await {
-                ControlFlow::Continue(Some(conn)) => {
-                    info!("New connection: {conn:#?}");
-                    TODO start consuming the stream
-                    perhaps already create a rotoro_quic_out target?
+                //ControlFlow::Continue(Ok(v)) => {
+                //    debug!("got msg: {v:?}");
+                //}
+                ControlFlow::Continue(Some(inc)) => {
+                    debug!("New Incoming, awaiting Connection");
+                    match inc.await {
+                        Ok(conn) => {
+                            info!("Connection, side {:?}, local {:?}, remote {}, awaiting accept_uni()", conn.side(), conn.local_ip(), conn.remote_address());
+                            loop {
+                                match self.process_until(conn.accept_uni()).await {
+                                    ControlFlow::Continue(Ok(mut rx)) => {
+                                        tokio::spawn( async move {
+                                            let mut buf = vec![0u8; 1024];
+                                            loop {
+                                                match rx.read(&mut buf).await {
+                                                    Ok(Some(len)) => {
+                                                        debug!(
+                                                            "received {len} bytes from {}: {:?}",
+                                                            rx.id(),
+                                                            &buf[..len]
+                                                            );
+                                                    }
+                                                    Ok(None) => {
+                                                        break;
+                                                    }
+                                                    // TODO find out, is a ReadError always fatal
+                                                    // for this Connection (conn)? Or are we able
+                                                    // to continue with some of the variants?
+                                                    Err(quinn::ReadError::ClosedStream) => {
+                                                        error!("Stream closed, breaking");
+                                                        break;
+                                                    }
+                                                    Err(quinn::ReadError::ConnectionLost(r)) => {
+                                                        error!("Connection lost: {r}");
+                                                        break;
+                                                    }
+                                                    Err(e) => {
+                                                        error!("error, but trying to continue: {e:?}");
+                                                    }
+                                                }
+                                            }
 
-                    let fut = handle_connection(root.clone(), conn);
-                    tokio::spawn(async move {
-                        if let Err(e) = fut.await {
-                            error!("connection failed: {reason}", reason = e.to_string())
+
+                                        });
+                                    }
+                                    ControlFlow::Continue(Err(e)) => {
+                                        //use quinn::ConnectionError::*;
+                                        //match e {
+                                        //    TransportError(error) => todo!(),
+                                        //    ConnectionClosed(connection_close) => todo!(),
+                                        //    ApplicationClosed(application_close) => todo!(),
+                                        //    VersionMismatch => todo!(),
+                                        //    Reset => todo!(),
+                                        //    TimedOut => todo!(),
+                                        //    LocallyClosed => todo!(),
+                                        //    CidsExhausted => todo!(),
+                                        //}
+                                        error!("error in inner process_until: {e:?}");
+                                        break;
+                                    }
+                                    ControlFlow::Break(_) => {
+                                        error!("break in inner accept_uni loop");
+                                        self.endpoint.close(0u8.into(), b"rotonda-terminated");
+                                        break 'outer Err(Terminated);
+                                    }
+                                }
+                            }
                         }
-                    });
+                        Err(e) => {
+                            error!("failed to connect (4): {e}"); 
+                            continue;
+                        }
+                    }
+                    //.await {
+                    //    Ok(_) => { },
+                    //    Err(_) => { return Err(Terminated) }
+                    //}
                 },
                 ControlFlow::Continue(None) => {
-                    info!("endpoint returned None for some reason");
+                    info!("endpoint is closed, terminating");
+                    return Err(Terminated);
                 },
                 ControlFlow::Break(Terminated) => {
-                    info!("terminating rotoro runner");
+                    info!("Break rotoro-in runner");
                     return Err(Terminated);
                 }
             }
         }
     }
+
+    async fn process_stream(&self, mut rx: quinn::RecvStream) -> Result<(), Terminated> {
+        debug!("process_stream for stream {}", rx.id());
+        loop {
+            let mut buf = vec![0u8; 1024];
+            let fut = rx.read(&mut buf);
+
+            match self.process_until(fut).await {
+                ControlFlow::Continue(Ok(Some(len))) => {
+                    debug!("received {len} bytes: {:?}", &buf[..len]);
+                }
+                ControlFlow::Continue(Ok(None)) => {
+                    error!("end of stream");
+                    return Err(Terminated);
+                }
+                ControlFlow::Continue(Err(e)) => {
+                    error!("error in stream: {e}");
+                    return Err(Terminated);
+                }
+                ControlFlow::Break(_) => {
+                    debug!("Break in process_stream");
+                    return Err(Terminated);
+                }
+            }
+
+        }
+    }
+
     async fn process_until<T, U>(
         &self,
         until_fut: T,

@@ -41,6 +41,34 @@
                 }
             </table>
 
+            <table border="1px">
+                <tr><th colspan="4">BMP with monitored BGP sessions v2</th></tr>
+                @for (bmp_id, (bmp_info, bgp_sessions)) in self.bmp_tree2.iter() {
+                <tr>
+                    <td>@bmp_id</td>
+                    <td>@bmp_info.remote_addr.map(|e| e.to_string()).unwrap_or("".into())</td>
+                    <td>@bmp_info.name.as_ref().map(|e| e.to_string()).unwrap_or("".into())</td>
+                    <td>@bmp_info.desc.as_ref().map(|e| e.to_string()).unwrap_or("".into())</td>
+                </tr>
+                    @{
+                        let mut last_asn = Asn::from_u32(0);
+                    }
+                    @for ((asn, addr), sessions) in bgp_sessions.iter() {
+                        <tr>
+                            <td></td>
+                            <td>@if asn != &last_asn { @asn }</td>
+                            <td>@addr</td>
+                            <td>
+                            @for (_id, bgp_info) in sessions {
+                                @bgp_info.peer_rib_type.map(|e| e.to_string()).unwrap_or("".into())
+                            }
+                            </td>
+                        </tr>
+                        @{ last_asn = *asn; }
+                    }
+                }
+            </table>
+
 
             <table border="1px">
                 <tr><th>BGP</th></tr>

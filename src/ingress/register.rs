@@ -239,6 +239,10 @@ impl Register {
         res
     }
 
+    pub fn cloned_info(&self) -> HashMap<IngressId, IngressInfo> {
+        self.info.read().unwrap().clone()
+    }
+
 
     pub fn bgp_neighbors<T>(&self, mut target: T) -> fmt::Result
         where for <'a> BgpIdAndInfo<'a>: GenOutput<T>

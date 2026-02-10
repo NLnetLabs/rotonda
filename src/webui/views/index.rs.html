@@ -7,10 +7,10 @@
 <body>
     <div class="container">
         <nav>
-            @include("navigation.rs.html")
         </nav>
         <main>
             <table border="1px">
+                <tr><th>BMP</th></tr>
                 @for (ingress_id, ingress_info) in self.bmp_routers.iter() {
                 <tr>
                     <td>@ingress_id</td>
@@ -21,6 +21,37 @@
             </table>
 
 
+            <table border="1px">
+                <tr><th>BMP with monitored BGP sessions</th></tr>
+                @for (bmp_id, (bmp_info, bgp_sessions)) in self.bmp_tree.iter() {
+                <tr>
+                    <td>@bmp_id</td>
+                    <td>@bmp_info.remote_addr.map(|e| e.to_string()).unwrap_or("".into())</td>
+                    <td>@bmp_info.name.as_ref().map(|e| e.to_string()).unwrap_or("".into())</td>
+                </tr>
+                    @for (bgp_id, bgp_info) in bgp_sessions {
+                        <tr>
+                            <td></td>
+                            <td>@bgp_id</td>
+                            <td>@bgp_info.remote_asn.map(|e| e.to_string()).unwrap_or("".into())</td>
+                            <td>@bgp_info.peer_rib_type.map(|e| e.to_string()).unwrap_or("".into())</td>
+                            <td>@bgp_info.remote_addr.map(|e| e.to_string()).unwrap_or("".into())</td>
+                        </tr>
+                    }
+                }
+            </table>
+
+
+            <table border="1px">
+                <tr><th>BGP</th></tr>
+                @for (ingress_id, ip, asn) in self.bgp_routers.iter() {
+                <tr>
+                    <td>@ingress_id</td>
+                    <td>@ip.map(|e| e.to_string()).unwrap_or("".into())</td>
+                    <td>@asn.map(|e| e.to_string()).unwrap_or("".into())</td>
+                </tr>
+                }
+            </table>
         </main>
     </div>
 </body>

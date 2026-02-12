@@ -1,0 +1,24 @@
+@(title, routes: &Vec<(Prefix, Vec<RouteDetails>)>)
+
+<table>
+    <tr><th colspan="4">@title</th></tr>
+    <tr>
+        <th>prefix</th>
+        <th>source</th>
+        <th>as_path</th>
+        <th>communities</th>
+    </tr>
+    @for (nlri, routes2) in routes.iter().take(1000) {
+        @for details in routes2.iter() {
+        @{
+            let RouteDetails {bmp_info, as_path, communities} = details;
+        }
+        <tr>
+            <td><a href="/routes/@nlri">@nlri</a></td>
+            <td>@bmp_info</td>
+            <td>@as_path</td>
+            <td>@communities</td>
+        </tr>
+        }
+    }
+</table>

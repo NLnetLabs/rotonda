@@ -226,6 +226,10 @@ impl Register {
         }
     }
 
+    pub fn current_serial(&self) -> u32 {
+        self.serial.load(Ordering::Relaxed)
+    }
+
     pub fn overview(&self) -> String {
         let lock = self.info.read().unwrap();
         let mut res = String::new();

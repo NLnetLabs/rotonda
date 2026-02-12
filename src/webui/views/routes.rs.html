@@ -1,0 +1,8 @@
+@use "Navigation"
+@use "components/RouteTable"
+
+<Navigation />
+
+<RouteTable title="less specifics" routes=@&self.less_specifics />
+<RouteTable title="exact matches" routes=@&self.routes />
+<RouteTable title="more specifics" routes=@&self.more_specifics />

@@ -1,5 +1,6 @@
-use std::{net::SocketAddr, sync::{Arc, OnceLock}};
+use std::{net::SocketAddr, sync::Arc};
 
+use arc_swap::ArcSwapOption;
 use axum::routing::get;
 #[cfg(feature = "http-api-gzip")]
 use tower_http::compression::CompressionLayer;
@@ -10,7 +11,7 @@ use crate::{ingress::{self, http_ng::IngressApi}, units::rib_unit::rib::Rib, web
 
 
 
-#[derive(Default)]
+//#[derive(Default)]
 pub struct Api {
     /// Interfaces to listen on
     interfaces: Vec<SocketAddr>,
@@ -19,7 +20,7 @@ pub struct Api {
     api_root: String,
 
     /// The Rib (wrapping rotonda-store)
-    store: OnceLock<Arc<Rib>>,
+    pub store: Arc<ArcSwapOption<Rib>>,
 
     /// The `ingress::Register`
     ingress_register: Arc<ingress::Register>,
@@ -40,7 +41,8 @@ pub struct Api {
 #[derive(Clone)]
 pub struct ApiState {
     /// The Rib (wrapping rotonda-store) to be set by the RibUnit
-    pub(crate) store: OnceLock<Arc<Rib>>,
+    //pub(crate) store: OnceLock<Arc<Rib>>,
+    pub(crate) store: Arc<ArcSwapOption<Rib>>,
 
     /// The `ingress::Register`
     pub(crate) ingress_register: Arc<ingress::Register>,
@@ -87,7 +89,9 @@ impl Api {
         };
 
         // The web-ui lives on /
+        eprintln!("calling WebUI::register_routes");
         WebUI::register_routes(&mut res);
+        eprintln!("calling WebUI::register_routes done");
 
         // All other endpoints go under /api/v1
         res.api_root = "/api/v1".into();
@@ -103,6 +107,7 @@ impl Api {
 
     /// Clone an `ApiState` based on the references to the store an ingress registry
     pub fn cloned_api_state(&self) -> ApiState {
+        debug!("cloned_api_state(), store is_some: {:?}", self.store.load().is_some());
         ApiState { 
             store: self.store.clone(),
             ingress_register: self.ingress_register.clone(),
@@ -115,7 +120,7 @@ impl Api {
     /// When this method is called while `self.store` is already set, the call is basically a
     /// no-op.
     pub fn set_rib(&mut self, rib: Arc<Rib>) {
-        if self.store.set(rib).is_err() {
+        if self.store.swap(Some(rib)).is_some() {
             debug!("http_ng set_rib(): Rib already set")
         }
     }
@@ -132,6 +137,7 @@ impl Api {
             H: axum::handler::Handler<T, ApiState>,
             T: 'static,
     {
+        debug!("add_get for {}", path.as_ref());
         self.router = self.router.clone()
             .route(&format!("{}{}", self.api_root, path.as_ref()), get(handler))
             .with_state(
@@ -148,6 +154,7 @@ impl Api {
             let (signal_tx, signal_rx) = mpsc::channel::<()>(1);
             self.signal_txs.push(signal_tx);
 
+            debug!("starting Api on interface {interface}");
             let mut app = self.router.clone().with_state(
                 self.cloned_api_state()
             );

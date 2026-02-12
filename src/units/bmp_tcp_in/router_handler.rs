@@ -290,6 +290,11 @@ impl RouterHandler {
         // Signal withdrawal of all bgp sessions monitored via this BMP
         // session:
         let session_ids = ingress_register.ids_for_parent(ingress_id);
+        debug!(
+            "withdraw these {}/{} BGP sessions for parent BMP {ingress_id}: {session_ids:?}",
+            session_ids.len(),
+            ingress_register.current_serial(),
+        );
         self.gate
             .update_data(Update::WithdrawBulk(session_ids.into()))
             .await;

@@ -316,7 +316,9 @@ impl RibUnitRunner {
         let filter_name = Arc::new(ArcSwap::from_pointee(filter_name));
 
         if let Ok(mut api) = component.http_ng_api_arc().lock() {
+            debug!("calling set_rib");
             api.set_rib(rib.load().clone());
+            debug!("called set_rib");
             super::http_ng::register_routes(&mut api);
 
 
@@ -405,6 +407,7 @@ impl RibUnitRunner {
         ingress_id: ingress::IngressId,
         specific_afisafi: Option<AfiSafiType>,
     ) {
+        debug!("signal_withdraw for {ingress_id}");
         self.rib
             .load()
             .withdraw_for_ingress(ingress_id, specific_afisafi);
@@ -544,6 +547,7 @@ impl RibUnitRunner {
             }
 
             Update::WithdrawBulk(ingress_ids) => {
+                debug!("got WithdrawBulk for {} ids", ingress_ids.len());
                 ingress_ids
                     .iter()
                     .for_each(|&id| self.signal_withdraw(id, None));

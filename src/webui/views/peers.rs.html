@@ -1,0 +1,29 @@
+@use "Navigation"
+
+<nav>
+<Navigation />
+</nav>
+
+<h1>Peers overview</h1>
+<table>
+    <tr>
+        <th>asn</th>
+        <th>addr</th>
+        <th>rib view</th>
+        <th># of routes</th>
+        <th>comm</th>
+        <th>ext comm</th>
+        <th>large comm</th>
+    </tr>
+    @for (asn, addr, ribview, routecnt, attrs) in &self.peers { 
+    <tr>
+        <td>@asn</td>
+        <td>@addr</td>
+        <td>@ribview</td>
+        <td>@routecnt</td>
+        <td>@if *attrs & ObservedAttributes::COMMUNITIES  { x } </td>
+        <td>@if *attrs & ObservedAttributes::EXT_COMMUNITIES  { x } </td>
+        <td>@if *attrs & ObservedAttributes::LARGE_COMMUNITIES  { x } </td>
+    </tr>
+    }
+</table>

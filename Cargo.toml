@@ -85,6 +85,7 @@ rshtml             = { version = "0.5", features = ["functions"] }
 cranelift-jit      = "*"
 tower-http         = { version = "0.5.2", features = ["compression-gzip"], optional = true }
 serde_qs           = "0.15.0"
+rayon = "1.11.0"
 
 [target.'cfg(unix)'.dependencies]
 syslog             = "7.0"

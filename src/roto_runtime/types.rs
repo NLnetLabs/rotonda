@@ -180,7 +180,7 @@ pub struct InsertionInfo {
 
 //------------ PeerRibType ---------------------------------------------------
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PeerRibType {
     InPre,

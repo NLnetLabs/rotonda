@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, HashMap}, net::IpAddr, time::Instant};
+use std::{collections::{BTreeMap, HashMap}, fmt, net::IpAddr, time::Instant};
 
 use axum::{extract::{Path, State}, response::Html};
 use inetnum::{addr::Prefix, asn::Asn};
@@ -6,7 +6,9 @@ use log::debug;
 use routecore::bgp::{aspath::HopPath, message::update_builder::StandardCommunitiesList, types::AfiSafiType};
 use rshtml::{RsHtml, traits::RsHtml};
 
-use crate::{http_ng::{Api, ApiState}, ingress::{IngressId, IngressInfo}, representation::GenOutput, units::rib_unit::{Include, QueryFilter}};
+use rayon::prelude::*;
+
+use crate::{http_ng::{Api, ApiState}, ingress::{IngressId, IngressInfo}, representation::GenOutput, roto_runtime::types::PeerRibType, units::rib_unit::{Include, QueryFilter}};
 
 pub struct WebUI { }
 
@@ -24,6 +26,8 @@ impl WebUI {
         router.add_get("/routes/peer_asn/{peer_asn}", Self::routes_peer_asn);
         router.add_get("/routes/peer_ip/{peer_ip}", Self::routes_peer_ip);
         router.add_get("/routes/{prefix}/{prefix_len}", Self::routes_prefix);
+
+        router.add_get("/peers/overview", Self::peers_overview);
     }
 
 
@@ -214,6 +218,113 @@ impl WebUI {
 
         res
     }
+
+    async fn peers_overview(
+        //Path((prefix, prefix_len)): Path<(IpAddr, u8)>,
+        state: State<ApiState>,
+    ) -> Result<Html<String>, String> {
+        
+        let register = state.ingress_register.cloned_info();
+        let s = state.store.load();
+        let Some(ref store) = *s else {
+            return Err("store not ready".into())
+        };
+        let mut peers = register.par_iter()
+            .filter(|(_id, info)|
+                info.ingress_type == Some(crate::ingress::IngressType::BgpViaBmp)
+                || info.ingress_type == Some(crate::ingress::IngressType::Bgp)
+            )
+            .map(|(ingress_id, info)| {
+
+            // fetch all routes for this mui
+            // iterate over path attributes, early abort once we have found everything
+
+                let mut observed_attributes = ObservedAttributes(0);
+                let mut route_cnt = 0;
+
+                if let Ok(r) = store.search_routes(
+                    AfiSafiType::Ipv4Unicast,
+                    "0.0.0.0/0".parse().unwrap(),
+                    QueryFilter {
+                        include: vec![Include::MoreSpecifics],
+                        ingress_id: Some(*ingress_id),
+                        .. Default::default()
+                    },
+                ) {
+                    if let Some(recordset) = r.query_result.more_specifics {
+                        route_cnt = recordset.len();
+                        for r in recordset.v4 {
+                            for m in r.meta {
+                                for pa in m.meta.path_attributes().iter() {
+                                    let Ok(pa) = pa else { break };
+                                    if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::Communities) {
+                                        observed_attributes |= ObservedAttributes::COMMUNITIES;
+                                    }
+                                    if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::ExtendedCommunities) {
+                                        observed_attributes |= ObservedAttributes::EXT_COMMUNITIES;
+                                    }
+                                    if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::LargeCommunities) {
+                                        observed_attributes |= ObservedAttributes::LARGE_COMMUNITIES;
+                                    }
+                                }
+                            }
+                            if observed_attributes.all_marked() {
+                                break;
+                            }
+                        }
+
+                    }
+                    if route_cnt == 0 {
+                        // nothing for v4, now check v6
+                        
+                        // TODO extact all the replicated code into a separate fn 
+                        if let Ok(r) = store.search_routes(
+                            AfiSafiType::Ipv6Unicast,
+                            "::/0".parse().unwrap(),
+                            QueryFilter {
+                                include: vec![Include::MoreSpecifics],
+                                ingress_id: Some(*ingress_id),
+                                .. Default::default()
+                            },
+                        ) {
+                            if let Some(recordset) = r.query_result.more_specifics {
+                                route_cnt = recordset.len();
+                                for r in recordset.v4 {
+                                    for m in r.meta {
+                                        for pa in m.meta.path_attributes().iter() {
+                                            let Ok(pa) = pa else { break };
+                                            if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::Communities) {
+                                                observed_attributes |= ObservedAttributes::COMMUNITIES;
+                                            }
+                                            if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::ExtendedCommunities) {
+                                                observed_attributes |= ObservedAttributes::EXT_COMMUNITIES;
+                                            }
+                                            if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::LargeCommunities) {
+                                                observed_attributes |= ObservedAttributes::LARGE_COMMUNITIES;
+                                            }
+                                        }
+                                    }
+                                    if observed_attributes.all_marked() {
+                                        break;
+                                    }
+                                }
+
+                            }
+                        }
+                    }
+                }
+
+
+            (info.remote_asn.unwrap(), info.remote_addr.unwrap(), info.peer_rib_type.unwrap(), route_cnt, observed_attributes)
+        }).collect::<Vec<_>>();
+
+        peers.sort();
+        let page = Peers { peers };
+
+        page.render()
+            .map(Into::into)
+            .map_err(|e| format!("rendering error: {}", e))
+    }
 }
 
 
@@ -282,33 +393,13 @@ impl crate::units::rib_unit::rib::SearchResult {
         }).collect()
     }
 }
+
 impl GenOutput<&mut Routes> for crate::units::rib_unit::rib::SearchResult {
     fn write(&self, target: &mut &mut Routes) -> Result<(), crate::representation::OutputError> {
 
         dbg!(self.query_result.more_specifics.as_ref().unwrap().v4.len());
         dbg!(self.query_result.more_specifics.as_ref().unwrap().v6.len());
         debug!("in write, current Routes.routes.len: {}", target.routes.len());
-
-        //fn collect_routes<'a>(
-        //    routes: impl Iterator<Item=&'a rotonda_store::prefix_record::Record<crate::payload::RotondaPaMap>>,
-        //    ingress_register: Arc<Register>,
-        //) -> Vec<RouteDetails> {
-        //    routes.map(|m| {
-        //        let bmp_info = {
-        //            //ingress_register. get( m.multi_uniq_id
-        //            "".info()
-        //        };
-        //        let pamap = m.meta.path_attributes();
-        //        let aspath = pamap.get::<HopPath>();
-        //        let communities = pamap.get::<StandardCommunitiesList>();
-        //        (
-        //            bmp_info,
-        //            aspath.map(|a| a.to_string()).unwrap_or("".into()),
-        //            communities.map(|c| c.communities().iter().map(|c| c.to_string()).collect::<Vec<_>>().join(", "))
-        //                .unwrap_or("".into()),
-        //        ).into()
-        //    }).collect()
-        //}
 
         if let Some(prefix) = self.query_result.prefix {
             let routes = self.collect_routes(self.query_result.records.iter());
@@ -337,4 +428,43 @@ impl GenOutput<&mut Routes> for crate::units::rib_unit::rib::SearchResult {
 
         Ok(())
     }
+}
+
+
+#[derive(Copy, Clone, Eq, Ord, PartialEq, PartialOrd)]
+pub struct ObservedAttributes(u8);
+
+
+impl ObservedAttributes {
+    const COMMUNITIES: Self = Self(0x1);
+    const EXT_COMMUNITIES: Self = Self(0x2);
+    const LARGE_COMMUNITIES: Self = Self(0x4);
+
+    pub fn all_marked(&self) -> bool {
+        self.0 == Self::COMMUNITIES.0 | Self::EXT_COMMUNITIES.0 | Self::LARGE_COMMUNITIES.0
+    }
+}
+
+impl fmt::Display for ObservedAttributes {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl std::ops::BitOrAssign for ObservedAttributes {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0
+    }
+}
+impl std::ops::BitAnd for ObservedAttributes {
+    type Output = bool;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        self.0 & rhs.0 > 0
+    }
+}
+
+#[derive(RsHtml)]
+pub struct Peers {
+    peers: Vec<(Asn, IpAddr, PeerRibType, usize, ObservedAttributes)>,
 }

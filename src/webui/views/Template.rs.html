@@ -1,0 +1,26 @@
+@(title)
+@use "Navigation";
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Rotonda WebUI</title>
+    <style>
+        table, tr, td, th {
+            border: 1px solid black;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <nav>
+        <Navigation />
+        </nav>
+        <main>
+            <h1>@title</h1>
+            @child_content
+        </main>
+    </div>
+</body>
+</html>

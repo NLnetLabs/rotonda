@@ -1,0 +1,37 @@
+@use "Template";
+
+
+<Template title="Routes diff">
+<table>
+    <tr>
+        @{
+            let (asn_a, addr_a) = self.peer_a;
+            let (asn_b, addr_b) = self.peer_b;
+        }
+        <td>@asn_a @@ @addr_a</td>
+        <td>both</td>
+        <td>@asn_b @@  @addr_b</td>
+    </tr>
+    @for prefix in &self.only_a {
+    <tr>
+        <td>@prefix</td>
+        <td></td>
+        <td></td>
+    </tr>
+    }
+    @for prefix in &self.only_b {
+    <tr>
+        <td></td>
+        <td></td>
+        <td>@prefix</td>
+    </tr>
+    }
+    @for prefix in &self.both {
+    <tr>
+        <td></td>
+        <td>@prefix</td>
+        <td></td>
+    </tr>
+    }
+</table>
+</Template>

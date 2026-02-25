@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, HashMap}, fmt, net::IpAddr, time::Instant};
+use std::{collections::{BTreeMap, BTreeSet, HashMap}, fmt, net::IpAddr, time::Instant};
 
 use axum::{extract::{Path, State}, response::Html};
 use inetnum::{addr::Prefix, asn::Asn};
@@ -28,6 +28,7 @@ impl WebUI {
         router.add_get("/routes/{prefix}/{prefix_len}", Self::routes_prefix);
 
         router.add_get("/peers/overview", Self::peers_overview);
+        router.add_get("/routes/diff/{ingress_a}/{ingress_b}", Self::routes_diff);
     }
 
 
@@ -325,6 +326,77 @@ impl WebUI {
             .map(Into::into)
             .map_err(|e| format!("rendering error: {}", e))
     }
+
+
+    async fn routes_diff(
+        Path((ingress_a, ingress_b)): Path<(IngressId, IngressId)>,
+        state: State<ApiState>,
+    ) -> Result<Html<String>, String> {
+
+        // fetch asn+ip for ingresses
+        let s = state.store.load();
+        let Some(ref store) = *s else {
+            return Err("store not ready".into())
+        };
+        let Some(ingress_info_a) = state.ingress_register.get(ingress_a) else {
+            return Err("no information for ingress id {ingress_a}".into());
+        };
+        let Some(ingress_info_b) = state.ingress_register.get(ingress_b) else {
+            return Err("no information for ingress id {ingress_a}".into());
+        };
+        // new RoutesDiff
+        // TODO fix unwraps
+        let mut routes_diff = RoutesDiff::new(
+            (ingress_info_a.remote_asn.unwrap(), ingress_info_a.remote_addr.unwrap()),
+            (ingress_info_b.remote_asn.unwrap(), ingress_info_b.remote_addr.unwrap()),
+        );
+
+        // fetch everything from store for a, and b,
+
+        let mut prefixes_a = BTreeSet::new();
+        if let Ok(r) = store.search_routes(
+            AfiSafiType::Ipv4Unicast,
+            "0.0.0.0/0".parse().unwrap(),
+            QueryFilter {
+                include: vec![Include::MoreSpecifics],
+                ingress_id: Some(ingress_a),
+                .. Default::default()
+            },
+        ) {
+            if let Some(recordset) = r.query_result.more_specifics {
+                prefixes_a = recordset.v4.iter().map(|r| r.prefix).collect();
+            }
+        };
+
+        let mut prefixes_b = BTreeSet::new();
+        if let Ok(r) = store.search_routes(
+            AfiSafiType::Ipv4Unicast,
+            "0.0.0.0/0".parse().unwrap(),
+            QueryFilter {
+                include: vec![Include::MoreSpecifics],
+                ingress_id: Some(ingress_b),
+                .. Default::default()
+            },
+        ) {
+            if let Some(recordset) = r.query_result.more_specifics {
+                prefixes_b = recordset.v4.iter().map(|r| r.prefix).collect();
+            }
+        };
+
+        //TODO add in ipv6 as well
+
+
+        // sort a and b, or create Set
+        // get the disjoint diff
+        // populate RoutesDiff
+        routes_diff.only_a = prefixes_a.difference(&prefixes_b).cloned().collect();
+        routes_diff.only_b = prefixes_b.difference(&prefixes_a).cloned().collect();
+        routes_diff.both = prefixes_a.intersection(&prefixes_a).cloned().collect();
+
+        routes_diff.render()
+            .map(Into::into)
+            .map_err(|e| format!("rendering error: {}", e))
+    }
 }
 
 
@@ -354,6 +426,27 @@ impl From<(String, String, String)> for RouteDetails {
             bmp_info: value.0,
             as_path: value.1,
             communities: value.2,
+        }
+    }
+}
+
+
+#[derive(RsHtml)]
+pub struct RoutesDiff {
+    peer_a: (Asn, IpAddr),
+    peer_b: (Asn, IpAddr),
+    pub only_a: Vec<Prefix>,
+    pub only_b: Vec<Prefix>,
+    pub both: Vec<Prefix>,
+}
+impl RoutesDiff {
+    pub fn new(peer_a: (Asn, IpAddr), peer_b: (Asn, IpAddr)) -> Self {
+        Self {
+            peer_a,
+            peer_b,
+            only_a: vec![],
+            only_b: vec![],
+            both: vec![],
         }
     }
 }

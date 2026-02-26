@@ -1,4 +1,4 @@
-use std::{collections::{BTreeMap, BTreeSet, HashMap}, fmt, net::IpAddr, time::Instant};
+use std::{collections::{BTreeMap, BTreeSet}, fmt, net::IpAddr, time::Instant};
 
 use axum::{extract::{Path, State}, response::Html};
 use inetnum::{addr::Prefix, asn::Asn};
@@ -200,9 +200,9 @@ impl WebUI {
         res
     }
 
-    fn bmp_tree(state: &State<ApiState>) -> BmpTree2 {
+    fn bmp_tree(state: &State<ApiState>) -> BmpTree {
         let register = state.ingress_register.cloned_info();
-        let mut res = HashMap::new();
+        let mut res = BTreeMap::new();
         for (id, info) in register.iter().filter(|(_id, info)| {
             info.ingress_type == Some(crate::ingress::IngressType::Bmp)
         }) {
@@ -457,7 +457,7 @@ impl WebUI {
 }
 
 
-type BmpTree2 = HashMap<
+type BmpTree = BTreeMap<
     IngressId, // BMP ingress id
     (IngressInfo, BTreeMap< // pointing to a tuple of its info plus a map
         (Asn, IpAddr), Vec<(IngressId, IngressInfo)> // of (asn+ip) pointing to all id+infos
@@ -468,7 +468,7 @@ type BmpTree2 = HashMap<
 pub struct Index {
     pub bmp_routers: Vec<(IngressId, IngressInfo)>,
     pub bgp_routers: Vec<(IngressId, Option<IpAddr>, Option<Asn>)>,
-    pub bmp_tree: BmpTree2,
+    pub bmp_tree: BmpTree,
 }
 
 

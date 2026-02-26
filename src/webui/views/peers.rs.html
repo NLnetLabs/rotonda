@@ -12,11 +12,11 @@
         <th>ext comm</th>
         <th>large comm</th>
     </tr>
-    @for (asn, addr, ribview, routecnt, attrs) in &self.peers { 
+    @for (ingress_id, asn, addr, ribview, routecnt, attrs) in &self.peers { 
     <tr>
-        <td>@asn</td>
-        <td>@addr</td>
-        <td>@ribview</td>
+        <td><a href="/routes/peer_asn/@asn">@asn</a></td>
+        <td><a href="/routes/peer_ip/@addr">@addr</a></td>
+        <td><a href="/routes/@ingress_id">@ribview</a></td>
         <td>@routecnt</td>
         <td>@if *attrs & ObservedAttributes::COMMUNITIES  { x } </td>
         <td>@if *attrs & ObservedAttributes::EXT_COMMUNITIES  { x } </td>

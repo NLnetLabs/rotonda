@@ -317,7 +317,7 @@ impl WebUI {
                 }
 
 
-            (info.remote_asn.unwrap(), info.remote_addr.unwrap(), info.peer_rib_type.unwrap(), route_cnt, observed_attributes)
+            (*ingress_id, info.remote_asn.unwrap(), info.remote_addr.unwrap(), info.peer_rib_type.unwrap(), route_cnt, observed_attributes)
         }).collect::<Vec<_>>();
 
         peers.sort();
@@ -638,5 +638,5 @@ impl std::ops::BitAnd for ObservedAttributes {
 
 #[derive(RsHtml)]
 pub struct Peers {
-    peers: Vec<(Asn, IpAddr, PeerRibType, usize, ObservedAttributes)>,
+    peers: Vec<(IngressId, Asn, IpAddr, PeerRibType, usize, ObservedAttributes)>,
 }

@@ -475,16 +475,20 @@ pub struct Index {
 pub struct RouteDetails {
     bmp_id: Option<IngressId>,
     bmp_name: String,
+    peer_asn: String,
+    origin_asn: String,
     as_path: String,
     communities: String,
 }
-impl From<(Option<IngressId>, String, String, String)> for RouteDetails {
-    fn from(value: (Option<IngressId>, String, String, String)) -> Self {
+impl From<(Option<IngressId>, String, String, String, String, String)> for RouteDetails {
+    fn from(value: (Option<IngressId>, String, String, String, String, String)) -> Self {
         RouteDetails {
             bmp_id: value.0,
             bmp_name: value.1,
-            as_path: value.2,
-            communities: value.3,
+            peer_asn: value.2,
+            origin_asn: value.3,
+            as_path: value.4,
+            communities: value.5,
         }
     }
 }
@@ -546,6 +550,7 @@ impl crate::units::rib_unit::rib::SearchResult {
         routes: impl Iterator<Item=&'a rotonda_store::prefix_record::Record<crate::payload::RotondaPaMap>>,
     ) -> Vec<RouteDetails> {
         routes.map(|m| {
+            let route_ingress_info = self.ingress_register.get(m.multi_uniq_id);
             let bmp_info = self.ingress_register.get(m.multi_uniq_id)
                 .and_then(|info| info.parent_ingress)
                 .map(|parent_id|
@@ -566,6 +571,8 @@ impl crate::units::rib_unit::rib::SearchResult {
             (
                 bmp_info.map(|(id, _info)| id),
                 bmp_name,
+                route_ingress_info.and_then(|info| info.remote_asn).map(|a| a.to_string()).unwrap_or("".into()),
+                aspath.as_ref().and_then(|a| a.origin().map(|a| a.to_string())).unwrap_or("".into()),
                 aspath.map(|a| a.to_string()).unwrap_or("".into()),
                 communities.map(|c| c.communities().iter().map(|c| c.to_string()).collect::<Vec<_>>().join(", "))
                 .unwrap_or("".into()),

@@ -11,11 +11,17 @@
     @for (nlri, routes2) in routes.iter().take(1000) {
         @for details in routes2.iter() {
         @{
-            let RouteDetails {bmp_info, as_path, communities} = details;
+            let RouteDetails {bmp_id, bmp_name, as_path, communities} = details;
         }
         <tr>
             <td><a href="/routes/@nlri">@nlri</a></td>
-            <td>@bmp_info</td>
+            <td>
+                @if let Some(bmp_id) = bmp_id {
+                <a href="/bmp/@bmp_id">
+                @if bmp_name != "" { @bmp_name } else { bmp-@bmp_id }
+                </a>
+                }
+            </td>
             <td>@as_path</td>
             <td>@communities</td>
         </tr>

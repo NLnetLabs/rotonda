@@ -8,7 +8,7 @@ use rshtml::{RsHtml, traits::RsHtml};
 
 use rayon::prelude::*;
 
-use crate::{http_ng::{Api, ApiState}, ingress::{IngressId, IngressInfo}, representation::GenOutput, roto_runtime::types::PeerRibType, units::rib_unit::{Include, QueryFilter}};
+use crate::{http_ng::{Api, ApiState}, ingress::{IngressId, IngressInfo, IngressType}, representation::GenOutput, roto_runtime::types::PeerRibType, units::rib_unit::{Include, QueryFilter}};
 
 pub struct WebUI { }
 
@@ -211,7 +211,7 @@ impl WebUI {
         for (id, info) in register.iter().filter(|(_id, info)| {
             info.ingress_type == Some(crate::ingress::IngressType::BgpViaBmp)
         }) {
-            let (_bmp_info, bgp)= res.get_mut(&info.parent_ingress.expect("should have parent"))
+            let (_bmp_name, bgp)= res.get_mut(&info.parent_ingress.expect("should have parent"))
                 .expect("should be in hashmap already");
             let infos: &mut Vec<_> = bgp.entry((info.remote_asn.unwrap(), info.remote_addr.unwrap()))
                 .or_default();
@@ -473,16 +473,18 @@ pub struct Index {
 
 
 pub struct RouteDetails {
-    bmp_info: String,
+    bmp_id: Option<IngressId>,
+    bmp_name: String,
     as_path: String,
     communities: String,
 }
-impl From<(String, String, String)> for RouteDetails {
-    fn from(value: (String, String, String)) -> Self {
+impl From<(Option<IngressId>, String, String, String)> for RouteDetails {
+    fn from(value: (Option<IngressId>, String, String, String)) -> Self {
         RouteDetails {
-            bmp_info: value.0,
-            as_path: value.1,
-            communities: value.2,
+            bmp_id: value.0,
+            bmp_name: value.1,
+            as_path: value.2,
+            communities: value.3,
         }
     }
 }
@@ -544,20 +546,26 @@ impl crate::units::rib_unit::rib::SearchResult {
         routes: impl Iterator<Item=&'a rotonda_store::prefix_record::Record<crate::payload::RotondaPaMap>>,
     ) -> Vec<RouteDetails> {
         routes.map(|m| {
-            let bmp_info = {
-                self.ingress_register.get(m.multi_uniq_id)
-                    //.and_then(|info| self.ingress_register.get(info.parent_ingress))
-                    .and_then(|info| info.parent_ingress)
-                    .and_then(|parent_id| self.ingress_register.get(parent_id))
-                    .map(|parent| parent.name)
-                    .flatten()
-                    .unwrap_or("".into())
-            };
+            let bmp_info = self.ingress_register.get(m.multi_uniq_id)
+                .and_then(|info| info.parent_ingress)
+                .map(|parent_id|
+                    self.ingress_register.get(parent_id)
+                        .filter(|parent_info| parent_info.ingress_type == Some(IngressType::Bmp))
+                        .map(|parent_info| (parent_id, parent_info))
+                ).flatten()
+            ;
+
+            let bmp_name = bmp_info.as_ref().map(|(_id, info)| info.name.clone())
+                .flatten()
+                .unwrap_or("".into())
+            ;
+
             let pamap = m.meta.path_attributes();
             let aspath = pamap.get::<HopPath>();
             let communities = pamap.get::<StandardCommunitiesList>();
             (
-                bmp_info,
+                bmp_info.map(|(id, _info)| id),
+                bmp_name,
                 aspath.map(|a| a.to_string()).unwrap_or("".into()),
                 communities.map(|c| c.communities().iter().map(|c| c.to_string()).collect::<Vec<_>>().join(", "))
                 .unwrap_or("".into()),

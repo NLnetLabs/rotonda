@@ -1,0 +1,16 @@
+@use "Template"
+
+<Template title={BMP overview @self.name}>
+    TODO overview of monitored sessions
+    <br>
+    <table>
+        <tr><th>compare @self.name with</th></tr>
+        @for id in &self.other_ids {
+        <tr><td>
+            <a href="/peers/diff/@self.ingress_id/@id">@id</a>
+            </td>
+        </tr>
+        }
+    </table>
+</Template>
+

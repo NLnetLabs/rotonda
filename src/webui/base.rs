@@ -30,6 +30,8 @@ impl WebUI {
         router.add_get("/peers/overview", Self::peers_overview);
         router.add_get("/routes/diff/{ingress_a}/{ingress_b}", Self::routes_diff);
         router.add_get("/peers/diff/{ingress_a}/{ingress_b}", Self::peers_diff);
+
+        router.add_get("/bmp/{ingress}", Self::bmp_details);
     }
 
 
@@ -42,6 +44,28 @@ impl WebUI {
             .map(Into::into)
             .map_err(|e| format!("rendering error: {}", e))
     }
+
+    async fn bmp_details(
+        Path(ingress_id): Path<IngressId>,
+        state: State<ApiState>,
+    ) -> Result<Html<String>, String> {
+        let Some(info) = state.ingress_register.get(ingress_id)
+            .filter(|info| info.ingress_type == Some(IngressType::Bmp)) else {
+            return Err("ingress id {ingress_id} is not a BMP source".into());
+        };
+
+        let name = info.name.unwrap_or("".into());
+        let addr = info.remote_addr.unwrap();
+        let other_ids = state.ingress_register.cloned_info().iter()
+            .filter(|(id, info)| info.ingress_type == Some(IngressType::Bmp) && **id != ingress_id)
+            .map(|(id, _info)| *id) // TODO also store the name to use in the template
+            .collect();
+
+        BmpDetails { ingress_id, name, addr, other_ids }.render()
+            .map(Into::into)
+            .map_err(|e| format!("rendering error: {}", e))
+    }
+
 
     fn routes_with_filter(
         state: State<ApiState>,
@@ -457,6 +481,15 @@ impl WebUI {
 }
 
 
+// Print an Option<T> with the Display impl of T if the option is Some, otherwise print the
+// alternative.
+macro_rules! or {
+    ($var:expr, $alt:expr) => {
+        $var.as_ref().map(|i| i.to_string()).filter(|i| i != "").unwrap_or($alt.into())
+    }
+}
+
+
 type BmpTree = BTreeMap<
     IngressId, // BMP ingress id
     (IngressInfo, BTreeMap< // pointing to a tuple of its info plus a map
@@ -469,6 +502,14 @@ pub struct Index {
     pub bmp_routers: Vec<(IngressId, IngressInfo)>,
     pub bgp_routers: Vec<(IngressId, Option<IpAddr>, Option<Asn>)>,
     pub bmp_tree: BmpTree,
+}
+
+#[derive(RsHtml)]
+pub struct BmpDetails {
+    pub ingress_id: IngressId,
+    pub name: String,
+    pub addr: IpAddr,
+    pub other_ids: Vec<IngressId>,
 }
 
 

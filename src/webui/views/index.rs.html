@@ -17,8 +17,8 @@
                 @for (ingress_id, ingress_info) in self.bmp_routers.iter() {
                 <tr>
                     <td>@ingress_id</td>
-                    <td>@ingress_info.remote_addr.map(|e| e.to_string()).unwrap_or("".into())</td>
-                    <td>@ingress_info.name.as_ref().map(|e| e.to_string()).unwrap_or("".into())</td>
+                    <td>@(or!(ingress_info.remote_addr, ""))</td>
+                    <td>@(or!(ingress_info.name, ""))</td>
                 </tr>
                 }
             </table>
@@ -27,10 +27,10 @@
                 <tr><th colspan="4">BMP with monitored BGP sessions</th></tr>
                 @for (bmp_id, (bmp_info, bgp_sessions)) in self.bmp_tree.iter() {
                 <tr>
-                    <td>@bmp_id</td>
-                    <td>@bmp_info.remote_addr.map(|e| e.to_string()).unwrap_or("".into())</td>
-                    <td>@bmp_info.name.as_ref().map(|e| e.to_string()).unwrap_or("".into())</td>
-                    <td>@bmp_info.desc.as_ref().map(|e| e.to_string()).unwrap_or("".into())</td>
+                    <th><a href="/bmp/@bmp_id">@bmp_id</a></th>
+                    <th>@(or!(bmp_info.remote_addr, ""))</th>
+                    <th><a href="/bmp/@bmp_id">@(or!(bmp_info.name, format!("__unnamed-bmp-{bmp_id}")))</a></th>
+                    <th>@(or!(bmp_info.desc, ""))</th>
                 </tr>
                     @{
                         let mut last_asn = Asn::from_u32(0);
@@ -64,8 +64,8 @@
                 @for (ingress_id, ip, asn) in self.bgp_routers.iter() {
                 <tr>
                     <td>@ingress_id</td>
-                    <td>@ip.map(|e| e.to_string()).unwrap_or("".into())</td>
-                    <td>@asn.map(|e| e.to_string()).unwrap_or("".into())</td>
+                    <td>@(or!(ip, ""))</td>
+                    <td>@(or!(asn, ""))</td>
                 </tr>
                 }
             </table>

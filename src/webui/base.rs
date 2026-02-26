@@ -2,7 +2,7 @@ use std::{collections::{BTreeMap, BTreeSet, HashMap}, fmt, net::IpAddr, time::In
 
 use axum::{extract::{Path, State}, response::Html};
 use inetnum::{addr::Prefix, asn::Asn};
-use log::debug;
+use log::{debug, error};
 use routecore::bgp::{aspath::HopPath, message::update_builder::StandardCommunitiesList, types::AfiSafiType};
 use rshtml::{RsHtml, traits::RsHtml};
 
@@ -29,6 +29,7 @@ impl WebUI {
 
         router.add_get("/peers/overview", Self::peers_overview);
         router.add_get("/routes/diff/{ingress_a}/{ingress_b}", Self::routes_diff);
+        router.add_get("/peers/diff/{ingress_a}/{ingress_b}", Self::peers_diff);
     }
 
 
@@ -397,6 +398,62 @@ impl WebUI {
             .map(Into::into)
             .map_err(|e| format!("rendering error: {}", e))
     }
+
+
+    async fn peers_diff(
+        Path((ingress_a, ingress_b)): Path<(IngressId, IngressId)>,
+        state: State<ApiState>,
+    ) -> Result<Html<String>, String> {
+
+        
+        let register = state.ingress_register.cloned_info();
+
+        let Some(ingress_info_a) = register.get(&ingress_a).filter(|info|
+            info.ingress_type == Some(crate::ingress::IngressType::Bmp)
+        ) else {
+          return Err("no ingress with id {ingress_a}".into());
+        };
+
+        let Some(bmp_a) = ingress_info_a.remote_addr.zip(ingress_info_a.name.clone()) else {
+            error!("unexpected: bmp ingress {ingress_a} lacks remote_addr and/or name");
+            return Err("Lacking remote_addr and/or name for ingress with id {ingress_a}".into());
+        };
+
+        let Some(ingress_info_b) = register.get(&ingress_b).filter(|info|
+            info.ingress_type == Some(crate::ingress::IngressType::Bmp)
+        ) else {
+          return Err("no ingress with id {ingress_b}".into());
+        };
+
+        let Some(bmp_b) = ingress_info_b.remote_addr.zip(ingress_info_b.name.clone()) else {
+            error!("unexpected: bmp ingress {ingress_b} lacks remote_addr and/or name");
+            return Err("Lacking remote_addr and/or name for ingress with id {ingress_b}".into());
+        };
+        
+        let sessions_a: BTreeSet<_> = register.iter()
+            .filter(|(_id, info)| info.parent_ingress == Some(ingress_a))
+            .filter_map(|(_id, info)| info.remote_asn.zip(info.remote_addr))
+            .collect()
+        ;
+
+        let sessions_b: BTreeSet<_> = register.iter()
+            .filter(|(_id, info)| info.parent_ingress == Some(ingress_b))
+            .filter_map(|(_id, info)| info.remote_asn.zip(info.remote_addr))
+            .collect()
+        ;
+
+
+        let mut peers_diff = PeersDiff::new(bmp_a, bmp_b);
+        peers_diff.only_a = sessions_a.difference(&sessions_b).cloned().collect();
+        peers_diff.only_b = sessions_b.difference(&sessions_a).cloned().collect();
+        peers_diff.both = sessions_a.intersection(&sessions_b).cloned().collect();
+
+
+        peers_diff.render()
+            .map(Into::into)
+            .map_err(|e| format!("rendering error: {}", e))
+    }
+
 }
 
 
@@ -444,6 +501,28 @@ impl RoutesDiff {
         Self {
             peer_a,
             peer_b,
+            only_a: vec![],
+            only_b: vec![],
+            both: vec![],
+        }
+    }
+}
+
+#[derive(RsHtml)]
+pub struct PeersDiff {
+    bmp_a: (IpAddr, String),
+    bmp_b: (IpAddr, String),
+    pub only_a: Vec<(Asn, IpAddr)>,
+    pub only_b: Vec<(Asn, IpAddr)>,
+    pub both: Vec<(Asn, IpAddr)>,
+
+}
+
+impl PeersDiff {
+    pub fn new(bmp_a: (IpAddr, String), bmp_b: (IpAddr, String)) -> Self {
+        Self {
+            bmp_a,
+            bmp_b,
             only_a: vec![],
             only_b: vec![],
             both: vec![],

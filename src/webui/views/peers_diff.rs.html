@@ -1,0 +1,37 @@
+@use "Template";
+
+
+<Template title="Peers diff">
+<table>
+    <tr>
+        @{
+            let (addr_a, name_a) = self.bmp_a.clone();
+            let (addr_b, name_b) = self.bmp_b.clone();
+        }
+        <td>@name_a @@ @addr_a</td>
+        <td>both</td>
+        <td>@name_b @@  @addr_b</td>
+    </tr>
+    @for (asn, addr) in &self.only_a {
+    <tr>
+        <td>@asn@@@addr</td>
+        <td></td>
+        <td></td>
+    </tr>
+    }
+    @for (asn, addr) in &self.only_b {
+    <tr>
+        <td></td>
+        <td></td>
+        <td>@asn@@@addr</td>
+    </tr>
+    }
+    @for (asn, addr) in &self.both {
+    <tr>
+        <td></td>
+        <td>@asn@@@addr</td>
+        <td></td>
+    </tr>
+    }
+</table>
+</Template>

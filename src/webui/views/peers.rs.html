@@ -12,7 +12,7 @@
         <th>ext comm</th>
         <th>large comm</th>
     </tr>
-    @for (ingress_id, asn, addr, ribview, routecnt, attrs) in &self.peers { 
+    @for (asn, addr, ribview, ingress_id, routecnt, attrs) in &self.peers { 
     <tr>
         <td><a href="/routes/peer_asn/@asn">@asn</a></td>
         <td><a href="/routes/peer_ip/@addr">@addr</a></td>

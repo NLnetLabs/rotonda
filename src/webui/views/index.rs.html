@@ -28,8 +28,8 @@
             <table border="1px">
                 @for session in self.bgp_routers.iter() {
                 <tr>
-                    <td><a href="/routes/peer_asn/@session.info.remote_asn.alt("")">@session.info.remote_asn.alt("")</a></td>
-                    <td><a href="/routes/peer_ip/@session.info.remote_addr.alt("")">@session.info.remote_addr.alt("")</a></td>
+                    <td>@#session.info.remote_asn.map(peer_asn_link).alt("")</td>
+                    <td>@#session.info.remote_addr.map(peer_ip_link).alt("")</td>
                     <td><a href="/routes/@session.id">@session.info.peer_rib_type.alt("")</a></td>
                 </tr>
                 }

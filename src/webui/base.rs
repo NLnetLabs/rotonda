@@ -590,6 +590,17 @@ impl fmt::Display for PeerAsnLink {
     }
 }
 
+fn peer_ip_link(peer_ip: IpAddr) -> PeerIpLink {
+    PeerIpLink(peer_ip)
+}
+struct PeerIpLink(IpAddr);
+
+impl fmt::Display for PeerIpLink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<a href=\"/routes/peer_ip/{0}\">{0}</a>", self.0)
+    }
+}
+
 
 impl fmt::Display for BgpPeer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

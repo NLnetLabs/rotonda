@@ -27,8 +27,9 @@ use routecore::bgp::fsm::session::{
     Session,
 };
 
+use crate::ingress::IngressType;
 use crate::roto_runtime::types::{
-    explode_announcements, explode_withdrawals, Output, OutputStreamMessage, RotoOutputStream,
+    Output, OutputStreamMessage, PeerRibType, RotoOutputStream, explode_announcements, explode_withdrawals
 };
 use crate::comms::{Gate, GateStatus, Terminated};
 use crate::{ingress, roto_runtime};
@@ -428,12 +429,15 @@ impl Processor {
                                 session_ingress_id
                             );
                             debug!("get: {:?}", self.ingresses.get(session_ingress_id));
+                            
                             self.ingresses.update_info(
                                 session_ingress_id,
                                 ingress::IngressInfo::new()
-                                    .with_name("some-bgp-session".to_string())
+                                    .with_ingress_type(IngressType::Bgp)
+                                    //.with_name("some-bgp-session".to_string())
                                     .with_remote_addr(negotiated.remote_addr())
                                     .with_remote_asn(negotiated.remote_asn())
+                                    .with_peer_rib_type(PeerRibType::OutPost)
                                 );
                             debug!("get 2: {:?}", self.ingresses.get(session_ingress_id));
 

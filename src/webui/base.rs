@@ -39,6 +39,8 @@ impl WebUI {
         let mut page = Index::default();
         let _ = state.ingress_register.bmp_routers(&mut page);
         page.bmp_tree = Self::bmp_tree(&state);
+
+        let _ = state.ingress_register.real_bgp_peers(&mut page);
         debug!("got rib? {:?}", state.store.load().is_some());
         page.render()
             .map(Into::into)
@@ -118,7 +120,6 @@ impl WebUI {
             },
         )?;
         page.show_only_more_specifics = true;
-        // TODO instead of ingress id, maybe print 'AS1234/IP/adj-rib-in-pre'
 
         if let Some(info) = state.ingress_register.get(ingress_id) {
             if let Some((asn, ribview)) = info.remote_asn.zip(info.peer_rib_type) {
@@ -238,6 +239,8 @@ impl WebUI {
                 .. Default::default()
             },
         );
+
+        page.title = format!("Routes related to {prefix}");
 
         let res = page.render()
             .map(Into::into)
@@ -543,6 +546,18 @@ impl BmpRouter {
     }
 }
 
+#[derive(Eq, Ord, PartialEq, PartialOrd)]
+pub struct BgpPeer{
+    pub id: IngressId,
+    pub info: IngressInfo
+}
+
+impl BgpPeer {
+    pub fn new(id: IngressId, info: IngressInfo) -> Self {
+        Self { id, info }
+    }
+}
+
 fn bmp_details(bmp_router: &BmpRouter) -> BmpRouterLink<'_> {
     BmpRouterLink(bmp_router)
 }
@@ -564,14 +579,14 @@ impl fmt::Display for BmpRouterLink<'_> {
     }
 }
 
-pub struct BgpPeer{
-    id: IngressId,
-    info: IngressInfo
+fn peer_asn_link(peer_asn: Asn) -> PeerAsnLink {
+    PeerAsnLink(peer_asn)
 }
+struct PeerAsnLink(Asn);
 
-impl BgpPeer {
-    pub fn new(id: IngressId, info: IngressInfo) -> Self {
-        Self { id, info }
+impl fmt::Display for PeerAsnLink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "<a href=\"/routes/peer_asn/{0}\">{0}</a>", self.0)
     }
 }
 
@@ -601,11 +616,18 @@ impl GenOutput<&mut crate::webui::Index> for crate::ingress::register::BmpIdAndI
     }
 }
 
+impl GenOutput<&mut crate::webui::Index> for crate::ingress::register::BgpIdAndInfo<'_> {
+    fn write(&self, target: &mut &mut crate::webui::Index) -> Result<(), crate::representation::OutputError> {
+        target.bgp_routers.push(BgpPeer::new(self.0.ingress_id, self.0.ingress_info.clone()));
+        Ok(())
+    }
+}
+
 
 #[derive(Default, RsHtml)]
 pub struct Index {
     pub bmp_routers: Vec<BmpRouter>,
-    pub bgp_routers: Vec<(IngressId, Option<IpAddr>, Option<Asn>)>,
+    pub bgp_routers: Vec<BgpPeer>,
     pub bmp_tree: BmpTree,
 }
 
@@ -618,26 +640,13 @@ pub struct BmpDetails {
 
 
 pub struct RouteDetails {
-    bmp_id: Option<IngressId>,
-    bmp_name: String,
-    peer_asn: String,
-    origin_asn: String,
-    as_path: String,
-    communities: String,
+    pub bmp_router: Option<BmpRouter>,
+    pub peer_asn: Option<Asn>,
+    pub ribview: Option<PeerRibType>,
+    pub origin_asn: String,
+    pub as_path: String,
+    pub communities: String,
 }
-impl From<(Option<IngressId>, String, String, String, String, String)> for RouteDetails {
-    fn from(value: (Option<IngressId>, String, String, String, String, String)) -> Self {
-        RouteDetails {
-            bmp_id: value.0,
-            bmp_name: value.1,
-            peer_asn: value.2,
-            origin_asn: value.3,
-            as_path: value.4,
-            communities: value.5,
-        }
-    }
-}
-
 
 #[derive(RsHtml)]
 pub struct RoutesDiff {
@@ -699,32 +708,26 @@ impl crate::units::rib_unit::rib::SearchResult {
     ) -> Vec<RouteDetails> {
         routes.map(|m| {
             let route_ingress_info = self.ingress_register.get(m.multi_uniq_id);
-            let bmp_info = self.ingress_register.get(m.multi_uniq_id)
+            let bmp_router = self.ingress_register.get(m.multi_uniq_id)
                 .and_then(|info| info.parent_ingress)
                 .map(|parent_id|
                     self.ingress_register.get(parent_id)
                         .filter(|parent_info| parent_info.ingress_type == Some(IngressType::Bmp))
-                        .map(|parent_info| (parent_id, parent_info))
+                        .map(|parent_info| BmpRouter::new(parent_id, parent_info))
                 ).flatten()
-            ;
-
-            let bmp_name = bmp_info.as_ref().map(|(_id, info)| info.name.clone())
-                .flatten()
-                .unwrap_or("".into())
             ;
 
             let pamap = m.meta.path_attributes();
             let aspath = pamap.get::<HopPath>();
             let communities = pamap.get::<StandardCommunitiesList>();
-            (
-                bmp_info.map(|(id, _info)| id),
-                bmp_name,
-                route_ingress_info.and_then(|info| info.remote_asn).map(|a| a.to_string()).unwrap_or("".into()),
-                aspath.as_ref().and_then(|a| a.origin().map(|a| a.to_string())).unwrap_or("".into()),
-                aspath.map(|a| a.to_string()).unwrap_or("".into()),
-                communities.map(|c| c.communities().iter().map(|c| c.to_string()).collect::<Vec<_>>().join(", "))
-                .unwrap_or("".into()),
-            ).into()
+            RouteDetails {
+                bmp_router,
+                peer_asn: route_ingress_info.as_ref().and_then(|info| info.remote_asn),
+                ribview: route_ingress_info.as_ref().and_then(|info| info.peer_rib_type),
+                origin_asn: aspath.as_ref().and_then(|a| a.origin().map(|a| a.to_string())).unwrap_or("".into()),
+                as_path: aspath.map(|a| a.to_string()).unwrap_or("".into()),
+                communities: communities.map(|c| c.communities().iter().map(|c| c.to_string()).collect::<Vec<_>>().join(", ")).unwrap_or("".into())
+            }
         }).collect()
     }
 }

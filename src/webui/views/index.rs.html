@@ -13,7 +13,7 @@
         <Navigation />
         </nav>
         <main>
-            <h2>BMP: @self.bmp_routers.len() connections</h2>
+            <h2>BMP: @self.bmp_routers.len() connection(s)</h2>
             @for (bmp_id, (bmp_info, bgp_sessions)) in self.bmp_tree.iter() {
                 @{
                     let bgp_session_cnt = bgp_sessions.len();
@@ -24,13 +24,13 @@
                 <SessionTable bgp_sessions=@bgp_sessions />
             }
 
+            <h2>BGP: @self.bgp_routers.len() session(s)</h2>
             <table border="1px">
-                <tr><th>BGP</th></tr>
-                @for (ingress_id, ip, asn) in self.bgp_routers.iter() {
+                @for session in self.bgp_routers.iter() {
                 <tr>
-                    <td>@ingress_id</td>
-                    <td>@ip.alt("")</td>
-                    <td>@asn.alt("")</td>
+                    <td><a href="/routes/peer_asn/@session.info.remote_asn.alt("")">@session.info.remote_asn.alt("")</a></td>
+                    <td><a href="/routes/peer_ip/@session.info.remote_addr.alt("")">@session.info.remote_addr.alt("")</a></td>
+                    <td><a href="/routes/@session.id">@session.info.peer_rib_type.alt("")</a></td>
                 </tr>
                 }
             </table>

@@ -224,7 +224,7 @@ impl fmt::Display for PeerRibType {
             PeerRibType::InPost => write!(f, "adj-RIB-in-post"),
             PeerRibType::Loc => write!(f, "RIB-loc"),
             PeerRibType::OutPre => write!(f, "adj-RIB-out-pre"),
-            PeerRibType::OutPost => write!(f, "adj-RIB-out-pre"),
+            PeerRibType::OutPost => write!(f, "adj-RIB-out-post"),
         }
     }
 }

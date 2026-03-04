@@ -25,6 +25,7 @@
         <th>prefix</th>
         <th>source</th>
         <th>peer&nbsp;ASN</th>
+        <th>rib view</th>
         <th>origin&nbsp;ASN</th>
         <th>as_path</th>
         <th>communities</th>
@@ -32,18 +33,17 @@
     @for (nlri, routes2) in routes.iter().take(max_nlri) {
         @for details in routes2.iter() {
         @{
-            let RouteDetails {bmp_id, bmp_name, peer_asn, origin_asn, as_path, communities} = details;
+            let RouteDetails {bmp_router, peer_asn, ribview, origin_asn, as_path, communities} = details;
         }
         <tr>
             <td><a href="/routes/@nlri">@nlri</a></td>
             <td>
-                @if let Some(bmp_id) = bmp_id {
-                <a href="/bmp/@bmp_id">
-                @if bmp_name != "" { @bmp_name } else { bmp-@bmp_id }
-                </a>
+                @if let Some(bmp_router) = bmp_router {
+                    @#bmp_details(&bmp_router)
                 }
             </td>
-            <td><a href="/routes/peer_asn/@peer_asn">@peer_asn</a></td>
+            <td>@#peer_asn.map(peer_asn_link).alt("")</td>
+            <td>@ribview.alt("")</a></td>
             <td>@origin_asn</td>
             <td>@as_path</td>
             <td>@communities</td>

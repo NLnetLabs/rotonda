@@ -5,7 +5,8 @@
 <table>
     <tr>
         <th>asn</th>
-        <th>addr</th>
+        <th>bmp source</th>
+        <th>peer addr</th>
         <th>rib view</th>
         <th># of routes</th>
         <th>comm</th>
@@ -14,11 +15,13 @@
     </tr>
     @{
         let mut last_asn = Asn::from_u32(0);
+        let mut last_bmp_id = None;
         let mut last_ip = "0.0.0.0".parse().unwrap();
     }
-    @for (asn, addr, ribview, ingress_id, routecnt, attrs) in &self.peers { 
+    @for (asn, bmp_router, addr, ribview, ingress_id, routecnt, attrs) in &self.peers { 
     <tr>
         <td>@if last_asn != *asn { <a href="/routes/peer_asn/@asn">@asn</a> }</td>
+        <td>@if last_bmp_id != bmp_router.as_ref().map(|b| b.id) { @#bmp_router.as_ref().map(|r| bmp_details(r)).alt("") }</td>
         <td>@if last_ip != *addr { <a href="/routes/peer_ip/@addr">@addr</a> }</td>
         <td><a href="/routes/@ingress_id">@ribview</a></td>
         <td>@routecnt</td>
@@ -28,7 +31,9 @@
     </tr>
     @{
         last_asn = *asn;
+        last_bmp_id = bmp_router.as_ref().map(|b| b.id);
         last_ip = *addr;
+
     }
 
     }

@@ -1,4 +1,5 @@
 @use "Navigation"
+@use "components/SessionTable"
 
 <!DOCTYPE html>
 <html>
@@ -12,60 +13,24 @@
         <Navigation />
         </nav>
         <main>
-            <table border="1px">
-                <tr><th>BMP</th></tr>
-                @for (ingress_id, ingress_info) in self.bmp_routers.iter() {
-                <tr>
-                    <td>@ingress_id</td>
-                    <td>@(or!(ingress_info.remote_addr, ""))</td>
-                    <td>@(or!(ingress_info.name, ""))</td>
-                </tr>
+            <h2>BMP: @self.bmp_routers.len() connections</h2>
+            @for (bmp_id, (bmp_info, bgp_sessions)) in self.bmp_tree.iter() {
+                @{
+                    let bgp_session_cnt = bgp_sessions.len();
+                    let ribview_cnt: usize = bgp_sessions.values().map(|rvs| rvs.len()).sum();
                 }
-            </table>
-
-            <table border="1px">
-                <tr><th colspan="4">BMP with monitored BGP sessions</th></tr>
-                @for (bmp_id, (bmp_info, bgp_sessions)) in self.bmp_tree.iter() {
-                <tr>
-                    <th><a href="/bmp/@bmp_id">@bmp_id</a></th>
-                    <th>@(or!(bmp_info.remote_addr, ""))</th>
-                    <th><a href="/bmp/@bmp_id">@(or!(bmp_info.name, format!("__unnamed-bmp-{bmp_id}")))</a></th>
-                    <th>@(or!(bmp_info.desc, ""))</th>
-                </tr>
-                    @{
-                        let mut last_asn = Asn::from_u32(0);
-                    }
-                    @for ((asn, addr), sessions) in bgp_sessions.iter() {
-                        <tr>
-                            <td></td>
-                            <td> @if asn != &last_asn {
-                                <a href="/routes/peer_asn/@asn">@asn</a>
-                            }</td>
-                            <td><a href="/routes/peer_ip/@addr">@addr</a></td>
-                            <td>
-                            @for (bgp_ingress_id, bgp_info) in sessions {
-                                @#(
-                                    bgp_info.peer_rib_type.map(|e| 
-                                    format!("<a href=\"/routes/{bgp_ingress_id}\">{e}</a>")
-                                )
-                                .unwrap_or("no-rib-type (unexpected, bug?)".into())
-                                )
-                            }
-                            </td>
-                        </tr>
-                        @{ last_asn = *asn; }
-                    }
-                }
-            </table>
-
+                <h3>@#bmp_details(&BmpRouter::new(*bmp_id, bmp_info.clone())) (@bmp_info.remote_addr.alt("")): @bgp_session_cnt/@ribview_cnt sessions/ribviews</h3>
+                <h4>@bmp_info.desc.alt("")</h4>
+                <SessionTable bgp_sessions=@bgp_sessions />
+            }
 
             <table border="1px">
                 <tr><th>BGP</th></tr>
                 @for (ingress_id, ip, asn) in self.bgp_routers.iter() {
                 <tr>
                     <td>@ingress_id</td>
-                    <td>@(or!(ip, ""))</td>
-                    <td>@(or!(asn, ""))</td>
+                    <td>@ip.alt("")</td>
+                    <td>@asn.alt("")</td>
                 </tr>
                 }
             </table>

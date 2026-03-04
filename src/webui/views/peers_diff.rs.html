@@ -1,20 +1,16 @@
 @use "Template";
 
 
-<Template title="Peers diff">
+<Template title={Peer presence: @self.bmp_a vs @self.bmp_b}>
 <table>
     <tr>
-        @{
-            let (addr_a, name_a) = self.bmp_a.clone();
-            let (addr_b, name_b) = self.bmp_b.clone();
-        }
-        <td>@name_a @@ @addr_a</td>
-        <td>both</td>
-        <td>@name_b @@  @addr_b</td>
+        <td>only on @#bmp_details(&self.bmp_a) (@self.bmp_a.info.remote_addr.alt(""))</td>
+        <td>present on both</td>
+        <td>only on @#bmp_details(&self.bmp_b) (@self.bmp_b.info.remote_addr.alt(""))</td>
     </tr>
     @for (asn, addr) in &self.only_a {
     <tr>
-        <td>@asn@@@addr</td>
+        <td><a href="/routes/peer_asn/@asn">@asn</a>@@<a href="/routes/peer_ip/@addr">@addr</a></td>
         <td></td>
         <td></td>
     </tr>
@@ -23,13 +19,13 @@
     <tr>
         <td></td>
         <td></td>
-        <td>@asn@@@addr</td>
+        <td><a href="/routes/peer_asn/@asn">@asn</a>@@<a href="/routes/peer_ip/@addr">@addr</a></td>
     </tr>
     }
     @for (asn, addr) in &self.both {
     <tr>
         <td></td>
-        <td>@asn@@@addr</td>
+        <td><a href="/routes/peer_asn/@asn">@asn</a>@@<a href="/routes/peer_ip/@addr">@addr</a></td>
         <td></td>
     </tr>
     }

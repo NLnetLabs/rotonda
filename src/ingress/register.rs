@@ -66,13 +66,6 @@ impl From<(IngressId, IngressInfo)> for OwnedIdAndInfo {
 pub struct BmpIdAndInfo<'a>(pub IdAndInfo<'a>);
 pub struct BgpIdAndInfo<'a>(pub IdAndInfo<'a>);
 
-impl GenOutput<&mut crate::webui::Index> for BmpIdAndInfo<'_> {
-    fn write(&self, target: &mut &mut crate::webui::Index) -> Result<(), OutputError> {
-        target.bmp_routers.push((self.0.ingress_id, self.0.ingress_info.clone()));
-        Ok(())
-    }
-}
-
 impl<W: std::io::Write> GenOutput<Cli<W>> for BgpIdAndInfo<'_> {
     fn write(&self, target: &mut Cli<W>) -> Result<(), OutputError> {
 
@@ -142,7 +135,7 @@ macro_rules! info_for_field{
         /// is wrapped as an `Option`, giving the user (mostly connector/ingress
         /// components within Rotonda) the flexibilty to fill in what makes sense in
         /// their specific case.
-        #[derive(Clone, Debug, Default, PartialEq)]
+        #[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
         #[serde_with::skip_serializing_none]
         #[derive(serde::Serialize)]
         pub struct $name {
@@ -423,7 +416,7 @@ impl IngressInfo {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum IngressType {
     Bmp,
@@ -434,7 +427,7 @@ pub enum IngressType {
 }
 
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, serde::Serialize)]
 pub enum IngressState {
     Connected,
     Disconnected,

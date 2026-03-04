@@ -2,8 +2,12 @@
 @use "components/RouteTable"
 
 
-<Template title="Routes">
+<Template title={@#self.title.alt("Routes")}>
+@if self.show_only_more_specifics {
+<RouteTable title="" routes=@&self.more_specifics />
+} else {
 <RouteTable title="less specifics" routes=@&self.less_specifics />
 <RouteTable title="exact matches" routes=@&self.routes />
 <RouteTable title="more specifics" routes=@&self.more_specifics />
+}
 </Template>

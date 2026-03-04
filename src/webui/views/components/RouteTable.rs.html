@@ -1,7 +1,26 @@
-@(title, routes: &Vec<(Prefix, Vec<RouteDetails>)>)
+@(title: &str, routes: &Vec<(Prefix, Vec<RouteDetails>)>)
 
+@{
+    let max_nlri = 1000;
+    let cnt = if routes.len() > max_nlri {
+        format!(
+            "(showing first {max_nlri}/{} prefixes ({} routes))",
+            routes.len(),
+            routes.iter().take(max_nlri)
+                .map(|(_nlri, routes2)| routes2.len()).sum::<usize>()
+        )
+    } else {
+        format!(
+            "({}/{} prefixes/routes)",
+            routes.len(),
+            routes.iter()
+                .map(|(_nlri, routes2)| routes2.len()).sum::<usize>()
+        )
+    };
+    
+}
+<h2>@title @cnt</h2>
 <table>
-    <tr><th colspan="4">@title</th></tr>
     <tr>
         <th>prefix</th>
         <th>source</th>
@@ -10,7 +29,7 @@
         <th>as_path</th>
         <th>communities</th>
     </tr>
-    @for (nlri, routes2) in routes.iter().take(1000) {
+    @for (nlri, routes2) in routes.iter().take(max_nlri) {
         @for details in routes2.iter() {
         @{
             let RouteDetails {bmp_id, bmp_name, peer_asn, origin_asn, as_path, communities} = details;

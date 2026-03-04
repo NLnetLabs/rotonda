@@ -1,16 +1,32 @@
 @use "Template"
+@use "components/SessionTable";
 
-<Template title={BMP overview @self.name}>
-    TODO overview of monitored sessions
-    <br>
+<Template title={BMP overview @self.router}>
+    
     <table>
-        <tr><th>compare @self.name with</th></tr>
-        @for id in &self.other_ids {
-        <tr><td>
-            <a href="/peers/diff/@self.ingress_id/@id">@id</a>
-            </td>
-        </tr>
-        }
+    <tr>
+        <td>IP address</td>
+        <td>@self.router.info.remote_addr.alt("not found, bug?")</td>
+    </tr>
+    <tr>
+        <td>sysName</td>
+        <td>@self.router.info.name.alt("(no sysName/hostname provided by this router)")</td>
+    </tr>
+    <tr>
+        <td>sysDesc</td>
+        <td>@self.router.info.desc.alt("(no sysDesc provided by this router)")</td>
+    </tr>
     </table>
+    <h2>Compare with other routers</h2>
+    <ul>
+        @for other in &self.other_routers {
+        <li>
+            @self.router vs <a href="/peers/diff/@self.router.id/@other.id">@other</a>
+        </li>
+        }
+    </ul>
+
+    <h2>Monitored sessions</h2>
+    <SessionTable bgp_sessions=@&self.bgp_sessions/>
 </Template>
 

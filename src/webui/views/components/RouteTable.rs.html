@@ -27,6 +27,7 @@
         <th>peer&nbsp;ASN</th>
         <th>rib view</th>
         <th>origin&nbsp;ASN</th>
+        <th>RPKI&nbsp;ROV</th>
         <th>OTC</th>
         <th>as_path</th>
         <th>communities</th>
@@ -34,7 +35,7 @@
     @for (nlri, routes2) in routes.iter().take(max_nlri) {
         @for details in routes2.iter() {
         @{
-            let RouteDetails {bmp_router, peer_asn, ribview, origin_asn, otc, as_path, communities} = details;
+            let RouteDetails {bmp_router, peer_asn, ribview, origin_asn, rov_status, otc, as_path, communities} = details;
         }
         <tr>
             <td><a href="/routes/@nlri">@nlri</a></td>
@@ -46,6 +47,7 @@
             <td>@#peer_asn.map(peer_asn_link).alt("")</td>
             <td>@ribview.alt("")</a></td>
             <td>@origin_asn</td>
+            <td>@rov_status</td>
             <td>@otc.alt("")</td>
             <td>@as_path</td>
             <td>@communities</td>

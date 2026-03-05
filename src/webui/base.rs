@@ -8,7 +8,7 @@ use rshtml::{RsHtml, traits::RsHtml};
 
 use rayon::prelude::*;
 
-use crate::{http_ng::{Api, ApiState}, ingress::{IngressId, IngressInfo, IngressType}, representation::GenOutput, roto_runtime::types::PeerRibType, units::rib_unit::{Include, QueryFilter}};
+use crate::{http_ng::{Api, ApiState}, ingress::{IngressId, IngressInfo, IngressType}, representation::GenOutput, roto_runtime::types::PeerRibType, units::rib_unit::{Include, QueryFilter, rpki::RovStatus}};
 
 pub struct WebUI { }
 
@@ -310,6 +310,9 @@ impl WebUI {
                         route_cnt = recordset.len();
                         for r in recordset.v4 {
                             for m in r.meta {
+                                if m.meta.rpki_info().rov_status() == RovStatus::Invalid {
+                                    observed_attributes |= ObservedAttributes::ROV_INVALID;
+                                }
                                 for pa in m.meta.path_attributes().iter() {
                                     let Ok(pa) = pa else { break };
                                     if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::Communities) {
@@ -320,6 +323,9 @@ impl WebUI {
                                     }
                                     if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::LargeCommunities) {
                                         observed_attributes |= ObservedAttributes::LARGE_COMMUNITIES;
+                                    }
+                                    if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::Otc) {
+                                        observed_attributes |= ObservedAttributes::OTC;
                                     }
                                 }
                             }
@@ -346,6 +352,9 @@ impl WebUI {
                                 route_cnt = recordset.len();
                                 for r in recordset.v6 {
                                     for m in r.meta {
+                                        if m.meta.rpki_info().rov_status() == RovStatus::Invalid {
+                                            observed_attributes |= ObservedAttributes::ROV_INVALID;
+                                        }
                                         for pa in m.meta.path_attributes().iter() {
                                             let Ok(pa) = pa else { break };
                                             if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::Communities) {
@@ -658,6 +667,7 @@ pub struct RouteDetails {
     pub peer_asn: Option<Asn>,
     pub ribview: Option<PeerRibType>,
     pub origin_asn: String,
+    pub rov_status: RovStatus,
     pub otc: Option<Otc>,
     pub as_path: String,
     pub communities: String,
@@ -740,6 +750,7 @@ impl crate::units::rib_unit::rib::SearchResult {
                 peer_asn: route_ingress_info.as_ref().and_then(|info| info.remote_asn),
                 ribview: route_ingress_info.as_ref().and_then(|info| info.peer_rib_type),
                 origin_asn: aspath.as_ref().and_then(|a| a.origin().map(|a| a.to_string())).unwrap_or("".into()),
+                rov_status: m.meta.rpki_info().rov_status(),
                 otc: pamap.get::<Otc>(),
                 as_path: aspath.map(|a| a.to_string()).unwrap_or("".into()),
                 communities: communities.map(|c| c.communities().iter().map(|c| c.to_string()).collect::<Vec<_>>().join(", ")).unwrap_or("".into())
@@ -794,6 +805,7 @@ impl ObservedAttributes {
     const EXT_COMMUNITIES: Self = Self(0x2);
     const LARGE_COMMUNITIES: Self = Self(0x4);
     const OTC: Self = Self(0x8);
+    const ROV_INVALID: Self = Self(0x10);
 
     pub fn all_marked(&self) -> bool {
         self.0 ==
@@ -801,6 +813,7 @@ impl ObservedAttributes {
             | Self::EXT_COMMUNITIES.0
             | Self::LARGE_COMMUNITIES.0
             | Self::OTC.0
+            | Self::ROV_INVALID.0
     }
 }
 

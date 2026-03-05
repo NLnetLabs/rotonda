@@ -9,6 +9,7 @@
         <th>peer addr</th>
         <th>rib view</th>
         <th># of routes</th>
+        <th>ROV invalids</th>
         <th>OTC</th>
         <th>comm</th>
         <th>ext comm</th>
@@ -26,6 +27,7 @@
         <td>@if last_ip != *addr { <a href="/routes/peer_ip/@addr">@addr</a> }</td>
         <td><a href="/routes/@ingress_id">@ribview</a></td>
         <td>@routecnt</td>
+        <td>@if *attrs & ObservedAttributes::ROV_INVALID  { x } </td>
         <td>@if *attrs & ObservedAttributes::OTC  { x } </td>
         <td>@if *attrs & ObservedAttributes::COMMUNITIES  { x } </td>
         <td>@if *attrs & ObservedAttributes::EXT_COMMUNITIES  { x } </td>

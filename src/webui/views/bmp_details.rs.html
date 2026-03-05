@@ -20,8 +20,8 @@
     <h2>Compare with other routers</h2>
     <ul>
         @for other in &self.other_routers {
-        <li>
-            @self.router vs <a href="/peers/diff/@self.router.id/@other.id">@other</a>
+        <li>vs <a href="/peers/diff/@self.router.id/@other.id">@other</a>
+            (@other.info.remote_addr.alt(""))
         </li>
         }
     </ul>

@@ -1,16 +1,34 @@
-use std::{collections::{BTreeMap, BTreeSet}, fmt, net::IpAddr, time::Instant};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    fmt,
+    net::IpAddr,
+    time::Instant,
+};
 
-use axum::{extract::{Path, State}, response::Html};
+use axum::{
+    extract::{Path, State},
+    response::Html,
+};
 use inetnum::{addr::Prefix, asn::Asn};
 use log::debug;
-use routecore::bgp::{aspath::HopPath, message::update_builder::StandardCommunitiesList, types::{AfiSafiType, Otc}};
-use rshtml::{RsHtml, traits::RsHtml};
+use routecore::bgp::{
+    aspath::HopPath,
+    message::update_builder::StandardCommunitiesList,
+    types::{AfiSafiType, Otc},
+};
+use rshtml::{traits::RsHtml, RsHtml};
 
 use rayon::prelude::*;
 
-use crate::{http_ng::{Api, ApiState}, ingress::{IngressId, IngressInfo, IngressType}, representation::GenOutput, roto_runtime::types::PeerRibType, units::rib_unit::{Include, QueryFilter, rpki::RovStatus}};
+use crate::{
+    http_ng::{Api, ApiState},
+    ingress::{IngressId, IngressInfo, IngressType},
+    representation::GenOutput,
+    roto_runtime::types::PeerRibType,
+    units::rib_unit::{rpki::RovStatus, Include, QueryFilter},
+};
 
-pub struct WebUI { }
+pub struct WebUI {}
 
 #[derive(serde::Deserialize)]
 struct ParamsPeerAsn {
@@ -20,7 +38,10 @@ struct ParamsPeerAsn {
 
 impl WebUI {
     pub fn register_routes(router: &mut Api) {
-        eprintln!("in WebUI::register_routes(), store? {}", router.store.load().is_some());
+        eprintln!(
+            "in WebUI::register_routes(), store? {}",
+            router.store.load().is_some()
+        );
         router.add_get("/", Self::index);
         router.add_get("/routes/{ingress_id}", Self::routes);
         router.add_get("/routes/peer_asn/{peer_asn}", Self::routes_peer_asn);
@@ -28,12 +49,15 @@ impl WebUI {
         router.add_get("/routes/{prefix}/{prefix_len}", Self::routes_prefix);
 
         router.add_get("/peers/overview", Self::peers_overview);
-        router.add_get("/routes/diff/{ingress_a}/{ingress_b}", Self::routes_diff);
-        router.add_get("/peers/diff/{ingress_a}/{ingress_b}", Self::peers_diff);
+        router.add_get(
+            "/routes/diff/{ingress_a}/{ingress_b}",
+            Self::routes_diff,
+        );
+        router
+            .add_get("/peers/diff/{ingress_a}/{ingress_b}", Self::peers_diff);
 
         router.add_get("/bmp/{ingress}", Self::bmp_details);
     }
-
 
     async fn index(state: State<ApiState>) -> Result<Html<String>, String> {
         let mut page = Index::default();
@@ -51,39 +75,55 @@ impl WebUI {
         Path(ingress_id): Path<IngressId>,
         state: State<ApiState>,
     ) -> Result<Html<String>, String> {
-        let Some(info) = state.ingress_register.get(ingress_id)
-            .filter(|info| info.ingress_type == Some(IngressType::Bmp)) else {
+        let Some(info) = state
+            .ingress_register
+            .get(ingress_id)
+            .filter(|info| info.ingress_type == Some(IngressType::Bmp))
+        else {
             return Err("ingress id {ingress_id} is not a BMP source".into());
         };
 
-        let other_routers = state.ingress_register.cloned_info().into_iter()
-            .filter(|(id, info)| info.ingress_type == Some(IngressType::Bmp) && *id != ingress_id)
+        let other_routers = state
+            .ingress_register
+            .cloned_info()
+            .into_iter()
+            .filter(|(id, info)| {
+                info.ingress_type == Some(IngressType::Bmp)
+                    && *id != ingress_id
+            })
             .map(|(id, info)| BmpRouter::new(id, info))
             .collect();
 
         let mut bgp_sessions = BTreeMap::new();
 
-        for (id, info) in state.ingress_register.cloned_info().iter().filter(|(_id, info)| {
-            info.parent_ingress == Some(ingress_id) &&
-            info.ingress_type == Some(crate::ingress::IngressType::BgpViaBmp)
-        }) {
-            let infos: &mut Vec<_> = bgp_sessions.entry((info.remote_asn.unwrap(), info.remote_addr.unwrap()))
+        for (id, info) in state.ingress_register.cloned_info().iter().filter(
+            |(_id, info)| {
+                info.parent_ingress == Some(ingress_id)
+                    && info.ingress_type
+                        == Some(crate::ingress::IngressType::BgpViaBmp)
+            },
+        ) {
+            let infos: &mut Vec<_> = bgp_sessions
+                .entry((info.remote_asn.unwrap(), info.remote_addr.unwrap()))
                 .or_default();
             infos.push((*id, info.clone()))
         }
-        BmpDetails { router: BmpRouter::new(ingress_id, info), other_routers, bgp_sessions }.render()
-            .map(Into::into)
-            .map_err(|e| format!("rendering error: {}", e))
+        BmpDetails {
+            router: BmpRouter::new(ingress_id, info),
+            other_routers,
+            bgp_sessions,
+        }
+        .render()
+        .map(Into::into)
+        .map_err(|e| format!("rendering error: {}", e))
     }
-
 
     fn routes_with_filter(
         state: State<ApiState>,
         filter: QueryFilter,
     ) -> Result<Routes, String> {
-
         let Some(ref store) = *state.store.load() else {
-            return Err("store not ready".into())
+            return Err("store not ready".into());
         };
 
         let mut page = Routes::default();
@@ -108,7 +148,10 @@ impl WebUI {
         Path(ingress_id): Path<IngressId>,
         state: State<ApiState>,
     ) -> Result<Html<String>, String> {
-        debug!("in routes for ingress_id {ingress_id}, store? {}", state.store.load().is_some());
+        debug!(
+            "in routes for ingress_id {ingress_id}, store? {}",
+            state.store.load().is_some()
+        );
         let t0 = std::time::Instant::now();
 
         let mut page = Self::routes_with_filter(
@@ -116,26 +159,31 @@ impl WebUI {
             QueryFilter {
                 include: vec![Include::LessSpecifics, Include::MoreSpecifics],
                 ingress_id: Some(ingress_id),
-                .. Default::default()
+                ..Default::default()
             },
         )?;
         page.show_only_more_specifics = true;
 
         if let Some(info) = state.ingress_register.get(ingress_id) {
-            if let Some((asn, ribview)) = info.remote_asn.zip(info.peer_rib_type) {
+            if let Some((asn, ribview)) =
+                info.remote_asn.zip(info.peer_rib_type)
+            {
                 page.title = format!("Routes for {asn}/{ribview}");
                 info.parent_ingress
                     .and_then(|id| state.ingress_register.get_tuple(id))
-                    .map(|ii|
-                        page.title.push_str(&format!(" on {}", BmpRouter::new(ii.ingress_id, ii.ingress_info)))
-                    );
+                    .map(|ii| {
+                        page.title.push_str(&format!(
+                            " on {}",
+                            BmpRouter::new(ii.ingress_id, ii.ingress_info)
+                        ))
+                    });
             }
         } else {
-        page.title = format!("Routes for ingress_id {ingress_id}");
+            page.title = format!("Routes for ingress_id {ingress_id}");
         }
 
-
-        let res = page.render()
+        let res = page
+            .render()
             .map(Into::into)
             .map_err(|e| format!("rendering error: {}", e));
 
@@ -152,7 +200,10 @@ impl WebUI {
         Path(ParamsPeerAsn { peer_asn }): Path<ParamsPeerAsn>,
         state: State<ApiState>,
     ) -> Result<Html<String>, String> {
-        debug!("in routes for peer_asn {peer_asn}, store? {}", state.store.load().is_some());
+        debug!(
+            "in routes for peer_asn {peer_asn}, store? {}",
+            state.store.load().is_some()
+        );
         let t0 = std::time::Instant::now();
 
         let mut page = Self::routes_with_filter(
@@ -160,13 +211,14 @@ impl WebUI {
             QueryFilter {
                 include: vec![Include::LessSpecifics, Include::MoreSpecifics],
                 peer_asn: Some(peer_asn),
-                .. Default::default()
+                ..Default::default()
             },
         )?;
         page.show_only_more_specifics = true;
         page.title = format!("Routes from peer {peer_asn}");
 
-        let res = page.render()
+        let res = page
+            .render()
             .map(Into::into)
             .map_err(|e| format!("rendering error: {}", e));
 
@@ -182,7 +234,10 @@ impl WebUI {
         Path(peer_ip): Path<IpAddr>,
         state: State<ApiState>,
     ) -> Result<Html<String>, String> {
-        debug!("in routes for peer_ip {peer_ip}, store? {}", state.store.load().is_some());
+        debug!(
+            "in routes for peer_ip {peer_ip}, store? {}",
+            state.store.load().is_some()
+        );
         let t0 = std::time::Instant::now();
 
         let mut page = Self::routes_with_filter(
@@ -190,13 +245,14 @@ impl WebUI {
             QueryFilter {
                 include: vec![Include::LessSpecifics, Include::MoreSpecifics],
                 peer_addr: Some(peer_ip),
-                .. Default::default()
+                ..Default::default()
             },
         )?;
         page.show_only_more_specifics = true;
         page.title = format!("Routes from peer {peer_ip}");
 
-        let res = page.render()
+        let res = page
+            .render()
             .map(Into::into)
             .map_err(|e| format!("rendering error: {}", e));
 
@@ -217,11 +273,11 @@ impl WebUI {
         let mut page = Routes::default();
         let s = state.store.load();
         let Some(ref store) = *s else {
-            return Err("store not ready".into())
+            return Err("store not ready".into());
         };
 
         let Ok(prefix) = Prefix::new(prefix, prefix_len) else {
-            return Err("illegal prefix".into())
+            return Err("illegal prefix".into());
         };
 
         let afisafi_type = if prefix.is_v6() {
@@ -236,13 +292,14 @@ impl WebUI {
             prefix,
             QueryFilter {
                 include: vec![Include::LessSpecifics, Include::MoreSpecifics],
-                .. Default::default()
+                ..Default::default()
             },
         );
 
         page.title = format!("Routes related to {prefix}");
 
-        let res = page.render()
+        let res = page
+            .render()
             .map(Into::into)
             .map_err(|e| format!("rendering error: {}", e));
 
@@ -265,9 +322,11 @@ impl WebUI {
         for (id, info) in register.iter().filter(|(_id, info)| {
             info.ingress_type == Some(crate::ingress::IngressType::BgpViaBmp)
         }) {
-            let (_bmp_ingress_info, bgp)= res.get_mut(&info.parent_ingress.expect("should have parent"))
+            let (_bmp_ingress_info, bgp) = res
+                .get_mut(&info.parent_ingress.expect("should have parent"))
                 .expect("should be in hashmap already");
-            let infos: &mut Vec<_> = bgp.entry((info.remote_asn.unwrap(), info.remote_addr.unwrap()))
+            let infos: &mut Vec<_> = bgp
+                .entry((info.remote_asn.unwrap(), info.remote_addr.unwrap()))
                 .or_default();
             infos.push((*id, info.clone()))
         }
@@ -278,11 +337,10 @@ impl WebUI {
     async fn peers_overview(
         state: State<ApiState>,
     ) -> Result<Html<String>, String> {
-        
         let register = state.ingress_register.cloned_info();
         let s = state.store.load();
         let Some(ref store) = *s else {
-            return Err("store not ready".into())
+            return Err("store not ready".into());
         };
         let mut peers = register.par_iter()
             .filter(|(_id, info)|
@@ -337,7 +395,6 @@ impl WebUI {
                     }
                     if route_cnt == 0 {
                         // nothing for v4, now check v6
-                        
                         // TODO extact all the replicated code into a separate fn 
                         if let Ok(r) = store.search_routes(
                             AfiSafiType::Ipv6Unicast,
@@ -397,28 +454,34 @@ impl WebUI {
             .map_err(|e| format!("rendering error: {}", e))
     }
 
-
     async fn routes_diff(
         Path((ingress_a, ingress_b)): Path<(IngressId, IngressId)>,
         state: State<ApiState>,
     ) -> Result<Html<String>, String> {
-
         // fetch asn+ip for ingresses
         let s = state.store.load();
         let Some(ref store) = *s else {
-            return Err("store not ready".into())
+            return Err("store not ready".into());
         };
-        let Some(ingress_info_a) = state.ingress_register.get(ingress_a) else {
+        let Some(ingress_info_a) = state.ingress_register.get(ingress_a)
+        else {
             return Err("no information for ingress id {ingress_a}".into());
         };
-        let Some(ingress_info_b) = state.ingress_register.get(ingress_b) else {
+        let Some(ingress_info_b) = state.ingress_register.get(ingress_b)
+        else {
             return Err("no information for ingress id {ingress_a}".into());
         };
         // new RoutesDiff
         // TODO fix unwraps
         let mut routes_diff = RoutesDiff::new(
-            (ingress_info_a.remote_asn.unwrap(), ingress_info_a.remote_addr.unwrap()),
-            (ingress_info_b.remote_asn.unwrap(), ingress_info_b.remote_addr.unwrap()),
+            (
+                ingress_info_a.remote_asn.unwrap(),
+                ingress_info_a.remote_addr.unwrap(),
+            ),
+            (
+                ingress_info_b.remote_asn.unwrap(),
+                ingress_info_b.remote_addr.unwrap(),
+            ),
         );
 
         // fetch everything from store for a, and b,
@@ -430,7 +493,7 @@ impl WebUI {
             QueryFilter {
                 include: vec![Include::MoreSpecifics],
                 ingress_id: Some(ingress_a),
-                .. Default::default()
+                ..Default::default()
             },
         ) {
             if let Some(recordset) = r.query_result.more_specifics {
@@ -445,7 +508,7 @@ impl WebUI {
             QueryFilter {
                 include: vec![Include::MoreSpecifics],
                 ingress_id: Some(ingress_b),
-                .. Default::default()
+                ..Default::default()
             },
         ) {
             if let Some(recordset) = r.query_result.more_specifics {
@@ -455,66 +518,73 @@ impl WebUI {
 
         //TODO add in ipv6 as well
 
-
         // sort a and b, or create Set
         // get the disjoint diff
         // populate RoutesDiff
-        routes_diff.only_a = prefixes_a.difference(&prefixes_b).cloned().collect();
-        routes_diff.only_b = prefixes_b.difference(&prefixes_a).cloned().collect();
-        routes_diff.both = prefixes_a.intersection(&prefixes_a).cloned().collect();
+        routes_diff.only_a =
+            prefixes_a.difference(&prefixes_b).cloned().collect();
+        routes_diff.only_b =
+            prefixes_b.difference(&prefixes_a).cloned().collect();
+        routes_diff.both =
+            prefixes_a.intersection(&prefixes_a).cloned().collect();
 
-        routes_diff.render()
+        routes_diff
+            .render()
             .map(Into::into)
             .map_err(|e| format!("rendering error: {}", e))
     }
-
 
     async fn peers_diff(
         Path((ingress_a, ingress_b)): Path<(IngressId, IngressId)>,
         state: State<ApiState>,
     ) -> Result<Html<String>, String> {
-
-        
         let register = state.ingress_register.cloned_info();
 
-        let Some(bmp_a) = register.get(&ingress_a)
-            .filter(|info| info.ingress_type == Some(crate::ingress::IngressType::Bmp))
+        let Some(bmp_a) = register
+            .get(&ingress_a)
+            .filter(|info| {
+                info.ingress_type == Some(crate::ingress::IngressType::Bmp)
+            })
             .map(|info| BmpRouter::new(ingress_a, info.clone()))
         else {
-          return Err(format!("no (BMP) ingress with id {ingress_a}"));
+            return Err(format!("no (BMP) ingress with id {ingress_a}"));
         };
 
-        let Some(bmp_b) = register.get(&ingress_b)
-            .filter(|info| info.ingress_type == Some(crate::ingress::IngressType::Bmp))
+        let Some(bmp_b) = register
+            .get(&ingress_b)
+            .filter(|info| {
+                info.ingress_type == Some(crate::ingress::IngressType::Bmp)
+            })
             .map(|info| BmpRouter::new(ingress_b, info.clone()))
         else {
-          return Err(format!("no (BMP) ingress with id {ingress_b}"));
+            return Err(format!("no (BMP) ingress with id {ingress_b}"));
         };
 
-        let sessions_a: BTreeSet<_> = register.iter()
+        let sessions_a: BTreeSet<_> = register
+            .iter()
             .filter(|(_id, info)| info.parent_ingress == Some(ingress_a))
             .filter_map(|(_id, info)| info.remote_asn.zip(info.remote_addr))
-            .collect()
-        ;
+            .collect();
 
-        let sessions_b: BTreeSet<_> = register.iter()
+        let sessions_b: BTreeSet<_> = register
+            .iter()
             .filter(|(_id, info)| info.parent_ingress == Some(ingress_b))
             .filter_map(|(_id, info)| info.remote_asn.zip(info.remote_addr))
-            .collect()
-        ;
-
+            .collect();
 
         let mut peers_diff = PeersDiff::new(bmp_a, bmp_b);
-        peers_diff.only_a = sessions_a.difference(&sessions_b).cloned().collect();
-        peers_diff.only_b = sessions_b.difference(&sessions_a).cloned().collect();
-        peers_diff.both = sessions_a.intersection(&sessions_b).cloned().collect();
+        peers_diff.only_a =
+            sessions_a.difference(&sessions_b).cloned().collect();
+        peers_diff.only_b =
+            sessions_b.difference(&sessions_a).cloned().collect();
+        peers_diff.both =
+            sessions_a.intersection(&sessions_b).cloned().collect();
 
-
-        peers_diff.render()
+        peers_diff
+            .render()
             .map(Into::into)
             .map_err(|e| format!("rendering error: {}", e))
     }
-
 }
 
 trait AlternativeDisplay {
@@ -523,7 +593,10 @@ trait AlternativeDisplay {
 
 impl<T: fmt::Display> AlternativeDisplay for Option<T> {
     fn alt(&self, alt: impl fmt::Display) -> impl fmt::Display {
-        self.as_ref().map(|i| i.to_string()).filter(|i| i != "").unwrap_or(alt.to_string())
+        self.as_ref()
+            .map(|i| i.to_string())
+            .filter(|i| i != "")
+            .unwrap_or(alt.to_string())
     }
 }
 
@@ -547,9 +620,9 @@ impl AlternativeDisplay for &str {
 }
 
 #[derive(Eq, Ord, PartialEq, PartialOrd)]
-pub struct BmpRouter{
+pub struct BmpRouter {
     pub id: IngressId,
-    pub info: IngressInfo
+    pub info: IngressInfo,
 }
 
 impl BmpRouter {
@@ -559,9 +632,9 @@ impl BmpRouter {
 }
 
 #[derive(Eq, Ord, PartialEq, PartialOrd)]
-pub struct BgpPeer{
+pub struct BgpPeer {
     pub id: IngressId,
-    pub info: IngressInfo
+    pub info: IngressInfo,
 }
 
 impl BgpPeer {
@@ -576,7 +649,8 @@ fn bmp_details(bmp_router: &BmpRouter) -> BmpRouterLink<'_> {
 
 impl fmt::Display for BmpRouter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(name) = self.info.name.as_ref().filter(|n| !n.is_empty()) {
+        if let Some(name) = self.info.name.as_ref().filter(|n| !n.is_empty())
+        {
             write!(f, "{name}")
         } else {
             write!(f, "__unnamed-bmp-{}", self.id)
@@ -613,7 +687,6 @@ impl fmt::Display for PeerIpLink {
     }
 }
 
-
 impl fmt::Display for BgpPeer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         todo!()
@@ -627,25 +700,45 @@ impl fmt::Display for BgpPeer {
 
 type BmpTree = BTreeMap<
     IngressId, // BMP ingress id
-    (IngressInfo, BTreeMap< // pointing to a tuple of its info plus a map
-        (Asn, IpAddr), Vec<(IngressId, IngressInfo)> // of (asn+ip) pointing to all id+infos
-    >)
+    (
+        IngressInfo,
+        BTreeMap<
+            // pointing to a tuple of its info plus a map
+            (Asn, IpAddr),
+            Vec<(IngressId, IngressInfo)>, // of (asn+ip) pointing to all id+infos
+        >,
+    ),
 >;
 
-impl GenOutput<&mut crate::webui::Index> for crate::ingress::register::BmpIdAndInfo<'_> {
-    fn write(&self, target: &mut &mut crate::webui::Index) -> Result<(), crate::representation::OutputError> {
-        target.bmp_routers.push(BmpRouter::new(self.0.ingress_id, self.0.ingress_info.clone()));
+impl GenOutput<&mut crate::webui::Index>
+    for crate::ingress::register::BmpIdAndInfo<'_>
+{
+    fn write(
+        &self,
+        target: &mut &mut crate::webui::Index,
+    ) -> Result<(), crate::representation::OutputError> {
+        target.bmp_routers.push(BmpRouter::new(
+            self.0.ingress_id,
+            self.0.ingress_info.clone(),
+        ));
         Ok(())
     }
 }
 
-impl GenOutput<&mut crate::webui::Index> for crate::ingress::register::BgpIdAndInfo<'_> {
-    fn write(&self, target: &mut &mut crate::webui::Index) -> Result<(), crate::representation::OutputError> {
-        target.bgp_routers.push(BgpPeer::new(self.0.ingress_id, self.0.ingress_info.clone()));
+impl GenOutput<&mut crate::webui::Index>
+    for crate::ingress::register::BgpIdAndInfo<'_>
+{
+    fn write(
+        &self,
+        target: &mut &mut crate::webui::Index,
+    ) -> Result<(), crate::representation::OutputError> {
+        target.bgp_routers.push(BgpPeer::new(
+            self.0.ingress_id,
+            self.0.ingress_info.clone(),
+        ));
         Ok(())
     }
 }
-
 
 #[derive(Default, RsHtml)]
 pub struct Index {
@@ -660,7 +753,6 @@ pub struct BmpDetails {
     pub other_routers: Vec<BmpRouter>,
     pub bgp_sessions: BTreeMap<(Asn, IpAddr), Vec<(IngressId, IngressInfo)>>,
 }
-
 
 pub struct RouteDetails {
     pub bmp_router: Option<BmpRouter>,
@@ -700,7 +792,6 @@ pub struct PeersDiff {
     pub only_a: Vec<(Asn, IpAddr)>,
     pub only_b: Vec<(Asn, IpAddr)>,
     pub both: Vec<(Asn, IpAddr)>,
-
 }
 
 impl PeersDiff {
@@ -715,13 +806,12 @@ impl PeersDiff {
     }
 }
 
-
 #[derive(Default, RsHtml)]
 pub struct Routes {
     pub routes: Vec<(Prefix, Vec<RouteDetails>)>, // RouteStatus, AsPath and Communities, for starters
     pub less_specifics: Vec<(Prefix, Vec<RouteDetails>)>, // RouteStatus, AsPath and Communities, for starters
     pub more_specifics: Vec<(Prefix, Vec<RouteDetails>)>, // RouteStatus, AsPath and Communities, for starters
-                                                          //
+    //
     pub show_only_more_specifics: bool,
     pub title: String,
 }
@@ -729,51 +819,90 @@ pub struct Routes {
 impl crate::units::rib_unit::rib::SearchResult {
     fn collect_routes<'a>(
         &'a self,
-        routes: impl Iterator<Item=&'a rotonda_store::prefix_record::Record<crate::payload::RotondaPaMap>>,
+        routes: impl Iterator<
+            Item = &'a rotonda_store::prefix_record::Record<
+                crate::payload::RotondaPaMap,
+            >,
+        >,
     ) -> Vec<RouteDetails> {
-        routes.map(|m| {
-            let route_ingress_info = self.ingress_register.get(m.multi_uniq_id);
-            let bmp_router = self.ingress_register.get(m.multi_uniq_id)
-                .and_then(|info| info.parent_ingress)
-                .map(|parent_id|
-                    self.ingress_register.get(parent_id)
-                        .filter(|parent_info| parent_info.ingress_type == Some(IngressType::Bmp))
-                        .map(|parent_info| BmpRouter::new(parent_id, parent_info))
-                ).flatten()
-            ;
+        routes
+            .map(|m| {
+                let route_ingress_info =
+                    self.ingress_register.get(m.multi_uniq_id);
+                let bmp_router = self
+                    .ingress_register
+                    .get(m.multi_uniq_id)
+                    .and_then(|info| info.parent_ingress)
+                    .map(|parent_id| {
+                        self.ingress_register
+                            .get(parent_id)
+                            .filter(|parent_info| {
+                                parent_info.ingress_type
+                                    == Some(IngressType::Bmp)
+                            })
+                            .map(|parent_info| {
+                                BmpRouter::new(parent_id, parent_info)
+                            })
+                    })
+                    .flatten();
 
-            let pamap = m.meta.path_attributes();
-            let aspath = pamap.get::<HopPath>();
-            let communities = pamap.get::<StandardCommunitiesList>();
-            RouteDetails {
-                bmp_router,
-                peer_asn: route_ingress_info.as_ref().and_then(|info| info.remote_asn),
-                ribview: route_ingress_info.as_ref().and_then(|info| info.peer_rib_type),
-                origin_asn: aspath.as_ref().and_then(|a| a.origin().map(|a| a.to_string())).unwrap_or("".into()),
-                rov_status: m.meta.rpki_info().rov_status(),
-                otc: pamap.get::<Otc>(),
-                as_path: aspath.map(|a| a.to_string()).unwrap_or("".into()),
-                communities: communities.map(|c| c.communities().iter().map(|c| c.to_string()).collect::<Vec<_>>().join(", ")).unwrap_or("".into())
-            }
-        }).collect()
+                let pamap = m.meta.path_attributes();
+                let aspath = pamap.get::<HopPath>();
+                let communities = pamap.get::<StandardCommunitiesList>();
+                RouteDetails {
+                    bmp_router,
+                    peer_asn: route_ingress_info
+                        .as_ref()
+                        .and_then(|info| info.remote_asn),
+                    ribview: route_ingress_info
+                        .as_ref()
+                        .and_then(|info| info.peer_rib_type),
+                    origin_asn: aspath
+                        .as_ref()
+                        .and_then(|a| a.origin().map(|a| a.to_string()))
+                        .unwrap_or("".into()),
+                    rov_status: m.meta.rpki_info().rov_status(),
+                    otc: pamap.get::<Otc>(),
+                    as_path: aspath
+                        .map(|a| a.to_string())
+                        .unwrap_or("".into()),
+                    communities: communities
+                        .map(|c| {
+                            c.communities()
+                                .iter()
+                                .map(|c| c.to_string())
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                        .unwrap_or("".into()),
+                }
+            })
+            .collect()
     }
 }
 
 impl GenOutput<&mut Routes> for crate::units::rib_unit::rib::SearchResult {
-    fn write(&self, target: &mut &mut Routes) -> Result<(), crate::representation::OutputError> {
-
+    fn write(
+        &self,
+        target: &mut &mut Routes,
+    ) -> Result<(), crate::representation::OutputError> {
         dbg!(self.query_result.more_specifics.as_ref().unwrap().v4.len());
         dbg!(self.query_result.more_specifics.as_ref().unwrap().v6.len());
-        debug!("in write, current Routes.routes.len: {}", target.routes.len());
+        debug!(
+            "in write, current Routes.routes.len: {}",
+            target.routes.len()
+        );
 
         if let Some(prefix) = self.query_result.prefix {
-            let routes = self.collect_routes(self.query_result.records.iter());
+            let routes =
+                self.collect_routes(self.query_result.records.iter());
             if !routes.is_empty() {
                 target.routes.push((prefix, routes));
             }
         }
 
-        let more_specifics = self.query_result.more_specifics.as_ref().unwrap();
+        let more_specifics =
+            self.query_result.more_specifics.as_ref().unwrap();
         for r in more_specifics.v4.iter().chain(&more_specifics.v6) {
             let routes = self.collect_routes(r.meta.iter());
             if !routes.is_empty() {
@@ -781,7 +910,8 @@ impl GenOutput<&mut Routes> for crate::units::rib_unit::rib::SearchResult {
             }
         }
 
-        let less_specifics = self.query_result.less_specifics.as_ref().unwrap();
+        let less_specifics =
+            self.query_result.less_specifics.as_ref().unwrap();
         for r in less_specifics.v4.iter().chain(&less_specifics.v6) {
             let routes = self.collect_routes(r.meta.iter());
             if !routes.is_empty() {
@@ -795,10 +925,8 @@ impl GenOutput<&mut Routes> for crate::units::rib_unit::rib::SearchResult {
     }
 }
 
-
 #[derive(Copy, Clone, Eq, Ord, PartialEq, PartialOrd)]
 pub struct ObservedAttributes(u8);
-
 
 impl ObservedAttributes {
     const COMMUNITIES: Self = Self(0x1);
@@ -808,12 +936,12 @@ impl ObservedAttributes {
     const ROV_INVALID: Self = Self(0x10);
 
     pub fn all_marked(&self) -> bool {
-        self.0 ==
-            Self::COMMUNITIES.0
-            | Self::EXT_COMMUNITIES.0
-            | Self::LARGE_COMMUNITIES.0
-            | Self::OTC.0
-            | Self::ROV_INVALID.0
+        self.0
+            == Self::COMMUNITIES.0
+                | Self::EXT_COMMUNITIES.0
+                | Self::LARGE_COMMUNITIES.0
+                | Self::OTC.0
+                | Self::ROV_INVALID.0
     }
 }
 
@@ -838,5 +966,13 @@ impl std::ops::BitAnd for ObservedAttributes {
 
 #[derive(RsHtml)]
 pub struct Peers {
-    peers: Vec<(Asn, Option<BmpRouter>, IpAddr, PeerRibType, IngressId, usize, ObservedAttributes)>,
+    peers: Vec<(
+        Asn,
+        Option<BmpRouter>,
+        IpAddr,
+        PeerRibType,
+        IngressId,
+        usize,
+        ObservedAttributes,
+    )>,
 }

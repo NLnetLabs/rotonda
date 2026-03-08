@@ -11,7 +11,7 @@ use crate::{ingress::{self, http_ng::IngressApi}, units::rib_unit::rib::Rib, web
 
 
 
-//#[derive(Default)]
+#[derive(Default)]
 pub struct Api {
     /// Interfaces to listen on
     interfaces: Vec<SocketAddr>,

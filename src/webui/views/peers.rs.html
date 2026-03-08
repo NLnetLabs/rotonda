@@ -20,13 +20,14 @@
         let mut last_bmp_id = None;
         let mut last_ip = "0.0.0.0".parse().unwrap();
     }
-    @for (asn, bmp_router, addr, ribview, ingress_id, routecnt, attrs) in &self.peers { 
+    @for peer in &self.peers { 
+        @{ let Peer {remote_asn, bmp_router, remote_addr, ribview, ingress_id, num_routes, observed_attributes: attrs} = peer; }
     <tr>
-        <td>@if last_asn != *asn { <a href="/routes/peer_asn/@asn">@asn</a> }</td>
+        <td>@if last_asn != *remote_asn { <a href="/routes/peer_asn/@remote_asn">@remote_asn</a> }</td>
         <td>@if last_bmp_id != bmp_router.as_ref().map(|b| b.id) { @#bmp_router.as_ref().map(|r| bmp_details(r)).alt("") }</td>
-        <td>@if last_ip != *addr { <a href="/routes/peer_ip/@addr">@addr</a> }</td>
+        <td>@if last_ip != *remote_addr { <a href="/routes/peer_ip/@remote_addr">@remote_addr</a> }</td>
         <td><a href="/routes/@ingress_id">@ribview</a></td>
-        <td>@routecnt</td>
+        <td>@num_routes</td>
         <td>@if *attrs & ObservedAttributes::ROV_INVALID  { x } </td>
         <td>@if *attrs & ObservedAttributes::OTC  { x } </td>
         <td>@if *attrs & ObservedAttributes::COMMUNITIES  { x } </td>
@@ -34,9 +35,9 @@
         <td>@if *attrs & ObservedAttributes::LARGE_COMMUNITIES  { x } </td>
     </tr>
     @{
-        last_asn = *asn;
+        last_asn = *remote_asn;
         last_bmp_id = bmp_router.as_ref().map(|b| b.id);
-        last_ip = *addr;
+        last_ip = *remote_addr;
 
     }
 

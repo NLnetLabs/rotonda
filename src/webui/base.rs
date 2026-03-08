@@ -444,7 +444,15 @@ impl WebUI {
                 .map(|(k,v)| BmpRouter::new(*k,v.clone()))
             );
 
-            (info.remote_asn.unwrap(), bmp_router, info.remote_addr.unwrap(), info.peer_rib_type.unwrap(), *ingress_id, route_cnt, observed_attributes)
+            Peer::new(
+                info.remote_asn.unwrap(),
+                bmp_router,
+                info.remote_addr.unwrap(),
+                info.peer_rib_type.unwrap(),
+                *ingress_id,
+                route_cnt,
+                observed_attributes
+            )
         }).collect::<Vec<_>>();
 
         peers.sort();
@@ -825,7 +833,6 @@ pub struct Routes {
     pub routes: Vec<(Prefix, Vec<RouteDetails>)>, // RouteStatus, AsPath and Communities, for starters
     pub less_specifics: Vec<(Prefix, Vec<RouteDetails>)>, // RouteStatus, AsPath and Communities, for starters
     pub more_specifics: Vec<(Prefix, Vec<RouteDetails>)>, // RouteStatus, AsPath and Communities, for starters
-    //
     pub show_only_more_specifics: bool,
     pub title: String,
 }
@@ -979,13 +986,38 @@ impl std::ops::BitAnd for ObservedAttributes {
 
 #[derive(RsHtml)]
 pub struct Peers {
-    peers: Vec<(
-        Asn,
-        Option<BmpRouter>,
-        IpAddr,
-        PeerRibType,
-        IngressId,
-        usize,
-        ObservedAttributes,
-    )>,
+    peers: Vec<Peer>,
+}
+
+#[derive(Eq, Ord, PartialEq, PartialOrd)]
+struct Peer {
+    remote_asn: Asn,
+    bmp_router: Option<BmpRouter>,
+    remote_addr: IpAddr,
+    ribview: PeerRibType,
+    ingress_id: IngressId,
+    num_routes: usize,
+    observed_attributes: ObservedAttributes,
+}
+
+impl Peer {
+    fn new(
+        remote_asn: Asn,
+        bmp_router: Option<BmpRouter>,
+        remote_addr: IpAddr,
+        ribview: PeerRibType,
+        ingress_id: IngressId,
+        num_routes: usize,
+        observed_attributes: ObservedAttributes,
+    ) -> Self {
+        Self {
+            remote_asn,
+            bmp_router,
+            remote_addr,
+            ribview,
+            ingress_id,
+            num_routes,
+            observed_attributes,
+        }
+    }
 }

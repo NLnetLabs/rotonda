@@ -169,14 +169,15 @@ impl WebUI {
                 info.remote_asn.zip(info.peer_rib_type)
             {
                 page.title = format!("Routes for {asn}/{ribview}");
-                info.parent_ingress
+                if let Some(ii) = info
+                    .parent_ingress
                     .and_then(|id| state.ingress_register.get_tuple(id))
-                    .map(|ii| {
-                        page.title.push_str(&format!(
-                            " on {}",
-                            BmpRouter::new(ii.ingress_id, ii.ingress_info)
-                        ))
-                    });
+                {
+                    page.title.push_str(&format!(
+                        " on {}",
+                        BmpRouter::new(ii.ingress_id, ii.ingress_info)
+                    ))
+                }
             }
         } else {
             page.title = format!("Routes for ingress_id {ingress_id}");
@@ -595,7 +596,7 @@ impl<T: fmt::Display> AlternativeDisplay for Option<T> {
     fn alt(&self, alt: impl fmt::Display) -> impl fmt::Display {
         self.as_ref()
             .map(|i| i.to_string())
-            .filter(|i| i != "")
+            .filter(|i| !i.is_empty())
             .unwrap_or(alt.to_string())
     }
 }
@@ -689,12 +690,25 @@ impl fmt::Display for PeerIpLink {
 
 impl fmt::Display for BgpPeer {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        todo!()
-        //if let Some(name) = self.1.name.as_ref().filter(|n| !n.is_empty()) {
-        //    write!(f, "{name}")
-        //} else {
-        //    write!(f, "__unnamed-bmp-{}", self.0)
-        //}
+        // ASN@ip (or fallback to 0.0.0.0)
+        // else name
+        // else ingressid
+
+        if let Some(asn) = self.info.remote_asn.as_ref() {
+            write!(f, "{asn}@")?;
+            write!(
+                f,
+                "{}",
+                self.info
+                    .remote_addr
+                    .as_ref()
+                    .unwrap_or(&"0.0.0.0".parse().unwrap())
+            )
+        } else if let Some(name) = self.info.name.as_ref() {
+            write!(f, "bgp-peer-{name}")
+        } else {
+            write!(f, "bgp-peer-lacking-info-id-{}", self.id)
+        }
     }
 }
 
@@ -833,7 +847,7 @@ impl crate::units::rib_unit::rib::SearchResult {
                     .ingress_register
                     .get(m.multi_uniq_id)
                     .and_then(|info| info.parent_ingress)
-                    .map(|parent_id| {
+                    .and_then(|parent_id| {
                         self.ingress_register
                             .get(parent_id)
                             .filter(|parent_info| {
@@ -843,8 +857,7 @@ impl crate::units::rib_unit::rib::SearchResult {
                             .map(|parent_info| {
                                 BmpRouter::new(parent_id, parent_info)
                             })
-                    })
-                    .flatten();
+                    });
 
                 let pamap = m.meta.path_attributes();
                 let aspath = pamap.get::<HopPath>();

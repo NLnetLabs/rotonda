@@ -479,18 +479,24 @@ impl WebUI {
         else {
             return Err("no information for ingress id {ingress_a}".into());
         };
-        // new RoutesDiff
-        // TODO fix unwraps
-        let mut routes_diff = RoutesDiff::new(
-            (
-                ingress_info_a.remote_asn.unwrap(),
-                ingress_info_a.remote_addr.unwrap(),
-            ),
-            (
-                ingress_info_b.remote_asn.unwrap(),
-                ingress_info_b.remote_addr.unwrap(),
-            ),
-        );
+
+        let Some(peer_a) =
+            ingress_info_a.remote_asn.zip(ingress_info_a.remote_addr)
+        else {
+            return Err(format!(
+                "lacking remote ASN or IP address for ingress id {ingress_a}"
+            ));
+        };
+
+        let Some(peer_b) =
+            ingress_info_b.remote_asn.zip(ingress_info_b.remote_addr)
+        else {
+            return Err(format!(
+                "lacking remote ASN or IP address for ingress id {ingress_b}"
+            ));
+        };
+
+        let mut routes_diff = RoutesDiff::new(peer_a, peer_b);
 
         // fetch everything from store for a, and b,
 
@@ -509,6 +515,26 @@ impl WebUI {
             }
         };
 
+        if let Ok(r) = store.search_routes(
+            AfiSafiType::Ipv6Unicast,
+            "::/0".parse().unwrap(),
+            QueryFilter {
+                include: vec![Include::MoreSpecifics],
+                ingress_id: Some(ingress_a),
+                ..Default::default()
+            },
+        ) {
+            if let Some(recordset) = r.query_result.more_specifics {
+                prefixes_a.append(
+                    &mut recordset
+                        .v6
+                        .iter()
+                        .map(|r| r.prefix)
+                        .collect::<BTreeSet<_>>(),
+                );
+            }
+        };
+
         let mut prefixes_b = BTreeSet::new();
         if let Ok(r) = store.search_routes(
             AfiSafiType::Ipv4Unicast,
@@ -524,7 +550,25 @@ impl WebUI {
             }
         };
 
-        //TODO add in ipv6 as well
+        if let Ok(r) = store.search_routes(
+            AfiSafiType::Ipv6Unicast,
+            "::/0".parse().unwrap(),
+            QueryFilter {
+                include: vec![Include::MoreSpecifics],
+                ingress_id: Some(ingress_b),
+                ..Default::default()
+            },
+        ) {
+            if let Some(recordset) = r.query_result.more_specifics {
+                prefixes_b.append(
+                    &mut recordset
+                        .v6
+                        .iter()
+                        .map(|r| r.prefix)
+                        .collect::<BTreeSet<_>>(),
+                );
+            }
+        };
 
         // sort a and b, or create Set
         // get the disjoint diff
@@ -534,7 +578,7 @@ impl WebUI {
         routes_diff.only_b =
             prefixes_b.difference(&prefixes_a).cloned().collect();
         routes_diff.both =
-            prefixes_a.intersection(&prefixes_a).cloned().collect();
+            prefixes_a.intersection(&prefixes_b).cloned().collect();
 
         routes_diff
             .render()

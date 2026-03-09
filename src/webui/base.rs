@@ -335,6 +335,43 @@ impl WebUI {
         res
     }
 
+    fn aggregate_peers(
+        recordset: &[rotonda_store::prefix_record::PrefixRecord<
+            crate::payload::RotondaPaMap,
+        >],
+        observed_attributes: &mut ObservedAttributes,
+    ) {
+        for r in recordset {
+            for m in &r.meta {
+                if m.meta.rpki_info().rov_status() == RovStatus::Invalid {
+                    *observed_attributes |= ObservedAttributes::ROV_INVALID;
+                }
+                for pa in m.meta.path_attributes().iter() {
+                    let Ok(pa) = pa else { break };
+                    if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::Communities) {
+                        *observed_attributes |= ObservedAttributes::COMMUNITIES;
+                    }
+                    if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::ExtendedCommunities) {
+                        *observed_attributes |= ObservedAttributes::EXT_COMMUNITIES;
+                    }
+                    if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::LargeCommunities) {
+                        *observed_attributes |= ObservedAttributes::LARGE_COMMUNITIES;
+                    }
+                    if pa.type_code()
+                        == u8::from(
+                            routecore::bgp::types::PathAttributeType::Otc,
+                        )
+                    {
+                        *observed_attributes |= ObservedAttributes::OTC;
+                    }
+                }
+            }
+            if observed_attributes.all_marked() {
+                break;
+            }
+        }
+    }
+
     async fn peers_overview(
         state: State<ApiState>,
     ) -> Result<Html<String>, String> {
@@ -343,15 +380,17 @@ impl WebUI {
         let Some(ref store) = *s else {
             return Err("store not ready".into());
         };
-        let mut peers = register.par_iter()
-            .filter(|(_id, info)|
-                info.ingress_type == Some(crate::ingress::IngressType::BgpViaBmp)
-                || info.ingress_type == Some(crate::ingress::IngressType::Bgp)
-            )
+        let mut peers = register
+            .par_iter()
+            .filter(|(_id, info)| {
+                info.ingress_type
+                    == Some(crate::ingress::IngressType::BgpViaBmp)
+                    || info.ingress_type
+                        == Some(crate::ingress::IngressType::Bgp)
+            })
             .map(|(ingress_id, info)| {
-
-            // fetch all routes for this mui
-            // iterate over path attributes, early abort once we have found everything
+                // fetch all routes for this mui
+                // iterate over path attributes, early abort once we have found everything
 
                 let mut observed_attributes = ObservedAttributes(0);
                 let mut route_cnt = 0;
@@ -362,98 +401,58 @@ impl WebUI {
                     QueryFilter {
                         include: vec![Include::MoreSpecifics],
                         ingress_id: Some(*ingress_id),
-                        .. Default::default()
+                        ..Default::default()
                     },
                 ) {
                     if let Some(recordset) = r.query_result.more_specifics {
                         route_cnt = recordset.len();
-                        for r in recordset.v4 {
-                            for m in r.meta {
-                                if m.meta.rpki_info().rov_status() == RovStatus::Invalid {
-                                    observed_attributes |= ObservedAttributes::ROV_INVALID;
-                                }
-                                for pa in m.meta.path_attributes().iter() {
-                                    let Ok(pa) = pa else { break };
-                                    if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::Communities) {
-                                        observed_attributes |= ObservedAttributes::COMMUNITIES;
-                                    }
-                                    if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::ExtendedCommunities) {
-                                        observed_attributes |= ObservedAttributes::EXT_COMMUNITIES;
-                                    }
-                                    if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::LargeCommunities) {
-                                        observed_attributes |= ObservedAttributes::LARGE_COMMUNITIES;
-                                    }
-                                    if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::Otc) {
-                                        observed_attributes |= ObservedAttributes::OTC;
-                                    }
-                                }
-                            }
-                            if observed_attributes.all_marked() {
-                                break;
-                            }
-                        }
-
+                        Self::aggregate_peers(
+                            &recordset.v4,
+                            &mut observed_attributes,
+                        );
                     }
+
                     if route_cnt == 0 {
                         // nothing for v4, now check v6
-                        // TODO extact all the replicated code into a separate fn 
                         if let Ok(r) = store.search_routes(
                             AfiSafiType::Ipv6Unicast,
                             "::/0".parse().unwrap(),
                             QueryFilter {
                                 include: vec![Include::MoreSpecifics],
                                 ingress_id: Some(*ingress_id),
-                                .. Default::default()
+                                ..Default::default()
                             },
                         ) {
-                            if let Some(recordset) = r.query_result.more_specifics {
+                            if let Some(recordset) =
+                                r.query_result.more_specifics
+                            {
                                 route_cnt = recordset.len();
-                                for r in recordset.v6 {
-                                    for m in r.meta {
-                                        if m.meta.rpki_info().rov_status() == RovStatus::Invalid {
-                                            observed_attributes |= ObservedAttributes::ROV_INVALID;
-                                        }
-                                        for pa in m.meta.path_attributes().iter() {
-                                            let Ok(pa) = pa else { break };
-                                            if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::Communities) {
-                                                observed_attributes |= ObservedAttributes::COMMUNITIES;
-                                            }
-                                            if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::ExtendedCommunities) {
-                                                observed_attributes |= ObservedAttributes::EXT_COMMUNITIES;
-                                            }
-                                            if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::LargeCommunities) {
-                                                observed_attributes |= ObservedAttributes::LARGE_COMMUNITIES;
-                                            }
-                                            if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::Otc) {
-                                                observed_attributes |= ObservedAttributes::OTC;
-                                            }
-                                        }
-                                    }
-                                    if observed_attributes.all_marked() {
-                                        break;
-                                    }
-                                }
-
+                                Self::aggregate_peers(
+                                    &recordset.v4,
+                                    &mut observed_attributes,
+                                );
                             }
                         }
                     }
                 }
 
-            let bmp_router = info.parent_ingress.and_then(|parent_id|
-                register.get_key_value(&parent_id)
-                .map(|(k,v)| BmpRouter::new(*k,v.clone()))
-            );
+                let bmp_router = info.parent_ingress.and_then(|parent_id| {
+                    register
+                        .get_key_value(&parent_id)
+                        .map(|(k, v)| BmpRouter::new(*k, v.clone()))
+                });
 
-            Peer::new(
-                info.remote_asn.unwrap(),
-                bmp_router,
-                info.remote_addr.unwrap(),
-                info.peer_rib_type.unwrap(),
-                *ingress_id,
-                route_cnt,
-                observed_attributes
-            )
-        }).collect::<Vec<_>>();
+                Peer::new(
+                    info.remote_asn.unwrap(),
+                    bmp_router,
+                    info.remote_addr.unwrap(),
+                    info.peer_rib_type.unwrap(),
+                    *ingress_id,
+                    route_cnt,
+                    observed_attributes,
+                )
+            })
+            .collect::<Vec<_>>();
 
         peers.sort();
         let page = Peers { peers };

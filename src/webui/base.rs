@@ -337,7 +337,8 @@ impl WebUI {
             let infos: &mut Vec<_> = bgp
                 .entry((info.remote_asn.unwrap(), info.remote_addr.unwrap()))
                 .or_default();
-            infos.push((*id, info.clone()))
+            infos.push((*id, info.clone()));
+            infos.sort_by(|a, b| a.1.peer_rib_type.cmp(&b.1.peer_rib_type));
         }
 
         res

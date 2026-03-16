@@ -438,6 +438,14 @@ impl Processor {
                                     .with_remote_addr(negotiated.remote_addr())
                                     .with_remote_asn(negotiated.remote_asn())
                                     .with_peer_rib_type(PeerRibType::OutPost)
+                                    .with_local_capabilities(
+                                        negotiated.local_capabilities()
+                                        .to_vec()
+                                    )
+                                    .with_remote_capabilities(
+                                        negotiated.remote_capabilities()
+                                        .to_vec()
+                                    )
                                 );
                             debug!("get 2: {:?}", self.ingresses.get(session_ingress_id));
 

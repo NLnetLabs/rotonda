@@ -488,13 +488,11 @@ where
             .capabilities()
             .any(|cap| cap.typ() == CapabilityType::GracefulRestart);
 
-        // TODO add impl AsRef<[u8]> on CapabilityIter in routecore
-        // instead of iterating and asreffing individually
         let (local_capabilities, remote_capabilities) = {
             let (sent, rcvd) = msg.bgp_open_sent_rcvd();
             (
-                sent.capabilities().fold(vec![], |mut acc, e| { acc.extend_from_slice(e.as_ref()); acc }),
-                rcvd.capabilities().fold(vec![], |mut acc, e| { acc.extend_from_slice(e.as_ref()); acc })
+                sent.capabilities_as_vec(),
+                rcvd.capabilities_as_vec(),
             )
         };
 

@@ -31,7 +31,7 @@
         <td>@if last_bmp_id != bmp_router.as_ref().map(|b| b.id) { @#bmp_router.as_ref().map(|r| bmp_details(r)).alt("") }</td>
         <td>@if last_ip != *remote_addr { <a href="/routes/peer_ip/@remote_addr">@remote_addr</a> }</td>
         <td>
-        @for enh in ext_next_hops.only_local() { <span class="yellow">@enh</span>| }
+        @for enh in ext_next_hops.only_local() { <span class="yellow">@enh</span> | }
         
         @for enh in ext_next_hops.both() { <span class="green">@enh</span> }
         @for enh in ext_next_hops.only_remote() { |<span class="yellow">@enh</span> }

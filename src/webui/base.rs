@@ -1335,12 +1335,12 @@ impl ExtendedNextHops {
     fn only_local(&self) -> impl Iterator<Item = ExtendedNextHop> + '_ {
         let mut remote = Self::iter_for(self.remote.as_ref());
         Self::iter_for(self.local.as_ref())
-            .filter(move |enh| remote.any(|enh2| *enh != enh2))
+            .filter(move |enh| remote.all(|enh2| *enh != enh2))
     }
     fn only_remote(&self) -> impl Iterator<Item = ExtendedNextHop> + '_ {
         let mut local = Self::iter_for(self.local.as_ref());
         Self::iter_for(self.remote.as_ref())
-            .filter(move |enh| local.any(|enh2| *enh != enh2))
+            .filter(move |enh| local.all(|enh2| *enh != enh2))
     }
 
     fn both(&self) -> impl Iterator<Item = ExtendedNextHop> + '_ {

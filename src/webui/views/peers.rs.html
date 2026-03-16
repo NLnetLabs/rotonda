@@ -7,6 +7,8 @@
         <th>asn</th>
         <th>bmp source</th>
         <th>peer addr</th>
+        <th>ext next hop</th>
+        <th>bgp role</th>
         <th>rib view</th>
         <th># of routes</th>
         <th>ROV invalids</th>
@@ -21,11 +23,26 @@
         let mut last_ip = "0.0.0.0".parse().unwrap();
     }
     @for peer in &self.peers { 
-        @{ let Peer {remote_asn, bmp_router, remote_addr, ribview, ingress_id, num_routes, observed_attributes: attrs} = peer; }
+        @{ let Peer {remote_asn, bmp_router, remote_addr, ribview, ingress_id, num_routes, ext_next_hops, bgp_roles, observed_attributes: attrs} = peer; }
     <tr>
         <td>@if last_asn != *remote_asn { <a href="/routes/peer_asn/@remote_asn">@remote_asn</a> }</td>
         <td>@if last_bmp_id != bmp_router.as_ref().map(|b| b.id) { @#bmp_router.as_ref().map(|r| bmp_details(r)).alt("") }</td>
         <td>@if last_ip != *remote_addr { <a href="/routes/peer_ip/@remote_addr">@remote_addr</a> }</td>
+        <td>
+        @for enh in ext_next_hops.only_local() { <span class="yellow">@enh</span>| }
+        
+        @for enh in ext_next_hops.both() { <span class="green">@enh</span> }
+        @for enh in ext_next_hops.only_remote() { |<span class="yellow">@enh</span> }
+        </td>
+        <td class=@(
+            if bgp_roles.incomplete() { "yellow"}
+            else if bgp_roles.correct() == Some(true) { "green" }
+            else if bgp_roles.correct() == Some(false) { "red" }
+            else { "" }
+        )
+        >
+            @bgp_roles
+        </td>
         <td><a href="/routes/@ingress_id">@ribview</a></td>
         <td>@num_routes</td>
         <td>@if *attrs & ObservedAttributes::ROV_INVALID  { x } </td>

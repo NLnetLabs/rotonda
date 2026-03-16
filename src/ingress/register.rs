@@ -465,7 +465,9 @@ info_for_field!(IngressInfo{
    local_asn: Asn,
    peer_type: PeerType,
    distinguisher: [u8; 8],
-   vrf_name: String
+   vrf_name: String,
+   local_capabilities: Vec<u8>,
+   remote_capabilities: Vec<u8>
 });
 
 #[cfg(test)]

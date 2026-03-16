@@ -10,11 +10,14 @@ use axum::{
     response::Html,
 };
 use inetnum::{addr::Prefix, asn::Asn};
-use log::debug;
+use log::{debug, warn};
 use routecore::bgp::{
     aspath::HopPath,
-    message::update_builder::StandardCommunitiesList,
-    types::{AfiSafiType, Otc},
+    message::{
+        open::{Capabilities, CapabilityType},
+        update_builder::StandardCommunitiesList,
+    },
+    types::{AfiSafiType, Otc, PathAttributeType},
 };
 use rshtml::{traits::RsHtml, RsHtml};
 
@@ -189,10 +192,11 @@ impl WebUI {
             .map_err(|e| format!("rendering error: {}", e));
 
         debug!(
-            "/routes/{ingress_id} html search/filter/rendering ({} prefixes): {:?}",
+            "/routes/{ingress_id} html search/filter/rendering \
+            ({} prefixes): {:?}",
             page.routes.len(),
             Instant::elapsed(&t0),
-            );
+        );
         res
     }
 
@@ -224,10 +228,11 @@ impl WebUI {
             .map_err(|e| format!("rendering error: {}", e));
 
         debug!(
-            "/routes/{peer_asn} html search/filter/rendering ({} prefixes): {:?}",
+            "/routes/{peer_asn} html search/filter/rendering \
+            ({} prefixes): {:?}",
             page.routes.len(),
             Instant::elapsed(&t0),
-            );
+        );
         res
     }
 
@@ -258,10 +263,11 @@ impl WebUI {
             .map_err(|e| format!("rendering error: {}", e));
 
         debug!(
-            "/routes/peer_ip/{peer_ip} html search/filter/rendering ({} prefixes): {:?}",
+            "/routes/peer_ip/{peer_ip} html search/filter/rendering \
+            ({} prefixes): {:?}",
             page.routes.len(),
             Instant::elapsed(&t0),
-            );
+        );
         res
     }
 
@@ -305,10 +311,11 @@ impl WebUI {
             .map_err(|e| format!("rendering error: {}", e));
 
         debug!(
-            "/routes/{prefix} html search/filter/rendering ({} prefixes): {:?}",
+            "/routes/{prefix} html search/filter/rendering \
+            ({} prefixes): {:?}",
             page.routes.len(),
             Instant::elapsed(&t0),
-            );
+        );
         res
     }
 
@@ -348,20 +355,25 @@ impl WebUI {
                 }
                 for pa in m.meta.path_attributes().iter() {
                     let Ok(pa) = pa else { break };
-                    if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::Communities) {
-                        *observed_attributes |= ObservedAttributes::COMMUNITIES;
-                    }
-                    if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::ExtendedCommunities) {
-                        *observed_attributes |= ObservedAttributes::EXT_COMMUNITIES;
-                    }
-                    if pa.type_code() == u8::from(routecore::bgp::types::PathAttributeType::LargeCommunities) {
-                        *observed_attributes |= ObservedAttributes::LARGE_COMMUNITIES;
+                    if pa.type_code()
+                        == u8::from(PathAttributeType::Communities)
+                    {
+                        *observed_attributes |=
+                            ObservedAttributes::COMMUNITIES;
                     }
                     if pa.type_code()
-                        == u8::from(
-                            routecore::bgp::types::PathAttributeType::Otc,
-                        )
+                        == u8::from(PathAttributeType::ExtendedCommunities)
                     {
+                        *observed_attributes |=
+                            ObservedAttributes::EXT_COMMUNITIES;
+                    }
+                    if pa.type_code()
+                        == u8::from(PathAttributeType::LargeCommunities)
+                    {
+                        *observed_attributes |=
+                            ObservedAttributes::LARGE_COMMUNITIES;
+                    }
+                    if pa.type_code() == u8::from(PathAttributeType::Otc) {
                         *observed_attributes |= ObservedAttributes::OTC;
                     }
                 }
@@ -390,7 +402,8 @@ impl WebUI {
             })
             .map(|(ingress_id, info)| {
                 // fetch all routes for this mui
-                // iterate over path attributes, early abort once we have found everything
+                // iterate over path attributes, early abort once we have
+                // found everything
 
                 let mut observed_attributes = ObservedAttributes(0);
                 let mut route_cnt = 0;
@@ -442,6 +455,56 @@ impl WebUI {
                         .map(|(k, v)| BmpRouter::new(*k, v.clone()))
                 });
 
+                let local_caps = info
+                    .local_capabilities
+                    .as_ref()
+                    .map(|c| Capabilities(&c[..]));
+                let remote_caps = info
+                    .remote_capabilities
+                    .as_ref()
+                    .map(|c| Capabilities(&c[..]));
+
+                let bgp_roles;
+                let ext_next_hop;
+                if let Some((local, remote)) =
+                    local_caps.as_ref().zip(remote_caps.as_ref())
+                {
+                    bgp_roles = BgpRoles::new(
+                        local
+                            .iter()
+                            .find(|c| c.typ() == CapabilityType::BgpRole)
+                            .and_then(|c| {
+                                c.value().first().map(|b| BgpRole(*b))
+                            }),
+                        remote
+                            .iter()
+                            .find(|c| c.typ() == CapabilityType::BgpRole)
+                            .and_then(|c| {
+                                c.value().first().map(|b| BgpRole(*b))
+                            }),
+                    );
+
+                    let local_enh = local
+                        .iter()
+                        .find(|c| c.typ() == CapabilityType::ExtendedNextHop)
+                        .filter(|c| c.value().len() % 6 == 0)
+                        .map(|c| c.value().to_vec());
+                    let remote_enh = remote
+                        .iter()
+                        .find(|c| c.typ() == CapabilityType::ExtendedNextHop)
+                        .filter(|c| c.value().len() % 6 == 0)
+                        .map(|c| c.value().to_vec());
+                    ext_next_hop =
+                        ExtendedNextHops::new(local_enh, remote_enh);
+                } else {
+                    warn!(
+                        "unexpected: no BGP Capabilities \
+                        for one or both sides"
+                    );
+                    bgp_roles = BgpRoles::new(None, None);
+                    ext_next_hop = ExtendedNextHops::new(None, None);
+                }
+
                 Peer::new(
                     info.remote_asn.unwrap(),
                     bmp_router,
@@ -449,6 +512,8 @@ impl WebUI {
                     info.peer_rib_type.unwrap(),
                     *ingress_id,
                     route_cnt,
+                    bgp_roles,
+                    ext_next_hop,
                     observed_attributes,
                 )
             })
@@ -766,11 +831,11 @@ impl fmt::Display for BgpPeer {
 type BmpTree = BTreeMap<
     IngressId, // BMP ingress id
     (
+        // pointing to a tuple of its info plus a map
         IngressInfo,
         BTreeMap<
-            // pointing to a tuple of its info plus a map
-            (Asn, IpAddr),
-            Vec<(IngressId, IngressInfo)>, // of (asn+ip) pointing to all id+infos
+            (Asn, IpAddr),                 // of (asn+ip)
+            Vec<(IngressId, IngressInfo)>, // pointing to all id+infos
         >,
     ),
 >;
@@ -873,9 +938,9 @@ impl PeersDiff {
 
 #[derive(Default, RsHtml)]
 pub struct Routes {
-    pub routes: Vec<(Prefix, Vec<RouteDetails>)>, // RouteStatus, AsPath and Communities, for starters
-    pub less_specifics: Vec<(Prefix, Vec<RouteDetails>)>, // RouteStatus, AsPath and Communities, for starters
-    pub more_specifics: Vec<(Prefix, Vec<RouteDetails>)>, // RouteStatus, AsPath and Communities, for starters
+    pub routes: Vec<(Prefix, Vec<RouteDetails>)>,
+    pub less_specifics: Vec<(Prefix, Vec<RouteDetails>)>,
+    pub more_specifics: Vec<(Prefix, Vec<RouteDetails>)>,
     pub show_only_more_specifics: bool,
     pub title: String,
 }
@@ -1032,6 +1097,162 @@ pub struct Peers {
     peers: Vec<Peer>,
 }
 
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct BgpRole(pub u8);
+impl BgpRole {
+    const PROVIDER: Self = Self(0);
+    const RS: Self = Self(1);
+    const RS_CLIENT: Self = Self(2);
+    const CUSTOMER: Self = Self(3);
+    const PEER: Self = Self(4);
+}
+
+impl fmt::Display for BgpRole {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            BgpRole::PROVIDER => write!(f, "Prov"),
+            BgpRole::RS => write!(f, "RS"),
+            BgpRole::RS_CLIENT => write!(f, "RSc"),
+            BgpRole::CUSTOMER => write!(f, "Cust"),
+            BgpRole::PEER => write!(f, "Peer"),
+            BgpRole(u) => write!(f, "unsupported BgpRole value {u}"),
+        }
+    }
+}
+
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct BgpRoles {
+    local: Option<BgpRole>,
+    remote: Option<BgpRole>,
+}
+
+impl BgpRoles {
+    fn new(local: Option<BgpRole>, remote: Option<BgpRole>) -> Self {
+        Self { local, remote }
+    }
+
+    fn empty(&self) -> bool {
+        self.local.is_none() && self.remote.is_none()
+    }
+
+    fn incomplete(&self) -> bool {
+        self.local.is_some() && self.remote.is_none()
+            || self.local.is_none() && self.remote.is_some()
+    }
+
+    fn correct(&self) -> Option<bool> {
+        if !(self.local.is_some() && self.remote.is_some()) {
+            return None;
+        }
+        match (&self.local, &self.remote) {
+            (None, None) => None,
+            (None, Some(_)) => None,
+            (Some(_), None) => None,
+            (Some(BgpRole::PROVIDER), Some(BgpRole::CUSTOMER)) => Some(true),
+            (Some(BgpRole::CUSTOMER), Some(BgpRole::PROVIDER)) => Some(true),
+            (Some(BgpRole::RS), Some(BgpRole::RS_CLIENT)) => Some(true),
+            (Some(BgpRole::RS_CLIENT), Some(BgpRole::RS)) => Some(true),
+            (Some(BgpRole::PEER), Some(BgpRole::PEER)) => Some(true),
+            (Some(_), Some(_)) => Some(false),
+        }
+    }
+}
+
+impl fmt::Display for BgpRoles {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.empty() {
+            return Ok(());
+        } else {
+            if let Some(local) = &self.local {
+                write!(f, "{local}-")?;
+            } else {
+                write!(f, "(not configured)-")?;
+            }
+            if let Some(remote) = &self.remote {
+                write!(f, "{remote}")?;
+            } else {
+                write!(f, "(not configured)")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct ExtendedNextHop([u8; 6]);
+
+impl From<[u8; 6]> for ExtendedNextHop {
+    fn from(value: [u8; 6]) -> Self {
+        Self(value)
+    }
+}
+
+impl ExtendedNextHop {
+    const IPV4UNICAST_IPV6: Self = Self([0, 1, 0, 1, 0, 2]);
+    const IPV4MULTICAST_IPV6: Self = Self([0, 1, 0, 2, 0, 2]);
+    const IPV4MPLS_IPV6: Self = Self([0, 1, 0, 4, 0, 2]);
+    const IPV4MPLSVPN_IPV6: Self = Self([0, 1, 0, 128, 0, 2]);
+    const IPV4MULTICASTVPN_IPV6: Self = Self([0, 1, 0, 129, 0, 2]);
+}
+
+impl fmt::Display for ExtendedNextHop {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            ExtendedNextHop::IPV4UNICAST_IPV6 => write!(f, "v4-over-v6"),
+            ExtendedNextHop(raw) => {
+                write!(
+                    f,
+                    "{}-{}/{}",
+                    u16::from_be_bytes([raw[0], raw[1]]),
+                    u16::from_be_bytes([raw[2], raw[3]]),
+                    u16::from_be_bytes([raw[4], raw[5]]),
+                )
+            }
+        }
+    }
+}
+
+#[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct ExtendedNextHops {
+    local: Option<Vec<u8>>,
+    remote: Option<Vec<u8>>,
+}
+
+impl ExtendedNextHops {
+    fn new(local: Option<Vec<u8>>, remote: Option<Vec<u8>>) -> Self {
+        Self { local, remote }
+    }
+
+    fn iter_for(
+        raw: Option<&Vec<u8>>,
+    ) -> impl Iterator<Item = ExtendedNextHop> + '_ {
+        let empty = std::iter::empty::<ExtendedNextHop>();
+        let maybe = raw.map(|raw| {
+            raw.chunks(6).map(|c| {
+                ExtendedNextHop::from(<[u8; 6]>::try_from(c).unwrap())
+            })
+        });
+        maybe.into_iter().flatten().chain(empty)
+    }
+
+    fn only_local(&self) -> impl Iterator<Item = ExtendedNextHop> + '_ {
+        let mut remote = Self::iter_for(self.remote.as_ref());
+        Self::iter_for(self.local.as_ref())
+            .filter(move |enh| remote.any(|enh2| *enh != enh2))
+    }
+    fn only_remote(&self) -> impl Iterator<Item = ExtendedNextHop> + '_ {
+        let mut local = Self::iter_for(self.local.as_ref());
+        Self::iter_for(self.remote.as_ref())
+            .filter(move |enh| local.any(|enh2| *enh != enh2))
+    }
+
+    fn both(&self) -> impl Iterator<Item = ExtendedNextHop> + '_ {
+        let mut remote = Self::iter_for(self.remote.as_ref());
+        Self::iter_for(self.local.as_ref())
+            .filter(move |enh| remote.any(|enh2| *enh == enh2))
+    }
+}
+
 #[derive(Eq, Ord, PartialEq, PartialOrd)]
 struct Peer {
     remote_asn: Asn,
@@ -1040,6 +1261,8 @@ struct Peer {
     ribview: PeerRibType,
     ingress_id: IngressId,
     num_routes: usize,
+    bgp_roles: BgpRoles,
+    ext_next_hops: ExtendedNextHops,
     observed_attributes: ObservedAttributes,
 }
 
@@ -1051,6 +1274,8 @@ impl Peer {
         ribview: PeerRibType,
         ingress_id: IngressId,
         num_routes: usize,
+        bgp_roles: BgpRoles,
+        ext_next_hops: ExtendedNextHops,
         observed_attributes: ObservedAttributes,
     ) -> Self {
         Self {
@@ -1060,6 +1285,8 @@ impl Peer {
             ribview,
             ingress_id,
             num_routes,
+            bgp_roles,
+            ext_next_hops,
             observed_attributes,
         }
     }

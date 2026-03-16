@@ -1,40 +1,28 @@
-@use "Navigation"
 @use "components/SessionTable"
+@use "Template"
 
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Rotonda WebUI</title>
-</head>
-<body>
-    <div class="container">
-        <nav>
-        <Navigation />
-        </nav>
-        <main>
-            <h2>BMP: @self.bmp_routers.len() connection(s)</h2>
-            @for (bmp_id, (bmp_info, bgp_sessions)) in self.bmp_tree.iter() {
-                @{
-                    let bgp_session_cnt = bgp_sessions.len();
-                    let ribview_cnt: usize = bgp_sessions.values().map(|rvs| rvs.len()).sum();
-                }
-                <h3>@#bmp_details(&BmpRouter::new(*bmp_id, bmp_info.clone())) (@bmp_info.remote_addr.alt("")): @bgp_session_cnt/@ribview_cnt sessions/ribviews</h3>
-                <h4>@bmp_info.desc.alt("")</h4>
-                <SessionTable bgp_sessions=@bgp_sessions />
-            }
+<Template title="Main overview">
 
-            <h2>BGP: @self.bgp_routers.len() session(s)</h2>
-            <table border="1px">
-                @for session in self.bgp_routers.iter() {
-                <tr>
-                    <td>@#session.info.remote_asn.map(peer_asn_link).alt("")</td>
-                    <td>@#session.info.remote_addr.map(peer_ip_link).alt("")</td>
-                    <td><a href="/routes/@session.id">@session.info.peer_rib_type.alt("")</a></td>
-                </tr>
-                }
-            </table>
-        </main>
-    </div>
-</body>
-</html>
+<h2>BMP: @self.bmp_routers.len() connection(s)</h2>
+@for (bmp_id, (bmp_info, bgp_sessions)) in self.bmp_tree.iter() {
+    @{
+        let bgp_session_cnt = bgp_sessions.len();
+        let ribview_cnt: usize = bgp_sessions.values().map(|rvs| rvs.len()).sum();
+    }
+    <h3>@#bmp_details(&BmpRouter::new(*bmp_id, bmp_info.clone())) (@bmp_info.remote_addr.alt("")): @bgp_session_cnt/@ribview_cnt sessions/ribviews</h3>
+    <h4>@bmp_info.desc.alt("")</h4>
+    <SessionTable bgp_sessions=@bgp_sessions />
+}
+
+<h2>BGP: @self.bgp_routers.len() session(s)</h2>
+<table border="1px">
+    @for session in self.bgp_routers.iter() {
+    <tr>
+        <td>@#session.info.remote_asn.map(peer_asn_link).alt("")</td>
+        <td>@#session.info.remote_addr.map(peer_ip_link).alt("")</td>
+        <td><a href="/routes/@session.id">@session.info.peer_rib_type.alt("")</a></td>
+    </tr>
+    }
+</table>
+
+</Template>

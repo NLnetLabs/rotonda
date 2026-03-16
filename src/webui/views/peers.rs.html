@@ -10,12 +10,14 @@
         <th>ext next hop</th>
         <th>bgp role</th>
         <th>rib view</th>
+        @if self.ext {
         <th># of routes</th>
         <th>ROV invalids</th>
         <th>OTC</th>
         <th>comm</th>
         <th>ext comm</th>
         <th>large comm</th>
+        }
     </tr>
     @{
         let mut last_asn = Asn::from_u32(0);
@@ -25,7 +27,7 @@
     @for peer in &self.peers { 
         @{ let Peer {remote_asn, bmp_router, remote_addr, ribview, ingress_id, num_routes, ext_next_hops, bgp_roles, observed_attributes: attrs} = peer; }
     <tr>
-        <td>@if last_asn != *remote_asn { <a href="/routes/peer_asn/@remote_asn">@remote_asn</a> }</td>
+        <td>@if last_asn != *remote_asn { @{last_bmp_id = None; } <a href="/routes/peer_asn/@remote_asn">@remote_asn</a> }</td>
         <td>@if last_bmp_id != bmp_router.as_ref().map(|b| b.id) { @#bmp_router.as_ref().map(|r| bmp_details(r)).alt("") }</td>
         <td>@if last_ip != *remote_addr { <a href="/routes/peer_ip/@remote_addr">@remote_addr</a> }</td>
         <td>
@@ -44,12 +46,14 @@
             @bgp_roles
         </td>
         <td><a href="/routes/@ingress_id">@ribview</a></td>
-        <td>@num_routes</td>
+        @if self.ext {
+        <td>@num_routes.alt("")</td>
         <td>@if *attrs & ObservedAttributes::ROV_INVALID  { x } </td>
         <td>@if *attrs & ObservedAttributes::OTC  { x } </td>
         <td>@if *attrs & ObservedAttributes::COMMUNITIES  { x } </td>
         <td>@if *attrs & ObservedAttributes::EXT_COMMUNITIES  { x } </td>
         <td>@if *attrs & ObservedAttributes::LARGE_COMMUNITIES  { x } </td>
+        }
     </tr>
     @{
         last_asn = *remote_asn;

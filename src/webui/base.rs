@@ -52,6 +52,7 @@ impl WebUI {
         router.add_get("/routes/{prefix}/{prefix_len}", Self::routes_prefix);
 
         router.add_get("/peers/overview", Self::peers_overview);
+        router.add_get("/peers/overview/ext", Self::peers_overview_ext);
         router.add_get(
             "/routes/diff/{ingress_a}/{ingress_b}",
             Self::routes_diff,
@@ -388,6 +389,97 @@ impl WebUI {
         state: State<ApiState>,
     ) -> Result<Html<String>, String> {
         let register = state.ingress_register.cloned_info();
+        let mut peers = register
+            .par_iter()
+            .filter(|(_id, info)| {
+                info.ingress_type
+                    == Some(crate::ingress::IngressType::BgpViaBmp)
+                    || info.ingress_type
+                        == Some(crate::ingress::IngressType::Bgp)
+            })
+            .map(|(ingress_id, info)| {
+                let bmp_router = info.parent_ingress.and_then(|parent_id| {
+                    register
+                        .get_key_value(&parent_id)
+                        .map(|(k, v)| BmpRouter::new(*k, v.clone()))
+                });
+
+                let local_caps = info
+                    .local_capabilities
+                    .as_ref()
+                    .map(|c| Capabilities(&c[..]));
+                let remote_caps = info
+                    .remote_capabilities
+                    .as_ref()
+                    .map(|c| Capabilities(&c[..]));
+
+                let bgp_roles;
+                let ext_next_hop;
+                if let Some((local, remote)) =
+                    local_caps.as_ref().zip(remote_caps.as_ref())
+                {
+                    bgp_roles = BgpRoles::new(
+                        local
+                            .iter()
+                            .find(|c| c.typ() == CapabilityType::BgpRole)
+                            .and_then(|c| {
+                                c.value().first().map(|b| BgpRole(*b))
+                            }),
+                        remote
+                            .iter()
+                            .find(|c| c.typ() == CapabilityType::BgpRole)
+                            .and_then(|c| {
+                                c.value().first().map(|b| BgpRole(*b))
+                            }),
+                    );
+
+                    let local_enh = local
+                        .iter()
+                        .find(|c| c.typ() == CapabilityType::ExtendedNextHop)
+                        .filter(|c| c.value().len() % 6 == 0)
+                        .map(|c| c.value().to_vec());
+                    let remote_enh = remote
+                        .iter()
+                        .find(|c| c.typ() == CapabilityType::ExtendedNextHop)
+                        .filter(|c| c.value().len() % 6 == 0)
+                        .map(|c| c.value().to_vec());
+                    ext_next_hop =
+                        ExtendedNextHops::new(local_enh, remote_enh);
+                } else {
+                    warn!(
+                        "unexpected: no BGP Capabilities \
+                        for one or both sides"
+                    );
+                    bgp_roles = BgpRoles::new(None, None);
+                    ext_next_hop = ExtendedNextHops::new(None, None);
+                }
+
+                Peer::new(
+                    info.remote_asn.unwrap(),
+                    bmp_router,
+                    info.remote_addr.unwrap(),
+                    info.peer_rib_type.unwrap(),
+                    *ingress_id,
+                    None, //route_cnt,
+                    bgp_roles,
+                    ext_next_hop,
+                    ObservedAttributes::empty(),
+                )
+            })
+            .collect::<Vec<_>>();
+
+        peers.sort();
+        let page = Peers { peers, ext: false };
+
+        page.render()
+            .map(Into::into)
+            .map_err(|e| format!("rendering error: {}", e))
+    }
+
+    async fn peers_overview_ext(
+        state: State<ApiState>,
+    ) -> Result<Html<String>, String> {
+        let register = state.ingress_register.cloned_info();
         let s = state.store.load();
         let Some(ref store) = *s else {
             return Err("store not ready".into());
@@ -511,7 +603,7 @@ impl WebUI {
                     info.remote_addr.unwrap(),
                     info.peer_rib_type.unwrap(),
                     *ingress_id,
-                    route_cnt,
+                    Some(route_cnt),
                     bgp_roles,
                     ext_next_hop,
                     observed_attributes,
@@ -520,7 +612,7 @@ impl WebUI {
             .collect::<Vec<_>>();
 
         peers.sort();
-        let page = Peers { peers };
+        let page = Peers { peers, ext: true };
 
         page.render()
             .map(Into::into)
@@ -1071,6 +1163,10 @@ impl ObservedAttributes {
                 | Self::OTC.0
                 | Self::ROV_INVALID.0
     }
+
+    pub fn empty() -> Self {
+        Self(0)
+    }
 }
 
 impl fmt::Display for ObservedAttributes {
@@ -1095,6 +1191,7 @@ impl std::ops::BitAnd for ObservedAttributes {
 #[derive(RsHtml)]
 pub struct Peers {
     peers: Vec<Peer>,
+    ext: bool,
 }
 
 #[derive(Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -1260,7 +1357,7 @@ struct Peer {
     remote_addr: IpAddr,
     ribview: PeerRibType,
     ingress_id: IngressId,
-    num_routes: usize,
+    num_routes: Option<usize>,
     bgp_roles: BgpRoles,
     ext_next_hops: ExtendedNextHops,
     observed_attributes: ObservedAttributes,
@@ -1273,7 +1370,7 @@ impl Peer {
         remote_addr: IpAddr,
         ribview: PeerRibType,
         ingress_id: IngressId,
-        num_routes: usize,
+        num_routes: Option<usize>,
         bgp_roles: BgpRoles,
         ext_next_hops: ExtendedNextHops,
         observed_attributes: ObservedAttributes,

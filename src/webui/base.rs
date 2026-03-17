@@ -25,7 +25,7 @@ use rayon::prelude::*;
 
 use crate::{
     http_ng::{Api, ApiState},
-    ingress::{IngressId, IngressInfo, IngressType},
+    ingress::{register::IngressState, IngressId, IngressInfo, IngressType},
     representation::GenOutput,
     roto_runtime::types::PeerRibType,
     units::rib_unit::{rpki::RovStatus, Include, QueryFilter},
@@ -321,19 +321,27 @@ impl WebUI {
     }
 
     fn bmp_tree(state: &State<ApiState>) -> BmpTree {
-        let register = state.ingress_register.cloned_info();
-        let mut res = BTreeMap::new();
-        for (id, info) in register.iter().filter(|(_id, info)| {
-            info.ingress_type == Some(crate::ingress::IngressType::Bmp)
-        }) {
-            res.insert(*id, (info.clone(), BTreeMap::new()));
+        let mut res = BmpTree::new();
+
+        if let Err(e) = state.ingress_register.bmp_routers(&mut res) {
+            warn!("could not generate BmpTree: {e}\nreturning empty tree");
+            return BmpTree::new();
         }
+
+        let register = state.ingress_register.cloned_info();
+
         for (id, info) in register.iter().filter(|(_id, info)| {
             info.ingress_type == Some(crate::ingress::IngressType::BgpViaBmp)
         }) {
-            let (_bmp_ingress_info, bgp) = res
+            let Some((_bmp_ingress_info, bgp)) = res
                 .get_mut(&info.parent_ingress.expect("should have parent"))
-                .expect("should be in hashmap already");
+            else {
+                // if the BMP connection has state 'Disconnected', it is still
+                // present in the ingress::Register but not in the BmpTree map
+                // we are building. So skip it.
+                continue;
+            };
+
             let infos: &mut Vec<_> = bgp
                 .entry((info.remote_asn.unwrap(), info.remote_addr.unwrap()))
                 .or_default();
@@ -932,6 +940,19 @@ type BmpTree = BTreeMap<
         >,
     ),
 >;
+
+impl GenOutput<&mut BmpTree> for crate::ingress::register::BmpIdAndInfo<'_> {
+    fn write(
+        &self,
+        target: &mut &mut BmpTree,
+    ) -> Result<(), crate::representation::OutputError> {
+        target.insert(
+            self.0.ingress_id,
+            (self.0.ingress_info.clone(), BTreeMap::new()),
+        );
+        Ok(())
+    }
+}
 
 impl GenOutput<&mut crate::webui::Index>
     for crate::ingress::register::BmpIdAndInfo<'_>

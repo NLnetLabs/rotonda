@@ -4,7 +4,7 @@ use axum::{extract::{Path, Query, State}, response::IntoResponse};
 use inetnum::asn::Asn;
 use serde::Deserialize;
 
-use crate::{http_ng::{Api, ApiError, ApiState}, ingress::{IngressId, IngressInfo, IngressType}, representation::Json, roto_runtime::types::PeerRibType};
+use crate::{http_ng::{Api, ApiError, ApiState}, ingress::{IngressId, IngressInfo, IngressType, register::IngressState}, representation::Json, roto_runtime::types::PeerRibType};
 
 pub struct IngressApi { }
 
@@ -59,6 +59,9 @@ pub struct QueryFilter {
     
     #[serde(rename = "filter[type]")]
     pub ingress_type: Option<IngressType>,
+
+    #[serde(rename = "filter[state]")]
+    pub ingress_state: Option<IngressState>,
     
     #[serde(rename = "filter[ribType]")]
     pub rib_type: Option<PeerRibType>,
@@ -87,6 +90,11 @@ impl QueryFilter {
         }
         if self.ingress_type.is_some() &&
             self.ingress_type != ingress_info.ingress_type
+        {
+            return false
+        }
+        if self.ingress_state.is_some() &&
+            self.ingress_state != ingress_info.state
         {
             return false
         }

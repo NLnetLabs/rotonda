@@ -272,7 +272,13 @@ impl Register {
     pub fn bmp_routers<T>(&self, mut target: T) -> fmt::Result
         where for <'a> BmpIdAndInfo<'a>: GenOutput<T>
     {
-        let res = self.search(QueryFilter { ingress_type: Some(IngressType::Bmp), ..Default::default() });
+        let res = self.search(
+            QueryFilter {
+                ingress_type: Some(IngressType::Bmp),
+                ingress_state: Some(IngressState::Connected),
+                ..Default::default()
+            }
+        );
         for r in res {
 
             let _ = BmpIdAndInfo (
@@ -440,7 +446,7 @@ pub enum IngressType {
 }
 
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub enum IngressState {
     Connected,
     Disconnected,

@@ -28,6 +28,7 @@ use routecore::bgp::fsm::session::{
 };
 
 use crate::ingress::IngressType;
+use crate::ingress::register::IngressState;
 use crate::roto_runtime::types::{
     Output, OutputStreamMessage, PeerRibType, RotoOutputStream, explode_announcements, explode_withdrawals
 };
@@ -434,6 +435,7 @@ impl Processor {
                                 session_ingress_id,
                                 ingress::IngressInfo::new()
                                     .with_ingress_type(IngressType::Bgp)
+                                    .with_state(IngressState::Connected)
                                     //.with_name("some-bgp-session".to_string())
                                     .with_remote_addr(negotiated.remote_addr())
                                     .with_remote_asn(negotiated.remote_asn())
@@ -474,6 +476,11 @@ impl Processor {
                     negotiated.remote_asn(),
                     negotiated.remote_addr(),
                     live_sessions.lock().unwrap().len()
+                );
+
+                self.ingresses.update_info(session_ingress_id,
+                    ingress::IngressInfo::new()
+                    .with_state(IngressState::Disconnected)
                 );
 
                 self.gate

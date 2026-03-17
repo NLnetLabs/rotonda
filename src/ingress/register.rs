@@ -259,7 +259,11 @@ impl Register {
     pub fn real_bgp_peers<T>(&self, mut target: T) -> fmt::Result
         where for <'a> BgpIdAndInfo<'a>: GenOutput<T>
     {
-        let res = self.search(QueryFilter { ingress_type: Some(IngressType::Bgp), ..Default::default() });
+        let res = self.search(QueryFilter {
+            ingress_type: Some(IngressType::Bgp),
+            ingress_state: Some(IngressState::Connected),
+            ..Default::default()
+        });
         for r in res {
             let _ = BgpIdAndInfo (
                 IdAndInfo { ingress_id: r.ingress_id, ingress_info: &r.ingress_info}

@@ -126,7 +126,7 @@ macro_rules! with_field {
 
 // Creates the IngressInfo (== $name) struct and adds fn Register::update_info
 macro_rules! info_for_field{
-    ($name:ident { $($field:ident : $type:ty),* } ) => {
+    ($name:ident { $( $(#[$m:meta])? $field:ident : $type:ty),* } ) => {
 
         /// Information pertaining to an [`IngressId`]
         ///
@@ -140,6 +140,7 @@ macro_rules! info_for_field{
         #[derive(serde::Serialize)]
         pub struct $name {
             $(
+                $(#[$m])?
                 pub $field: Option<$type>,
             )*
 
@@ -476,7 +477,9 @@ info_for_field!(IngressInfo{
    peer_type: PeerType,
    distinguisher: [u8; 8],
    vrf_name: String,
+   #[serde(skip_serializing)]
    local_capabilities: Vec<u8>,
+   #[serde(skip_serializing)]
    remote_capabilities: Vec<u8>
 });
 

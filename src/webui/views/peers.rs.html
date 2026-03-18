@@ -1,4 +1,5 @@
 @use "Template"
+@use "components/Tooltip"
 
 <Template title="Peers overview">
 
@@ -7,8 +8,19 @@
         <th>asn</th>
         <th>bmp source</th>
         <th>peer addr</th>
-        <th>ext next hop</th>
-        <th>bgp role</th>
+        <th>ext next hop
+            <Tooltip item="(?)" title="RFC8950 / Extended Next Hop exchanged in BGP OPENs">
+            Matching capabilities are shown in green in the middle.<br/>
+            Capabilities configured only locally are shown on the left, in yellow.</br>
+            Capabilities configured only remotely, on the right.</br>
+            </Tooltip>
+        </th>
+        <th>bgp role
+            <Tooltip item="?" title="RFC9234 Roles exchanged in BGP OPENs.">
+            Left is the local role - right is the remote role.<br/>
+            Empty cell means no configuration on either side.
+            </Tooltip>
+        </th>
         <th>rib view</th>
         @if self.ext {
         <th># of routes</th>

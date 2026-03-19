@@ -25,7 +25,7 @@ use rayon::prelude::*;
 
 use crate::{
     http_ng::{Api, ApiState},
-    ingress::{register::IngressState, IngressId, IngressInfo, IngressType},
+    ingress::{IngressId, IngressInfo, IngressType},
     representation::GenOutput,
     roto_runtime::types::PeerRibType,
     units::rib_unit::{rpki::RovStatus, Include, QueryFilter},
@@ -646,23 +646,18 @@ impl WebUI {
             return Err("no information for ingress id {ingress_a}".into());
         };
 
-        let Some(peer_a) =
-            ingress_info_a.remote_asn.zip(ingress_info_a.remote_addr)
-        else {
-            return Err(format!(
-                "lacking remote ASN or IP address for ingress id {ingress_a}"
-            ));
-        };
+        let bmp_a = ingress_info_a
+            .parent_ingress
+            .and_then(|id| state.ingress_register.get_tuple(id))
+            .map(|ii| BmpRouter::new(ii.ingress_id, ii.ingress_info));
 
-        let Some(peer_b) =
-            ingress_info_b.remote_asn.zip(ingress_info_b.remote_addr)
-        else {
-            return Err(format!(
-                "lacking remote ASN or IP address for ingress id {ingress_b}"
-            ));
-        };
+        let bmp_b = ingress_info_b
+            .parent_ingress
+            .and_then(|id| state.ingress_register.get_tuple(id))
+            .map(|ii| BmpRouter::new(ii.ingress_id, ii.ingress_info));
 
-        let mut routes_diff = RoutesDiff::new(peer_a, peer_b);
+        let mut routes_diff =
+            RoutesDiff::new(ingress_info_a, ingress_info_b, bmp_a, bmp_b);
 
         // fetch everything from store for a, and b,
 
@@ -1011,17 +1006,26 @@ pub struct RouteDetails {
 
 #[derive(RsHtml)]
 pub struct RoutesDiff {
-    peer_a: (Asn, IpAddr),
-    peer_b: (Asn, IpAddr),
+    peer_a: IngressInfo,
+    peer_b: IngressInfo,
+    bmp_a: Option<BmpRouter>,
+    bmp_b: Option<BmpRouter>,
     pub only_a: Vec<Prefix>,
     pub only_b: Vec<Prefix>,
     pub both: Vec<Prefix>,
 }
 impl RoutesDiff {
-    pub fn new(peer_a: (Asn, IpAddr), peer_b: (Asn, IpAddr)) -> Self {
+    pub fn new(
+        peer_a: IngressInfo,
+        peer_b: IngressInfo,
+        bmp_a: Option<BmpRouter>,
+        bmp_b: Option<BmpRouter>,
+    ) -> Self {
         Self {
             peer_a,
             peer_b,
+            bmp_a,
+            bmp_b,
             only_a: vec![],
             only_b: vec![],
             both: vec![],
@@ -1231,7 +1235,7 @@ impl fmt::Display for BgpRole {
         match *self {
             BgpRole::PROVIDER => write!(f, "Prov"),
             BgpRole::RS => write!(f, "RS"),
-            BgpRole::RS_CLIENT => write!(f, "RSc"),
+            BgpRole::RS_CLIENT => write!(f, "RS-c"),
             BgpRole::CUSTOMER => write!(f, "Cust"),
             BgpRole::PEER => write!(f, "Peer"),
             BgpRole(u) => write!(f, "unsupported BgpRole value {u}"),
@@ -1283,9 +1287,9 @@ impl fmt::Display for BgpRoles {
             return Ok(());
         } else {
             if let Some(local) = &self.local {
-                write!(f, "{local}-")?;
+                write!(f, "{local}⇄")?;
             } else {
-                write!(f, "(not configured)-")?;
+                write!(f, "(not configured)⇄")?;
             }
             if let Some(remote) = &self.remote {
                 write!(f, "{remote}")?;

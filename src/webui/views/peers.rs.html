@@ -11,14 +11,15 @@
         <th>ext next hop
             <Tooltip item="(?)" title="RFC8950 / Extended Next Hop exchanged in BGP OPENs">
             Matching capabilities are shown in green in the middle.<br/>
-            Capabilities configured only locally are shown on the left, in yellow.</br>
+            Capabilities configured only locally are shown on the left of the
+            arrows, in yellow.</br>
             Capabilities configured only remotely, on the right.</br>
             </Tooltip>
         </th>
         <th>bgp role
-            <Tooltip item="?" title="RFC9234 Roles exchanged in BGP OPENs.">
-            Left is the local role - right is the remote role.<br/>
-            Empty cell means no configuration on either side.
+            <Tooltip item="(?)" title="RFC9234 Roles exchanged in BGP OPENs.">
+            Locally configured role is on the left of the arrows, remote role
+            on the right.<br/>
             </Tooltip>
         </th>
         <th>rib view</th>
@@ -43,10 +44,10 @@
         <td>@if last_bmp_id != bmp_router.as_ref().map(|b| b.id) { @#bmp_router.as_ref().map(|r| bmp_details(r)).alt("") }</td>
         <td>@if last_ip != *remote_addr { <a href="/routes/peer_ip/@remote_addr">@remote_addr</a> }</td>
         <td>
-        @for enh in ext_next_hops.only_local() { <span class="yellow">@enh</span> | }
+        @for enh in ext_next_hops.only_local() { <span class="yellow">@enh</span>⇄ }
         
         @for enh in ext_next_hops.both() { <span class="green">@enh</span> }
-        @for enh in ext_next_hops.only_remote() { |<span class="yellow">@enh</span> }
+        @for enh in ext_next_hops.only_remote() { ⇄<span class="yellow">@enh</span> }
         </td>
         <td class=@(
             if bgp_roles.incomplete() { "yellow"}

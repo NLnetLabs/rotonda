@@ -1321,11 +1321,19 @@ impl ExtendedNextHop {
 impl fmt::Display for ExtendedNextHop {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            ExtendedNextHop::IPV4UNICAST_IPV6 => write!(f, "v4-over-v6"),
+            ExtendedNextHop::IPV4UNICAST_IPV6 => write!(f, "v4-via-v6"),
+            ExtendedNextHop::IPV4MULTICAST_IPV6 => write!(f, "v4mc-via-v6"),
+            ExtendedNextHop::IPV4MPLS_IPV6 => write!(f, "v4mpls-via-v6"),
+            ExtendedNextHop::IPV4MPLSVPN_IPV6 => {
+                write!(f, "v4mpls_vpn-via-v6")
+            }
+            ExtendedNextHop::IPV4MULTICASTVPN_IPV6 => {
+                write!(f, "v4mc_vpn-via-v6")
+            }
             ExtendedNextHop(raw) => {
                 write!(
                     f,
-                    "{}-{}/{}",
+                    "{}/{}-{}",
                     u16::from_be_bytes([raw[0], raw[1]]),
                     u16::from_be_bytes([raw[2], raw[3]]),
                     u16::from_be_bytes([raw[4], raw[5]]),

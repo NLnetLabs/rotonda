@@ -399,7 +399,7 @@ impl WebUI {
     ) -> Result<Html<String>, String> {
         let register = state.ingress_register.cloned_info();
         let mut peers = register
-            .par_iter()
+            .into_par_iter()
             .filter(|(_id, info)| {
                 info.ingress_type
                     == Some(crate::ingress::IngressType::BgpViaBmp)
@@ -408,9 +408,9 @@ impl WebUI {
             })
             .map(|(ingress_id, info)| {
                 let bmp_router = info.parent_ingress.and_then(|parent_id| {
-                    register
-                        .get_key_value(&parent_id)
-                        .map(|(k, v)| BmpRouter::new(*k, v.clone()))
+                    state.ingress_register.get_tuple(parent_id).map(|ii| {
+                        BmpRouter::new(ii.ingress_id, ii.ingress_info)
+                    })
                 });
 
                 let local_caps = info
@@ -464,11 +464,9 @@ impl WebUI {
                 }
 
                 Peer::new(
-                    info.remote_asn.unwrap(),
+                    ingress_id,
+                    info,
                     bmp_router,
-                    info.remote_addr.unwrap(),
-                    info.peer_rib_type.unwrap(),
-                    *ingress_id,
                     None, //route_cnt,
                     bgp_roles,
                     ext_next_hop,
@@ -494,7 +492,7 @@ impl WebUI {
             return Err("store not ready".into());
         };
         let mut peers = register
-            .par_iter()
+            .into_par_iter()
             .filter(|(_id, info)| {
                 info.ingress_type
                     == Some(crate::ingress::IngressType::BgpViaBmp)
@@ -514,7 +512,7 @@ impl WebUI {
                     "0.0.0.0/0".parse().unwrap(),
                     QueryFilter {
                         include: vec![Include::MoreSpecifics],
-                        ingress_id: Some(*ingress_id),
+                        ingress_id: Some(ingress_id),
                         ..Default::default()
                     },
                 ) {
@@ -533,7 +531,7 @@ impl WebUI {
                             "::/0".parse().unwrap(),
                             QueryFilter {
                                 include: vec![Include::MoreSpecifics],
-                                ingress_id: Some(*ingress_id),
+                                ingress_id: Some(ingress_id),
                                 ..Default::default()
                             },
                         ) {
@@ -551,9 +549,9 @@ impl WebUI {
                 }
 
                 let bmp_router = info.parent_ingress.and_then(|parent_id| {
-                    register
-                        .get_key_value(&parent_id)
-                        .map(|(k, v)| BmpRouter::new(*k, v.clone()))
+                    state.ingress_register.get_tuple(parent_id).map(|ii| {
+                        BmpRouter::new(ii.ingress_id, ii.ingress_info)
+                    })
                 });
 
                 let local_caps = info
@@ -607,11 +605,9 @@ impl WebUI {
                 }
 
                 Peer::new(
-                    info.remote_asn.unwrap(),
+                    ingress_id,
+                    info,
                     bmp_router,
-                    info.remote_addr.unwrap(),
-                    info.peer_rib_type.unwrap(),
-                    *ingress_id,
                     Some(route_cnt),
                     bgp_roles,
                     ext_next_hop,
@@ -1386,35 +1382,35 @@ impl ExtendedNextHops {
 
 #[derive(Eq, Ord, PartialEq, PartialOrd)]
 struct Peer {
-    remote_asn: Asn,
-    bmp_router: Option<BmpRouter>,
-    remote_addr: IpAddr,
-    ribview: PeerRibType,
     ingress_id: IngressId,
+    ingress_info: IngressInfo,
+    bmp_router: Option<BmpRouter>,
     num_routes: Option<usize>,
     bgp_roles: BgpRoles,
     ext_next_hops: ExtendedNextHops,
+
+    // - multi-protocol afisafis
+    // -
+    //
+    // TODO add ipv6extended comm, deprecated stuff from Radu's presentation
+    //
     observed_attributes: ObservedAttributes,
 }
 
 impl Peer {
     fn new(
-        remote_asn: Asn,
-        bmp_router: Option<BmpRouter>,
-        remote_addr: IpAddr,
-        ribview: PeerRibType,
         ingress_id: IngressId,
+        ingress_info: IngressInfo,
+        bmp_router: Option<BmpRouter>,
         num_routes: Option<usize>,
         bgp_roles: BgpRoles,
         ext_next_hops: ExtendedNextHops,
         observed_attributes: ObservedAttributes,
     ) -> Self {
         Self {
-            remote_asn,
-            bmp_router,
-            remote_addr,
-            ribview,
             ingress_id,
+            ingress_info,
+            bmp_router,
             num_routes,
             bgp_roles,
             ext_next_hops,

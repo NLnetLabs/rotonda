@@ -45,7 +45,7 @@ pub struct Cli<W: std::io::Write>(pub W);
 macro_rules! genoutput_json {
     ($type:ty $(, $val:tt )? ) => {
         impl<W: std::io::Write> GenOutput<Json<W>> for $type {
-            fn write(&self, target: &mut Json<W>) -> Result<(), crate::representation::OutputError> {
+            fn write(&self, target: &mut Json<W>) -> Result<(), $crate::representation::OutputError> {
                 serde_json::to_writer(&mut target.0, &self$(.$val)?)?;
                 Ok(())
             }

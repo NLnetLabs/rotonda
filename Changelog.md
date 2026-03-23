@@ -1,4 +1,25 @@
 # Changelog
+
+## Unreleased version
+
+Released yyyy-mm-dd.
+
+
+### Breaking changes
+
+
+### New
+
+
+### Bug fixes
+
+
+### Other changes
+
+
+### Acknowledgements
+
+
  
 ## 0.5.2 't.ex. mjölkkartonger'
 

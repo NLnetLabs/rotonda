@@ -391,11 +391,14 @@ pub trait PeerAware {
     ///     reconnecting peer).
     ///
     /// [1]: https://datatracker.ietf.org/doc/html/rfc4724#section-2
+    #[allow(clippy::too_many_arguments)] // XXX this will go with the refactor anyway
     fn add_peer_config(
         &mut self,
         pph: PerPeerHeader<Bytes>,
         config: SessionConfig,
         eor_capable: bool,
+        local_capabilities: Vec<u8>,
+        remote_capabilities: Vec<u8>,
         ingress_register: Arc<ingress::Register>,
         bmp_ingress_id: ingress::IngressId,
         tlv_iter: InformationTlvIter,
@@ -485,12 +488,22 @@ where
             .capabilities()
             .any(|cap| cap.typ() == CapabilityType::GracefulRestart);
 
+        let (local_capabilities, remote_capabilities) = {
+            let (sent, rcvd) = msg.bgp_open_sent_rcvd();
+            (
+                sent.capabilities_as_vec(),
+                rcvd.capabilities_as_vec(),
+            )
+        };
+
         let tlv_iter = msg.information_tlvs();
 
         let (peer_added, existing_peer_ingress_id) =  self.details.add_peer_config(
             pph,
             config,
             eor_capable,
+            local_capabilities,
+            remote_capabilities,
             self.ingress_register.clone(),
             self.ingress_id,
             tlv_iter,
@@ -1193,6 +1206,8 @@ impl PeerAware for PeerStates {
         pph: PerPeerHeader<Bytes>,
         session_config: SessionConfig,
         eor_capable: bool,
+        local_capabilities: Vec<u8>,
+        remote_capabilities: Vec<u8>,
         ingress_register: Arc<ingress::Register>,
         bmp_ingress_id: ingress::IngressId,
         mut tlv_iter: InformationTlvIter,
@@ -1207,6 +1222,8 @@ impl PeerAware for PeerStates {
             .with_rib_type(pph.rib_type())
             .with_peer_rib_type((pph.is_post_policy(), pph.rib_type()))
             .with_peer_type(pph.peer_type())
+            .with_local_capabilities(local_capabilities)
+            .with_remote_capabilities(remote_capabilities)
         ;
         use routecore::bmp::message::PeerType;
         match pph.peer_type() {

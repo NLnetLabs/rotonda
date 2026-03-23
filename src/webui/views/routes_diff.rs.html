@@ -1,0 +1,94 @@
+@use "Template";
+
+@{
+    let (asn_a, addr_a, ribview_a) = (
+        self.peer_a.remote_asn,
+        self.peer_a.remote_addr,
+        self.peer_a.peer_rib_type
+    );
+    let (asn_b, addr_b, ribview_b) = (
+        self.peer_b.remote_asn,
+        self.peer_b.remote_addr,
+        self.peer_b.peer_rib_type
+    );
+
+    let (header_a, header_b) = if
+        asn_a == asn_b && asn_a.is_some()
+            && addr_a == addr_b && addr_a.is_some()
+        {
+            // same asn+ip, only show rib view
+            (
+            ribview_a.alt("").to_string(),
+            ribview_b.alt("").to_string(),
+            )
+        } else {
+            (
+            format!(
+                "{} {}/{}",
+                ribview_a.alt(""), asn_a.alt(""), (addr_a.alt(""))
+            ),
+
+            format!(
+                "{} {}/{}",
+                ribview_b.alt(""), asn_b.alt(""), (addr_b.alt(""))
+            )
+            )
+        }
+    ;
+}
+
+<Template title={
+    Routes diff 
+}>
+
+Left: @if let Some(bmp) = &self.bmp_a
+{
+    @#bmp_details(&bmp) (BMP from @bmp.info.remote_addr.alt(""))
+}
+    @ribview_a.alt("") @asn_a.alt("") (@addr_a.alt("")) <br/>
+vs <br/>
+
+Right: @if let Some(bmp) = &self.bmp_b
+{
+    @#bmp_details(&bmp) (BMP from @bmp.info.remote_addr.alt(""))
+}
+    @ribview_b.alt("") @asn_b.alt("") (@addr_b.alt("")) <br/>
+
+@if let Some((a,b)) = self.bmp_a.as_ref().zip(self.bmp_b.as_ref()) {
+    @if a.id != b.id {
+        <a href="/peers/diff/@a.id/@b.id">Compare peer presence</a>
+        between these two routers<br/>
+    } else {
+        <br/>
+    }
+}
+<table>
+    <tr>
+        <th>@header_a</th>
+        <th>both</th>
+        <th>@header_b</th>
+    </tr>
+    
+    @for prefix in &self.only_a {
+    <tr>
+        <td><a href="/routes/@prefix">@prefix</a></td>
+        <td></td>
+        <td></td>
+    </tr>
+    }
+    @for prefix in &self.only_b {
+    <tr>
+        <td></td>
+        <td></td>
+        <td><a href="/routes/@prefix">@prefix</a></td>
+    </tr>
+    }
+    @for prefix in &self.both {
+    <tr>
+        <td></td>
+        <td><a href="/routes/@prefix">@prefix</a></td>
+        <td></td>
+    </tr>
+    }
+</table>
+</Template>

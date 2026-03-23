@@ -1,0 +1,33 @@
+@(bgp_sessions: &BTreeMap<(Asn, IpAddr), Vec<(IngressId, IngressInfo)>>)
+
+<table border="1px">
+    @{
+    let mut last_asn = Asn::from_u32(0);
+    }
+    @for ((asn, addr), sessions) in bgp_sessions.iter() {
+    <tr>
+        <td> @if asn != &last_asn {
+            <a href="/routes/peer_asn/@asn">@asn</a>
+            }</td>
+        <td><a href="/routes/peer_ip/@addr">@addr</a></td>
+        <td>
+        @{ let mut iter = sessions.iter().peekable(); }
+        @while iter.peek().is_some() {
+            @{let (bgp_ingress_id, bgp_info) = iter.next().unwrap(); }
+            @#(bgp_info.peer_rib_type.map(|e| 
+                    format!("<a href=\"/routes/{bgp_ingress_id}\">{e}</a>")
+                )
+                .unwrap_or("no-rib-type (unexpected, bug?)".into())
+            )
+            @if iter.peek().is_some() {
+                (<a href="/routes/diff/@bgp_ingress_id/@(iter.peek().unwrap().0)">vs</a>)
+            }
+            
+        }
+
+        </td>
+    </tr>
+    @{ last_asn = *asn; }
+    }
+    
+</table>

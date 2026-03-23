@@ -1,0 +1,33 @@
+@use "Template";
+
+
+<Template title={Peer presence: @self.bmp_a vs @self.bmp_b}>
+<table>
+    <tr>
+        <td>only on @#bmp_details(&self.bmp_a) (@self.bmp_a.info.remote_addr.alt(""))</td>
+        <td>present on both</td>
+        <td>only on @#bmp_details(&self.bmp_b) (@self.bmp_b.info.remote_addr.alt(""))</td>
+    </tr>
+    @for (asn, addr) in &self.only_a {
+    <tr>
+        <td><a href="/routes/peer_asn/@asn">@asn</a>@@<a href="/routes/peer_ip/@addr">@addr</a></td>
+        <td></td>
+        <td></td>
+    </tr>
+    }
+    @for (asn, addr) in &self.only_b {
+    <tr>
+        <td></td>
+        <td></td>
+        <td><a href="/routes/peer_asn/@asn">@asn</a>@@<a href="/routes/peer_ip/@addr">@addr</a></td>
+    </tr>
+    }
+    @for (asn, addr) in &self.both {
+    <tr>
+        <td></td>
+        <td><a href="/routes/peer_asn/@asn">@asn</a>@@<a href="/routes/peer_ip/@addr">@addr</a></td>
+        <td></td>
+    </tr>
+    }
+</table>
+</Template>

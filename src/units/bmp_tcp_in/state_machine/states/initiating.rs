@@ -80,6 +80,7 @@ impl BmpStateDetails<Initiating> {
                 self.ingress_register.update_info(
                     self.ingress_id,
                     ingress::IngressInfo::new()
+                        .with_state(ingress::register::IngressState::Connected)
                         .with_name(
                             msg.information_tlvs()
                                 .find(|t| {

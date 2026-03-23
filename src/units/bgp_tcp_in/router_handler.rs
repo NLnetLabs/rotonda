@@ -27,8 +27,10 @@ use routecore::bgp::fsm::session::{
     Session,
 };
 
+use crate::ingress::IngressType;
+use crate::ingress::register::IngressState;
 use crate::roto_runtime::types::{
-    explode_announcements, explode_withdrawals, Output, OutputStreamMessage, RotoOutputStream,
+    Output, OutputStreamMessage, PeerRibType, RotoOutputStream, explode_announcements, explode_withdrawals
 };
 use crate::comms::{Gate, GateStatus, Terminated};
 use crate::{ingress, roto_runtime};
@@ -428,12 +430,24 @@ impl Processor {
                                 session_ingress_id
                             );
                             debug!("get: {:?}", self.ingresses.get(session_ingress_id));
+                            
                             self.ingresses.update_info(
                                 session_ingress_id,
                                 ingress::IngressInfo::new()
-                                    .with_name("some-bgp-session".to_string())
+                                    .with_ingress_type(IngressType::Bgp)
+                                    .with_state(IngressState::Connected)
+                                    //.with_name("some-bgp-session".to_string())
                                     .with_remote_addr(negotiated.remote_addr())
                                     .with_remote_asn(negotiated.remote_asn())
+                                    .with_peer_rib_type(PeerRibType::OutPost)
+                                    .with_local_capabilities(
+                                        negotiated.local_capabilities()
+                                        .to_vec()
+                                    )
+                                    .with_remote_capabilities(
+                                        negotiated.remote_capabilities()
+                                        .to_vec()
+                                    )
                                 );
                             debug!("get 2: {:?}", self.ingresses.get(session_ingress_id));
 
@@ -462,6 +476,11 @@ impl Processor {
                     negotiated.remote_asn(),
                     negotiated.remote_addr(),
                     live_sessions.lock().unwrap().len()
+                );
+
+                self.ingresses.update_info(session_ingress_id,
+                    ingress::IngressInfo::new()
+                    .with_state(IngressState::Disconnected)
                 );
 
                 self.gate

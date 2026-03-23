@@ -1,23 +1,13 @@
 # Changelog
  
-## Unreleased version
+## 0.5.2 't.ex. mjölkkartonger'
 
-Released yyyy-mm-dd.
+Released 2026-03-23.
 
 
 ### New
 
-
-### Bug fixes
-
-
-### Breaking changes
-
-
-### Other changes
-
-
-### Acknowledgements
+* The web UI is back, and is completely overhauled.
 
 
 

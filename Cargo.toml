@@ -19,7 +19,7 @@ name = "print_rotonda_std_doc"
 path = "doc/bin/print_rotonda_std_doc.rs"
 
 [workspace.package]
-version = "0.5.2"
+version = "0.5.2-alpha.0"
 edition = "2021"
 rust-version = "1.87"
 authors = ["NLnet Labs <routing-team@nlnetlabs.nl>"]
@@ -82,7 +82,7 @@ micromap           = "0.1.0"
 paste              = "1.0.15"
 axum               = { version = "0.8.8", features = ["query", "http1", "http2", "tokio"], default-features = false }
 rshtml             = { version = "0.5", features = ["functions"] }
-cranelift-jit      = "*"
+cranelift-jit      = "0.130"
 tower-http         = { version = "0.5.2", features = ["compression-gzip"], optional = true }
 serde_qs           = "0.15.0"
 rayon = "1.11.0"

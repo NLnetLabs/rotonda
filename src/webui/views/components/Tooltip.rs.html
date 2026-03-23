@@ -1,0 +1,10 @@
+@(title: &str, item)
+
+<div class="tooltip">@#item
+    <span class="tooltiptext">
+        @if !title.is_empty(){
+            <b>@title</b><br/>
+        }
+        @child_content
+    </span>
+</div>

@@ -180,7 +180,7 @@ pub struct InsertionInfo {
 
 //------------ PeerRibType ---------------------------------------------------
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Hash, Default, Serialize, Deserialize)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum PeerRibType {
     InPre,
@@ -224,7 +224,7 @@ impl fmt::Display for PeerRibType {
             PeerRibType::InPost => write!(f, "adj-RIB-in-post"),
             PeerRibType::Loc => write!(f, "RIB-loc"),
             PeerRibType::OutPre => write!(f, "adj-RIB-out-pre"),
-            PeerRibType::OutPost => write!(f, "adj-RIB-out-pre"),
+            PeerRibType::OutPost => write!(f, "adj-RIB-out-post"),
         }
     }
 }

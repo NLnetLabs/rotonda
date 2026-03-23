@@ -1,11 +1,29 @@
 # Changelog
  
-## 0.5.1
+## Unreleased version
 
 Released yyyy-mm-dd.
 
 
+### New
+
+
+### Bug fixes
+
+
 ### Breaking changes
+
+
+### Other changes
+
+
+### Acknowledgements
+
+
+
+## 0.5.1
+
+Released 2026-02-09.
 
 
 ### New
@@ -26,12 +44,6 @@ Released yyyy-mm-dd.
  ([#132](https://github.com/NLnetLabs/rotonda/issues/132),
  [roto#259](https://github.com/NLnetLabs/roto/issues/259),
  [#150](https://github.com/NLnetLabs/rotonda/pull/150))
-
-
-### Other changes
-
-
-### Known issues
 
 
 ### Acknowledgements

@@ -1,0 +1,107 @@
+@(title)
+@use "Navigation";
+
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Rotonda WebUI</title>
+    <link rel="icon" type="image/svg+xml"
+                     href="data:image/svg+xml;base64,PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz48c3ZnIGlkPSJMYXllcl8xIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyODkuNjEgMjU2LjE3Ij48cGF0aCBkPSJtMjgxLjY3LDQ5LjA5bC0yNS4xMy0zMi43NXMwLS4wMS0uMDEtLjAyQzI0My45MS0uMTIsMjE4LjY2LTQuMzEsMTg1LjQzLDQuNTJjLTI3LjY0LDcuMzQtNTguNjgsMjMuMDItODguMzEsNDQuNDYtNS41OCw0LjA0LTExLjA0LDguMjMtMTYuMzgsMTIuNTctMjguMzgsMjMuMDctNTEuNTUsNDktNjUuOCw3My44LTE3LjEzLDI5LjgxLTE5LjYxLDU1LjI5LTcsNzEuNzNoMHMyNS4xNCwzMi43NywyNS4xNCwzMi43N2M4LjUzLDExLjEyLDIyLjg1LDE2LjY0LDQxLjUsMTYuMzEsOC45Mi0uMTYsMTguODQtMS42NSwyOS42LTQuNTEsMjcuNjQtNy4zNCw1OC42OC0yMy4wMiw4OC4zMS00NC40Niw1LjU4LTQuMDQsMTEuMDQtOC4yMywxNi4zOC0xMi41NywyOC4zOC0yMy4wNyw1MS41NS00OSw2NS44LTczLjgsMTcuMTMtMjkuODEsMTkuNjEtNTUuMjksNy03MS43M1ptLTM5LjU1LDQuMThjLTIwLjY4LS4xMy01MS41LDkuNzMtODUuMzIsMzAuMjctMS40OS45LTIuNjYsMi4yNi0zLjMzLDMuODdoMGMtMSwyLjQyLS42NCw1LjE5Ljk2LDcuMjYsMS41OSwyLjA3LDQuMTcsMy4xNCw2Ljc2LDIuOGw2My4yNS04LjMzYy01LjI5LDcuNzItMTEuNDUsMTUuNTItMTguMzgsMjMuMjVsLTQyLjE3LDUuNTVjLTIuNTkuMzQtNC44LDIuMDQtNS44MSw0LjQ1LTEsMi40Mi0uNjQsNS4xOC45Niw3LjI1bDEyLjEzLDE1LjhjLTIuNjUsMi4xNi01LjM0LDQuMzEtOC4wOSw2LjQyLTIuNzcsMi4xMy01LjU0LDQuMTYtOC4yOSw2LjE1bC0xMi4xMy0xNS44MWMtMS41OS0yLjA3LTQuMTctMy4xNC02Ljc2LTIuOC0yLjU5LjM0LTQuOCwyLjA0LTUuODEsNC40NWwtMTYuMywzOS4zNWMtOS41Miw0Ljg0LTE4LjY2LDguNzgtMjcuMjUsMTEuODFsMjQuNDctNTkuMDdjMS0yLjQyLjY0LTUuMTgtLjk2LTcuMjUtMS41OS0yLjA3LTQuMTctMy4xNC02Ljc2LTIuOGgwYy0xLjcyLjIzLTMuMzEuOTktNC41NywyLjItMTcuMTgsMTYuNDctMzEuMjEsMzMuNzEtNDAuNzMsNTAuMjgtNS4wOSw4Ljg1LTguNTksMTcuMTQtMTAuNDksMjQuNDktMTAuODctLjA3LTE4Ljk1LTIuODktMjMuMTctOC4zOC0xMy45NS0xOC4xOCwxMS4xNC02OS40NSw2OC45OS0xMTYuNTcsNS4zNC00LjM1LDEwLjc5LTguNTYsMTYuMzctMTIuNTksNDEuMzMtMjkuODQsODAuNTYtNDQuNDEsMTA1LjcyLTQ0Ljg0LDExLjY3LS4yLDIwLjMyLDIuNjMsMjQuNzQsOC4zOSw0LjEyLDUuMzYsNC42OSwxMy45LDEuOTcsMjQuMzhaIi8+PC9zdmc+"/>
+    <style>
+        table, tr, td, th {
+            border: 1px solid black;
+        }
+        table {
+            /*min-width: 95%;*/
+            white-space: nowrap;
+        }
+        td {
+            padding: 2px 10px;
+        }
+        th {
+            position: sticky;
+            top: 0;
+            padding: 5px;
+            background: whitesmoke;
+        }
+
+        span.green, td.green {
+            background: greenyellow;
+        }
+        span.yellow, td.yellow {
+            background: yellow;
+        }
+        span.red, td.red {
+            background: red;
+        }
+
+        td:has(span) {
+            padding: 0;
+        }
+
+        ul.legend {
+            list-style: none
+        }
+
+        ul.legend li::before {padding: 0; margin: 0; vertical-align: middle; line-height: 1rem}
+        ul.legend li.green::before {content: "•"; color: green; font-size: 3em; }
+        ul.legend li.yellow::before {content: "•"; color: yellow; font-size: 3em; }
+        ul.legend li.local::before {content: "L: "; color: white; font-weight: bold;}
+        ul.legend li.remote::before {content: "R: "; color: white; font-weight: bold;}
+
+        .tooltip {
+            position: relative;
+            display: inline-block;
+            border-bottom: 1px dotted black;
+        }
+
+        .tooltip .tooltiptext {
+            visibility: hidden;
+            width: fit-content;
+            background-color: #555;
+            color: #fff;
+            text-align: left;
+            border-radius: 6px;
+            padding: 5px;
+            position: absolute;
+            z-index: 1;
+            top: 2em;
+            left: 50%;
+            opacity: 0;
+            transition: opacity 0.3s;
+            transform: translateX(-50%);
+            font-weight: initial;
+        }
+
+        .tooltip .tooltiptext::before {
+            content: "";
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            margin-left: -5px;
+            border-width: 5px;
+            border-style: solid;
+            border-color: transparent transparent #555 transparent;
+        }
+
+        .tooltip:hover .tooltiptext {
+            visibility: visible;
+            opacity: 1;
+        }
+
+        
+    </style>
+</head>
+<body>
+    <div class="container">
+        <nav>
+        <Navigation />
+        </nav>
+        <main>
+            <h1>@title</h1>
+            @child_content
+        </main>
+    </div>
+</body>
+</html>

@@ -66,6 +66,17 @@ pub enum RovStatus {
     Invalid,
 }
 
+impl std::fmt::Display for RovStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RovStatus::NotChecked => write!(f, "not checked"),
+            RovStatus::NotFound => write!(f, "NotFound"),
+            RovStatus::Valid => write!(f, "Valid"),
+            RovStatus::Invalid => write!(f, "Invalid"),
+        }
+    }
+}
+
 
 /// Route Origin Validation status update for a route
 #[derive(Copy, Clone, Debug)]

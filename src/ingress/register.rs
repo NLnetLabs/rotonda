@@ -66,13 +66,6 @@ impl From<(IngressId, IngressInfo)> for OwnedIdAndInfo {
 pub struct BmpIdAndInfo<'a>(pub IdAndInfo<'a>);
 pub struct BgpIdAndInfo<'a>(pub IdAndInfo<'a>);
 
-impl GenOutput<&mut crate::webui::Index> for BmpIdAndInfo<'_> {
-    fn write(&self, target: &mut &mut crate::webui::Index) -> Result<(), OutputError> {
-        target.bmp_routers.push((self.0.ingress_id, self.0.ingress_info.clone()));
-        Ok(())
-    }
-}
-
 impl<W: std::io::Write> GenOutput<Cli<W>> for BgpIdAndInfo<'_> {
     fn write(&self, target: &mut Cli<W>) -> Result<(), OutputError> {
 
@@ -133,7 +126,7 @@ macro_rules! with_field {
 
 // Creates the IngressInfo (== $name) struct and adds fn Register::update_info
 macro_rules! info_for_field{
-    ($name:ident { $($field:ident : $type:ty),* } ) => {
+    ($name:ident { $( $(#[$m:meta])? $field:ident : $type:ty),* } ) => {
 
         /// Information pertaining to an [`IngressId`]
         ///
@@ -142,11 +135,12 @@ macro_rules! info_for_field{
         /// is wrapped as an `Option`, giving the user (mostly connector/ingress
         /// components within Rotonda) the flexibilty to fill in what makes sense in
         /// their specific case.
-        #[derive(Clone, Debug, Default, PartialEq)]
+        #[derive(Clone, Debug, Default, Eq, PartialEq, Ord, PartialOrd)]
         #[serde_with::skip_serializing_none]
         #[derive(serde::Serialize)]
         pub struct $name {
             $(
+                $(#[$m])?
                 pub $field: Option<$type>,
             )*
 
@@ -226,6 +220,10 @@ impl Register {
         }
     }
 
+    pub fn current_serial(&self) -> u32 {
+        self.serial.load(Ordering::Relaxed)
+    }
+
     pub fn overview(&self) -> String {
         let lock = self.info.read().unwrap();
         let mut res = String::new();
@@ -237,6 +235,10 @@ impl Register {
             ));
         }
         res
+    }
+
+    pub fn cloned_info(&self) -> HashMap<IngressId, IngressInfo> {
+        self.info.read().unwrap().clone()
     }
 
 
@@ -255,10 +257,33 @@ impl Register {
         Ok(())
     }
 
+    pub fn real_bgp_peers<T>(&self, mut target: T) -> fmt::Result
+        where for <'a> BgpIdAndInfo<'a>: GenOutput<T>
+    {
+        let res = self.search(QueryFilter {
+            ingress_type: Some(IngressType::Bgp),
+            ingress_state: Some(IngressState::Connected),
+            ..Default::default()
+        });
+        for r in res {
+            let _ = BgpIdAndInfo (
+                IdAndInfo { ingress_id: r.ingress_id, ingress_info: &r.ingress_info}
+            ).write(&mut target);
+
+        }
+        Ok(())
+    }
+
     pub fn bmp_routers<T>(&self, mut target: T) -> fmt::Result
         where for <'a> BmpIdAndInfo<'a>: GenOutput<T>
     {
-        let res = self.search(QueryFilter { ingress_type: Some(IngressType::Bmp), ..Default::default() });
+        let res = self.search(
+            QueryFilter {
+                ingress_type: Some(IngressType::Bmp),
+                ingress_state: Some(IngressState::Connected),
+                ..Default::default()
+            }
+        );
         for r in res {
 
             let _ = BmpIdAndInfo (
@@ -415,7 +440,7 @@ impl IngressInfo {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum IngressType {
     Bmp,
@@ -426,7 +451,7 @@ pub enum IngressType {
 }
 
 
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, serde::Serialize, serde::Deserialize)]
 pub enum IngressState {
     Connected,
     Disconnected,
@@ -451,7 +476,11 @@ info_for_field!(IngressInfo{
    local_asn: Asn,
    peer_type: PeerType,
    distinguisher: [u8; 8],
-   vrf_name: String
+   vrf_name: String,
+   #[serde(skip_serializing)]
+   local_capabilities: Vec<u8>,
+   #[serde(skip_serializing)]
+   remote_capabilities: Vec<u8>
 });
 
 #[cfg(test)]

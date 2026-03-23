@@ -208,6 +208,7 @@ impl Rib {
         //     As such, perhaps we should leave the generation of
         //     those withdrawals to the very latest (most-East) point?
 
+        debug!("withdraw_for_ingress for {ingress_id}");
         match specific_afisafi {
             None => {
                 // Set all address families to withdrawn.
@@ -218,6 +219,7 @@ impl Rib {
                 //The store seems to lack a 'mark_mui_as_withdrawn'
                 //that handles both v4 and v6 in one go.
 
+                debug!("mark_mui_as_withdrawn on unicast for for {ingress_id}");
                 if let Err(e) = (*self.unicast)
                     .as_ref()
                     .unwrap()
@@ -227,6 +229,16 @@ impl Rib {
                         "failed to mark MUI as withdrawn in unicast rib: {}",
                         e
                     )
+                }
+
+                // XXX TMP try to use the _v4 withdrawn just to test store behavior
+                debug!("mark_mui_as_withdrawn_v4 on unicast for for {ingress_id}");
+                if let Err(e) = (*self.unicast)
+                    .as_ref()
+                    .unwrap()
+                    .mark_mui_as_withdrawn_v4(ingress_id)
+                {
+                    error!("failed to mark MUI as withdrawn for v4: {}", e)
                 }
 
                 if let Err(e) = (*self.multicast)
@@ -432,6 +444,8 @@ impl Rib {
             mui: filter.ingress_id,
             include_history: rotonda_store::match_options::IncludeHistory::None,
         };
+
+        debug!("match_options.mui: {:?}", match_options.mui);
 
         let t0 = std::time::Instant::now();
         let mut res = store
@@ -668,8 +682,8 @@ impl Rib {
 /// This wrapper is used to impl the necessary traits on, to enable consistent representation
 /// between CLI, HTTP API, etc.
 pub struct SearchResult {
-    query_result: QueryResult<RotondaPaMap>,
-    ingress_register: Arc<ingress::Register>,
+    pub(crate) query_result: QueryResult<RotondaPaMap>,
+    pub(crate) ingress_register: Arc<ingress::Register>,
     query_filter: QueryFilter,
 }
 

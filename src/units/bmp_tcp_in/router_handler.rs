@@ -17,6 +17,7 @@ use smallvec::smallvec;
 use tokio::sync::Mutex;
 use tokio::{io::AsyncRead, net::TcpStream};
 
+use crate::ingress::register::IngressState;
 use crate::roto_runtime::types::{
     FilterName, Output, OutputStreamMessage, PeerRibType, RotoOutputStream, RotoScripts
 };
@@ -287,9 +288,19 @@ impl RouterHandler {
             &bmp_state_lock.as_ref().unwrap().router_id(),
         );
 
+        ingress_register.update_info(ingress_id,
+            ingress::IngressInfo::new()
+            .with_state(IngressState::Disconnected)
+        );
+
         // Signal withdrawal of all bgp sessions monitored via this BMP
         // session:
         let session_ids = ingress_register.ids_for_parent(ingress_id);
+        debug!(
+            "withdraw these {}/{} BGP sessions for parent BMP {ingress_id}: {session_ids:?}",
+            session_ids.len(),
+            ingress_register.current_serial(),
+        );
         self.gate
             .update_data(Update::WithdrawBulk(session_ids.into()))
             .await;

@@ -48,7 +48,7 @@ enum SupportedAfiSafi {
 
 
 #[serde_as]
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 #[serde(rename_all(deserialize = "camelCase"))]
 pub struct QueryFilter {
     
@@ -224,9 +224,9 @@ async fn search_ipv4unicast(
 ) -> Result<impl IntoResponse, ApiError> {
 
     let prefix = Prefix::new_v4(prefix, prefix_len).map_err(|e| ApiError::BadRequest(e.to_string()))?;
-    let s = state.store.clone();
-    let search_result = match s.get() {
-        Some(store) => store.search_routes(AfiSafiType::Ipv4Unicast, prefix, filter)
+    let s = state.store.load();
+    let search_result = match *s {
+        Some(ref store) => store.search_routes(AfiSafiType::Ipv4Unicast, prefix, filter)
             .map_err(ApiError::BadRequest)?,
         None => return Err(ApiError::InternalServerError("store unavailable".into())),
     };
@@ -251,9 +251,9 @@ async fn search_ipv6unicast(
 ) -> Result<impl IntoResponse, ApiError> {
 
     let prefix = Prefix::new_v6(prefix, prefix_len).map_err(|e| ApiError::BadRequest(e.to_string()))?;
-    let s = state.store.clone();
-    let search_result = match s.get() {
-        Some(store) => store.search_routes(AfiSafiType::Ipv6Unicast, prefix, filter)
+    let s = state.store.load();
+    let search_result = match *s {
+        Some(ref store) => store.search_routes(AfiSafiType::Ipv6Unicast, prefix, filter)
             .map_err(ApiError::BadRequest)?,
         None => return Err(ApiError::InternalServerError("store unavailable".into())),
     };

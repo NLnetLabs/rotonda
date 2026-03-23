@@ -10,10 +10,12 @@
         <th>peer addr</th>
         <th>ext next hop
             <Tooltip item="(?)" title="RFC8950 / Extended Next Hop exchanged in BGP OPENs">
-            Matching capabilities are shown in green in the middle.<br/>
-            Capabilities configured only locally are shown on the left of the
-            arrows, in yellow.</br>
-            Capabilities configured only remotely, on the right.</br>
+            <ul class="legend">
+                <li class="green">sent by both sides</li>
+                <li class="yellow">sent by only one side</li>
+                <li class="local">only configured locally</li>
+                <li class="remote">only configured remotely</li>
+            </ul>
             </Tooltip>
         </th>
         <th>bgp role
@@ -48,10 +50,21 @@
         <td>@if last_bmp_id != bmp_router.as_ref().map(|b| b.id) { @#bmp_router.as_ref().map(|r| bmp_details(r)).alt("") }</td>
         <td>@if last_ip != remote_addr { <a href="/routes/peer_ip/@remote_addr">@remote_addr</a> }</td>
         <td>
-        @for enh in ext_next_hops.only_local() { <span class="yellow">@enh</span>⇄ }
+        @if ext_next_hops.only_local().count() > 0 {
+            <span class="yellow">L:
+                @for enh in ext_next_hops.only_local() { @enh }
+            </span>
+        } 
         
         @for enh in ext_next_hops.both() { <span class="green">@enh</span> }
-        @for enh in ext_next_hops.only_remote() { ⇄<span class="yellow">@enh</span> }
+
+        @if ext_next_hops.only_remote().count() > 0 {
+            <span class="yellow">R:
+                @for enh in ext_next_hops.only_remote() { @enh }
+            </span>
+        } 
+
+
         </td>
         <td class=@(
             if bgp_roles.incomplete() { "yellow"}

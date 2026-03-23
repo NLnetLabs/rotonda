@@ -25,15 +25,30 @@
             padding: 5px;
             background: whitesmoke;
         }
-        .green {
+
+        span.green, td.green {
             background: greenyellow;
         }
-        .yellow {
+        span.yellow, td.yellow {
             background: yellow;
         }
-        .red {
+        span.red, td.red {
             background: red;
         }
+
+        td:has(span) {
+            padding: 0;
+        }
+
+        ul.legend {
+            list-style: none
+        }
+
+        ul.legend li::before {padding: 0; margin: 0; vertical-align: middle; line-height: 1rem}
+        ul.legend li.green::before {content: "•"; color: green; font-size: 3em; }
+        ul.legend li.yellow::before {content: "•"; color: yellow; font-size: 3em; }
+        ul.legend li.local::before {content: "L: "; color: white; font-weight: bold;}
+        ul.legend li.remote::before {content: "R: "; color: white; font-weight: bold;}
 
         .tooltip {
             position: relative;
@@ -46,7 +61,7 @@
             width: fit-content;
             background-color: #555;
             color: #fff;
-            text-align: center;
+            text-align: left;
             border-radius: 6px;
             padding: 5px;
             position: absolute;

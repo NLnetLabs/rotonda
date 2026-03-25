@@ -10,6 +10,12 @@ Released yyyy-mm-dd.
 
 ### New
 
+* Rotonda now uses Roto 0.10.
+  [#158](https://github.com/NLnetLabs/rotonda/pull/158) (XXX depending on much
+  we change the runtime, this might need to go under Breaking changes)
+  More details on changes in Roto not affecting Rotonda per se can be found in
+  its
+  [changelog](https://codeberg.org/NLnetLabs/roto/src/tag/v0.10.0/Changelog.md).
 
 ### Bug fixes
 

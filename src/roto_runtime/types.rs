@@ -1,6 +1,10 @@
 use core::fmt;
 use std::{
-    cell::RefCell, collections::{HashMap, HashSet}, net::IpAddr, path::PathBuf, rc::Rc,
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    net::IpAddr,
+    path::PathBuf,
+    rc::Rc,
 };
 
 use chrono::serde::ts_microseconds;
@@ -16,6 +20,7 @@ use crate::{
     ingress::IngressId,
     manager,
     payload::{RotondaPaMap, RotondaRoute},
+    roto_runtime::RotondaCtx,
 };
 
 use super::MutLogEntry;
@@ -82,7 +87,7 @@ impl RotoScripts {
     }
 }
 
-pub type RotoPackage = std::sync::Mutex<roto::Package>;
+pub type RotoPackage = std::sync::Mutex<roto::Package<roto::Ctx<RotondaCtx>>>;
 
 #[derive(Default)]
 pub struct OutputStream<M> {
@@ -177,10 +182,21 @@ pub struct InsertionInfo {
     //replaced_route: RotondaRoute,
 }
 
-
 //------------ PeerRibType ---------------------------------------------------
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd, Hash, Default, Serialize, Deserialize)]
+#[derive(
+    Debug,
+    Copy,
+    Clone,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    Hash,
+    Default,
+    Serialize,
+    Deserialize,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum PeerRibType {
     InPre,

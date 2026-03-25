@@ -35,7 +35,7 @@ use crate::roto_runtime::types::{
 use crate::comms::{Gate, GateStatus, Terminated};
 use crate::{ingress, roto_runtime};
 use crate::payload::{Payload, RotondaRoute, Update};
-use crate::roto_runtime::Ctx;
+use crate::roto_runtime::RotondaCtx;
 use crate::units::bgp_tcp_in::status_reporter::BgpTcpInStatusReporter;
 use crate::units::rib_unit::rpki::RtrCache;
 use crate::units::Unit;
@@ -77,7 +77,7 @@ impl BgpSession<CombinedConfig> for Session<CombinedConfig> {
 
 struct Processor {
     roto_function: Option<RotoFunc>,
-    roto_context: Arc<Mutex<Ctx>>,
+    roto_context: Arc<Mutex<RotondaCtx>>,
     gate: Gate,
     unit_cfg: BgpTcpIn,
     //bgp_ltime: u64, // XXX or should this be on Unit level?
@@ -99,7 +99,7 @@ impl Processor {
     #[allow(clippy::too_many_arguments)]
     fn new(
         roto_function: Option<RotoFunc>,
-        roto_context: Arc<Mutex<Ctx>>,
+        roto_context: Arc<Mutex<RotondaCtx>>,
         gate: Gate,
         unit_cfg: BgpTcpIn,
         tx: mpsc::Sender<Command>,
@@ -132,7 +132,7 @@ impl Processor {
 
         let processor = Self {
             roto_function: None,
-            roto_context: Arc::new(Mutex::new(Ctx::empty())),
+            roto_context: Arc::new(Mutex::new(RotondaCtx::empty())),
             gate,
             unit_cfg,
             //bgp_ltime: 0,
@@ -570,7 +570,7 @@ impl Processor {
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_connection(
     roto_function: Option<RotoFunc>,
-    roto_context: Arc<Mutex<Ctx>>,
+    roto_context: Arc<Mutex<RotondaCtx>>,
     gate: Gate,
     unit_config: BgpTcpIn,
     tcp_stream: TcpStream,

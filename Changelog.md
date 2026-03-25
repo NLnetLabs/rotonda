@@ -22,6 +22,9 @@ Released yyyy-mm-dd.
 
 ### Other changes
 
+* Updated the man page, which included a broken URL for the online
+  documentation, and described command line arguments that are not supported
+  anymore.
 
 ### Acknowledgements
 

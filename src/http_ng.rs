@@ -1,7 +1,7 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use arc_swap::ArcSwapOption;
-use axum::routing::get;
+use axum::routing::{get, post};
 #[cfg(feature = "http-api-gzip")]
 use tower_http::compression::CompressionLayer;
 use log::{debug, error};
@@ -144,6 +144,21 @@ impl Api {
                 self.cloned_api_state()
             );
     }
+
+    /// Add an HTTP POST endpoint
+    pub fn add_post<H, T>(&mut self, path: impl AsRef<str>, handler: H)
+        where
+            H: axum::handler::Handler<T, ApiState>,
+            T: 'static,
+    {
+        debug!("add_post for {}", path.as_ref());
+        self.router = self.router.clone()
+            .route(&format!("{}{}", self.api_root, path.as_ref()), post(handler))
+            .with_state(
+                self.cloned_api_state()
+            );
+    }
+
 
     /// Start the HTTP API listeners on the configured interfaces
     pub fn start(&mut self) {

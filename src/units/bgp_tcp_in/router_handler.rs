@@ -152,6 +152,7 @@ impl Processor {
         mut session: T,
         mut rx_sess: mpsc::Receiver<Message>,
         live_sessions: Arc<Mutex<super::unit::LiveSessions>>,
+        global_live_sessions: Arc<Mutex<super::unit::LiveSessions>>,
     ) -> (T, mpsc::Receiver<Message>) {
         let peer_addr_cfg = session.config().remote_prefix_or_exact();
 
@@ -421,6 +422,15 @@ impl Processor {
                                 "inserted into live_sessions (current count: {})",
                                 live_sessions.len()
                             );
+                            let mut global_live_sessions = global_live_sessions.lock().unwrap();
+                            global_live_sessions.insert(
+                                (negotiated.remote_addr(), negotiated.remote_asn()),
+                                (self.tx.clone(), self.pdu_out_tx.clone())
+                            );
+                            debug!(
+                                "inserted into global_live_sessions (current count: {})",
+                                global_live_sessions.len()
+                            );
                             }
                             // register ingress
                             //session_ingress_id = self.ingresses.register();
@@ -579,6 +589,7 @@ pub async fn handle_connection(
     cmds_rx: mpsc::Receiver<Command>,
     status_reporter: Arc<BgpTcpInStatusReporter>,
     live_sessions: Arc<Mutex<super::unit::LiveSessions>>,
+    global_live_sessions: Arc<Mutex<super::unit::LiveSessions>>,
     ingresses: Arc<ingress::Register>,
     connector_ingress_id: ingress::IngressId,
 ) {
@@ -676,7 +687,7 @@ pub async fn handle_connection(
         debug!("post tcp_out.forget()");
     });
 
-    p.process(session, sess_rx, live_sessions).await;
+    p.process(session, sess_rx, live_sessions, global_live_sessions).await;
 }
 
 #[cfg(test)]
@@ -798,11 +809,12 @@ mod tests {
         let (mut p, gate_agent) = Processor::mock(unit_settings);
         let (sess_tx, sess_rx) = mpsc::channel::<Message>(100);
         let live_sessions = Arc::new(Mutex::new(HashMap::new()));
+        let global_live_sessions = Arc::new(Mutex::new(HashMap::new()));
         let status_reporter = p.status_reporter.clone();
 
         let join_handle =
             crate::tokio::spawn("mock_bgp_tcp_in_processor", async move {
-                p.process(session, sess_rx, live_sessions).await
+                p.process(session, sess_rx, live_sessions, global_live_sessions).await
             });
 
         (join_handle, status_reporter, gate_agent, sess_tx)

@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::{Arc, Mutex}};
 
 use arc_swap::ArcSwapOption;
 use axum::routing::{get, post};
@@ -7,7 +7,7 @@ use tower_http::compression::CompressionLayer;
 use log::{debug, error};
 use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::{ingress::{self, http_ng::IngressApi}, units::rib_unit::rib::Rib, webui::WebUI};
+use crate::{ingress::{self, http_ng::IngressApi}, units::{bgp_tcp_in::unit::LiveSessions, rib_unit::rib::Rib}, webui::WebUI};
 
 
 
@@ -36,18 +36,21 @@ pub struct Api {
 
     /// Handles of serving tasks to be awaited upon shutdown/restart
     serve_handles: Vec<JoinHandle<()>>,
+
+    global_bgp_sessions: Arc<Mutex<LiveSessions>>,
 }
 
 #[derive(Clone)]
 pub struct ApiState {
     /// The Rib (wrapping rotonda-store) to be set by the RibUnit
-    //pub(crate) store: OnceLock<Arc<Rib>>,
     pub(crate) store: Arc<ArcSwapOption<Rib>>,
 
     /// The `ingress::Register`
     pub(crate) ingress_register: Arc<ingress::Register>,
-    // roto::Compiled: < >
 
+
+    pub(crate) global_bgp_sessions: Arc<Mutex<LiveSessions>>,
+    
     /// The metrics collection
     pub(crate) metrics: crate::metrics::Collection,
 }
@@ -62,11 +65,13 @@ impl Api {
     pub fn new(
         interfaces: Vec<SocketAddr>,
         ingress_register: Arc<ingress::Register>,
+        global_bgp_sessions: Arc<Mutex<LiveSessions>>,
         metrics: crate::metrics::Collection,
     ) -> Self {
         let state = ApiState {
             store: Default::default(),
             ingress_register: ingress_register.clone(),
+            global_bgp_sessions: global_bgp_sessions.clone(),
             metrics: metrics.clone(),
             
         };
@@ -85,6 +90,7 @@ impl Api {
             metrics,
             router,
             signal_txs: vec![],
+            global_bgp_sessions,
             serve_handles: vec![],
         };
 
@@ -111,6 +117,7 @@ impl Api {
         ApiState { 
             store: self.store.clone(),
             ingress_register: self.ingress_register.clone(),
+            global_bgp_sessions: self.global_bgp_sessions.clone(),
             metrics: self.metrics.clone(),
         }
     }

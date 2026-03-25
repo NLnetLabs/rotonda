@@ -80,11 +80,12 @@ rpki               = { version = "0.19.2", features = ["crypto", "rtr"] }
 futures-util       = "0.3"
 micromap           = "0.1.0"
 paste              = "1.0.15"
-axum               = { version = "0.8.8", features = ["query", "http1", "http2", "tokio"], default-features = false }
+axum               = { version = "0.8.8", features = ["query", "http1", "http2", "tokio", "json"], default-features = false }
 rshtml             = { version = "0.5", features = ["functions"] }
 tower-http         = { version = "0.5.2", features = ["compression-gzip"], optional = true }
 serde_qs           = "0.15.0"
 rayon = "1.11.0"
+base64 = "0.22.1"
 
 [target.'cfg(unix)'.dependencies]
 syslog             = "7.0"

@@ -116,6 +116,7 @@ impl BgpTcpIn {
         let metrics = Arc::new(BgpTcpInMetrics::new(&gate));
         component.register_metrics(metrics.clone());
 
+        let global_live_sessions = component.global_bgp_sessions();
         let ingresses = component.ingresses();
         let roto_metrics = component.roto_metrics().clone();
 
@@ -146,10 +147,12 @@ impl BgpTcpIn {
         BgpTcpInRunner::new(
             self,
             gate,
+            component,
             metrics,
             status_reporter,
             roto_compiled,
             roto_metrics,
+            global_live_sessions,
             ingresses,
         )
         .run::<_, _, StandardTcpStream, BgpTcpInRunner>(
@@ -174,6 +177,7 @@ trait ConfigAcceptor {
         remote_net: super::peer_config::PrefixOrExact,
         child_status_reporter: Arc<BgpTcpInStatusReporter>,
         live_sessions: Arc<Mutex<LiveSessions>>,
+        global_live_sessions: Arc<Mutex<LiveSessions>>,
         ingresses: Arc<ingress::Register>,
         connector_ingress_id: ingress::IngressId,
     );
@@ -202,6 +206,8 @@ struct BgpTcpInRunner {
     // To send commands to a Session based on peer IP + ASN.
     live_sessions: Arc<Mutex<LiveSessions>>,
 
+    global_live_sessions: Arc<Mutex<LiveSessions>>,
+
     ingresses: Arc<ingress::Register>,
 }
 
@@ -217,12 +223,22 @@ impl BgpTcpInRunner {
     fn new(
         bgp: BgpTcpIn,
         gate: Gate,
+        component: Component,
         metrics: Arc<BgpTcpInMetrics>,
         status_reporter: Arc<BgpTcpInStatusReporter>,
         roto_compiled: Option<Arc<RotoPackage>>,
         roto_metrics: Option<Arc<RotoMetricsWrapper>>,
+        global_live_sessions: Arc<Mutex<LiveSessions>>,
         ingresses: Arc<ingress::Register>,
     ) -> Self {
+        
+
+        if let Ok(mut api) = component.http_ng_api_arc().lock() {
+            super::http_ng::register_routes(&mut api);
+        } else {
+            debug!("could not get lock on HTTP API");
+        }
+
         BgpTcpInRunner {
             bgp: Arc::new(ArcSwap::from_pointee(bgp)),
             gate,
@@ -231,6 +247,7 @@ impl BgpTcpInRunner {
             roto_compiled,
             roto_metrics,
             live_sessions: Arc::new(Mutex::new(HashMap::new())),
+            global_live_sessions,
             ingresses,
         }
     }
@@ -245,6 +262,7 @@ impl BgpTcpInRunner {
             metrics: Default::default(),
             status_reporter: Default::default(),
             live_sessions: Arc::new(Mutex::new(HashMap::new())),
+            global_live_sessions: Arc::new(Mutex::new(HashMap::new())),
             ingresses: Arc::new(ingress::Register::default()),
             roto_compiled: None,
             roto_metrics: Default::default(),
@@ -368,6 +386,7 @@ impl BgpTcpInRunner {
                                 remote_net,
                                 child_status_reporter,
                                 arc_self.live_sessions.clone(),
+                                arc_self.global_live_sessions.clone(),
                                 arc_self.ingresses.clone(),
                                 // XXX we need to do a find_existing_peer here instead of blindly
                                 // doing a .register().
@@ -584,6 +603,7 @@ impl ConfigAcceptor for BgpTcpInRunner {
         remote_net: super::peer_config::PrefixOrExact,
         child_status_reporter: Arc<BgpTcpInStatusReporter>,
         live_sessions: Arc<Mutex<LiveSessions>>,
+        global_live_sessions: Arc<Mutex<LiveSessions>>,
         ingresses: Arc<ingress::Register>,
         connector_ingress_id: ingress::IngressId,
     ) {
@@ -603,6 +623,7 @@ impl ConfigAcceptor for BgpTcpInRunner {
                 cmds_rx,
                 child_status_reporter,
                 live_sessions,
+                global_live_sessions,
                 ingresses,
                 connector_ingress_id,
             ),
@@ -806,6 +827,7 @@ mod tests {
             _remote_net: PrefixOrExact,
             _child_status_reporter: Arc<BgpTcpInStatusReporter>,
             _live_sessions: Arc<std::sync::Mutex<LiveSessions>>,
+            _global_live_sessions: Arc<std::sync::Mutex<LiveSessions>>,
             _ingressess: Arc<ingress::Register>,
             _connector_ingress_id: ingress::IngressId,
         ) {

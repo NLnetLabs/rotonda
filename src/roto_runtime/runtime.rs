@@ -25,9 +25,7 @@ use routecore::bmp::message::{Message as BmpMsg, MessageType as BmpMsgType};
 use roto::{Context, Val};
 
 use super::lists::{MutNamedAsnLists, MutNamedPrefixLists};
-use super::types::{
-    InsertionInfo, Output, RotoOutputStream 
-};
+use super::types::{InsertionInfo, Output, RotoOutputStream};
 use crate::ingress::{self, IngressId, IngressInfo};
 use crate::payload::{RotondaPaMap, RotondaRoute};
 use crate::roto_runtime::lists::{AsnList, PrefixList};
@@ -36,10 +34,9 @@ use crate::roto_runtime::types::LogEntry;
 use crate::units::rib_unit::rpki::{RovStatus, RovStatusUpdate, RtrCache};
 use crate::units::rtr::client::VrpUpdate;
 
-
-pub type CompileListsFunc = roto::TypedFunc<roto::Ctx<RotondaCtx>, fn () -> ()>;
+pub type CompileListsFunc =
+    roto::TypedFunc<roto::Ctx<RotondaCtx>, fn() -> ()>;
 pub const COMPILE_LISTS_FUNC_NAME: &str = "compile_lists";
-
 
 pub(crate) type Log = Rc<RefCell<RotoOutputStream>>;
 pub(crate) type SharedRtrCache = Arc<RtrCache>;
@@ -69,18 +66,25 @@ pub struct RotondaCtx {
 pub struct IngressInfoCache {
     ingress_id: IngressId,
     register: Arc<ingress::Register>,
-    ingress_info: Option<IngressInfo>
+    ingress_info: Option<IngressInfo>,
 }
 
 impl IngressInfoCache {
-    pub fn new_rc(ingress_id: IngressId, register: Arc<ingress::Register>) -> MutIngressInfoCache {
+    pub fn new_rc(
+        ingress_id: IngressId,
+        register: Arc<ingress::Register>,
+    ) -> MutIngressInfoCache {
         Rc::new(RefCell::new(Self {
             ingress_id,
             register,
-            ingress_info: None
+            ingress_info: None,
         }))
     }
-    pub fn for_info_rc(ingress_id: IngressId, register: Arc<ingress::Register>, ingress_info: IngressInfo) -> MutIngressInfoCache {
+    pub fn for_info_rc(
+        ingress_id: IngressId,
+        register: Arc<ingress::Register>,
+        ingress_info: IngressInfo,
+    ) -> MutIngressInfoCache {
         Rc::new(RefCell::new(Self {
             ingress_id,
             register,
@@ -100,18 +104,23 @@ impl IngressInfoCache {
     }
     fn peer_asn(&mut self) -> Asn {
         self.info().remote_asn.unwrap_or_else(|| {
-            warn!("No remote_asn on ingress {}, this is a bug", self.ingress_id);
+            warn!(
+                "No remote_asn on ingress {}, this is a bug",
+                self.ingress_id
+            );
             Asn::from_u32(u32::MAX)
         })
     }
     fn peer_address(&mut self) -> IpAddr {
         self.info().remote_addr.unwrap_or_else(|| {
-            warn!("No remote_address on ingress {}, this is a bug", self.ingress_id);
+            warn!(
+                "No remote_address on ingress {}, this is a bug",
+                self.ingress_id
+            );
             Ipv6Addr::from(0).into()
         })
     }
 }
-
 
 unsafe impl Send for RotondaCtx {}
 
@@ -140,9 +149,12 @@ impl RotondaCtx {
         self.metrics = Val(metrics);
     }
 
-    pub fn prepare(&mut self, roto_package: &mut roto::Package<roto::Ctx<RotondaCtx>>) {
-        let f: Result<CompileListsFunc, _> = roto_package
-            .get_function(COMPILE_LISTS_FUNC_NAME);
+    pub fn prepare(
+        &mut self,
+        roto_package: &mut roto::Package<roto::Ctx<RotondaCtx>>,
+    ) {
+        let f: Result<CompileListsFunc, _> =
+            roto_package.get_function(COMPILE_LISTS_FUNC_NAME);
         if let Ok(f) = f {
             f.call(self);
         } else {
@@ -158,8 +170,8 @@ impl RotondaCtx {
 #[derive(Copy, Clone, Debug)]
 pub struct OriginAsn(pub Option<Asn>);
 
-pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> {
-
+pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
+{
     let lib = roto::library! {
 
         // --- General types
@@ -216,7 +228,8 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
                 false
             }
 
-            /// Check whether this `RotondaRoute` contains the given Standard Community
+            /// Check whether this `RotondaRoute` contains the given Standard
+            /// Community
             fn contains_community(
                 rr: Val<MutRotondaRoute>,
                 to_match: Val<StandardCommunity>,
@@ -229,7 +242,8 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
                 false
             }
 
-            /// Check whether this `RotondaRoute` contains the given Large Community
+            /// Check whether this `RotondaRoute` contains the given Large
+            /// Community
             fn contains_large_community(
                 rr: Val<MutRotondaRoute>,
                 to_match: Val<LargeCommunity>,
@@ -242,7 +256,8 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
                 false
             }
 
-            /// Check whether this `RotondaRoute` contains the given Path Attribute
+            /// Check whether this `RotondaRoute` contains the given Path
+            /// Attribute
             fn has_attribute(rr: Val<MutRotondaRoute>, to_match: u8) -> bool {
                 let rr = rr.borrow_mut();
                 rr.owned_map()
@@ -380,13 +395,15 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
                 stream.push(Output::Asn(asn));
             }
 
-            /// Log the given ASN as origin (NB: this method will likely be removed)
+            /// Log the given ASN as origin (NB: this method will likely be
+            /// removed)
             fn log_matched_origin(stream: Val<Log>, origin: Asn) {
                 let mut stream = stream.borrow_mut();
                 stream.push(Output::Origin(origin));
             }
 
-            /// Log the given community (NB: this method will likely be removed)
+            /// Log the given community (NB: this method will likely be
+            /// removed)
             fn log_matched_community(stream: Val<Log>, community: Val<StandardCommunity>) {
                 let mut stream = stream.borrow_mut();
                 stream.push(Output::Community(community.to_u32()));
@@ -398,7 +415,8 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
                 stream.push(Output::PeerDown);
             }
 
-            /// Log a custom entry in forms of a tuple (NB: this method will likely be removed)
+            /// Log a custom entry in forms of a tuple (NB: this method will
+            /// likely be removed)
             fn log_custom(stream: Val<Log>, id: u32, local: u32) {
                 let mut stream = stream.borrow_mut();
                 stream.push(Output::Custom((id, local)));
@@ -421,11 +439,12 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
                 );
             }
 
-            /// Finalize this entry and ensure it will be written to the output
+            /// Finalize this entry and ensure it will be written to the
+            /// output
             ///
-            /// Calling this method will close the log entry that is currently being
-            /// composed, and ensures a subsequent call to [`entry`] returns a new,
-            /// empty `LogEntry`.
+            /// Calling this method will close the log entry that is currently
+            /// being composed, and ensures a subsequent call to [`entry`]
+            /// returns a new, empty `LogEntry`.
             fn write_entry(stream: Val<Log>) {
                 let mut stream = stream.borrow_mut();
                 let entry = stream.take_entry();
@@ -433,12 +452,12 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
                 stream.push(Output::Entry(entry));
             }
 
-            //------------ LogEntry --------------------------------------------------
+            //------------ LogEntry -----------------------------------------
 
             /// Get the current/new entry
             ///
-            /// A `LogEntry` is only written to the output if [`write_entry`] is
-            /// called on it after populating its fields.
+            /// A `LogEntry` is only written to the output if [`write_entry`]
+            /// is called on it after populating its fields.
             fn entry(stream: Val<Log>) -> Val<MutLogEntry> {
                 let mut stream = stream.borrow_mut();
                 Val(stream.entry())
@@ -455,15 +474,16 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
             /// This sets the 'rpki_info' for this Route to Valid, Invalid or
             /// NotFound (RFC6811).
             ///
-            /// In order for this method to have effect, a 'rtr-in' connector should
-            /// be configured, and it should have received VRP data from the connected
-            /// RP software.
+            /// In order for this method to have effect, a 'rtr-in' connector
+            /// should be configured, and it should have received VRP data
+            /// from the connected RP software.
             fn check_rov(rpki: Val<SharedRtrCache>, rr: Val<MutRotondaRoute>) -> Val<RovStatus> {
                 let mut rr = rr.borrow_mut();
                 let prefix = match *rr {
                     RotondaRoute::Ipv4Unicast(nlri, _) => nlri.prefix(),
                     RotondaRoute::Ipv6Unicast(nlri, _) => nlri.prefix(),
-                    _=> { return Val(RovStatus::NotChecked) ; } // defaults to 'NotChecked'
+                    // defaults to 'NotChecked'
+                    _=> { return Val(RovStatus::NotChecked) ; }
                 };
 
                 let mut rov_status = RovStatus::default();
@@ -488,8 +508,8 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
 
             /// Returns the `Asn` for this `VrpUpdate`
             fn asn(vrp_update: Val<VrpUpdate>) -> Asn {
-                // We need to convert the rpki-rs Asn into the inetnum Asn, hence the
-                // into_u32->from_u32 calls.
+                // We need to convert the rpki-rs Asn into the inetnum Asn,
+                // hence the into_u32->from_u32 calls.
                 Asn::from_u32(vrp_update.vrp.asn.into_u32())
             }
 
@@ -531,9 +551,10 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
 
             /// Returns 'true' if the named list contains `origin`
             ///
-            /// This method returns false if the list does not exist, or if `origin`
-            /// does not actually contain an `Asn`. The latter could occur for
-            /// announcements with an empty 'AS_PATH' attribute (iBGP).
+            /// This method returns false if the list does not exist, or if
+            /// `origin` does not actually contain an `Asn`. The latter could
+            /// occur for announcements with an empty 'AS_PATH' attribute
+            /// (iBGP).
             fn contains_origin(asn_list: Val<MutNamedAsnLists>, name: Arc<str>, origin: Val<OriginAsn>) -> bool {
                 let asn = match (*origin).0 {
                     Some(asn) => asn,
@@ -569,7 +590,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
                 }
             }
 
-            /// Returns 'true' if `prefix` or a less-specific is in the named list 
+            /// Returns 'true' if `prefix` or a less-specific is in the named list
             fn covers(prefix_list: Val<MutNamedPrefixLists>, name: Arc<str>, prefix: Prefix) -> bool {
                 let prefix_list = prefix_list.lock().unwrap();
                 if let Some(list) = prefix_list.inner.get(&*name.clone()) {
@@ -585,7 +606,8 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
         impl Val<MutMetrics> {
             fn increase_counter(metrics: Val<MutMetrics>, name: Arc<str>, value: u64) {
                 // first try with only a read-lock (for already existing keys)
-                // if that fails, try again with a write lock so the new key can get inserted.
+                // if that fails, try again with a write lock so the new key
+                // can get inserted.
                 if value == 0 {
                     return
                 }
@@ -633,16 +655,17 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
 
             /// Log a custom message based on the given string
             ///
-            /// By setting a custom message for a `LogEntry`, all other fields are
-            /// ignored when the entry is written to the output. Combining the custom
-            /// message with the built-in fields is currently not possible.
+            /// By setting a custom message for a `LogEntry`, all other fields
+            /// are ignored when the entry is written to the output. Combining
+            /// the custom message with the built-in fields is currently not
+            /// possible.
             fn custom(entry_ptr: Val<MutLogEntry>, custom_msg: Arc<str>) {
                 let mut entry = entry_ptr.borrow_mut();
                 entry.custom = Some(custom_msg.to_string());
             }
 
             /// Log a custom, timestamped message based on the given string
-            /// 
+            ///
             /// Also see [`custom`].
             fn timestamped_custom(entry_ptr: Val<MutLogEntry>, custom_msg: Arc<str>) {
                 let mut entry = entry_ptr.borrow_mut();
@@ -702,7 +725,8 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
                 entry_ptr.clone()
             }
 
-            /// Log the number of conventional announcements for the given message
+            /// Log the number of conventional announcements for the given
+            /// message
             fn conventional_reach(
                 entry_ptr: Val<MutLogEntry>,
                 msg: Val<BmpMsg<Bytes>>,
@@ -721,7 +745,8 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
                 entry_ptr.clone()
             }
 
-            /// Log the number of conventional withdrawals for the given message
+            /// Log the number of conventional withdrawals for the given
+            /// message
             fn conventional_unreach(
                 entry_ptr: Val<MutLogEntry>,
                 msg: Val<BmpMsg<Bytes>>,
@@ -740,7 +765,8 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
                 entry_ptr.clone()
             }
 
-            /// Log the number of MultiProtocol announcements for the given message
+            /// Log the number of MultiProtocol announcements for the given
+            /// message
             fn mp_reach(
                 entry_ptr: Val<MutLogEntry>,
                 msg: Val<BmpMsg<Bytes>>,
@@ -757,7 +783,8 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
                 entry_ptr.clone()
             }
 
-            /// Log the number of MultiProtocol withdrawals for the given message
+            /// Log the number of MultiProtocol withdrawals for the given
+            /// message
             fn mp_unreach(
                 entry_ptr: Val<MutLogEntry>,
                 msg: Val<BmpMsg<Bytes>>,
@@ -835,9 +862,10 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
 
             /// Returns the right-most `Asn` in the 'AS_PATH' attribute
             ///
-            /// Note that the returned value is of type `OriginAsn`, which optionally
-            /// contains an `Asn`. In case of empty an 'AS_PATH' (e.g. in iBGP) this
-            /// method will still return an `OriginAsn`, though representing 'None'.
+            /// Note that the returned value is of type `OriginAsn`, which
+            /// optionally contains an `Asn`. In case of empty an 'AS_PATH'
+            /// (e.g. in iBGP) this method will still return an `OriginAsn`,
+            /// though representing 'None'.
             fn aspath_origin(
                 msg: Val<BgpUpdateMessage<Bytes>>,
             ) -> Val<OriginAsn> {
@@ -852,7 +880,8 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
                 match_aspath_origin(&msg, to_match)
             }
 
-            /// Check whether this message contains the given Standard Community
+            /// Check whether this message contains the given Standard
+            /// Community
             fn contains_community(
                 msg: Val<BgpUpdateMessage<Bytes>>,
                 to_match: Val<StandardCommunity>,
@@ -972,9 +1001,10 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
 
             /// Returns the right-most `Asn` in the 'AS_PATH' attribute
             ///
-            /// Note that the returned value is of type `OriginAsn`, which optionally
-            /// contains an `Asn`. In case of empty an 'AS_PATH' (e.g. in iBGP) this
-            /// method will still return an `OriginAsn`, though representing 'None'.
+            /// Note that the returned value is of type `OriginAsn`, which
+            /// optionally contains an `Asn`. In case of empty an 'AS_PATH'
+            /// (e.g. in iBGP) this method will still return an `OriginAsn`,
+            /// though representing 'None'.
             ///
             /// When called on BMP messages not of type 'RouteMonitoring', the
             /// 'None'-variant is returned as well.
@@ -1014,7 +1044,8 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
                 match_aspath_origin(&update, to_match)
             }
 
-            /// Check whether this message contains the given Standard Community
+            /// Check whether this message contains the given Standard
+            /// Community
             fn contains_community(
                 msg: Val<BmpMsg<Bytes>>,
                 to_match: Val<StandardCommunity>,
@@ -1189,7 +1220,9 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
 
         impl Val<StandardCommunity> {
             fn from(s: Arc<str>) -> Val<StandardCommunity> {
-                Val(StandardCommunity::from_str(&s).unwrap_or(StandardCommunity::from_u32(0)))
+                Val(StandardCommunity::from_str(&s)
+                    .unwrap_or(StandardCommunity::from_u32(0))
+                )
             }
         }
 
@@ -1197,7 +1230,9 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
         #[copy] type LargeCommunity = Val<LargeCommunity>;
         impl Val<LargeCommunity> {
             fn from(s: Arc<str>) -> Val<LargeCommunity> {
-                Val(LargeCommunity::from_str(&s).unwrap_or(LargeCommunity::from([0u8;12])))
+                Val(LargeCommunity::from_str(&s)
+                    .unwrap_or(LargeCommunity::from([0u8;12]))
+                )
             }
         }
 
@@ -1229,7 +1264,8 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
                 rov_update.prefix
             }
 
-            /// Returns the origin `asn` from the 'AS_PATH' of the updated route
+            /// Returns the origin `asn` from the 'AS_PATH' of the updated
+            /// route
             fn origin(rov_update: Val<RovStatusUpdate>) -> Asn {
                 rov_update.origin
             }
@@ -1270,21 +1306,26 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
 
 
         /// The well-known NO_EXPORT community (RFC1997)
-        const NO_EXPORT: Val<StandardCommunity> = Val(StandardCommunity::from_wellknown(Wellknown::NoExport));
+        const NO_EXPORT: Val<StandardCommunity> =
+            Val(StandardCommunity::from_wellknown(Wellknown::NoExport));
 
         /// The well-known NO_ADVERTISE community (RFC1997)
-        const NO_ADVERTISE: Val<StandardCommunity> = Val(StandardCommunity::from_wellknown(Wellknown::NoAdvertise));
+        const NO_ADVERTISE: Val<StandardCommunity> =
+            Val(StandardCommunity::from_wellknown(Wellknown::NoAdvertise));
 
         /// The well-known NO_EXPORT_SUBCONFED community (RFC1997)
-        const NO_EXPORT_SUBCONFED: Val<StandardCommunity> = Val(StandardCommunity::from_wellknown(Wellknown::NoExportSubconfed));
+        const NO_EXPORT_SUBCONFED: Val<StandardCommunity> =
+            Val(StandardCommunity::from_wellknown(Wellknown::NoExportSubconfed));
 
         /// The well-known NO_PEER community (RFC1997)
-        const NO_PEER: Val<StandardCommunity> = Val(StandardCommunity::from_wellknown(Wellknown::NoPeer));
+        const NO_PEER: Val<StandardCommunity> =
+            Val(StandardCommunity::from_wellknown(Wellknown::NoPeer));
 
 
 
 
-        // XXX do we still need these with all new string/formatting functionality in roto itself?
+        // XXX do we still need these with all new string/formatting
+        // functionality in roto itself?
         fn fmt_asn(asn: Asn) -> Arc<str> {
             asn.to_string().into()
         }
@@ -1300,50 +1341,23 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
 
     // --- RotondaRoute methods
 
-
-
-
-
-
     // --- BGP message methods
-
 
     // --- BMP types / methods
 
-
-
     // --- Output / logging / 'south'-wards artifacts methods
-
-
-
-
 
     //------------ RPKI / RTR methods ----------------------------------------
 
-
-
-
-
     //--- RovStatusUpdate
-
-
 
     //------------ Lists -----------------------------------------------------
 
-
-
-
     //------------ IngressInfo -----------------------------------------------
-
 
     //------------ Metrics ---------------------------------------------------
 
-
     //---------
-
-
-
-
 
     // currently unused
     //// --- InsertionInfo methods
@@ -1357,17 +1371,14 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String> 
     //    unsafe { &*info }.prefix_new
     //}
 
-    //------------ Constants -------------------------------------------------
-
-
+    //------------ Constants ------------------------------------------------
 
     roto::Runtime::from_lib(lib)
         .map_err(|e| e.to_string())?
         .with_context_type::<RotondaCtx>()
 }
 
-
-//------------ Path Attributes helpers ----------------------------------------
+//------------ Path Attributes helpers --------------------------------------
 
 fn has_attribute(bgp_update: &BgpUpdateMessage<Bytes>, to_match: u8) -> bool {
     if let Ok(mut pas) = bgp_update.path_attributes() {
@@ -1410,16 +1421,12 @@ fn aspath_contains(
     }
 }
 
-fn aspath_origin(
-    bgp_update: &BgpUpdateMessage<Bytes>,
-) -> OriginAsn {
-    OriginAsn(
-        if let Some(aspath) = bgp_update.aspath().ok().flatten() {
-            aspath.origin().and_then(|o| o.try_into_asn().ok())
-        } else {
-            None
-        }
-    )
+fn aspath_origin(bgp_update: &BgpUpdateMessage<Bytes>) -> OriginAsn {
+    OriginAsn(if let Some(aspath) = bgp_update.aspath().ok().flatten() {
+        aspath.origin().and_then(|o| o.try_into_asn().ok())
+    } else {
+        None
+    })
 }
 
 fn match_aspath_origin(
@@ -1438,7 +1445,8 @@ fn announcements_count(bgp_update: &BgpUpdateMessage<Bytes>) -> u64 {
         iter.count().try_into().unwrap_or(u32::MAX)
     } else {
         0
-    }.into()
+    }
+    .into()
 }
 
 fn withdrawals_count(bgp_update: &BgpUpdateMessage<Bytes>) -> u64 {
@@ -1451,10 +1459,11 @@ fn withdrawals_count(bgp_update: &BgpUpdateMessage<Bytes>) -> u64 {
         res
     } else {
         0
-    }.into()
+    }
+    .into()
 }
 
-//------------ Formatting/printing helpers ------------------------------------
+//------------ Formatting/printing helpers ----------------------------------
 
 fn fmt_aspath(bgp_update: &BgpUpdateMessage<Bytes>) -> Arc<str> {
     if let Some(aspath) = bgp_update.aspath().ok().flatten() {
@@ -1530,36 +1539,45 @@ fn fmt_pcap(buf: impl AsRef<[u8]>) -> Arc<str> {
 mod tests {
     use super::*;
 
-
     #[test]
     fn packaged_roto_script() {
         use crate::units::bgp_tcp_in::unit::{
             RotoFunc as BgpInFunc,
-            ROTO_FUNC_FILTER_NAME as ROTO_FUNC_BGP_IN_NAME
+            ROTO_FUNC_FILTER_NAME as ROTO_FUNC_BGP_IN_NAME,
         };
         use crate::units::bmp_tcp_in::unit::{
             RotoFunc as BmpInFunc,
-            ROTO_FUNC_FILTER_NAME as ROTO_FUNC_BMP_IN_NAME
+            ROTO_FUNC_FILTER_NAME as ROTO_FUNC_BMP_IN_NAME,
         };
         use crate::units::rib_unit::unit::{
-            RotoFuncPre as RibInPreFunc,
+            RotoFuncPre as RibInPreFunc, RotoFuncRovStatusUpdate,
+            RotoFuncVrpUpdate,
             ROTO_FUNC_PRE_FILTER_NAME as ROTO_FUNC_RIB_IN_PRE_NAME,
-            RotoFuncVrpUpdate, ROTO_FUNC_VRP_UPDATE_FILTER_NAME,
-            RotoFuncRovStatusUpdate, ROTO_FUNC_ROV_STATUS_UPDATE_NAME,
+            ROTO_FUNC_ROV_STATUS_UPDATE_NAME,
+            ROTO_FUNC_VRP_UPDATE_FILTER_NAME,
         };
 
         let roto_script = "etc/examples/filters.roto.example";
-        let mut roto_package = 
-            roto::FileTree::single_file(roto_script).unwrap()
+        let mut roto_package = roto::FileTree::single_file(roto_script)
+            .unwrap()
             .compile(&create_runtime().unwrap())
             .inspect_err(|e| eprintln!("{e}"))
             .unwrap();
 
-        let _: CompileListsFunc = roto_package.get_function(COMPILE_LISTS_FUNC_NAME).unwrap();
-        let _: BgpInFunc = roto_package.get_function(ROTO_FUNC_BGP_IN_NAME).unwrap();
-        let _: BmpInFunc = roto_package.get_function(ROTO_FUNC_BMP_IN_NAME).unwrap();
-        let _: RibInPreFunc = roto_package.get_function(ROTO_FUNC_RIB_IN_PRE_NAME).unwrap();
-        let _: RotoFuncVrpUpdate = roto_package.get_function(ROTO_FUNC_VRP_UPDATE_FILTER_NAME).unwrap();
-        let _: RotoFuncRovStatusUpdate = roto_package.get_function(ROTO_FUNC_ROV_STATUS_UPDATE_NAME).unwrap();
+        let _: CompileListsFunc =
+            roto_package.get_function(COMPILE_LISTS_FUNC_NAME).unwrap();
+        let _: BgpInFunc =
+            roto_package.get_function(ROTO_FUNC_BGP_IN_NAME).unwrap();
+        let _: BmpInFunc =
+            roto_package.get_function(ROTO_FUNC_BMP_IN_NAME).unwrap();
+        let _: RibInPreFunc = roto_package
+            .get_function(ROTO_FUNC_RIB_IN_PRE_NAME)
+            .unwrap();
+        let _: RotoFuncVrpUpdate = roto_package
+            .get_function(ROTO_FUNC_VRP_UPDATE_FILTER_NAME)
+            .unwrap();
+        let _: RotoFuncRovStatusUpdate = roto_package
+            .get_function(ROTO_FUNC_ROV_STATUS_UPDATE_NAME)
+            .unwrap();
     }
 }

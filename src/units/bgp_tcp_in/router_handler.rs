@@ -490,6 +490,17 @@ impl Processor {
                     live_sessions.lock().unwrap().len()
                 );
 
+                global_live_sessions.lock().unwrap().remove(&(
+                    negotiated.remote_addr(),
+                    negotiated.remote_asn(),
+                ));
+                debug!(
+                    "removed {}@{} from global_live_sessions (current count: {})",
+                    negotiated.remote_asn(),
+                    negotiated.remote_addr(),
+                    global_live_sessions.lock().unwrap().len()
+                );
+
                 self.ingresses.update_info(session_ingress_id,
                     ingress::IngressInfo::new()
                     .with_state(IngressState::Disconnected)

@@ -1,18 +1,23 @@
-use std::{net::{IpAddr, SocketAddr}, sync::{Arc, Mutex}};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::{Arc, Mutex},
+};
 
 use arc_swap::ArcSwapOption;
 use axum::routing::{get, post};
 use bytes::Bytes;
 use inetnum::asn::Asn;
+use log::{debug, error};
 use routecore::bgp::{fsm::session::Command, message::Message};
+use tokio::{sync::mpsc, task::JoinHandle};
 #[cfg(feature = "http-api-gzip")]
 use tower_http::compression::CompressionLayer;
-use log::{debug, error};
-use tokio::{sync::mpsc, task::JoinHandle};
 
-use crate::{ingress::{self, http_ng::IngressApi}, units::{bgp_tcp_in::unit::LiveSessions, rib_unit::rib::Rib}, webui::WebUI};
-
-
+use crate::{
+    ingress::{self, http_ng::IngressApi},
+    units::{bgp_tcp_in::unit::LiveSessions, rib_unit::rib::Rib},
+    webui::WebUI,
+};
 
 #[derive(Default)]
 pub struct Api {
@@ -51,29 +56,33 @@ pub struct ApiState {
     /// The `ingress::Register`
     pub(crate) ingress_register: Arc<ingress::Register>,
 
-
     pub(crate) global_bgp_sessions: Arc<Mutex<LiveSessions>>,
-    
+
     /// The metrics collection
     pub(crate) metrics: crate::metrics::Collection,
 }
 
-
 impl ApiState {
-
-    pub fn get_session(&self, remote_addr: IpAddr, remote_asn: Asn) -> Result<(mpsc::Sender<Command>,mpsc::Sender<Message<Bytes>>), ApiError> {
+    pub fn get_session(
+        &self,
+        remote_addr: IpAddr,
+        remote_asn: Asn,
+    ) -> Result<(mpsc::Sender<Command>, mpsc::Sender<Message<Bytes>>), ApiError>
+    {
         let Ok(sessions) = self.global_bgp_sessions.lock() else {
             return Err(ApiError::InternalServerError(
-                    "could not get lock on BGP live sessions".into(),
+                "could not get lock on BGP live sessions".into(),
             ));
         };
-        
-        sessions.get(&(remote_addr, remote_asn)).cloned().ok_or(ApiError::InternalServerError("foo".into()))
+
+        sessions
+            .get(&(remote_addr, remote_asn))
+            .cloned()
+            .ok_or(ApiError::InternalServerError("foo".into()))
     }
 }
 
 impl Api {
-
     /// Create a new HTTP Api based on configured interfaces and an `ingress::Register`
     ///
     /// The reference to the Rib (rotonda-store) will be unset, and is to be set by a/the RibUnit
@@ -88,14 +97,11 @@ impl Api {
             ingress_register: ingress_register.clone(),
             global_bgp_sessions: global_bgp_sessions.clone(),
             metrics: metrics.clone(),
-            
         };
 
         let router = axum::Router::<ApiState>::new()
             .route("/metrics", get(Self::metrics))
-            .with_state(state)
-            ;
-
+            .with_state(state);
 
         let mut res = Self {
             api_root: "".into(),
@@ -122,14 +128,21 @@ impl Api {
         res
     }
 
-    async fn metrics(state: axum::extract::State<ApiState>) -> Result<String, String> {
-        Ok(state.metrics.assemble(crate::metrics::OutputFormat::Prometheus))
+    async fn metrics(
+        state: axum::extract::State<ApiState>,
+    ) -> Result<String, String> {
+        Ok(state
+            .metrics
+            .assemble(crate::metrics::OutputFormat::Prometheus))
     }
 
     /// Clone an `ApiState` based on the references to the store an ingress registry
     pub fn cloned_api_state(&self) -> ApiState {
-        debug!("cloned_api_state(), store is_some: {:?}", self.store.load().is_some());
-        ApiState { 
+        debug!(
+            "cloned_api_state(), store is_some: {:?}",
+            self.store.load().is_some()
+        );
+        ApiState {
             store: self.store.clone(),
             ingress_register: self.ingress_register.clone(),
             global_bgp_sessions: self.global_bgp_sessions.clone(),
@@ -148,53 +161,59 @@ impl Api {
     }
 
     /// Set the interfaces
-    pub fn set_interfaces(&mut self, interfaces: impl IntoIterator<Item=SocketAddr>) { //Vec<SocketAddr>) {
+    pub fn set_interfaces(
+        &mut self,
+        interfaces: impl IntoIterator<Item = SocketAddr>,
+    ) {
+        //Vec<SocketAddr>) {
         self.interfaces = interfaces.into_iter().collect();
     }
 
-
     /// Add an HTTP GET endpoint
     pub fn add_get<H, T>(&mut self, path: impl AsRef<str>, handler: H)
-        where
-            H: axum::handler::Handler<T, ApiState>,
-            T: 'static,
+    where
+        H: axum::handler::Handler<T, ApiState>,
+        T: 'static,
     {
         debug!("add_get for {}", path.as_ref());
-        self.router = self.router.clone()
-            .route(&format!("{}{}", self.api_root, path.as_ref()), get(handler))
-            .with_state(
-                self.cloned_api_state()
-            );
+        self.router = self
+            .router
+            .clone()
+            .route(
+                &format!("{}{}", self.api_root, path.as_ref()),
+                get(handler),
+            )
+            .with_state(self.cloned_api_state());
     }
 
     /// Add an HTTP POST endpoint
     pub fn add_post<H, T>(&mut self, path: impl AsRef<str>, handler: H)
-        where
-            H: axum::handler::Handler<T, ApiState>,
-            T: 'static,
+    where
+        H: axum::handler::Handler<T, ApiState>,
+        T: 'static,
     {
         debug!("add_post for {}", path.as_ref());
-        self.router = self.router.clone()
-            .route(&format!("{}{}", self.api_root, path.as_ref()), post(handler))
-            .with_state(
-                self.cloned_api_state()
-            );
+        self.router = self
+            .router
+            .clone()
+            .route(
+                &format!("{}{}", self.api_root, path.as_ref()),
+                post(handler),
+            )
+            .with_state(self.cloned_api_state());
     }
-
 
     /// Start the HTTP API listeners on the configured interfaces
     pub fn start(&mut self) {
         self.signal_txs = vec![];
         self.serve_handles = vec![];
         for interface in self.interfaces.clone() {
-
             let (signal_tx, signal_rx) = mpsc::channel::<()>(1);
             self.signal_txs.push(signal_tx);
 
             debug!("starting Api on interface {interface}");
-            let mut app = self.router.clone().with_state(
-                self.cloned_api_state()
-            );
+            let mut app =
+                self.router.clone().with_state(self.cloned_api_state());
 
             #[cfg(feature = "http-api-gzip")]
             {
@@ -202,13 +221,14 @@ impl Api {
             }
 
             let h = tokio::spawn(async move {
-                let listener = match tokio::net::TcpListener::bind(interface).await {
-                    Ok(listener) => listener,
-                    Err(e) => {
-                        error!("Could not bind on {}: {}", interface, e);
-                        return;
-                    }
-                };
+                let listener =
+                    match tokio::net::TcpListener::bind(interface).await {
+                        Ok(listener) => listener,
+                        Err(e) => {
+                            error!("Could not bind on {}: {}", interface, e);
+                            return;
+                        }
+                    };
                 let _ = axum::serve(listener, app)
                     .with_graceful_shutdown(Self::shutdown(signal_rx))
                     .await;
@@ -216,7 +236,7 @@ impl Api {
             self.serve_handles.push(h);
         }
     }
-    
+
     async fn shutdown(mut rx: mpsc::Receiver<()>) {
         rx.recv().await;
         //debug!("in Api::shutdown(), got signal");
@@ -239,7 +259,6 @@ impl Api {
         }
         self.start();
     }
-
 }
 
 pub enum ApiError {
@@ -255,7 +274,8 @@ impl axum::response::IntoResponse for ApiError {
             serde_json::json!({
                 "data": None::<()>,
                 "error": msg
-            }).to_string()
+            })
+            .to_string()
         }
         (
             [("content-type", "application/json")],
@@ -263,10 +283,12 @@ impl axum::response::IntoResponse for ApiError {
                 ApiError::BadRequest(msg) => {
                     (axum::http::StatusCode::BAD_REQUEST, to_json(msg))
                 }
-                ApiError::InternalServerError(msg) => {
-                    (axum::http::StatusCode::INTERNAL_SERVER_ERROR, to_json(msg))
-                }
-            }
-        ).into_response()
+                ApiError::InternalServerError(msg) => (
+                    axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+                    to_json(msg),
+                ),
+            },
+        )
+            .into_response()
     }
 }

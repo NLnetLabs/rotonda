@@ -196,12 +196,40 @@ async fn send_pdu(
                     }
                 }
             } else if announce.prefix.first().is_some_and(|p| p.is_v6()) {
-                todo!()
-                //if let Err(e) = builder
-                //    .add_announcement(Ipv6UnicastNlri::try_from(body.prefix).unwrap())
-                //{
-                //    return Err(ApiError::InternalServerError(e.to_string()));
-                //};
+                let mut builder =
+                    UpdateBuilder::<Vec<u8>, Ipv6UnicastNlri>::from_attributes_builder(pamap);
+                if let Err(e) = builder.announcements_from_iter(
+                    announce
+                        .prefix
+                        .into_iter()
+                        .map(|p| Ipv6UnicastNlri::try_from(p).unwrap()),
+                ) {
+                    return Err(ApiError::InternalServerError(e.to_string()));
+                };
+                let _ = builder.set_nexthop(
+                    routecore::bgp::types::NextHop::Unicast(announce.nexthop),
+                );
+                let pdu = match builder.into_message(&session_config) {
+                    Ok(pdu) => pdu,
+                    Err(e) => {
+                        return Err(ApiError::InternalServerError(
+                            e.to_string(),
+                        ));
+                    }
+                };
+
+                let bytes = Bytes::from(pdu.as_ref().to_vec());
+                match tx_pdus.try_send(
+                    routecore::bgp::message::Message::Update(
+                        UpdateMessage::from_octets(bytes, &session_config)
+                            .unwrap(),
+                    ),
+                ) {
+                    Ok(_) => Ok("ok"),
+                    Err(e) => {
+                        Err(ApiError::InternalServerError(e.to_string()))
+                    }
+                }
             } else {
                 Err(ApiError::InternalServerError(
                     "no prefixes or unexpected prefix type".into(),
@@ -242,12 +270,37 @@ async fn send_pdu(
                     }
                 }
             } else if withdraw.prefix.first().is_some_and(|p| p.is_v6()) {
-                todo!()
-                //if let Err(e) = builder
-                //    .add_announcement(Ipv6UnicastNlri::try_from(body.prefix).unwrap())
-                //{
-                //    return Err(ApiError::InternalServerError(e.to_string()));
-                //};
+                let mut builder =
+                    UpdateBuilder::<Vec<u8>, Ipv6UnicastNlri>::new_vec();
+                if let Err(e) = builder.withdrawals_from_iter(
+                    withdraw
+                        .prefix
+                        .into_iter()
+                        .map(|p| Ipv6UnicastNlri::try_from(p).unwrap()),
+                ) {
+                    return Err(ApiError::InternalServerError(e.to_string()));
+                };
+                let pdu = match builder.into_message(&session_config) {
+                    Ok(pdu) => pdu,
+                    Err(e) => {
+                        return Err(ApiError::InternalServerError(
+                            e.to_string(),
+                        ));
+                    }
+                };
+
+                let bytes = Bytes::from(pdu.as_ref().to_vec());
+                match tx_pdus.try_send(
+                    routecore::bgp::message::Message::Update(
+                        UpdateMessage::from_octets(bytes, &session_config)
+                            .unwrap(),
+                    ),
+                ) {
+                    Ok(_) => Ok("ok"),
+                    Err(e) => {
+                        Err(ApiError::InternalServerError(e.to_string()))
+                    }
+                }
             } else {
                 Err(ApiError::InternalServerError(
                     "no prefixes or unexpected prefix type".into(),

@@ -1,7 +1,10 @@
-use std::{net::SocketAddr, sync::{Arc, Mutex}};
+use std::{net::{IpAddr, SocketAddr}, sync::{Arc, Mutex}};
 
 use arc_swap::ArcSwapOption;
 use axum::routing::{get, post};
+use bytes::Bytes;
+use inetnum::asn::Asn;
+use routecore::bgp::{fsm::session::Command, message::Message};
 #[cfg(feature = "http-api-gzip")]
 use tower_http::compression::CompressionLayer;
 use log::{debug, error};
@@ -56,6 +59,18 @@ pub struct ApiState {
 }
 
 
+impl ApiState {
+
+    pub fn get_session(&self, remote_addr: IpAddr, remote_asn: Asn) -> Result<(mpsc::Sender<Command>,mpsc::Sender<Message<Bytes>>), ApiError> {
+        let Ok(sessions) = self.global_bgp_sessions.lock() else {
+            return Err(ApiError::InternalServerError(
+                    "could not get lock on BGP live sessions".into(),
+            ));
+        };
+        
+        sessions.get(&(remote_addr, remote_asn)).cloned().ok_or(ApiError::InternalServerError("foo".into()))
+    }
+}
 
 impl Api {
 

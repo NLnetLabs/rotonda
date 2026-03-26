@@ -422,6 +422,7 @@ impl Processor {
                                 "inserted into live_sessions (current count: {})",
                                 live_sessions.len()
                             );
+
                             let mut global_live_sessions = global_live_sessions.lock().unwrap();
                             global_live_sessions.insert(
                                 (negotiated.remote_addr(), negotiated.remote_asn()),
@@ -431,6 +432,7 @@ impl Processor {
                                 "inserted into global_live_sessions (current count: {})",
                                 global_live_sessions.len()
                             );
+
                             }
                             // register ingress
                             //session_ingress_id = self.ingresses.register();

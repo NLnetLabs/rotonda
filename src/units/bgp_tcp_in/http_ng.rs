@@ -27,11 +27,19 @@ use crate::{
 pub fn register_routes(router: &mut Api) {
     router.add_post(
         "/bgp/announce/ingress/{ingress_id}",
-        send_pdu_for_ingress_id,
+        send_announce_for_ingress_id,
     );
     router.add_post(
         "/bgp/announce/peer/{remote_asn}/{remote_addr}",
-        send_pdu_for_peer,
+        send_announce_for_peer,
+    );
+    router.add_post(
+        "/bgp/withdraw/ingress/{ingress_id}",
+        send_withdraw_for_ingress_id,
+    );
+    router.add_post(
+        "/bgp/withdraw/peer/{remote_asn}/{remote_addr}",
+        send_withdraw_for_peer,
     );
 }
 
@@ -47,13 +55,15 @@ struct Withdraw {
     prefix: Vec<Prefix>,
 }
 
-async fn send_pdu_for_ingress_id(
-    Path(ingress_id): Path<IngressId>,
-    state: State<ApiState>,
-    Json(body): Json<Announce>,
-) -> Result<impl IntoResponse, ApiError> {
-    // fetch asn+addr from ingress
-    // call send_pdu
+enum Action {
+    Announce(Announce),
+    Withdraw(Withdraw),
+}
+
+fn ingress_to_peer(
+    ingress_id: IngressId,
+    state: &State<ApiState>,
+) -> Result<(Asn, IpAddr), ApiError> {
     let Some(ingress_info) = state
         .ingress_register
         .get(ingress_id)
@@ -64,30 +74,53 @@ async fn send_pdu_for_ingress_id(
         ));
     };
 
-    let Some((asn, addr)) =
-        ingress_info.remote_asn.zip(ingress_info.remote_addr)
-    else {
-        return Err(ApiError::BadRequest(
+    ingress_info.remote_asn.zip(ingress_info.remote_addr).ok_or(
+        ApiError::BadRequest(
             "unexpected: remote ASN and/or IP address missing".into(),
-        ));
-    };
-
-    send_pdu(asn, addr, state, body)
+        ),
+    )
 }
 
-async fn send_pdu_for_peer(
+async fn send_announce_for_ingress_id(
+    Path(ingress_id): Path<IngressId>,
+    state: State<ApiState>,
+    Json(body): Json<Announce>,
+) -> Result<impl IntoResponse, ApiError> {
+    let (asn, addr) = ingress_to_peer(ingress_id, &state)?;
+    send_pdu(asn, addr, state, Action::Announce(body))
+}
+
+async fn send_announce_for_peer(
     Path((remote_asn, remote_addr)): Path<(Asn, IpAddr)>,
     state: State<ApiState>,
     Json(body): Json<Announce>,
 ) -> Result<impl IntoResponse, ApiError> {
-    send_pdu(remote_asn, remote_addr, state, body)
+    send_pdu(remote_asn, remote_addr, state, Action::Announce(body))
+}
+
+async fn send_withdraw_for_ingress_id(
+    Path(ingress_id): Path<IngressId>,
+    state: State<ApiState>,
+    Json(body): Json<Withdraw>,
+) -> Result<impl IntoResponse, ApiError> {
+    let (asn, addr) = ingress_to_peer(ingress_id, &state)?;
+    send_pdu(asn, addr, state, Action::Withdraw(body))
+}
+
+async fn send_withdraw_for_peer(
+    Path((remote_asn, remote_addr)): Path<(Asn, IpAddr)>,
+    state: State<ApiState>,
+    Json(body): Json<Withdraw>,
+) -> Result<impl IntoResponse, ApiError> {
+    send_pdu(remote_asn, remote_addr, state, Action::Withdraw(body))
 }
 
 fn send_pdu(
     remote_asn: Asn,
     remote_addr: IpAddr,
     state: State<ApiState>,
-    body: Announce,
+    //body: Announce,
+    action: Action,
 ) -> Result<impl IntoResponse, ApiError> {
     let Ok(sessions) = state.global_bgp_sessions.lock() else {
         return Err(ApiError::InternalServerError(
@@ -105,66 +138,127 @@ fn send_pdu(
         ));
     };
     debug!("found a session for {remote_asn}@{remote_addr} to send a PDU to");
-    let decoded = BASE64_STANDARD
-        .decode(body.raw_attributes.as_bytes())
-        .unwrap();
 
-    let mut pamap = PaMap::empty();
-    let opa = OwnedPathAttributes::new(PduParseInfo::modern(), decoded);
-    for pa in opa.iter() {
-        if let Ok(pa) = pa {
-            pamap.set_from_enum(pa.to_owned().unwrap());
-        } else {
-            warn!("can't interpret path attribute: {pa:#?}")
-        }
-    }
+    match action {
+        Action::Announce(announce) => {
+            let decoded = BASE64_STANDARD
+                .decode(announce.raw_attributes.as_bytes())
+                .unwrap();
 
-    if body.prefix.first().is_some_and(|p| p.is_v4()) {
-        let mut builder =
-            UpdateBuilder::<Vec<u8>, Ipv4UnicastNlri>::from_attributes_builder(pamap);
-        if let Err(e) = builder.announcements_from_iter(
-            body.prefix
-                .into_iter()
-                .map(|p| Ipv4UnicastNlri::try_from(p).unwrap()),
-        )
-        //.add_announcement(Ipv4UnicastNlri::try_from(body.prefix).unwrap())
-        {
-            return Err(ApiError::InternalServerError(e.to_string()));
-        };
-        let _ = builder.set_nexthop(routecore::bgp::types::NextHop::Unicast(
-            "10.1.0.254".parse().unwrap(),
-        ));
-        let pdu = match builder.into_message(&SessionConfig::modern()) {
-            Ok(pdu) => pdu,
-            Err(e) => {
-                return Err(ApiError::InternalServerError(e.to_string()));
+            let mut pamap = PaMap::empty();
+            let opa =
+                OwnedPathAttributes::new(PduParseInfo::modern(), decoded);
+            for pa in opa.iter() {
+                if let Ok(pa) = pa {
+                    pamap.set_from_enum(pa.to_owned().unwrap());
+                } else {
+                    warn!("can't interpret path attribute: {pa:#?}")
+                }
             }
-        };
 
-        let bytes = Bytes::from(pdu.as_ref().to_vec());
-        match tx_pdus.try_send(routecore::bgp::message::Message::Update(
-            UpdateMessage::from_octets(bytes, &SessionConfig::modern())
-                .unwrap(),
-        )) {
-            Ok(_) => Ok("ok"),
-            Err(e) => Err(ApiError::InternalServerError(e.to_string())),
+            if announce.prefix.first().is_some_and(|p| p.is_v4()) {
+                let mut builder =
+                    UpdateBuilder::<Vec<u8>, Ipv4UnicastNlri>::from_attributes_builder(pamap);
+                if let Err(e) = builder.announcements_from_iter(
+                    announce
+                        .prefix
+                        .into_iter()
+                        .map(|p| Ipv4UnicastNlri::try_from(p).unwrap()),
+                ) {
+                    return Err(ApiError::InternalServerError(e.to_string()));
+                };
+                let _ = builder.set_nexthop(
+                    routecore::bgp::types::NextHop::Unicast(
+                        "10.1.0.254".parse().unwrap(),
+                    ),
+                );
+                let pdu = match builder.into_message(&SessionConfig::modern())
+                {
+                    Ok(pdu) => pdu,
+                    Err(e) => {
+                        return Err(ApiError::InternalServerError(
+                            e.to_string(),
+                        ));
+                    }
+                };
+
+                let bytes = Bytes::from(pdu.as_ref().to_vec());
+                match tx_pdus.try_send(
+                    routecore::bgp::message::Message::Update(
+                        UpdateMessage::from_octets(
+                            bytes,
+                            &SessionConfig::modern(),
+                        )
+                        .unwrap(),
+                    ),
+                ) {
+                    Ok(_) => Ok("ok"),
+                    Err(e) => {
+                        Err(ApiError::InternalServerError(e.to_string()))
+                    }
+                }
+            } else if announce.prefix.first().is_some_and(|p| p.is_v6()) {
+                todo!()
+                //if let Err(e) = builder
+                //    .add_announcement(Ipv6UnicastNlri::try_from(body.prefix).unwrap())
+                //{
+                //    return Err(ApiError::InternalServerError(e.to_string()));
+                //};
+            } else {
+                Err(ApiError::InternalServerError(
+                    "no prefixes or unexpected prefix type".into(),
+                ))
+            }
         }
-    } else if body.prefix.first().is_some_and(|p| p.is_v6()) {
-        todo!()
-        //if let Err(e) = builder
-        //    .add_announcement(Ipv6UnicastNlri::try_from(body.prefix).unwrap())
-        //{
-        //    return Err(ApiError::InternalServerError(e.to_string()));
-        //};
-    } else {
-        Err(ApiError::InternalServerError(
-            "no prefixes or unexpected prefix type".into(),
-        ))
-    }
+        Action::Withdraw(withdraw) => {
+            if withdraw.prefix.first().is_some_and(|p| p.is_v4()) {
+                let mut builder =
+                    UpdateBuilder::<Vec<u8>, Ipv4UnicastNlri>::new_vec();
+                if let Err(e) = builder.withdrawals_from_iter(
+                    withdraw
+                        .prefix
+                        .into_iter()
+                        .map(|p| Ipv4UnicastNlri::try_from(p).unwrap()),
+                ) {
+                    return Err(ApiError::InternalServerError(e.to_string()));
+                };
+                let pdu = match builder.into_message(&SessionConfig::modern())
+                {
+                    Ok(pdu) => pdu,
+                    Err(e) => {
+                        return Err(ApiError::InternalServerError(
+                            e.to_string(),
+                        ));
+                    }
+                };
 
-    //Ok(format!(
-    //    "found a session, TODO send announcement for {} containing {:?}",
-    //    body.prefix, decoded
-    //))
-    //
+                let bytes = Bytes::from(pdu.as_ref().to_vec());
+                match tx_pdus.try_send(
+                    routecore::bgp::message::Message::Update(
+                        UpdateMessage::from_octets(
+                            bytes,
+                            &SessionConfig::modern(),
+                        )
+                        .unwrap(),
+                    ),
+                ) {
+                    Ok(_) => Ok("ok"),
+                    Err(e) => {
+                        Err(ApiError::InternalServerError(e.to_string()))
+                    }
+                }
+            } else if withdraw.prefix.first().is_some_and(|p| p.is_v6()) {
+                todo!()
+                //if let Err(e) = builder
+                //    .add_announcement(Ipv6UnicastNlri::try_from(body.prefix).unwrap())
+                //{
+                //    return Err(ApiError::InternalServerError(e.to_string()));
+                //};
+            } else {
+                Err(ApiError::InternalServerError(
+                    "no prefixes or unexpected prefix type".into(),
+                ))
+            }
+        }
+    }
 }

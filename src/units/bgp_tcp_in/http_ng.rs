@@ -41,6 +41,12 @@ pub fn register_routes(router: &mut Api) {
         "/bgp/withdraw/peer/{remote_asn}/{remote_addr}",
         send_withdraw_for_peer,
     );
+
+    router.add_post("/bgp/raw/ingress/{ingress_id}", send_raw_for_ingress_id);
+    router.add_post(
+        "/bgp/raw/peer/{remote_asn}/{remote_addr}",
+        send_raw_for_peer,
+    );
 }
 
 #[derive(Debug, Deserialize)]
@@ -54,6 +60,11 @@ struct Announce {
 #[derive(Debug, Deserialize)]
 struct Withdraw {
     prefix: Vec<Prefix>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawPdu {
+    full_pdu: String,
 }
 
 enum Action {
@@ -147,7 +158,9 @@ async fn send_pdu(
         Action::Announce(announce) => {
             let decoded = BASE64_STANDARD
                 .decode(announce.raw_attributes.as_bytes())
-                .unwrap();
+                .map_err(|e| {
+                    ApiError::BadRequest(format!("invalid base64: {e}"))
+                })?;
 
             let mut pamap = PaMap::empty();
             let opa =
@@ -307,5 +320,58 @@ async fn send_pdu(
                 ))
             }
         }
+    }
+}
+
+async fn send_raw_for_ingress_id(
+    Path(ingress_id): Path<IngressId>,
+    state: State<ApiState>,
+    Json(body): Json<RawPdu>,
+) -> Result<impl IntoResponse, ApiError> {
+    let (asn, addr) = ingress_to_peer(ingress_id, &state)?;
+    send_raw(asn, addr, state, body).await
+}
+
+async fn send_raw_for_peer(
+    Path((remote_asn, remote_addr)): Path<(Asn, IpAddr)>,
+    state: State<ApiState>,
+    Json(body): Json<RawPdu>,
+) -> Result<impl IntoResponse, ApiError> {
+    send_raw(remote_asn, remote_addr, state, body).await
+}
+
+async fn send_raw(
+    remote_asn: Asn,
+    remote_addr: IpAddr,
+    state: State<ApiState>,
+    raw_pdu: RawPdu,
+) -> Result<impl IntoResponse, ApiError> {
+    let (tx_cmds, tx_pdus) = state.get_session(remote_addr, remote_asn)?;
+
+    let (tx, rx) = oneshot::channel();
+    let session_config = {
+        tx_cmds
+            .send(routecore::bgp::fsm::session::Command::GetSessionConfig {
+                resp: tx,
+            })
+            .await
+            .unwrap();
+        rx.await.unwrap_or_else(|_| {
+            warn!(
+                "could not get SessionConfig from BGP handler, \
+                defaulting to SessionConfig::modern()"
+            );
+            SessionConfig::modern()
+        })
+    };
+    let decoded = BASE64_STANDARD
+        .decode(raw_pdu.full_pdu.as_bytes())
+        .map_err(|e| ApiError::BadRequest(format!("invalid base64: {e}")))?;
+    let bytes = Bytes::from(decoded);
+    let pdu = UpdateMessage::from_octets(bytes, &session_config)
+        .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
+    match tx_pdus.try_send(routecore::bgp::message::Message::Update(pdu)) {
+        Ok(_) => Ok("ok"),
+        Err(e) => Err(ApiError::InternalServerError(e.to_string())),
     }
 }

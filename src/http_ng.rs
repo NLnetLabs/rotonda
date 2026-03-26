@@ -75,10 +75,11 @@ impl ApiState {
             ));
         };
 
-        sessions
-            .get(&(remote_addr, remote_asn))
-            .cloned()
-            .ok_or(ApiError::InternalServerError("foo".into()))
+        sessions.get(&(remote_addr, remote_asn)).cloned().ok_or(
+            ApiError::InternalServerError(format!(
+                "no session info for {remote_asn}@{remote_addr}"
+            )),
+        )
     }
 }
 

@@ -46,6 +46,7 @@ pub fn register_routes(router: &mut Api) {
 #[derive(Debug, Deserialize)]
 struct Announce {
     prefix: Vec<Prefix>,
+    nexthop: IpAddr,
     // base64 encoded path attributes
     raw_attributes: String,
 }
@@ -168,9 +169,7 @@ fn send_pdu(
                     return Err(ApiError::InternalServerError(e.to_string()));
                 };
                 let _ = builder.set_nexthop(
-                    routecore::bgp::types::NextHop::Unicast(
-                        "10.1.0.254".parse().unwrap(),
-                    ),
+                    routecore::bgp::types::NextHop::Unicast(announce.nexthop),
                 );
                 let pdu = match builder.into_message(&SessionConfig::modern())
                 {

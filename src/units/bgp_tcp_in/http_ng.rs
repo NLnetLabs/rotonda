@@ -17,7 +17,7 @@ use routecore::bgp::{
     path_attributes::{OwnedPathAttributes, PaMap},
 };
 use serde::Deserialize;
-//use serde_json::Value;
+use tokio::sync::oneshot;
 
 use crate::{
     http_ng::{Api, ApiError, ApiState},
@@ -88,7 +88,7 @@ async fn send_announce_for_ingress_id(
     Json(body): Json<Announce>,
 ) -> Result<impl IntoResponse, ApiError> {
     let (asn, addr) = ingress_to_peer(ingress_id, &state)?;
-    send_pdu(asn, addr, state, Action::Announce(body))
+    send_pdu(asn, addr, state, Action::Announce(body)).await
 }
 
 async fn send_announce_for_peer(
@@ -96,7 +96,7 @@ async fn send_announce_for_peer(
     state: State<ApiState>,
     Json(body): Json<Announce>,
 ) -> Result<impl IntoResponse, ApiError> {
-    send_pdu(remote_asn, remote_addr, state, Action::Announce(body))
+    send_pdu(remote_asn, remote_addr, state, Action::Announce(body)).await
 }
 
 async fn send_withdraw_for_ingress_id(
@@ -105,7 +105,7 @@ async fn send_withdraw_for_ingress_id(
     Json(body): Json<Withdraw>,
 ) -> Result<impl IntoResponse, ApiError> {
     let (asn, addr) = ingress_to_peer(ingress_id, &state)?;
-    send_pdu(asn, addr, state, Action::Withdraw(body))
+    send_pdu(asn, addr, state, Action::Withdraw(body)).await
 }
 
 async fn send_withdraw_for_peer(
@@ -113,32 +113,35 @@ async fn send_withdraw_for_peer(
     state: State<ApiState>,
     Json(body): Json<Withdraw>,
 ) -> Result<impl IntoResponse, ApiError> {
-    send_pdu(remote_asn, remote_addr, state, Action::Withdraw(body))
+    send_pdu(remote_asn, remote_addr, state, Action::Withdraw(body)).await
 }
 
-fn send_pdu(
+async fn send_pdu(
     remote_asn: Asn,
     remote_addr: IpAddr,
     state: State<ApiState>,
-    //body: Announce,
     action: Action,
 ) -> Result<impl IntoResponse, ApiError> {
-    let Ok(sessions) = state.global_bgp_sessions.lock() else {
-        return Err(ApiError::InternalServerError(
-            "could not get lock on BGP live sessions".into(),
-        ));
+    let (tx_cmds, tx_pdus) = state.get_session(remote_addr, remote_asn)?;
+
+    let (tx, rx) = oneshot::channel();
+    let session_config = {
+        tx_cmds
+            .send(routecore::bgp::fsm::session::Command::GetSessionConfig {
+                resp: tx,
+            })
+            .await
+            .unwrap();
+        rx.await.unwrap_or_else(|_| {
+            warn!(
+                "could not get SessionConfig from BGP handler, \
+                defaulting to SessionConfig::modern()"
+            );
+            SessionConfig::modern()
+        })
     };
 
-    debug!("in send_pdu, global_live_sessions: {:#?}", sessions.keys());
-
-    let Some((_tx_cmds, tx_pdus)) = sessions.get(&(remote_addr, remote_asn))
-    else {
-        warn!("no live BGP session for {remote_asn}@{remote_addr}");
-        return Err(ApiError::InternalServerError(
-            "no live BGP session for {remote_asn}@{remote_addr}".into(),
-        ));
-    };
-    debug!("found a session for {remote_asn}@{remote_addr} to send a PDU to");
+    debug!("got session_config: {:#?}", session_config);
 
     match action {
         Action::Announce(announce) => {
@@ -171,8 +174,7 @@ fn send_pdu(
                 let _ = builder.set_nexthop(
                     routecore::bgp::types::NextHop::Unicast(announce.nexthop),
                 );
-                let pdu = match builder.into_message(&SessionConfig::modern())
-                {
+                let pdu = match builder.into_message(&session_config) {
                     Ok(pdu) => pdu,
                     Err(e) => {
                         return Err(ApiError::InternalServerError(
@@ -184,11 +186,8 @@ fn send_pdu(
                 let bytes = Bytes::from(pdu.as_ref().to_vec());
                 match tx_pdus.try_send(
                     routecore::bgp::message::Message::Update(
-                        UpdateMessage::from_octets(
-                            bytes,
-                            &SessionConfig::modern(),
-                        )
-                        .unwrap(),
+                        UpdateMessage::from_octets(bytes, &session_config)
+                            .unwrap(),
                     ),
                 ) {
                     Ok(_) => Ok("ok"),
@@ -221,8 +220,7 @@ fn send_pdu(
                 ) {
                     return Err(ApiError::InternalServerError(e.to_string()));
                 };
-                let pdu = match builder.into_message(&SessionConfig::modern())
-                {
+                let pdu = match builder.into_message(&session_config) {
                     Ok(pdu) => pdu,
                     Err(e) => {
                         return Err(ApiError::InternalServerError(
@@ -234,11 +232,8 @@ fn send_pdu(
                 let bytes = Bytes::from(pdu.as_ref().to_vec());
                 match tx_pdus.try_send(
                     routecore::bgp::message::Message::Update(
-                        UpdateMessage::from_octets(
-                            bytes,
-                            &SessionConfig::modern(),
-                        )
-                        .unwrap(),
+                        UpdateMessage::from_octets(bytes, &session_config)
+                            .unwrap(),
                     ),
                 ) {
                     Ok(_) => Ok("ok"),

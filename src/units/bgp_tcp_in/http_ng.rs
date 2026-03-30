@@ -8,6 +8,7 @@ use base64::prelude::*;
 use bytes::Bytes;
 use inetnum::{addr::Prefix, asn::Asn};
 use log::{debug, warn};
+use rotonda_store::prefix_record::{Record, RouteStatus};
 use routecore::bgp::{
     message::{
         update_builder::UpdateBuilder, PduParseInfo, SessionConfig,
@@ -21,7 +22,11 @@ use tokio::sync::oneshot;
 
 use crate::{
     http_ng::{Api, ApiError, ApiState},
-    ingress::{IngressId, IngressType},
+    ingress::{
+        http_ng::QueryFilter, register::IngressState, IngressId, IngressInfo,
+        IngressType,
+    },
+    payload::{RotondaPaMap, RotondaRoute},
 };
 
 pub fn register_routes(router: &mut Api) {
@@ -93,13 +98,42 @@ fn ingress_to_peer(
     )
 }
 
+// XXX make this and ingress_to_peer live on ApiState itself?
+fn peer_to_ingress(
+    peer_asn: Asn,
+    peer_addr: IpAddr,
+    state: &State<ApiState>,
+) -> Result<IngressId, ApiError> {
+    let res = state.ingress_register.search(QueryFilter {
+        ingress_type: Some(IngressType::Bgp),
+        ingress_state: Some(IngressState::Connected),
+        remote_addr: Some(peer_addr),
+        remote_asn: Some(peer_asn),
+        ..Default::default()
+    });
+    if res.len() > 1 {
+        return Err(ApiError::InternalServerError(format!(
+            "more than one candidate BGP session for \
+            {peer_asn}@{peer_addr}, rotonda bug"
+        )));
+    }
+
+    if res.is_empty() {
+        return Err(ApiError::BadRequest(format!(
+            "no active BGP session for {peer_asn}@{peer_addr}"
+        )));
+    }
+
+    Ok(res[0].ingress_id)
+}
+
 async fn send_announce_for_ingress_id(
     Path(ingress_id): Path<IngressId>,
     state: State<ApiState>,
     Json(body): Json<Announce>,
 ) -> Result<impl IntoResponse, ApiError> {
     let (asn, addr) = ingress_to_peer(ingress_id, &state)?;
-    send_pdu(asn, addr, state, Action::Announce(body)).await
+    send_pdu(ingress_id, asn, addr, state, Action::Announce(body)).await
 }
 
 async fn send_announce_for_peer(
@@ -107,7 +141,15 @@ async fn send_announce_for_peer(
     state: State<ApiState>,
     Json(body): Json<Announce>,
 ) -> Result<impl IntoResponse, ApiError> {
-    send_pdu(remote_asn, remote_addr, state, Action::Announce(body)).await
+    let ingress_id = peer_to_ingress(remote_asn, remote_addr, &state)?;
+    send_pdu(
+        ingress_id,
+        remote_asn,
+        remote_addr,
+        state,
+        Action::Announce(body),
+    )
+    .await
 }
 
 async fn send_withdraw_for_ingress_id(
@@ -116,7 +158,7 @@ async fn send_withdraw_for_ingress_id(
     Json(body): Json<Withdraw>,
 ) -> Result<impl IntoResponse, ApiError> {
     let (asn, addr) = ingress_to_peer(ingress_id, &state)?;
-    send_pdu(asn, addr, state, Action::Withdraw(body)).await
+    send_pdu(ingress_id, asn, addr, state, Action::Withdraw(body)).await
 }
 
 async fn send_withdraw_for_peer(
@@ -124,10 +166,19 @@ async fn send_withdraw_for_peer(
     state: State<ApiState>,
     Json(body): Json<Withdraw>,
 ) -> Result<impl IntoResponse, ApiError> {
-    send_pdu(remote_asn, remote_addr, state, Action::Withdraw(body)).await
+    let ingress_id = peer_to_ingress(remote_asn, remote_addr, &state)?;
+    send_pdu(
+        ingress_id,
+        remote_asn,
+        remote_addr,
+        state,
+        Action::Withdraw(body),
+    )
+    .await
 }
 
 async fn send_pdu(
+    ingress_id: IngressId,
     remote_asn: Asn,
     remote_addr: IpAddr,
     state: State<ApiState>,
@@ -135,6 +186,7 @@ async fn send_pdu(
 ) -> Result<impl IntoResponse, ApiError> {
     let (tx_cmds, tx_pdus) = state.get_session(remote_addr, remote_asn)?;
 
+    // TODO D-R-Y, extract this into function
     let (tx, rx) = oneshot::channel();
     let session_config = {
         tx_cmds
@@ -173,14 +225,42 @@ async fn send_pdu(
                 }
             }
 
+            // find an existing mui, or register one.
+            // the mui ('ingress_id') is not really pointing to an
+            // ingress, but rather a adj-RIB-out for Rotonda
+            // itself.
+            let adj_rib_out_id = if let Some((ingress_id, _ingress_info)) =
+                state.ingress_register.find_rib_out_for_ingress(ingress_id)
+            {
+                ingress_id
+            } else {
+                let new_id = state.ingress_register.register();
+                state.ingress_register.update_info(
+                    new_id,
+                    IngressInfo::new()
+                        .with_parent_ingress(ingress_id)
+                        .with_ingress_type(IngressType::BgpOut)
+                        .with_remote_asn(remote_asn)
+                        .with_remote_addr(remote_addr),
+                );
+                new_id
+            };
+
+            let store = state.store.load();
+            let Some(ref rib) = *store else {
+                return Err(ApiError::InternalServerError(
+                    "store not ready".into(),
+                ));
+            };
+
             if announce.prefix.first().is_some_and(|p| p.is_v4()) {
                 let mut builder =
                     UpdateBuilder::<Vec<u8>, Ipv4UnicastNlri>::from_attributes_builder(pamap);
                 if let Err(e) = builder.announcements_from_iter(
                     announce
                         .prefix
-                        .into_iter()
-                        .map(|p| Ipv4UnicastNlri::try_from(p).unwrap()),
+                        .iter()
+                        .map(|p| Ipv4UnicastNlri::try_from(*p).unwrap()),
                 ) {
                     return Err(ApiError::InternalServerError(e.to_string()));
                 };
@@ -203,7 +283,27 @@ async fn send_pdu(
                             .unwrap(),
                     ),
                 ) {
-                    Ok(_) => Ok("ok"),
+                    Ok(_) => {
+                        let ltime = 0;
+                        let route_status = RouteStatus::Active;
+                        for p in announce.prefix.into_iter() {
+                            let rr = RotondaRoute::Ipv4Unicast(
+                                Ipv4UnicastNlri::try_from(p).unwrap(),
+                                RotondaPaMap::new(opa.clone()),
+                            );
+                            if let Err(e) = rib.insert(
+                                &rr,
+                                route_status,
+                                ltime,
+                                adj_rib_out_id,
+                            ) {
+                                return Err(ApiError::InternalServerError(
+                                    format!("store error: {e}"),
+                                ));
+                            }
+                        }
+                        Ok("ok")
+                    }
                     Err(e) => {
                         Err(ApiError::InternalServerError(e.to_string()))
                     }
@@ -214,8 +314,8 @@ async fn send_pdu(
                 if let Err(e) = builder.announcements_from_iter(
                     announce
                         .prefix
-                        .into_iter()
-                        .map(|p| Ipv6UnicastNlri::try_from(p).unwrap()),
+                        .iter()
+                        .map(|p| Ipv6UnicastNlri::try_from(*p).unwrap()),
                 ) {
                     return Err(ApiError::InternalServerError(e.to_string()));
                 };
@@ -238,7 +338,27 @@ async fn send_pdu(
                             .unwrap(),
                     ),
                 ) {
-                    Ok(_) => Ok("ok"),
+                    Ok(_) => {
+                        let ltime = 0;
+                        let route_status = RouteStatus::Active;
+                        for p in announce.prefix.into_iter() {
+                            let rr = RotondaRoute::Ipv6Unicast(
+                                Ipv6UnicastNlri::try_from(p).unwrap(),
+                                RotondaPaMap::new(opa.clone()),
+                            );
+                            if let Err(e) = rib.insert(
+                                &rr,
+                                route_status,
+                                ltime,
+                                adj_rib_out_id,
+                            ) {
+                                return Err(ApiError::InternalServerError(
+                                    format!("store error: {e}"),
+                                ));
+                            }
+                        }
+                        Ok("ok")
+                    }
                     Err(e) => {
                         Err(ApiError::InternalServerError(e.to_string()))
                     }
@@ -250,14 +370,36 @@ async fn send_pdu(
             }
         }
         Action::Withdraw(withdraw) => {
+            let adj_rib_out_id = if let Some((ingress_id, _ingress_info)) =
+                state.ingress_register.find_rib_out_for_ingress(ingress_id)
+            {
+                ingress_id
+            } else {
+                // If there is no such an existing BgpOut, there
+                // can't be anything to withdraw in the first
+                // place.
+                return Err(ApiError::BadRequest(format!(
+                    "no BgpOut for \
+                                {remote_asn}@{remote_addr} \
+                                (ingress {ingress_id})"
+                )));
+            };
+
+            let store = state.store.load();
+            let Some(ref rib) = *store else {
+                return Err(ApiError::InternalServerError(
+                    "store not ready".into(),
+                ));
+            };
+
             if withdraw.prefix.first().is_some_and(|p| p.is_v4()) {
                 let mut builder =
                     UpdateBuilder::<Vec<u8>, Ipv4UnicastNlri>::new_vec();
                 if let Err(e) = builder.withdrawals_from_iter(
                     withdraw
                         .prefix
-                        .into_iter()
-                        .map(|p| Ipv4UnicastNlri::try_from(p).unwrap()),
+                        .iter()
+                        .map(|p| Ipv4UnicastNlri::try_from(*p).unwrap()),
                 ) {
                     return Err(ApiError::InternalServerError(e.to_string()));
                 };
@@ -277,7 +419,27 @@ async fn send_pdu(
                             .unwrap(),
                     ),
                 ) {
-                    Ok(_) => Ok("ok"),
+                    Ok(_) => {
+                        let ltime = 0;
+                        let route_status = RouteStatus::Withdrawn;
+                        for p in withdraw.prefix.into_iter() {
+                            let rr = RotondaRoute::Ipv4Unicast(
+                                Ipv4UnicastNlri::try_from(p).unwrap(),
+                                RotondaPaMap::empty(),
+                            );
+                            if let Err(e) = rib.insert(
+                                &rr,
+                                route_status,
+                                ltime,
+                                adj_rib_out_id,
+                            ) {
+                                return Err(ApiError::InternalServerError(
+                                    format!("store error: {e}"),
+                                ));
+                            }
+                        }
+                        Ok("ok")
+                    }
                     Err(e) => {
                         Err(ApiError::InternalServerError(e.to_string()))
                     }
@@ -288,8 +450,8 @@ async fn send_pdu(
                 if let Err(e) = builder.withdrawals_from_iter(
                     withdraw
                         .prefix
-                        .into_iter()
-                        .map(|p| Ipv6UnicastNlri::try_from(p).unwrap()),
+                        .iter()
+                        .map(|p| Ipv6UnicastNlri::try_from(*p).unwrap()),
                 ) {
                     return Err(ApiError::InternalServerError(e.to_string()));
                 };
@@ -309,7 +471,27 @@ async fn send_pdu(
                             .unwrap(),
                     ),
                 ) {
-                    Ok(_) => Ok("ok"),
+                    Ok(_) => {
+                        let ltime = 0;
+                        let route_status = RouteStatus::Withdrawn;
+                        for p in withdraw.prefix.into_iter() {
+                            let rr = RotondaRoute::Ipv6Unicast(
+                                Ipv6UnicastNlri::try_from(p).unwrap(),
+                                RotondaPaMap::empty(),
+                            );
+                            if let Err(e) = rib.insert(
+                                &rr,
+                                route_status,
+                                ltime,
+                                adj_rib_out_id,
+                            ) {
+                                return Err(ApiError::InternalServerError(
+                                    format!("store error: {e}"),
+                                ));
+                            }
+                        }
+                        Ok("ok")
+                    }
                     Err(e) => {
                         Err(ApiError::InternalServerError(e.to_string()))
                     }
@@ -348,6 +530,7 @@ async fn send_raw(
 ) -> Result<impl IntoResponse, ApiError> {
     let (tx_cmds, tx_pdus) = state.get_session(remote_addr, remote_asn)?;
 
+    // TODO D-R-Y, extract this into function
     let (tx, rx) = oneshot::channel();
     let session_config = {
         tx_cmds
@@ -371,7 +554,12 @@ async fn send_raw(
     let pdu = UpdateMessage::from_octets(bytes, &session_config)
         .map_err(|e| ApiError::InternalServerError(e.to_string()))?;
     match tx_pdus.try_send(routecore::bgp::message::Message::Update(pdu)) {
-        Ok(_) => Ok("ok"),
+        Ok(_) => {
+            // TODO update RIB?
+            // We do not know whether this is an announcement or a withdrawal,
+            // or what AFISAFI this PDU pertains to anyway.
+            Ok("ok")
+        }
         Err(e) => Err(ApiError::InternalServerError(e.to_string())),
     }
 }

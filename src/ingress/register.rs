@@ -403,7 +403,7 @@ impl Register {
         None
     }
 
-    /// Search existing [`IngressId`] on the BMP router leven
+    /// Search existing [`IngressId`] on the BMP router level
     ///
     /// For the BMP router level, the comparison is based on the parent
     /// `ingress_id` and the remote address (both must be set).
@@ -432,6 +432,34 @@ impl Register {
         log::debug!("no match in find_existing_bmp_router");
         None
     }
+
+    /// Find the egress part of a BGP session
+    ///
+    /// For any BGP-type ingress (thus, BGP session), there might be one
+    /// entry in the register to represent to RIB view containing
+    /// announcements from Rotonda. This 'adj-RIB-out' is tied to the session
+    /// using the 'parent_ingress' field in IngressInfo.
+    pub fn find_rib_out_for_ingress(
+        &self,
+        ingress_id: IngressId
+    ) -> Option<(IngressId, IngressInfo)> {
+        let query = IngressInfo {
+            ingress_type: Some(IngressType::BgpOut),
+            parent_ingress: Some(ingress_id),
+            ..Default::default()
+        };
+
+        let lock = self.info.read().unwrap();
+        for (id, info) in lock.iter() {
+            if find_existing_for!(info, query,
+                {ingress_type, parent_ingress}
+            ) {
+                return Some((*id, info.clone()))
+            }
+        }
+        None
+
+    }
 }
 
 impl IngressInfo {
@@ -448,6 +476,12 @@ pub enum IngressType {
     Bgp,
     Mrt,
     Rtr,
+    /// To keep track of routes sent by Rotonda
+    // This is not really an 'ingress', so this probably requires some
+    // restructuring at some point.
+    // Also, this variant is functionally a mix between IngressType (this
+    // enum) and the PeerRibType::OutPost.
+    BgpOut,
 }
 
 
@@ -458,8 +492,7 @@ pub enum IngressState {
     NonNetwork,
 }
 
-// TODO this probably needs a 'state' (connected, disconnected, ..) ?
-// and with that, a last_active timestamp/Instant
+// TODO add a last_active timestamp/Instant?
 // This constructs the [`IngressInfo`] struct, used as values in the Register.
 info_for_field!(IngressInfo{
    unit_name: String,

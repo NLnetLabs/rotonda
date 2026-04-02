@@ -1537,7 +1537,15 @@ fn fmt_pcap(buf: impl AsRef<[u8]>) -> Arc<str> {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
+
+    #[test]
+    fn generate_documentation() {
+        let runtime = create_runtime().unwrap();
+        let tmpdir = tempfile::tempdir().unwrap();
+        let _ = runtime.print_documentation(tmpdir.path());
+    }
 
     #[test]
     fn packaged_roto_script() {

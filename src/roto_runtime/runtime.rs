@@ -9,7 +9,7 @@ use chrono::{SecondsFormat, Utc};
 use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
 use log::{debug, warn};
-use routecore::bgp::aspath::{AsPath, Hop, HopPath};
+use routecore::bgp::aspath::{Hop, HopPath};
 use routecore::bgp::communities::{
     LargeCommunity, StandardCommunity, Wellknown,
 };
@@ -17,12 +17,14 @@ use routecore::bgp::message::update_builder::StandardCommunitiesList;
 use routecore::bgp::message::SessionConfig;
 use routecore::bgp::message::UpdateMessage as BgpUpdateMessage;
 use routecore::bgp::nlri::afisafi::IsPrefix;
-use routecore::bgp::path_attributes::LargeCommunitiesList;
+use routecore::bgp::path_attributes::{
+    LargeCommunitiesList, OwnedPathAttributes,
+};
 use routecore::bgp::types::Otc;
 use routecore::bmp::message::PerPeerHeader;
 use routecore::bmp::message::{Message as BmpMsg, MessageType as BmpMsgType};
 
-use roto::{Context, Val};
+use roto::{Context, List, Val};
 
 use super::lists::{MutNamedAsnLists, MutNamedPrefixLists};
 use super::types::{InsertionInfo, Output, RotoOutputStream};
@@ -163,13 +165,6 @@ impl RotondaCtx {
     }
 }
 
-/// Newtype for a possibly empty `Asn`.
-///
-/// NB: This type might become obsolete depending on the development of
-/// Optional value handling in roto.
-#[derive(Copy, Clone, Debug)]
-pub struct OriginAsn(pub Option<Asn>);
-
 pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
 {
     let lib = roto::library! {
@@ -266,81 +261,50 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             }
 
 
-            /// Return a formatted string for the prefix
-            fn fmt_prefix(rr: Val<MutRotondaRoute>) -> Arc<str> {
-                let rr = rr.borrow();
-                let prefix = match *rr {
-                    RotondaRoute::Ipv4Unicast(n, ..) => n.prefix(),
-                    RotondaRoute::Ipv6Unicast(n, ..) => n.prefix(),
-                    RotondaRoute::Ipv4Multicast(n, ..) => n.prefix(),
-                    RotondaRoute::Ipv6Multicast(n, ..) => n.prefix(),
-                };
-                prefix.to_string().into()
+            fn rov_status(rr: Val<MutRotondaRoute>) -> Val<RovStatus> {
+                Val(rr.borrow().rotonda_pamap().rpki_info().rov_status())
             }
 
-            /// Return a formatted string for the ROV status
-            fn fmt_rov_status(rr: Val<MutRotondaRoute>) -> Arc<str> {
-                let rr = rr.borrow();
-                match rr.rotonda_pamap().rpki_info().rov_status() {
-                    RovStatus::NotChecked => "not-checked",
-                    RovStatus::NotFound => "not-found",
-                    RovStatus::Valid => "valid",
-                    RovStatus::Invalid => "invalid",
-                }.into()
+            fn aspath(rr: Val<MutRotondaRoute>) -> Option<Val<HopPath>> {
+                rr.borrow().owned_map().get::<HopPath>().map(Val)
             }
 
-            /// Return a formatted string for the AS_PATH
-            fn fmt_aspath(rr: Val<MutRotondaRoute>) -> Arc<str> {
-                let rr = rr.borrow_mut();
-                if let Some(hoppath) = rr.owned_map().get::<HopPath>() {
-                    let Ok(as_path) = hoppath.to_as_path();
-                    _fmt_aspath(as_path)
-                } else {
-                    "".into()
+            fn aspath_origin(rr: Val<MutRotondaRoute>) -> Option<Asn> {
+                rr.borrow().owned_map().get::<HopPath>()
+                    .and_then(|hp| hp.origin().cloned())
+                    .and_then(|hop| Asn::try_from(hop).ok())
+            }
+
+            /// Return a `List` of `Community`s
+            // XXX also no support to use List[T] in f-strings?
+            fn communities(rr: Val<MutRotondaRoute>) -> List<Val<StandardCommunity>> {
+                let res = List::new();
+                // XXX in the next roto release we can use from_iter /
+                // .collect
+                if let Some(pa) = rr.borrow().owned_map()
+                    .get::<StandardCommunitiesList>()
+                {
+                    pa.communities().iter()
+                        .for_each(|c| res.push(Val(*c)))
                 }
+                res
+
             }
 
-            /// Return a formatted string for the AS_PATH origin
-            fn fmt_aspath_origin(rr: Val<MutRotondaRoute>) -> Arc<str> {
-                let rr = rr.borrow_mut();
-                if let Some(hoppath) = rr.owned_map().get::<HopPath>() {
-                    let Ok(as_path) = hoppath.to_as_path();
-                    _fmt_aspath_origin(as_path)
-                } else {
-                    "".into()
+            /// Return a `List` of `LargeCommunity`s
+            // XXX also no support to use List[T] in f-strings?
+            fn large_communities(rr: Val<MutRotondaRoute>) -> List<Val<LargeCommunity>> {
+                let res = List::new();
+                // XXX something like a List::from_iter (impl FromIterator)
+                // would allow a .collect::<List<_>>(), that'd be nice.
+                if let Some(pa) = rr.borrow().owned_map()
+                    .get::<LargeCommunitiesList>()
+                {
+                    pa.communities().iter()
+                        .for_each(|c| res.push(Val(*c)))
                 }
-            }
+                res
 
-            /// Return a formatted string for the Standard Communities
-            fn fmt_communities(rr: Val<MutRotondaRoute>) -> Arc<str> {
-                let rr = rr.borrow_mut();
-
-                if let Some(iter) = rr.owned_map().get::<StandardCommunitiesList>() {
-                    iter.communities()
-                        .iter()
-                        .map(|c| c.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                        .into()
-                } else {
-                    "".into()
-                }
-            }
-
-            /// Return a formatted string for the Large Communities
-            fn fmt_large_communities(rr: Val<MutRotondaRoute>) -> Arc<str> {
-                let rr = rr.borrow_mut();
-
-                if let Some(iter) = rr.owned_map().get::<LargeCommunitiesList>() {
-                    iter.communities()
-                        .iter()
-                        .map(|c| c.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                        .into()
-                } else {
-                    "".into()
-                }
             }
         }
 
@@ -523,7 +487,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             }
 
             /// Return a formatted string for `vrp_update`
-            fn fmt(vrp_update: Val<VrpUpdate>) -> Arc<str> {
+            fn to_string(vrp_update: Val<VrpUpdate>) -> Arc<str> {
                 vrp_update.to_string().into()
             }
         }
@@ -538,28 +502,8 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 lists.add(name, res);
             }
 
-
             /// Returns 'true' if `asn` is in the named list
             fn contains(asn_list: Val<MutNamedAsnLists>, name: Arc<str>, asn: Asn) -> bool {
-                let asn_list = asn_list.lock().unwrap();
-                if let Some(list) = asn_list.inner.get(&*name.clone()) {
-                    list.contains(asn)
-                } else {
-                    false
-                }
-            }
-
-            /// Returns 'true' if the named list contains `origin`
-            ///
-            /// This method returns false if the list does not exist, or if
-            /// `origin` does not actually contain an `Asn`. The latter could
-            /// occur for announcements with an empty 'AS_PATH' attribute
-            /// (iBGP).
-            fn contains_origin(asn_list: Val<MutNamedAsnLists>, name: Arc<str>, origin: Val<OriginAsn>) -> bool {
-                let asn = match (*origin).0 {
-                    Some(asn) => asn,
-                    None => { return false }
-                };
                 let asn_list = asn_list.lock().unwrap();
                 if let Some(list) = asn_list.inner.get(&*name.clone()) {
                     list.contains(asn)
@@ -860,16 +804,10 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 aspath_contains(&msg, to_match)
             }
 
-            /// Returns the right-most `Asn` in the 'AS_PATH' attribute
-            ///
-            /// Note that the returned value is of type `OriginAsn`, which
-            /// optionally contains an `Asn`. In case of empty an 'AS_PATH'
-            /// (e.g. in iBGP) this method will still return an `OriginAsn`,
-            /// though representing 'None'.
-            fn aspath_origin(
-                msg: Val<BgpUpdateMessage<Bytes>>,
-            ) -> Val<OriginAsn> {
-                Val(aspath_origin(&msg))
+            /// Returns the right-most `Asn` in the 'AS_PATH' attribute, if
+            /// any.
+            fn aspath_origin(msg: Val<BgpUpdateMessage<Bytes>>) -> Option<Asn> {
+                aspath_origin(&msg)
             }
 
             /// Check whether the AS_PATH origin matches the given `Asn`
@@ -915,28 +853,12 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 withdrawals_count(&msg)
             }
 
-            /// Return a formatted string for the AS_PATH
-            fn fmt_aspath(msg: Val<BgpUpdateMessage<Bytes>>) -> Arc<str> {
-                fmt_aspath(&msg)
+            fn aspath(msg: Val<BgpUpdateMessage<Bytes>>) -> Option<Val<HopPath>> {
+                hoppath(&msg)
             }
 
-            /// Return a formatted string for the AS_PATH origin
-            fn fmt_aspath_origin(
-                msg: Val<BgpUpdateMessage<Bytes>>,
-            ) -> Arc<str> {
-                fmt_aspath_origin(&msg)
-            }
-
-            /// Return a formatted string for the Standard Communities
-            fn fmt_communities(msg: Val<BgpUpdateMessage<Bytes>>) -> Arc<str> {
-                fmt_communities(&msg)
-            }
-
-            /// Return a formatted string for the Large Communities
-            fn fmt_large_communities(
-                msg: Val<BgpUpdateMessage<Bytes>>,
-            ) -> Arc<str> {
-                fmt_large_communities(&msg)
+            fn communities(msg: Val<BgpUpdateMessage<Bytes>>) -> Option<List<Val<StandardCommunity>>> {
+                _communities(&msg)
             }
 
             /// Format this message as hexadecimal Wireshark input
@@ -1008,20 +930,14 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             ///
             /// When called on BMP messages not of type 'RouteMonitoring', the
             /// 'None'-variant is returned as well.
-            fn aspath_origin(
-                msg: Val<BmpMsg<Bytes>>,
-            ) -> Val<OriginAsn> {
-                let update = if let BmpMsg::RouteMonitoring(rm) = &*msg {
-                    if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
-                        upd
-                    } else {
-                        return Val(OriginAsn(None));
-                    }
+            fn aspath_origin(msg: Val<BmpMsg<Bytes>>) -> Option<Asn> {
+                if let BmpMsg::RouteMonitoring(rm) = &*msg {
+                    rm.bgp_update(&SessionConfig::modern())
+                        .ok()
+                        .and_then(|ref upd| aspath_origin(upd))
                 } else {
-                    return Val(OriginAsn(None));
-                };
-
-                Val(aspath_origin(&update))
+                    None
+                }
             }
 
 
@@ -1126,68 +1042,34 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 0
             }
 
-            /// Return a formatted string for the AS_PATH
-            fn fmt_aspath(msg: Val<BmpMsg<Bytes>>) -> Arc<str> {
-                let update = if let BmpMsg::RouteMonitoring(rm) = &*msg {
-                    if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
-                        upd
-                    } else {
-                        // log error
-                        return "".into();
-                    }
+            fn aspath(msg: Val<BmpMsg<Bytes>>) -> Option<Val<HopPath>> {
+                if let BmpMsg::RouteMonitoring(rm) = &*msg {
+                    rm.bgp_update(&SessionConfig::modern())
+                        .ok()
+                        .and_then(|ref upd| hoppath(upd))
                 } else {
-                    return "".into();
-                };
-
-                fmt_aspath(&update)
+                    None
+                }
             }
 
-            /// Return a string of the AS_PATH origin for this `BmpMsg`.
-            fn fmt_aspath_origin(msg: Val<BmpMsg<Bytes>>) -> Arc<str> {
-                let update = if let BmpMsg::RouteMonitoring(rm) = &*msg {
-                    if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
-                        upd
-                    } else {
-                        // log error
-                        return "".into();
-                    }
+            fn communities(msg: Val<BmpMsg<Bytes>>) -> Option<List<Val<StandardCommunity>>> {
+                if let BmpMsg::RouteMonitoring(rm) = &*msg {
+                    rm.bgp_update(&SessionConfig::modern())
+                        .ok()
+                        .and_then(|ref upd| _communities(upd))
                 } else {
-                    return "".into();
-                };
-
-                fmt_aspath_origin(&update)
+                    None
+                }
             }
 
-            /// Return a string for the Standard Communities in this `BmpMsg`.
-            fn fmt_communities(msg: Val<BmpMsg<Bytes>>) -> Arc<str> {
-                let update = if let BmpMsg::RouteMonitoring(rm) = &*msg {
-                    if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
-                        upd
-                    } else {
-                        // log error
-                        return "".into();
-                    }
+            fn large_communities(msg: Val<BmpMsg<Bytes>>) -> Option<List<Val<LargeCommunity>>> {
+                if let BmpMsg::RouteMonitoring(rm) = &*msg {
+                    rm.bgp_update(&SessionConfig::modern())
+                        .ok()
+                        .and_then(|ref upd| _large_communities(upd))
                 } else {
-                    return "".into();
-                };
-
-                fmt_communities(&update)
-            }
-
-            /// Return a string for the Large Communities in this `BmpMsg`.
-            fn fmt_large_communities(msg: Val<BmpMsg<Bytes>>) -> Arc<str> {
-                let update = if let BmpMsg::RouteMonitoring(rm) = &*msg {
-                    if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
-                        upd
-                    } else {
-                        // log error
-                        return "".into();
-                    }
-                } else {
-                    return "".into();
-                };
-
-                fmt_large_communities(&update)
+                    None
+                }
             }
 
             /// Format this message as hexadecimal Wireshark input
@@ -1206,11 +1088,12 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             fn contains(hoppath: Val<HopPath>, asn: Asn) -> bool {
                 hoppath.contains(&asn.into())
             }
+
+            fn to_string(hoppath: Val<HopPath>) -> Arc<str> {
+                hoppath.to_string().into()
+            }
+
         }
-
-
-        /// Represents an optional ASN
-        #[copy] type OriginAsn = Val<OriginAsn>;
 
         /// Information from the RIB on an inserted route
         #[copy] type InsertionInfo = Val<InsertionInfo>;
@@ -1224,6 +1107,10 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                     .unwrap_or(StandardCommunity::from_u32(0))
                 )
             }
+
+            fn to_string(c: Val<StandardCommunity>) -> Arc<str> {
+                c.to_string().into()
+            }
         }
 
         /// A BGP Large Community (RFC8092)
@@ -1233,6 +1120,10 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 Val(LargeCommunity::from_str(&s)
                     .unwrap_or(LargeCommunity::from([0u8;12]))
                 )
+            }
+
+            fn to_string(c: Val<LargeCommunity>) -> Arc<str> {
+                c.to_string().into()
             }
         }
 
@@ -1252,6 +1143,10 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             /// Returns 'true' if the status is 'NotFound'
             fn is_not_found(status: Val<RovStatus>) -> bool {
                 *status == RovStatus::NotFound
+            }
+
+            fn to_string(status: Val<RovStatus>) -> Arc<str> {
+                status.to_string().into()
             }
         }
 
@@ -1321,15 +1216,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         const NO_PEER: Val<StandardCommunity> =
             Val(StandardCommunity::from_wellknown(Wellknown::NoPeer));
 
-
-
-
-        // XXX do we still need these with all new string/formatting
-        // functionality in roto itself?
-        fn fmt_asn(asn: Asn) -> Arc<str> {
-            asn.to_string().into()
-        }
-
         impl u32 {
             fn fmt(n: u32) -> Arc<str> {
                 format!("{n}").into()
@@ -1338,40 +1224,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
 
 
     };
-
-    // --- RotondaRoute methods
-
-    // --- BGP message methods
-
-    // --- BMP types / methods
-
-    // --- Output / logging / 'south'-wards artifacts methods
-
-    //------------ RPKI / RTR methods ----------------------------------------
-
-    //--- RovStatusUpdate
-
-    //------------ Lists -----------------------------------------------------
-
-    //------------ IngressInfo -----------------------------------------------
-
-    //------------ Metrics ---------------------------------------------------
-
-    //---------
-
-    // currently unused
-    //// --- InsertionInfo methods
-    //#[roto_method(rt, InsertionInfo)]
-    //fn new_peer(info: *const InsertionInfo) -> bool {
-    //    unsafe { &*info }.new_peer
-    //}
-
-    //#[roto_method(rt, InsertionInfo)]
-    //fn prefix_new(info: *const InsertionInfo) -> bool {
-    //    unsafe { &*info }.prefix_new
-    //}
-
-    //------------ Constants ------------------------------------------------
 
     roto::Runtime::from_lib(lib)
         .map_err(|e| e.to_string())?
@@ -1386,6 +1238,28 @@ fn has_attribute(bgp_update: &BgpUpdateMessage<Bytes>, to_match: u8) -> bool {
     } else {
         false
     }
+}
+
+fn _communities(
+    bgp_update: &BgpUpdateMessage<Bytes>,
+) -> Option<List<Val<StandardCommunity>>> {
+    if let Some(iter) = bgp_update.communities().ok().flatten() {
+        let res = List::new();
+        iter.for_each(|c| res.push(Val(c)));
+        return Some(res);
+    }
+    None
+}
+
+fn _large_communities(
+    bgp_update: &BgpUpdateMessage<Bytes>,
+) -> Option<List<Val<LargeCommunity>>> {
+    if let Some(iter) = bgp_update.large_communities().ok().flatten() {
+        let res = List::new();
+        iter.for_each(|c| res.push(Val(c)));
+        return Some(res);
+    }
+    None
 }
 
 fn contains_community(
@@ -1421,14 +1295,13 @@ fn aspath_contains(
     }
 }
 
-fn aspath_origin(bgp_update: &BgpUpdateMessage<Bytes>) -> OriginAsn {
-    OriginAsn(if let Some(aspath) = bgp_update.aspath().ok().flatten() {
-        aspath.origin().and_then(|o| o.try_into_asn().ok())
-    } else {
-        None
-    })
+fn aspath_origin(bgp_update: &BgpUpdateMessage<Bytes>) -> Option<Asn> {
+    hoppath(bgp_update)
+        .and_then(|hp| hp.origin().cloned())
+        .and_then(|o| Asn::try_from(o).ok())
 }
 
+// XXX can we do without this, now with roto's Option[T]?
 fn match_aspath_origin(
     bgp_update: &BgpUpdateMessage<Bytes>,
     to_match: Asn,
@@ -1463,67 +1336,14 @@ fn withdrawals_count(bgp_update: &BgpUpdateMessage<Bytes>) -> u64 {
     .into()
 }
 
-//------------ Formatting/printing helpers ----------------------------------
+//------------ printing helpers ----------------------------------------------
 
-fn fmt_aspath(bgp_update: &BgpUpdateMessage<Bytes>) -> Arc<str> {
-    if let Some(aspath) = bgp_update.aspath().ok().flatten() {
-        _fmt_aspath(aspath)
-    } else {
-        "".into()
-    }
-}
-
-fn _fmt_aspath(aspath: AsPath<Bytes>) -> Arc<str> {
-    if let Ok(mut asns) = aspath.try_single_sequence_iter() {
-        let mut res = String::new();
-        if let Some(asn) = asns.next() {
-            res.push_str(&format!("{}", asn.into_u32()));
-        }
-        for asn in asns {
-            res.push_str(&format!(" {}", asn.into_u32()));
-        }
-        res.into()
-    } else {
-        aspath.to_string().into()
-    }
-}
-
-fn fmt_aspath_origin(bgp_update: &BgpUpdateMessage<Bytes>) -> Arc<str> {
-    if let Some(asp) = bgp_update.aspath().ok().flatten() {
-        _fmt_aspath_origin(asp)
-    } else {
-        "".into()
-    }
-}
-
-fn _fmt_aspath_origin(aspath: AsPath<Bytes>) -> Arc<str> {
-    if let Some(asn) = aspath.origin().and_then(|a| Asn::try_from(a).ok()) {
-        asn.to_string().into()
-    } else {
-        "".into()
-    }
-}
-
-fn fmt_communities(bgp_update: &BgpUpdateMessage<Bytes>) -> Arc<str> {
-    if let Some(iter) = bgp_update.communities().ok().flatten() {
-        iter.map(|c| c.to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
-            .into()
-    } else {
-        "".into()
-    }
-}
-
-fn fmt_large_communities(bgp_update: &BgpUpdateMessage<Bytes>) -> Arc<str> {
-    if let Some(iter) = bgp_update.large_communities().ok().flatten() {
-        iter.map(|c| c.to_string())
-            .collect::<Vec<_>>()
-            .join(", ")
-            .into()
-    } else {
-        "".into()
-    }
+fn hoppath(bgp_update: &BgpUpdateMessage<Bytes>) -> Option<Val<HopPath>> {
+    bgp_update
+        .path_attributes()
+        .ok()
+        .and_then(|pas| OwnedPathAttributes::from(pas).get::<HopPath>())
+        .map(Val)
 }
 
 fn fmt_pcap(buf: impl AsRef<[u8]>) -> Arc<str> {

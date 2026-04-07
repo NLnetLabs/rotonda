@@ -1184,20 +1184,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             fn current_status(rov_update: Val<RovStatusUpdate>) -> Val<RovStatus> {
                 Val(rov_update.current_status)
             }
-
-            /// Return a formatted string for `rov_update`
-            fn fmt(rov_update: Val<RovStatusUpdate>) -> Arc<str> {
-                format!(
-                    "[{:?}] -> [{:?}] {} originated by {}, learned from {}",
-                    rov_update.previous_status,
-                    rov_update.current_status,
-                    rov_update.prefix,
-                    rov_update.origin,
-                    rov_update.peer_asn,
-                ).as_str().into()
-            }
         }
-
 
 
         /// The well-known NO_EXPORT community (RFC1997)
@@ -1215,13 +1202,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         /// The well-known NO_PEER community (RFC1997)
         const NO_PEER: Val<StandardCommunity> =
             Val(StandardCommunity::from_wellknown(Wellknown::NoPeer));
-
-        impl u32 {
-            fn fmt(n: u32) -> Arc<str> {
-                format!("{n}").into()
-            }
-        }
-
 
     };
 

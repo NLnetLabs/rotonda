@@ -414,7 +414,6 @@ impl Rib {
         //nlri: Nlri<&[u8]>,
         nlri: Prefix, // change to Nlri or equivalent after routecore refactor
         filter: QueryFilter,
-    //) -> Result<QueryResult<RotondaPaMap>, String> {
     ) -> Result<SearchResult, String> {
         let guard = &epoch::pin();
 
@@ -454,13 +453,6 @@ impl Rib {
             .map_err(|err| err.to_string());
 
         // filter on:
-        // X origin asn
-        // X peer rib type
-        // X ingress_id -> done via Store.match_prefix already
-        // X otc
-        //
-        // - community
-        // - large community
         // - peer distinguisher
         
         debug!("store lookup took {:?}", std::time::Instant::now().duration_since(t0));
@@ -470,13 +462,6 @@ impl Rib {
         // We do this here, once, to reduce acquiring locks and such over and over.
         // If the query contains a filter name for which no roto function exists, this simply
         // filters as if no filter was passed:
-
-        //let maybe_roto_function: Option<RotoHttpFilter> = filter.roto_function.as_ref().and_then(|name| {
-        //    self.roto_package.as_ref().and_then(|package| {
-        //        let mut package = package.lock().unwrap();
-        //        package.get_function(name.as_str()).ok()
-        //    })
-        //});
 
         // Alternatively, we could return an error:
         let maybe_roto_function: Option<RotoHttpFilter> = match filter.roto_function.as_ref() {
@@ -538,6 +523,27 @@ impl Rib {
     //  - in apply_filter, check for such info and branch: if let Some(passed_info), etc
     
     fn apply_filter(&self, records: &mut Vec<Record<RotondaPaMap>>, filter: &QueryFilter, roto_filter: Option<RotoHttpFilter>) {
+        debug!("in apply filter: {filter:?}");
+        if filter.include_local_announcements.is_some() {
+            debug!("got include_local_announcements");
+        }
+        if filter.include_local_announcements.is_some_and(|x| x) {
+            // by default, self originated on Some(true), 
+
+
+            //records.retain(|r|{
+            //    self.ingress_register.get(r.multi_uniq_id).map(|ii|
+            //        ii.ingress_type == Some(ingress::IngressType::BgpOut)
+            //    ).unwrap_or(true)
+            //});
+        } else {
+            records.retain(|r|{
+                self.ingress_register.get(r.multi_uniq_id).map(|ii|
+                    ii.ingress_type != Some(ingress::IngressType::BgpOut)
+                ).unwrap_or(true)
+            });
+        }
+
         if let Some(rib_type) = filter.rib_type {
             records.retain(|r|{
                 self.ingress_register.get(r.multi_uniq_id).map(|ii|
@@ -627,8 +633,6 @@ impl Rib {
             });
 
             // TODO:
-            // - communities
-            // - large communities
             // - route distinguisher
 
         }

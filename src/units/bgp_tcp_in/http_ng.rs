@@ -24,8 +24,9 @@ use tokio::sync::oneshot;
 use crate::{
     http_ng::{Api, ApiError, ApiState},
     ingress::{
-        http_ng::QueryFilter, register::IngressState, IngressId, IngressInfo,
-        IngressType,
+        http_ng::QueryFilter,
+        register::{IngressState, OwnedIdAndInfo},
+        IngressId, IngressInfo, IngressType,
     },
     payload::{RotondaPaMap, RotondaRoute},
 };
@@ -132,6 +133,14 @@ fn peer_to_ingress(
     Ok(res[0].ingress_id)
 }
 
+/// Return all BGP sessions from ingress register
+fn all_bgp_sessions(state: &State<ApiState>) -> Vec<OwnedIdAndInfo> {
+    state.ingress_register.search(QueryFilter {
+        ingress_type: Some(IngressType::Bgp),
+        ..Default::default()
+    })
+}
+
 async fn send_announce_for_ingress_id(
     Path(ingress_id): Path<IngressId>,
     state: State<ApiState>,
@@ -161,17 +170,12 @@ async fn send_announce_for_all(
     state: State<ApiState>,
     Json(body): Json<Announce>,
 ) -> Result<impl IntoResponse, ApiError> {
-    // get all bgp sessions from ingress reg
-    // get all ingress_id, asn, addr,
-    // loop over and call send_pdu
     let mut futs = vec![];
-    for crate::ingress::register::OwnedIdAndInfo {
+    for OwnedIdAndInfo {
         ingress_id,
         ingress_info,
-    } in state.ingress_register.search(QueryFilter {
-        ingress_type: Some(IngressType::Bgp),
-        ..Default::default()
-    }) {
+    } in all_bgp_sessions(&state)
+    {
         futs.push(send_pdu(
             ingress_id,
             ingress_info.remote_asn.unwrap(),
@@ -219,17 +223,12 @@ async fn send_withdraw_for_all(
     state: State<ApiState>,
     Json(body): Json<Withdraw>,
 ) -> Result<impl IntoResponse, ApiError> {
-    // get all bgp sessions from ingress reg
-    // get all ingress_id, asn, addr,
-    // loop over and call send_pdu
     let mut futs = vec![];
-    for crate::ingress::register::OwnedIdAndInfo {
+    for OwnedIdAndInfo {
         ingress_id,
         ingress_info,
-    } in state.ingress_register.search(QueryFilter {
-        ingress_type: Some(IngressType::Bgp),
-        ..Default::default()
-    }) {
+    } in all_bgp_sessions(&state)
+    {
         futs.push(send_pdu(
             ingress_id,
             ingress_info.remote_asn.unwrap(),
@@ -597,19 +596,13 @@ async fn send_raw_for_all(
     state: State<ApiState>,
     Json(body): Json<RawPdu>,
 ) -> Result<impl IntoResponse, ApiError> {
-    // get all bgp sessions from ingress reg
-    // get all ingress_id, asn, addr,
-    // loop over and call send_pdu
     let mut futs = vec![];
-    for crate::ingress::register::OwnedIdAndInfo {
+    for OwnedIdAndInfo {
         ingress_id: _,
         ingress_info,
-    } in state.ingress_register.search(QueryFilter {
-        ingress_type: Some(IngressType::Bgp),
-        ..Default::default()
-    }) {
+    } in all_bgp_sessions(&state)
+    {
         futs.push(send_raw(
-            //ingress_id,
             ingress_info.remote_asn.unwrap(),
             ingress_info.remote_addr.unwrap(),
             state.clone(),

@@ -584,7 +584,7 @@ struct RtrTarget {
     pub name: Arc<str>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct VrpUpdate {
     pub action: Action,
     pub vrp: RouteOrigin

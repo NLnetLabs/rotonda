@@ -9,20 +9,39 @@ use smallvec::SmallVec;
 const ASN_LIST_COUNT: usize = 64;
 const ASN_LIST_SIZE: usize = 8;
 
-pub type MutNamedAsnLists = Arc<Mutex<NamedAsnLists>>;
+#[derive(Clone, Debug, Default)]
+pub struct MutNamedAsnLists(Arc<Mutex<NamedAsnLists>>);
+
+impl MutNamedAsnLists {
+    pub fn add(&self, name: impl AsRef<str>, asn_list: AsnList) {
+        self.0.lock().unwrap().add(name, asn_list);
+    }
+
+    pub fn contains(&self, name: impl AsRef<str>, asn: Asn) -> bool {
+        self.0.lock().unwrap().inner.get(name.as_ref())
+            .is_some_and(|list| list.contains(asn))
+    }
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct NamedAsnLists {
-    pub inner: micromap::Map<Arc<str>, AsnList, ASN_LIST_COUNT>
+    pub inner: micromap::Map<String, AsnList, ASN_LIST_COUNT>
+}
+
+impl PartialEq for MutNamedAsnLists {
+    fn eq(&self, _other: &Self) -> bool {
+        // XXX double check this
+        false
+    }
 }
 
 impl NamedAsnLists {
-    pub fn add(&mut self, name: Arc<str>, asn_list: AsnList) {
-        if self.inner.checked_insert(name.clone(), asn_list).is_none() {
+    pub fn add(&mut self, name: impl AsRef<str>, asn_list: AsnList) {
+        if self.inner.checked_insert(name.as_ref().to_string(), asn_list).is_none() {
             warn!(
                 "maximum number of ASN lists defined ({ASN_LIST_COUNT}), \
-                not registering '{name}'
-            ");
+                not registering '{}'
+            ", name.as_ref());
         }
     }
 }
@@ -64,20 +83,46 @@ impl FromStr for AsnList {
 const PREFIX_LIST_COUNT: usize = 64;
 const PREFIX_LIST_SIZE: usize = 8;
 
-pub type MutNamedPrefixLists = Arc<Mutex<NamedPrefixLists>>;
+#[derive(Clone, Debug, Default)]
+pub struct MutNamedPrefixLists(Arc<Mutex<NamedPrefixLists>>);
+
+impl PartialEq for MutNamedPrefixLists {
+    fn eq(&self, _other: &Self) -> bool {
+        // XXX double check this
+        false
+    }
+}
+
+impl MutNamedPrefixLists {
+    pub fn add(&self, name: impl AsRef<str>, prefix_list: PrefixList) {
+        self.0.lock().unwrap().add(name, prefix_list);
+    }
+
+    pub fn contains(&self, name: impl AsRef<str>, prefix: Prefix) -> bool {
+        self.0.lock().unwrap().inner.get(name.as_ref())
+            .is_some_and(|list| list.contains(prefix))
+    }
+
+    pub fn covers(&self, name: impl AsRef<str>, prefix: Prefix) -> bool {
+        self.0.lock().unwrap().inner.get(name.as_ref())
+            .is_some_and(|list| list.covers(prefix))
+    }
+}
 
 #[derive(Clone, Debug, Default)]
 pub struct NamedPrefixLists {
-    pub inner: micromap::Map<Arc<str>, PrefixList, PREFIX_LIST_COUNT>
+    pub inner: micromap::Map<String, PrefixList, PREFIX_LIST_COUNT>
 }
 
 impl NamedPrefixLists {
-    pub fn add(&mut self, name: Arc<str>, list: PrefixList) {
-        if self.inner.checked_insert(name.clone(), list).is_none() {
+    pub fn add(&mut self, name: impl AsRef<str>, list: PrefixList) {
+        if self.inner.checked_insert(name.as_ref().to_string(), list).is_none() {
             warn!(
                 "maximum number of prefix lists defined ({PREFIX_LIST_COUNT}), \
-                not registering '{name}'
-            ");
+                not registering '{}'
+            ",
+            name.as_ref()
+            );
         }
     }
 }

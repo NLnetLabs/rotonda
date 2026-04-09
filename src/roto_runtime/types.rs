@@ -89,7 +89,7 @@ impl RotoScripts {
 
 pub type RotoPackage = std::sync::Mutex<roto::Package<roto::Ctx<RotondaCtx>>>;
 
-#[derive(Default)]
+#[derive(Default, PartialEq)]
 pub struct OutputStream<M> {
     msgs: Vec<M>,
     entry: MutLogEntry,
@@ -149,7 +149,7 @@ impl<M> IntoIterator for OutputStream<M> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Output {
     /// Community observed in Path Attributes.
     Community(u32),
@@ -174,7 +174,7 @@ pub enum Output {
     Entry(LogEntry),
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct InsertionInfo {
     pub prefix_new: bool,
     pub new_peer: bool,

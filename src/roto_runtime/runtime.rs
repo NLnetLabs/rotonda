@@ -2,7 +2,9 @@ use std::cell::RefCell;
 use std::net::{IpAddr, Ipv6Addr};
 use std::rc::Rc;
 use std::str::FromStr;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+
+use roto::String as RotoString;
 
 use bytes::Bytes;
 use chrono::{SecondsFormat, Utc};
@@ -31,7 +33,7 @@ use super::types::{InsertionInfo, Output, RotoOutputStream};
 use crate::ingress::{self, IngressId, IngressInfo};
 use crate::payload::{RotondaPaMap, RotondaRoute};
 use crate::roto_runtime::lists::{AsnList, PrefixList};
-use crate::roto_runtime::metrics::Metrics;
+use crate::roto_runtime::metrics::MutMetrics;
 use crate::roto_runtime::types::LogEntry;
 use crate::units::rib_unit::rpki::{RovStatus, RovStatusUpdate, RtrCache};
 use crate::units::rtr::client::VrpUpdate;
@@ -46,7 +48,6 @@ pub(crate) type MutRotondaRoute = Rc<RefCell<RotondaRoute>>;
 pub(crate) type RcRotondaPaMap = Rc<RotondaPaMap>;
 pub(crate) type MutLogEntry = Rc<RefCell<LogEntry>>;
 
-pub type MutMetrics = Arc<RwLock<Metrics>>;
 pub type MutIngressInfoCache = Rc<RefCell<IngressInfoCache>>;
 
 impl From<RotondaRoute> for MutRotondaRoute {
@@ -69,6 +70,13 @@ pub struct IngressInfoCache {
     ingress_id: IngressId,
     register: Arc<ingress::Register>,
     ingress_info: Option<IngressInfo>,
+}
+
+impl PartialEq for IngressInfoCache {
+    fn eq(&self, other: &Self) -> bool {
+        self.ingress_id == other.ingress_id
+            && self.ingress_info == other.ingress_info
+    }
 }
 
 impl IngressInfoCache {
@@ -387,13 +395,13 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             }
 
             /// Print a message to standard error
-            fn print(stream: Val<Log>, msg: Arc<str>) {
+            fn print(stream: Val<Log>, msg: RotoString) {
                 let stream = stream.borrow();
                 stream.print(&*msg);
             }
 
             /// Print a timestamped message to standard error
-            fn timestamped_print(stream: Val<Log>, msg: Arc<str>) {
+            fn timestamped_print(stream: Val<Log>, msg: RotoString) {
                 let stream = stream.borrow();
                 stream.print(
                     format!("[{}] {}",
@@ -487,7 +495,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             }
 
             /// Return a formatted string for `vrp_update`
-            fn to_string(vrp_update: Val<VrpUpdate>) -> Arc<str> {
+            fn to_string(vrp_update: Val<VrpUpdate>) -> RotoString {
                 vrp_update.to_string().into()
             }
         }
@@ -496,20 +504,14 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         #[clone] type AsnLists = Val<MutNamedAsnLists>;
         impl Val<MutNamedAsnLists> {
             /// Add a named ASN list
-            fn add(lists: Val<MutNamedAsnLists>, name: Arc<str>, s: Arc<str>) {
-                let mut lists = lists.lock().unwrap();
+            fn add(lists: Val<MutNamedAsnLists>, name: RotoString, s: RotoString) {
                 let res = AsnList::from_str(&s).unwrap_or_default();
-                lists.add(name, res);
+                lists.add(&*name, res);
             }
 
             /// Returns 'true' if `asn` is in the named list
-            fn contains(asn_list: Val<MutNamedAsnLists>, name: Arc<str>, asn: Asn) -> bool {
-                let asn_list = asn_list.lock().unwrap();
-                if let Some(list) = asn_list.inner.get(&*name.clone()) {
-                    list.contains(asn)
-                } else {
-                    false
-                }
+            fn contains(asn_list: Val<MutNamedAsnLists>, name: RotoString, asn: Asn) -> bool {
+                asn_list.contains(&*name, asn)
             }
 
         }
@@ -518,37 +520,26 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         #[clone] type PrefixLists = Val<MutNamedPrefixLists>;
         impl Val<MutNamedPrefixLists> {
             /// Add a named prefix list
-            fn add(lists: Val<MutNamedPrefixLists>, name: Arc<str>, s: Arc<str>) {
-                let mut lists = lists.lock().unwrap();
+            fn add(lists: Val<MutNamedPrefixLists>, name: RotoString, s: RotoString) {
                 let res = PrefixList::from_str(&s).unwrap_or_default();
-                lists.add(name, res);
+                lists.add(&*name, res);
             }
 
             /// Returns 'true' if `prefix` is in the named list
-            fn contains(prefix_list: Val<MutNamedPrefixLists>, name: Arc<str>, prefix: Prefix) -> bool {
-                let prefix_list = prefix_list.lock().unwrap();
-                if let Some(list) = prefix_list.inner.get(&*name.clone()) {
-                    list.contains(prefix)
-                } else {
-                    false
-                }
+            fn contains(prefix_list: Val<MutNamedPrefixLists>, name: RotoString, prefix: Prefix) -> bool {
+                prefix_list.contains(&*name, prefix)
             }
 
             /// Returns 'true' if `prefix` or a less-specific is in the named list
-            fn covers(prefix_list: Val<MutNamedPrefixLists>, name: Arc<str>, prefix: Prefix) -> bool {
-                let prefix_list = prefix_list.lock().unwrap();
-                if let Some(list) = prefix_list.inner.get(&*name.clone()) {
-                    list.covers(prefix)
-                } else {
-                    false
-                }
+            fn covers(prefix_list: Val<MutNamedPrefixLists>, name: RotoString, prefix: Prefix) -> bool {
+                prefix_list.covers(&*name, prefix)
             }
         }
 
         /// User-defined Prometheus style metrics
         #[clone] type Metrics = Val<MutMetrics>;
         impl Val<MutMetrics> {
-            fn increase_counter(metrics: Val<MutMetrics>, name: Arc<str>, value: u64) {
+            fn increase_counter(metrics: Val<MutMetrics>, name: RotoString, value: u64) {
                 // first try with only a read-lock (for already existing keys)
                 // if that fails, try again with a write lock so the new key
                 // can get inserted.
@@ -557,22 +548,22 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 }
                 let updated = {
                     let readlock = metrics.read().unwrap();
-                    readlock.try_inc_counter(name.clone(), value).is_ok()
+                    readlock.try_inc_counter(&*name, value).is_ok()
                 };
                 if !updated {
-                    metrics.write().unwrap().inc_counter(name, value);
+                    metrics.write().unwrap().inc_counter(&*name, value);
                 }
             }
 
-            fn set_gauge(metrics: Val<MutMetrics>, name: Arc<str>, value: u64) {
+            fn set_gauge(metrics: Val<MutMetrics>, name: RotoString, value: u64) {
                 // first try with only a read-lock (for already existing keys)
                 // if that fails, try again with a write lock so the new key can get inserted.
                 let updated = {
                     let readlock = metrics.read().unwrap();
-                    readlock.try_set_gauge(name.clone(), value).is_ok()
+                    readlock.try_set_gauge(&*name, value).is_ok()
                 };
                 if !updated {
-                    metrics.write().unwrap().set_gauge(name.clone(), value);
+                    metrics.write().unwrap().set_gauge(&*name, value);
                 }
             }
 
@@ -603,7 +594,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             /// are ignored when the entry is written to the output. Combining
             /// the custom message with the built-in fields is currently not
             /// possible.
-            fn custom(entry_ptr: Val<MutLogEntry>, custom_msg: Arc<str>) {
+            fn custom(entry_ptr: Val<MutLogEntry>, custom_msg: RotoString) {
                 let mut entry = entry_ptr.borrow_mut();
                 entry.custom = Some(custom_msg.to_string());
             }
@@ -611,7 +602,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             /// Log a custom, timestamped message based on the given string
             ///
             /// Also see [`custom`].
-            fn timestamped_custom(entry_ptr: Val<MutLogEntry>, custom_msg: Arc<str>) {
+            fn timestamped_custom(entry_ptr: Val<MutLogEntry>, custom_msg: RotoString) {
                 let mut entry = entry_ptr.borrow_mut();
                 entry.timestamp = chrono::Utc::now();
                 entry.custom = Some(custom_msg.to_string());
@@ -862,7 +853,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             }
 
             /// Format this message as hexadecimal Wireshark input
-            fn fmt_pcap(msg: Val<BgpUpdateMessage<Bytes>>) -> Arc<str> {
+            fn fmt_pcap(msg: Val<BgpUpdateMessage<Bytes>>) -> RotoString {
                 fmt_pcap(msg.as_ref())
             }
 
@@ -1073,7 +1064,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             }
 
             /// Format this message as hexadecimal Wireshark input
-            fn fmt_pcap(msg: Val<BmpMsg<Bytes>>) -> Arc<str> {
+            fn fmt_pcap(msg: Val<BmpMsg<Bytes>>) -> RotoString {
                 fmt_pcap(msg.as_ref())
             }
         }
@@ -1089,7 +1080,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 hoppath.contains(&asn.into())
             }
 
-            fn to_string(hoppath: Val<HopPath>) -> Arc<str> {
+            fn to_string(hoppath: Val<HopPath>) -> RotoString {
                 hoppath.to_string().into()
             }
 
@@ -1102,13 +1093,13 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         #[copy] type Community = Val<StandardCommunity>;
 
         impl Val<StandardCommunity> {
-            fn from(s: Arc<str>) -> Val<StandardCommunity> {
+            fn from(s: RotoString) -> Val<StandardCommunity> {
                 Val(StandardCommunity::from_str(&s)
                     .unwrap_or(StandardCommunity::from_u32(0))
                 )
             }
 
-            fn to_string(c: Val<StandardCommunity>) -> Arc<str> {
+            fn to_string(c: Val<StandardCommunity>) -> RotoString {
                 c.to_string().into()
             }
         }
@@ -1116,13 +1107,13 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         /// A BGP Large Community (RFC8092)
         #[copy] type LargeCommunity = Val<LargeCommunity>;
         impl Val<LargeCommunity> {
-            fn from(s: Arc<str>) -> Val<LargeCommunity> {
+            fn from(s: RotoString) -> Val<LargeCommunity> {
                 Val(LargeCommunity::from_str(&s)
                     .unwrap_or(LargeCommunity::from([0u8;12]))
                 )
             }
 
-            fn to_string(c: Val<LargeCommunity>) -> Arc<str> {
+            fn to_string(c: Val<LargeCommunity>) -> RotoString {
                 c.to_string().into()
             }
         }
@@ -1145,7 +1136,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 *status == RovStatus::NotFound
             }
 
-            fn to_string(status: Val<RovStatus>) -> Arc<str> {
+            fn to_string(status: Val<RovStatus>) -> RotoString {
                 status.to_string().into()
             }
         }
@@ -1326,7 +1317,7 @@ fn hoppath(bgp_update: &BgpUpdateMessage<Bytes>) -> Option<Val<HopPath>> {
         .map(Val)
 }
 
-fn fmt_pcap(buf: impl AsRef<[u8]>) -> Arc<str> {
+fn fmt_pcap(buf: impl AsRef<[u8]>) -> RotoString {
     let mut res = String::with_capacity(7 + buf.as_ref().len());
     res.push_str("000000 ");
     for b in buf.as_ref() {

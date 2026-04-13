@@ -1,8 +1,6 @@
-use std::cell::RefCell;
 use std::net::{IpAddr, Ipv6Addr};
-use std::rc::Rc;
 use std::str::FromStr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use roto::String as RotoString;
 
@@ -42,17 +40,94 @@ pub type CompileListsFunc =
     roto::TypedFunc<roto::Ctx<RotondaCtx>, fn() -> ()>;
 pub const COMPILE_LISTS_FUNC_NAME: &str = "compile_lists";
 
-pub(crate) type Log = Rc<RefCell<RotoOutputStream>>;
-pub(crate) type SharedRtrCache = Arc<RtrCache>;
-pub(crate) type MutRotondaRoute = Rc<RefCell<RotondaRoute>>;
-pub(crate) type RcRotondaPaMap = Rc<RotondaPaMap>;
-pub(crate) type MutLogEntry = Rc<RefCell<LogEntry>>;
+#[derive(Clone)]
+pub struct Log(Arc<Mutex<RotoOutputStream>>);
 
-pub type MutIngressInfoCache = Rc<RefCell<IngressInfoCache>>;
+impl Log {
+    pub fn new() -> Self {
+        Self(RotoOutputStream::new_arced())
+    }
+}
+
+impl PartialEq for Log {
+    fn eq(&self, _other: &Self) -> bool {
+        // XXX double check
+        false
+    }
+}
+impl std::ops::Deref for Log {
+    type Target = Arc<Mutex<RotoOutputStream>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+pub(crate) type SharedRtrCache = Arc<RtrCache>;
+
+#[derive(Clone)]
+pub struct MutRotondaRoute(Arc<Mutex<RotondaRoute>>);
+impl PartialEq for MutRotondaRoute {
+    fn eq(&self, _other: &Self) -> bool {
+        // XXX double check
+        false
+    }
+}
+impl MutRotondaRoute {
+    //pub fn inner(&self) -> &RotondaRoute {
+    //    &self.0.lock().unwrap()
+    //}
+    pub fn cloned_inner(&self) -> RotondaRoute {
+        self.0.lock().unwrap().clone()
+    }
+}
+impl std::ops::Deref for MutRotondaRoute {
+    type Target = Arc<Mutex<RotondaRoute>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+pub type ArcRotondaPaMap = Arc<RotondaPaMap>;
+#[derive(Clone, Default)]
+pub struct MutLogEntry(Arc<Mutex<LogEntry>>);
+
+impl MutLogEntry {
+    pub fn cloned_inner(&self) -> LogEntry {
+        self.0.lock().unwrap().clone()
+    }
+}
+
+impl std::ops::Deref for MutLogEntry {
+    type Target = Arc<Mutex<LogEntry>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl PartialEq for MutLogEntry {
+    fn eq(&self, _other: &Self) -> bool {
+        // XXX double check
+        false
+    }
+}
+
+#[derive(Clone)]
+pub struct MutIngressInfoCache(Arc<Mutex<IngressInfoCache>>);
+
+impl std::ops::Deref for MutIngressInfoCache {
+    type Target = Arc<Mutex<IngressInfoCache>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
 
 impl From<RotondaRoute> for MutRotondaRoute {
     fn from(value: RotondaRoute) -> Self {
-        Rc::new(RefCell::new(value))
+        Self(Arc::new(Mutex::new(value)))
     }
 }
 
@@ -65,6 +140,12 @@ pub struct RotondaCtx {
     pub prefix_lists: Val<MutNamedPrefixLists>,
     pub metrics: Val<MutMetrics>,
 }
+impl PartialEq for RotondaCtx {
+    fn eq(&self, _other: &Self) -> bool {
+        // XXX double check
+        false
+    }
+}
 
 pub struct IngressInfoCache {
     ingress_id: IngressId,
@@ -72,34 +153,34 @@ pub struct IngressInfoCache {
     ingress_info: Option<IngressInfo>,
 }
 
-impl PartialEq for IngressInfoCache {
-    fn eq(&self, other: &Self) -> bool {
-        self.ingress_id == other.ingress_id
-            && self.ingress_info == other.ingress_info
+impl PartialEq for MutIngressInfoCache {
+    fn eq(&self, _other: &Self) -> bool {
+        // XXX double check
+        false
     }
 }
 
 impl IngressInfoCache {
-    pub fn new_rc(
+    pub fn new_arc(
         ingress_id: IngressId,
         register: Arc<ingress::Register>,
     ) -> MutIngressInfoCache {
-        Rc::new(RefCell::new(Self {
+        MutIngressInfoCache(Arc::new(Mutex::new(Self {
             ingress_id,
             register,
             ingress_info: None,
-        }))
+        })))
     }
-    pub fn for_info_rc(
+    pub fn for_info_arc(
         ingress_id: IngressId,
         register: Arc<ingress::Register>,
         ingress_info: IngressInfo,
     ) -> MutIngressInfoCache {
-        Rc::new(RefCell::new(Self {
+        MutIngressInfoCache(Arc::new(Mutex::new(Self {
             ingress_id,
             register,
             ingress_info: Some(ingress_info),
-        }))
+        })))
     }
     fn info(&mut self) -> &IngressInfo {
         if let Some(ref info) = self.ingress_info {
@@ -146,7 +227,7 @@ impl RotondaCtx {
     }
     pub fn empty() -> Self {
         Self {
-            output: Val(RotoOutputStream::new_rced()),
+            output: Val(Log(RotoOutputStream::new_arced())),
             rpki: Val(Arc::<RtrCache>::default()),
             asn_lists: Val(Default::default()),
             prefix_lists: Val(Default::default()),
@@ -185,8 +266,8 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
 
             /// Return the prefix for this `RotondaRoute`
             fn prefix(rr: Val<MutRotondaRoute>) -> Prefix {
-                let rr = rr.borrow_mut();
-                match *rr {
+                let rr = rr.cloned_inner();
+                match rr {
                     RotondaRoute::Ipv4Unicast(n, ..) => n.prefix(),
                     RotondaRoute::Ipv6Unicast(n, ..) => n.prefix(),
                     RotondaRoute::Ipv4Multicast(n, ..) => n.prefix(),
@@ -196,8 +277,8 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
 
             /// Check whether the prefix for this `RotondaRoute` matches
             fn prefix_matches(rr: Val<MutRotondaRoute>, to_match: Prefix) -> bool {
-                let rr = rr.borrow_mut();
-                let rr_prefix = match *rr {
+                let rr = rr.cloned_inner();
+                let rr_prefix = match rr {
                     RotondaRoute::Ipv4Unicast(n, ..) => n.prefix(),
                     RotondaRoute::Ipv6Unicast(n, ..) => n.prefix(),
                     RotondaRoute::Ipv4Multicast(n, ..) => n.prefix(),
@@ -208,7 +289,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
 
             /// Check whether the AS_PATH contains the given `Asn`
             fn aspath_contains(rr: Val<MutRotondaRoute>, to_match: Asn) -> bool {
-                let rr = rr.borrow_mut();
+                let rr = rr.cloned_inner();
 
                 if let Some(hoppath) = rr.owned_map().get::<HopPath>() {
                     hoppath.into_iter().any(|h| h == to_match.into())
@@ -222,7 +303,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 rr: Val<MutRotondaRoute>,
                 to_match: Asn,
             ) -> bool {
-                let rr = rr.borrow_mut();
+                let rr = rr.lock().unwrap();
                 if let Some(hoppath) = rr.owned_map().get::<HopPath>() {
                     if let Some(Hop::Asn(asn)) = hoppath.origin() {
                         return *asn == to_match;
@@ -237,7 +318,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 rr: Val<MutRotondaRoute>,
                 to_match: Val<StandardCommunity>,
             ) -> bool {
-                let rr = rr.borrow_mut();
+                let rr = rr.lock().unwrap();
 
                 if let Some(list) = rr.owned_map().get::<StandardCommunitiesList>() {
                     return list.communities().contains(&*to_match);
@@ -251,7 +332,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 rr: Val<MutRotondaRoute>,
                 to_match: Val<LargeCommunity>,
             ) -> bool {
-                let rr = rr.borrow_mut();
+                let rr = rr.lock().unwrap();
 
                 if let Some(list) = rr.owned_map().get::<LargeCommunitiesList>() {
                     return list.communities().contains(&*to_match);
@@ -262,7 +343,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             /// Check whether this `RotondaRoute` contains the given Path
             /// Attribute
             fn has_attribute(rr: Val<MutRotondaRoute>, to_match: u8) -> bool {
-                let rr = rr.borrow_mut();
+                let rr = rr.lock().unwrap();
                 rr.owned_map()
                     .iter()
                     .any(|pa| pa.ok().is_some_and(|pa| pa.type_code() == to_match))
@@ -270,15 +351,15 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
 
 
             fn rov_status(rr: Val<MutRotondaRoute>) -> Val<RovStatus> {
-                Val(rr.borrow().rotonda_pamap().rpki_info().rov_status())
+                Val(rr.lock().unwrap().rotonda_pamap().rpki_info().rov_status())
             }
 
             fn aspath(rr: Val<MutRotondaRoute>) -> Option<Val<HopPath>> {
-                rr.borrow().owned_map().get::<HopPath>().map(Val)
+                rr.lock().unwrap().owned_map().get::<HopPath>().map(Val)
             }
 
             fn aspath_origin(rr: Val<MutRotondaRoute>) -> Option<Asn> {
-                rr.borrow().owned_map().get::<HopPath>()
+                rr.lock().unwrap().owned_map().get::<HopPath>()
                     .and_then(|hp| hp.origin().cloned())
                     .and_then(|hop| Asn::try_from(hop).ok())
             }
@@ -289,7 +370,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 let res = List::new();
                 // XXX in the next roto release we can use from_iter /
                 // .collect
-                if let Some(pa) = rr.borrow().owned_map()
+                if let Some(pa) = rr.lock().unwrap().owned_map()
                     .get::<StandardCommunitiesList>()
                 {
                     pa.communities().iter()
@@ -305,7 +386,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 let res = List::new();
                 // XXX something like a List::from_iter (impl FromIterator)
                 // would allow a .collect::<List<_>>(), that'd be nice.
-                if let Some(pa) = rr.borrow().owned_map()
+                if let Some(pa) = rr.lock().unwrap().owned_map()
                     .get::<LargeCommunitiesList>()
                 {
                     pa.communities().iter()
@@ -317,13 +398,13 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         }
 
         /// The Path attributes pertaining to a certain Route
-        #[clone] type PathAttributes = Val<RcRotondaPaMap>;
-        impl Val<RcRotondaPaMap> {
-            fn otc(pamap: Val<RcRotondaPaMap>) -> Option<Asn> {
+        #[clone] type PathAttributes = Val<ArcRotondaPaMap>;
+        impl Val<ArcRotondaPaMap> {
+            fn otc(pamap: Val<ArcRotondaPaMap>) -> Option<Asn> {
                 pamap.path_attributes().get::<Otc>().map(|a| a.0)
             }
 
-            fn contains_community(pamap: Val<RcRotondaPaMap>, to_match: Val<StandardCommunity>) -> bool {
+            fn contains_community(pamap: Val<ArcRotondaPaMap>, to_match: Val<StandardCommunity>) -> bool {
                 if let Some(pa) = pamap.path_attributes()
                     .get::<StandardCommunitiesList>()
                 {
@@ -333,7 +414,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 }
             }
 
-            fn contains_large_community(pamap: Val<RcRotondaPaMap>, to_match: Val<LargeCommunity>) -> bool {
+            fn contains_large_community(pamap: Val<ArcRotondaPaMap>, to_match: Val<LargeCommunity>) -> bool {
                 if let Some(pa) = pamap.path_attributes()
                     .get::<LargeCommunitiesList>()
                 {
@@ -343,7 +424,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 }
             }
 
-            fn aspath(pamap: Val<RcRotondaPaMap>) -> Option<Val<HopPath>> {
+            fn aspath(pamap: Val<ArcRotondaPaMap>) -> Option<Val<HopPath>> {
                 pamap.path_attributes().get::<HopPath>().map(Val)
             }
 
@@ -357,52 +438,53 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         impl Val<Log> {
             /// Log the given prefix (NB: this method will likely be removed)
             fn log_prefix(stream: Val<Log>, prefix: Prefix) {
-                let mut stream = stream.borrow_mut();
+                let mut stream = stream.lock().unwrap();
                 stream.push(Output::Prefix(prefix));
             }
 
             /// Log the given ASN (NB: this method will likely be removed)
             fn log_matched_asn(stream: Val<Log>, asn: Asn) {
-                let mut stream = stream.borrow_mut();
+                let mut stream = stream.lock().unwrap();
                 stream.push(Output::Asn(asn));
             }
 
             /// Log the given ASN as origin (NB: this method will likely be
             /// removed)
             fn log_matched_origin(stream: Val<Log>, origin: Asn) {
-                let mut stream = stream.borrow_mut();
+                let mut stream = stream.lock().unwrap();
                 stream.push(Output::Origin(origin));
             }
 
             /// Log the given community (NB: this method will likely be
             /// removed)
             fn log_matched_community(stream: Val<Log>, community: Val<StandardCommunity>) {
-                let mut stream = stream.borrow_mut();
+                let mut stream = stream.lock().unwrap();
+                debug!("log_matched_community {:?}", community);
                 stream.push(Output::Community(community.to_u32()));
             }
 
             /// Log a PeerDown event
             fn log_peer_down(stream: Val<Log>) {
-                let mut stream = stream.borrow_mut();
+                let mut stream = stream.lock().unwrap();
                 stream.push(Output::PeerDown);
             }
 
             /// Log a custom entry in forms of a tuple (NB: this method will
             /// likely be removed)
             fn log_custom(stream: Val<Log>, id: u32, local: u32) {
-                let mut stream = stream.borrow_mut();
+                let mut stream = stream.lock().unwrap();
                 stream.push(Output::Custom((id, local)));
             }
 
             /// Print a message to standard error
             fn print(stream: Val<Log>, msg: RotoString) {
-                let stream = stream.borrow();
+                let stream = stream.lock().unwrap();
                 stream.print(&*msg);
             }
 
             /// Print a timestamped message to standard error
             fn timestamped_print(stream: Val<Log>, msg: RotoString) {
-                let stream = stream.borrow();
+                let stream = stream.lock().unwrap();
                 stream.print(
                     format!("[{}] {}",
                         Utc::now().to_rfc3339_opts(SecondsFormat::Secs, true),
@@ -418,9 +500,9 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             /// being composed, and ensures a subsequent call to [`entry`]
             /// returns a new, empty `LogEntry`.
             fn write_entry(stream: Val<Log>) {
-                let mut stream = stream.borrow_mut();
+                let mut stream = stream.lock().unwrap();
                 let entry = stream.take_entry();
-                let entry = Rc::unwrap_or_clone(entry).into_inner();
+                let entry = entry.cloned_inner();
                 stream.push(Output::Entry(entry));
             }
 
@@ -431,7 +513,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             /// A `LogEntry` is only written to the output if [`write_entry`]
             /// is called on it after populating its fields.
             fn entry(stream: Val<Log>) -> Val<MutLogEntry> {
-                let mut stream = stream.borrow_mut();
+                let mut stream = stream.lock().unwrap();
                 Val(stream.entry())
             }
 
@@ -450,7 +532,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             /// should be configured, and it should have received VRP data
             /// from the connected RP software.
             fn check_rov(rpki: Val<SharedRtrCache>, rr: Val<MutRotondaRoute>) -> Val<RovStatus> {
-                let mut rr = rr.borrow_mut();
+                let mut rr = rr.lock().unwrap();
                 let prefix = match *rr {
                     RotondaRoute::Ipv4Unicast(nlri, _) => nlri.prefix(),
                     RotondaRoute::Ipv6Unicast(nlri, _) => nlri.prefix(),
@@ -573,12 +655,12 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         #[clone] type IngressInfo = Val<MutIngressInfoCache>;
         impl Val<MutIngressInfoCache> {
             fn peer_asn(iic: Val<MutIngressInfoCache>) -> Asn {
-                let mut iic = iic.borrow_mut();
+                let mut iic = iic.lock().unwrap();
                 iic.peer_asn()
             }
 
             fn peer_address(iic: Val<MutIngressInfoCache>) -> IpAddr {
-                let mut iic = iic.borrow_mut();
+                let mut iic = iic.lock().unwrap();
                 iic.peer_address()
             }
 
@@ -595,7 +677,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             /// the custom message with the built-in fields is currently not
             /// possible.
             fn custom(entry_ptr: Val<MutLogEntry>, custom_msg: RotoString) {
-                let mut entry = entry_ptr.borrow_mut();
+                let mut entry = entry_ptr.lock().unwrap();
                 entry.custom = Some(custom_msg.to_string());
             }
 
@@ -603,7 +685,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             ///
             /// Also see [`custom`].
             fn timestamped_custom(entry_ptr: Val<MutLogEntry>, custom_msg: RotoString) {
-                let mut entry = entry_ptr.borrow_mut();
+                let mut entry = entry_ptr.lock().unwrap();
                 entry.timestamp = chrono::Utc::now();
                 entry.custom = Some(custom_msg.to_string());
             }
@@ -613,7 +695,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 entry_ptr: Val<MutLogEntry>,
                 msg: Val<BmpMsg<Bytes>>,
             ) -> Val<MutLogEntry> {
-                let mut entry = entry_ptr.borrow_mut();
+                let mut entry = entry_ptr.lock().unwrap();
 
                 if let BmpMsg::RouteMonitoring(rm) = &*msg {
                     if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
@@ -636,7 +718,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 entry_ptr: Val<MutLogEntry>,
                 msg: Val<BmpMsg<Bytes>>,
             ) -> Val<MutLogEntry> {
-                let mut entry = entry_ptr.borrow_mut();
+                let mut entry = entry_ptr.lock().unwrap();
                 if let BmpMsg::RouteMonitoring(rm) = &*msg {
                     let asn = rm.per_peer_header().asn();
                     entry.peer_as = Some(asn);
@@ -649,7 +731,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 entry_ptr: Val<MutLogEntry>,
                 msg: Val<BmpMsg<Bytes>>,
             ) -> Val<MutLogEntry> {
-                let mut entry = entry_ptr.borrow_mut();
+                let mut entry = entry_ptr.lock().unwrap();
                 if let BmpMsg::RouteMonitoring(rm) = &*msg {
                     if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                         let cnt =
@@ -666,7 +748,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 entry_ptr: Val<MutLogEntry>,
                 msg: Val<BmpMsg<Bytes>>,
             ) -> Val<MutLogEntry> {
-                let mut entry = entry_ptr.borrow_mut();
+                let mut entry = entry_ptr.lock().unwrap();
                 if let BmpMsg::RouteMonitoring(rm) = &*msg {
                     if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                         let cnt = upd
@@ -686,7 +768,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 entry_ptr: Val<MutLogEntry>,
                 msg: Val<BmpMsg<Bytes>>,
             ) -> Val<MutLogEntry> {
-                let mut entry = entry_ptr.borrow_mut();
+                let mut entry = entry_ptr.lock().unwrap();
                 if let BmpMsg::RouteMonitoring(rm) = &*msg {
                     if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                         let cnt = upd
@@ -706,7 +788,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 entry_ptr: Val<MutLogEntry>,
                 msg: Val<BmpMsg<Bytes>>,
             ) -> Val<MutLogEntry> {
-                let mut entry = entry_ptr.borrow_mut();
+                let mut entry = entry_ptr.lock().unwrap();
                 if let BmpMsg::RouteMonitoring(rm) = &*msg {
                     if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                         if let Some(iter) = upd.mp_announcements().ok().flatten() {
@@ -724,7 +806,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 entry_ptr: Val<MutLogEntry>,
                 msg: Val<BmpMsg<Bytes>>,
             ) -> Val<MutLogEntry> {
-                let mut entry = entry_ptr.borrow_mut();
+                let mut entry = entry_ptr.lock().unwrap();
                 if let BmpMsg::RouteMonitoring(rm) = &*msg {
                     if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
                         if let Some(iter) = upd.mp_withdrawals().ok().flatten() {
@@ -741,7 +823,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 entry_ptr: Val<MutLogEntry>,
                 msg: Val<BmpMsg<Bytes>>,
             ) -> Val<MutLogEntry> {
-                let mut entry = entry_ptr.borrow_mut();
+                let mut entry = entry_ptr.lock().unwrap();
 
                 if let BmpMsg::RouteMonitoring(rm) = &*msg {
                     let asn = rm.per_peer_header().asn();

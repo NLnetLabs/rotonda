@@ -1,10 +1,9 @@
 use core::fmt;
 use std::{
-    cell::RefCell,
     collections::{HashMap, HashSet},
     net::IpAddr,
     path::PathBuf,
-    rc::Rc,
+    sync::{Arc, Mutex},
 };
 
 use chrono::serde::ts_microseconds;
@@ -105,13 +104,13 @@ impl<M> OutputStream<M> {
     pub fn with_vec(v: Vec<M>) -> Self {
         Self {
             msgs: v,
-            entry: Rc::new(RefCell::new(LogEntry::new())),
+            entry: MutLogEntry::default(),
         }
     }
 
-    /// Create a new `OutputStream` wrapped in an `Rc<RefCell<>>`
-    pub fn new_rced() -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(Self::new()))
+    /// Create a new `OutputStream` wrapped in an `Arc<Mutex<>>`
+    pub fn new_arced() -> Arc<Mutex<Self>> {
+        Arc::new(Mutex::new(Self::new()))
     }
 
     pub fn push(&mut self, msg: M) {

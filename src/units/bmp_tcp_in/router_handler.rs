@@ -405,7 +405,7 @@ impl RouterHandler {
         { // lock scope
         let mut ctx = self.roto_context.lock().unwrap();
 
-        let mutiic = roto_runtime::IngressInfoCache::for_info_rc(
+        let mutiic = roto_runtime::IngressInfoCache::for_info_arc(
             0 as IngressId, 
             self.ingress_register.clone(),
             ingress_info,
@@ -420,7 +420,7 @@ impl RouterHandler {
         });
         
 
-        let mut output_stream = ctx.output.borrow_mut();
+        let mut output_stream = ctx.output.lock().unwrap();
         if !output_stream.is_empty() {
             for entry in output_stream.drain() {
                 let osm = match entry {

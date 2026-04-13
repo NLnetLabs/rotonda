@@ -277,7 +277,7 @@ impl Processor {
                             let received = std::time::Instant::now();
                             { // lock scope
                             let mut ctx = self.roto_context.lock().unwrap();
-                            let mutiic = roto_runtime::IngressInfoCache::new_rc(
+                            let mutiic = roto_runtime::IngressInfoCache::new_arc(
                                 session_ingress_id,
                                 self.ingresses.clone()
                             );
@@ -293,7 +293,7 @@ impl Processor {
                             });
 
 
-                            let mut output_stream = ctx.output.borrow_mut();
+                            let mut output_stream = ctx.output.lock().unwrap();
 
                             if !output_stream.is_empty() {
                                 use crate::roto_runtime::types::Output;

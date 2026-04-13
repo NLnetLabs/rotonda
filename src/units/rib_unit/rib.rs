@@ -33,7 +33,7 @@ type Store = StarCastRib<RotondaPaMap, MemoryOnlyConfig>;
 
 type RotoHttpFilter = roto::TypedFunc<
     roto::Ctx<RotondaCtx>,
-    fn (roto::Val<crate::roto_runtime::RcRotondaPaMap>,) -> roto::Verdict<(), ()>,
+    fn (roto::Val<crate::roto_runtime::ArcRotondaPaMap>,) -> roto::Verdict<(), ()>,
 >;
 
 #[derive(Clone)]
@@ -565,10 +565,10 @@ impl Rib {
         if let Some(f) = roto_filter {
             let mut ctx = self.roto_context.lock().unwrap();
             records.retain_mut(|r| {
-                let rc_r: crate::roto_runtime::RcRotondaPaMap = std::mem::take(&mut r.meta).into();
+                let rc_r: crate::roto_runtime::ArcRotondaPaMap = std::mem::take(&mut r.meta).into();
                 match f.call(&mut ctx, roto::Val(rc_r.clone())) {
                     roto::Verdict::Accept(_) => {
-                        r.meta = std::rc::Rc::into_inner(rc_r).unwrap();
+                        r.meta = std::sync::Arc::into_inner(rc_r).unwrap();
                         true
                     }
                     roto::Verdict::Reject(_) => {

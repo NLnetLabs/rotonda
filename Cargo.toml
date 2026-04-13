@@ -66,7 +66,8 @@ inetnum            = { workspace = true }
 mqtt               = { version = "0.23.0", package = "rumqttc", default-features = false }
 memmap2            = "0.9.9"
 non-empty-vec      = { version = "0.2", features = ["serde"]}
-roto               = { git = "https://codeberg.org/NLnetLabs/roto", features = ["selinux-fix"]}
+#roto               = { git = "https://codeberg.org/NLnetLabs/roto", branch="constants", features = ["selinux-fix"]}
+roto               = { path = "../../roto", features = ["selinux-fix"]}
 rotonda-store      = { workspace = true }
 serde_with         = "3"
 smallvec           = { version = "1.15", features = ["const_generics", "const_new", "union"] }

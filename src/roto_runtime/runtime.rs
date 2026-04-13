@@ -459,7 +459,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             /// removed)
             fn log_matched_community(stream: Val<Log>, community: Val<StandardCommunity>) {
                 let mut stream = stream.lock().unwrap();
-                debug!("log_matched_community {:?}", community);
                 stream.push(Output::Community(community.to_u32()));
             }
 

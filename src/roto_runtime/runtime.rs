@@ -227,19 +227,6 @@ impl RotondaCtx {
         debug!("setting metrics in Ctx");
         self.metrics = Val(metrics);
     }
-
-    pub fn prepare(
-        &mut self,
-        roto_package: &mut roto::Package<roto::Ctx<RotondaCtx>>,
-    ) {
-        let f: Result<CompileListsFunc, _> =
-            roto_package.get_function(COMPILE_LISTS_FUNC_NAME);
-        if let Ok(f) = f {
-            f.call(self);
-        } else {
-            debug!("No {COMPILE_LISTS_FUNC_NAME} to prepare");
-        }
-    }
 }
 
 pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>

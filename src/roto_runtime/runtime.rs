@@ -26,19 +26,13 @@ use routecore::bmp::message::{Message as BmpMsg, MessageType as BmpMsgType};
 
 use roto::{Context, List, Val};
 
-use super::lists::{MutNamedAsnLists, MutNamedPrefixLists};
 use super::types::{InsertionInfo, Output, RotoOutputStream};
 use crate::ingress::{self, IngressId, IngressInfo};
 use crate::payload::{RotondaPaMap, RotondaRoute};
-use crate::roto_runtime::lists::{AsnList, PrefixList};
 use crate::roto_runtime::metrics::MutMetrics;
 use crate::roto_runtime::types::LogEntry;
 use crate::units::rib_unit::rpki::{RovStatus, RovStatusUpdate, RtrCache};
 use crate::units::rtr::client::VrpUpdate;
-
-pub type CompileListsFunc =
-    roto::TypedFunc<roto::Ctx<RotondaCtx>, fn() -> ()>;
-pub const COMPILE_LISTS_FUNC_NAME: &str = "compile_lists";
 
 #[derive(Clone)]
 pub struct Log(Arc<Mutex<RotoOutputStream>>);
@@ -136,8 +130,6 @@ impl From<RotondaRoute> for MutRotondaRoute {
 pub struct RotondaCtx {
     pub output: Val<Log>,
     pub rpki: Val<SharedRtrCache>,
-    pub asn_lists: Val<MutNamedAsnLists>,
-    pub prefix_lists: Val<MutNamedPrefixLists>,
     pub metrics: Val<MutMetrics>,
 }
 impl PartialEq for RotondaCtx {
@@ -220,8 +212,6 @@ impl RotondaCtx {
         Self {
             output: Val(log),
             rpki: Val(rpki),
-            asn_lists: Val(Default::default()),
-            prefix_lists: Val(Default::default()),
             metrics: Val(Default::default()),
         }
     }
@@ -229,8 +219,6 @@ impl RotondaCtx {
         Self {
             output: Val(Log(RotoOutputStream::new_arced())),
             rpki: Val(Arc::<RtrCache>::default()),
-            asn_lists: Val(Default::default()),
-            prefix_lists: Val(Default::default()),
             metrics: Val(Default::default()),
         }
     }
@@ -598,42 +586,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             /// Return a formatted string for `vrp_update`
             fn to_string(vrp_update: Val<VrpUpdate>) -> RotoString {
                 vrp_update.to_string().into()
-            }
-        }
-
-        /// Named lists of ASNs
-        #[clone] type AsnLists = Val<MutNamedAsnLists>;
-        impl Val<MutNamedAsnLists> {
-            /// Add a named ASN list
-            fn add(lists: Val<MutNamedAsnLists>, name: RotoString, s: RotoString) {
-                let res = AsnList::from_str(&s).unwrap_or_default();
-                lists.add(&*name, res);
-            }
-
-            /// Returns 'true' if `asn` is in the named list
-            fn contains(asn_list: Val<MutNamedAsnLists>, name: RotoString, asn: Asn) -> bool {
-                asn_list.contains(&*name, asn)
-            }
-
-        }
-
-        /// Named lists of prefixes
-        #[clone] type PrefixLists = Val<MutNamedPrefixLists>;
-        impl Val<MutNamedPrefixLists> {
-            /// Add a named prefix list
-            fn add(lists: Val<MutNamedPrefixLists>, name: RotoString, s: RotoString) {
-                let res = PrefixList::from_str(&s).unwrap_or_default();
-                lists.add(&*name, res);
-            }
-
-            /// Returns 'true' if `prefix` is in the named list
-            fn contains(prefix_list: Val<MutNamedPrefixLists>, name: RotoString, prefix: Prefix) -> bool {
-                prefix_list.contains(&*name, prefix)
-            }
-
-            /// Returns 'true' if `prefix` or a less-specific is in the named list
-            fn covers(prefix_list: Val<MutNamedPrefixLists>, name: RotoString, prefix: Prefix) -> bool {
-                prefix_list.covers(&*name, prefix)
             }
         }
 

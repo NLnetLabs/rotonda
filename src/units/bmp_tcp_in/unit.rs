@@ -366,10 +366,6 @@ impl BmpTcpInRunner {
             roto_context.set_metrics(roto_metrics.metrics.clone());
         }
 
-        if let Some(c) = self.roto_compiled.clone() {
-            roto_context.prepare(&mut c.lock().unwrap());
-        }
-
         let roto_context = Arc::new(std::sync::Mutex::new(roto_context));
 
         let unit_ingress_id = self.ingress_register.register();

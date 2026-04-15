@@ -15,24 +15,6 @@
 #   - asn_lists.contains_origin("my_asns", bmp_msg.aspath_origin())
 # 
 
-fn compile_lists() {
-    # First parameter of `add` is the name of the list, the second is a
-    # whitespace separated list of ASNs, optionally prefixed with 'AS'.
-    # Non-parseable items are ignored.
-    asn_lists.add("my_asns", "AS211321");
-    asn_lists.add("other_asns", "AS65536 65537 65538 not65536 foo");
-
-
-    # Similarly, create a named list of prefixes. IPv4 and IPv6 can be mixed in
-    # a single list.
-    prefix_lists.add("my_prefixes",
-    "
-        185.49.140.0/23
-        2a04:b900::/29
-    ");
-
-}
-
 fn compile_many_asns() -> List[Asn] {
     let many_asns = List.new();
     let a = 1;
@@ -90,7 +72,7 @@ const MY_ASNS: List[Asn] = [AS1, AS2, AS3];
 #    list
 #};
 
-const PREFIX_LIST: List[Prefix] = [
+const MY_PREFIXES: List[Prefix] = [
     185.49.140.0/23,
     2a04:b900::/29,
 ];
@@ -215,7 +197,7 @@ filter rib_in_pre(
     ingress_info: IngressInfo,
 ) {
 
-    if PREFIX_LIST.contains(route.prefix()) {
+    if MY_PREFIXES.contains(route.prefix()) {
         output.log_prefix(route.prefix());
     }
 
@@ -271,16 +253,16 @@ fn fmt_communities(c: List[Community]) -> String {
 # RTR Cache Reset sync.
 filter vrp_update(vrp_update: VrpUpdate) {
 
-    if MANY_ASNS.contains(vrp_update.asn()) {
-        output.entry().timestamped_custom(f"[RTR] (many_asns): {vrp_update}");
+    if MY_ASNS.contains(vrp_update.asn()) {
+        output.entry().timestamped_custom(f"[RTR] (my_asns): {vrp_update}");
         output.write_entry();
     }
-    if MANY_ASNS.contains(vrp_update.asn()) {
-        output.entry().timestamped_custom(f"[RTR] (my asns): {vrp_update}");
+    if BOGON_ASNS.contains(vrp_update.asn()) {
+        output.entry().timestamped_custom(f"[RTR] (bogon): {vrp_update}");
         output.write_entry();
     }
 
-    if vrp_update.prefix().covered_by(PREFIX_LIST) {
+    if vrp_update.prefix().covered_by(MY_PREFIXES) {
         output.timestamped_print(f"[RTR] (my prefixes): {vrp_update}")
     }
 
@@ -316,7 +298,7 @@ fn rib_in_rov_status_update(rov_update: RovStatusUpdate) {
         #output.timestamped_print(f"[RTR] {fmt_rov_upd(rov_update)}");
     }
     # When it concerns any of 'my_prefixes', always log:
-    if rov_update.prefix().covered_by(PREFIX_LIST) {
+    if rov_update.prefix().covered_by(MY_PREFIXES) {
         output.timestamped_print(f"[RTR] (my prefixes): {fmt_rov_upd(rov_update)}")
     }
 }

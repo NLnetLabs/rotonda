@@ -33,6 +33,101 @@ fn compile_lists() {
 
 }
 
+fn compile_many_asns() -> List[Asn] {
+    let many_asns = List.new();
+    let a = 1;
+    # underscores in numeral literals would be nice, e.g. 10_000
+    while a < 100000 {
+        many_asns.push(Asn.from_u32(a));
+        a = a + 1;
+    }
+    many_asns
+}
+
+fn compile_prefix_lists() -> List[Prefix] {
+    #let prefix_lists = PrefixLists.new();
+    #prefix_lists
+    let list = List.new();
+    list.push(1.2.3.0/24);
+    list
+}
+
+fn compile_bogon_asns() -> List[Asn] {
+    let bogons = [
+        AS0,            # RFC 7607
+        AS23456,        # RFC 4893 AS_TRANS
+        AS65535,        # RFC 7300 Last 16 bit ASN
+        AS4294967295    # RFC 7300 Last 32 bit ASN
+    ];
+
+    # RFC 5398 and documentation/example ASNs
+    bogons = bogons.concat(Asn.range(AS64496, AS64511));
+
+    # RFC 6996 Private ASNs
+    bogons = bogons.concat(Asn.range(AS64512, AS65534));
+
+    # RFC 5398 and documentation/example ASNs
+    bogons = bogons.concat(Asn.range(AS65536, AS65551));
+
+    # RFC IANA reserved ASNs
+    bogons = bogons.concat(Asn.range(AS65552, AS131071));
+
+    # RFC 6996 Private ASNs
+    bogons = bogons.concat(Asn.range(AS4200000000, AS4294967294));
+
+    bogons
+}
+
+const BOGON_ASNS: List[Asn] = compile_bogon_asns();
+
+const MANY_ASNS: List[Asn] = compile_many_asns();
+const MY_ASNS: List[Asn] = [AS1, AS2, AS3];
+
+# TODO issue: ambiguous with anonymous record syntax
+#const MY_ASNS: List[Asn] = {
+#    let list = List.new();
+#    list.push(AS123);
+#    list
+#};
+
+const PREFIX_LIST: List[Prefix] = [
+    185.49.140.0/23,
+    2a04:b900::/29,
+];
+
+const BOGONS: List[Prefix] = [
+    # source: https://bgpfilterguide.nlnog.net/guides/bogon_prefixes/
+    # retrieved April 2026
+    0.0.0.0/8,          #	RFC 1122 ‘this’ network
+    10.0.0.0/8,         #	RFC 1918 private space
+    100.64.0.0/10,      #	RFC 6598 Carrier grade nat space
+    127.0.0.0/8,        #	RFC 1122 localhost
+    169.254.0.0/16,     #	RFC 3927 link local
+    172.16.0.0/12,      #	RFC 1918 private space
+    192.0.2.0/24,       #	RFC 5737 TEST-NET-1
+    192.88.99.0/24,     #	RFC 7526 6to4 anycast relay
+    192.168.0.0/16,     #	RFC 1918 private space
+    198.18.0.0/15,      #	RFC 2544 benchmarking
+    198.51.100.0/24,    #	RFC 5737 TEST-NET-2
+    203.0.113.0/24,     #	RFC 5737 TEST-NET-3
+    224.0.0.0/4,        #	multicast
+    240.0.0.0/4,        #	reserved
+    0100::/64,          #	RFC 6666 Discard-Only
+    2001:2::/48,        #	RFC 5180 BMWG
+    2001:10::/28,       #	RFC 4843 ORCHID
+    2001:db8::/32,      #	RFC 3849 documentation
+    2002::/16,          #	RFC 7526 6to4 anycast relay
+    3ffe::/16,          #	RFC 3701 old 6bone
+    3fff::/20,          #	RFC 9637 documentation
+    5f00::/16,          #	RFC 9602 SRv6 SIDs
+    fc00::/7,           #	RFC 4193 unique local unicast
+    fe80::/10,          #	RFC 4291 link local unicast
+    fec0::/10,          #	RFC 3879 old site local unicast
+    ff00::/8,           #	RFC 4291 multicast
+];
+
+
+
 # The bgp_in filter works on incoming BGP UPDATE messages.
 #
 # One such message can contain multiple NLRI, thus multiple announcements or
@@ -56,6 +151,9 @@ filter bgp_in(
     accept
 }
 
+
+const MY_ASN: Asn =  AS211321;
+
 # The bmp_in filter works on incoming BMP messages.
 #
 # While most BMP message will be of type RouteMonitoring (transporting route
@@ -66,7 +164,7 @@ filter bmp_in(
     bmp_msg: BmpMsg,
     ingress_info: IngressInfo,
 ) {
-    let my_asn = AS12345;
+    #let my_asn = AS12345;
     let asn_to_log = AS65536;
     let community_to_log = Community.from("NOPEER");
 
@@ -86,7 +184,7 @@ filter bmp_in(
         );
     }
 
-    if bmp_msg.is_ibgp(my_asn) {
+    if bmp_msg.is_ibgp(MY_ASN) {
         reject
     } else {
         if bmp_msg.aspath_contains(asn_to_log) {
@@ -117,7 +215,7 @@ filter rib_in_pre(
     ingress_info: IngressInfo,
 ) {
 
-    if prefix_lists.contains("my_prefixes", route.prefix()) {
+    if PREFIX_LIST.contains(route.prefix()) {
         output.log_prefix(route.prefix());
     }
 
@@ -125,6 +223,36 @@ filter rib_in_pre(
     rpki.check_rov(route);
 
     accept
+}
+
+fn fmt_aspath_origin(r: Route) -> String {
+    match r.aspath_origin() {
+        Some(asn) -> f"{asn}",
+        None -> "no origin in route"
+    }
+}
+
+# XXX requires .join() from roto main
+# and ideally, something like .map() on List[T]
+#fn fmt_communities(c: List[Community]) -> String {
+#    let strings = List.new();
+#    for c in c {
+#        strings.push(c.to_string());
+#    }
+#    f"[{strings.join(",")}]"
+#}
+
+# XXX bit poor, with that trailing comma.
+# A .split_first might be nice
+# though a map + join is perhaps even nicer.
+fn fmt_communities(c: List[Community]) -> String {
+    let res = StringBuf.from("[");
+    for c in c {
+        res.push_string(f"{c}, ");
+    }
+    
+    res.push_char(']');
+    res.as_string()
 }
 
 # The vrp_update filter processes updates pertaining to VRPs coming in via RTR.
@@ -143,14 +271,27 @@ filter rib_in_pre(
 # RTR Cache Reset sync.
 filter vrp_update(vrp_update: VrpUpdate) {
 
-    #if asn_lists.contains("my_asns", vrp_update.asn()) {
-    #    output.entry().timestamped_custom("[RTR] (my asns): " + vrp_update.fmt());
-    #    output.write_entry();
-    #}
-
-    if prefix_lists.covers("my_prefixes", vrp_update.prefix()) {
-        output.timestamped_print("[RTR] (my prefixes): " + vrp_update.fmt())
+    if MANY_ASNS.contains(vrp_update.asn()) {
+        output.entry().timestamped_custom(f"[RTR] (many_asns): {vrp_update}");
+        output.write_entry();
     }
+    if MANY_ASNS.contains(vrp_update.asn()) {
+        output.entry().timestamped_custom(f"[RTR] (my asns): {vrp_update}");
+        output.write_entry();
+    }
+
+    if vrp_update.prefix().covered_by(PREFIX_LIST) {
+        output.timestamped_print(f"[RTR] (my prefixes): {vrp_update}")
+    }
+
+    if vrp_update.prefix().covered_by(BOGONS) {
+        output.timestamped_print(f"[RTR] (BOGON): {vrp_update}")
+    }
+
+    #tmp just to test new fmt stuff
+# TODO issue / idea: warn when using a String that is not an f-string, but
+    # looks like one? So, curly braces containing an identifier?
+    output.timestamped_print(f"[RTR] {vrp_update}");
 
     accept
 }
@@ -167,14 +308,25 @@ fn rib_in_rov_status_update(rov_update: RovStatusUpdate) {
     if rov_update.has_changed() {
         # Only log whenever something changed to Invalid:
         if rov_update.current_status().is_invalid() {
-            output.timestamped_print("[RTR]" + rov_update.fmt())
+            output.timestamped_print(f"[RTR] {fmt_rov_upd(rov_update)}")
         }
+
+        # tmp to compare with output of fmt_rov_upd() below
+        #output.timestamped_print("[RTR] " + rov_update.fmt());
+        #output.timestamped_print(f"[RTR] {fmt_rov_upd(rov_update)}");
     }
     # When it concerns any of 'my_prefixes', always log:
-    if prefix_lists.covers("my_prefixes", rov_update.prefix()) {
-        output.timestamped_print("[RTR] (my prefixes): " + rov_update.fmt())
+    if rov_update.prefix().covered_by(PREFIX_LIST) {
+        output.timestamped_print(f"[RTR] (my prefixes): {fmt_rov_upd(rov_update)}")
     }
 }
+
+fn fmt_rov_upd(r: RovStatusUpdate) -> String {
+    f"[{r.previous_status()}] -> [{r.current_status()}] \
+    {r.prefix()} originated by {r.origin()}, learned from {r.peer_asn()}"
+}
+
+
 
 
 # The ribs/$address_family/routes endpoints take a

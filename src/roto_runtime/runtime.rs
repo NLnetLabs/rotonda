@@ -258,6 +258,26 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
 {
     let lib = roto::library! {
 
+        // Extends the roto std lib Asn type
+        impl Asn {
+            fn from_u32(v: u32) -> Asn {
+                Asn::from_u32(v)
+            }
+
+            fn range(start: Asn, end: Asn) -> List<Asn> {
+                List::from_iter(
+                    (u32::from(start)..=u32::from(end)).map(Asn::from_u32)
+                )
+            }
+        }
+
+        // Extends the roto std lib Prefix type
+        impl Prefix {
+            fn covered_by(prefix: Prefix, list: List<Prefix>) -> bool {
+                list.to_vec().iter().any(|p| p.covers(prefix))
+            }
+        }
+
         // --- General types
 
         /// A single announced or withdrawn path

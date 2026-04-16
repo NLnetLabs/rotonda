@@ -1,4 +1,5 @@
 use std::net::{IpAddr, Ipv6Addr};
+use std::process::Command;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
@@ -8,7 +9,7 @@ use bytes::Bytes;
 use chrono::{SecondsFormat, Utc};
 use inetnum::addr::Prefix;
 use inetnum::asn::Asn;
-use log::{debug, warn};
+use log::{debug, error, info, warn};
 use routecore::bgp::aspath::{Hop, HopPath};
 use routecore::bgp::communities::{
     LargeCommunity, StandardCommunity, Wellknown,
@@ -253,11 +254,35 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             }
         }
 
+
+        fn command(cmd: RotoString, args: List<RotoString>) -> bool {
+            let Ok(output) = Command::new(cmd.as_ref())
+                .args(args.to_vec().iter().map(|s| s.as_ref()))
+                .output()
+                else {
+                    error!("error running command() from roto");
+                    return false;
+                };
+
+            if !output.stdout.is_empty() {
+                info!("roto command {cmd}: {}", String::from_utf8_lossy(&output.stdout));
+            }
+            if !output.stderr.is_empty() {
+                warn!("roto command {cmd} stderr: {}", String::from_utf8_lossy(&output.stderr));
+            }
+            output.status.success()
+        }
+
+
         // --- General types
 
         /// A single announced or withdrawn path
         #[clone] type Route  = Val<MutRotondaRoute>;
         impl Val<MutRotondaRoute> {
+
+            fn to_json(rr: Val<MutRotondaRoute>) -> RotoString {
+                serde_json::to_string(&rr.cloned_inner()).unwrap().into()
+            }
 
             /// Return the prefix for this `RotondaRoute`
             fn prefix(rr: Val<MutRotondaRoute>) -> Prefix {

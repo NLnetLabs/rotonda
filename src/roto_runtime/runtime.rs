@@ -307,17 +307,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 rr_prefix == to_match
             }
 
-            /// Check whether the AS_PATH contains the given `Asn`
-            fn aspath_contains(rr: Val<MutRotondaRoute>, to_match: Asn) -> bool {
-                let rr = rr.cloned_inner();
-
-                if let Some(hoppath) = rr.owned_map().get::<HopPath>() {
-                    hoppath.into_iter().any(|h| h == to_match.into())
-                } else {
-                    false
-                }
-            }
-
             /// Check whether the AS_PATH origin matches the given `Asn`
             fn match_aspath_origin(
                 rr: Val<MutRotondaRoute>,
@@ -332,33 +321,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 false
             }
 
-            /// Check whether this `RotondaRoute` contains the given Standard
-            /// Community
-            fn contains_community(
-                rr: Val<MutRotondaRoute>,
-                to_match: Val<StandardCommunity>,
-            ) -> bool {
-                let rr = rr.lock().unwrap();
-
-                if let Some(list) = rr.owned_map().get::<StandardCommunitiesList>() {
-                    return list.communities().contains(&*to_match);
-                }
-                false
-            }
-
-            /// Check whether this `RotondaRoute` contains the given Large
-            /// Community
-            fn contains_large_community(
-                rr: Val<MutRotondaRoute>,
-                to_match: Val<LargeCommunity>,
-            ) -> bool {
-                let rr = rr.lock().unwrap();
-
-                if let Some(list) = rr.owned_map().get::<LargeCommunitiesList>() {
-                    return list.communities().contains(&*to_match);
-                }
-                false
-            }
 
             /// Check whether this `RotondaRoute` contains the given Path
             /// Attribute
@@ -424,28 +386,22 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 pamap.path_attributes().get::<Otc>().map(|a| a.0)
             }
 
-            fn contains_community(pamap: Val<ArcRotondaPaMap>, to_match: Val<StandardCommunity>) -> bool {
-                if let Some(pa) = pamap.path_attributes()
-                    .get::<StandardCommunitiesList>()
-                {
-                    pa.communities().contains(&*to_match)
-                } else {
-                    false
-                }
-            }
-
-            fn contains_large_community(pamap: Val<ArcRotondaPaMap>, to_match: Val<LargeCommunity>) -> bool {
-                if let Some(pa) = pamap.path_attributes()
-                    .get::<LargeCommunitiesList>()
-                {
-                    pa.communities().contains(&*to_match)
-                } else {
-                    false
-                }
-            }
-
             fn aspath(pamap: Val<ArcRotondaPaMap>) -> Option<Val<HopPath>> {
                 pamap.path_attributes().get::<HopPath>().map(Val)
+            }
+
+            fn communities(pamap: Val<ArcRotondaPaMap>) -> Option<List<Val<StandardCommunity>>> {
+                let communities = pamap.path_attributes().get::<StandardCommunitiesList>()?;
+                let res = List::new();
+                communities.communities().iter().for_each(|&c| res.push(Val(c)));
+                Some(res)
+            }
+
+            fn large_communities(pamap: Val<ArcRotondaPaMap>) -> Option<List<Val<LargeCommunity>>> {
+                let communities = pamap.path_attributes().get::<LargeCommunitiesList>()?;
+                let res = List::new();
+                communities.communities().iter().for_each(|&c| res.push(Val(c)));
+                Some(res)
             }
 
         }
@@ -852,14 +808,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         /// BGP UPDATE message
         #[clone] type BgpMsg = Val<BgpUpdateMessage<Bytes>>;
         impl Val<BgpUpdateMessage<Bytes>> {
-            /// Check whether the AS_PATH contains the given `Asn`
-            fn aspath_contains(
-                msg: Val<BgpUpdateMessage<Bytes>>,
-                to_match: Asn,
-            ) -> bool {
-                aspath_contains(&msg, to_match)
-            }
-
             /// Returns the right-most `Asn` in the 'AS_PATH' attribute, if
             /// any.
             fn aspath_origin(msg: Val<BgpUpdateMessage<Bytes>>) -> Option<Asn> {
@@ -872,23 +820,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 to_match: Asn,
             ) -> bool {
                 match_aspath_origin(&msg, to_match)
-            }
-
-            /// Check whether this message contains the given Standard
-            /// Community
-            fn contains_community(
-                msg: Val<BgpUpdateMessage<Bytes>>,
-                to_match: Val<StandardCommunity>,
-            ) -> bool {
-                contains_community(&msg, &to_match)
-            }
-
-            /// Check whether this message contains the given Large Community
-            fn contains_large_community(
-                msg: Val<BgpUpdateMessage<Bytes>>,
-                to_match: Val<LargeCommunity>,
-            ) -> bool {
-                contains_large_community(&msg, &to_match)
             }
 
             /// Check whether this message contains the given Path Attribute
@@ -961,22 +892,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 msg.msg_type() == BmpMsgType::PeerUpNotification
             }
 
-            /// Check whether the AS_PATH contains the given `Asn`
-            fn aspath_contains(msg: Val<BmpMsg<Bytes>>, to_match: Asn) -> bool {
-                let update = if let BmpMsg::RouteMonitoring(rm) = &*msg {
-                    if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
-                        upd
-                    } else {
-                        // log error?
-                        return false;
-                    }
-                } else {
-                    return false;
-                };
-
-                aspath_contains(&update, to_match)
-            }
-
             /// Returns the right-most `Asn` in the 'AS_PATH' attribute
             ///
             /// Note that the returned value is of type `OriginAsn`, which
@@ -1014,45 +929,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 };
 
                 match_aspath_origin(&update, to_match)
-            }
-
-            /// Check whether this message contains the given Standard
-            /// Community
-            fn contains_community(
-                msg: Val<BmpMsg<Bytes>>,
-                to_match: Val<StandardCommunity>,
-            ) -> bool {
-                let update = if let BmpMsg::RouteMonitoring(rm) = &*msg {
-                    if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
-                        upd
-                    } else {
-                        // log error
-                        return false;
-                    }
-                } else {
-                    return false;
-                };
-
-                contains_community(&update, &to_match)
-            }
-
-            /// Check whether this message contains the given Large Community
-            fn contains_large_community(
-                msg: Val<BmpMsg<Bytes>>,
-                to_match: Val<LargeCommunity>,
-            ) -> bool {
-                let update = if let BmpMsg::RouteMonitoring(rm) = &*msg {
-                    if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
-                        upd
-                    } else {
-                        // log error
-                        return false;
-                    }
-                } else {
-                    return false;
-                };
-
-                contains_large_community(&update, &to_match)
             }
 
             /// Check whether this message contains the given Path Attribute
@@ -1298,39 +1174,7 @@ fn _large_communities(
     None
 }
 
-fn contains_community(
-    bgp_update: &BgpUpdateMessage<Bytes>,
-    to_match: &StandardCommunity,
-) -> bool {
-    if let Some(mut iter) = bgp_update.communities().ok().flatten() {
-        iter.any(|c| c == *to_match)
-    } else {
-        false
-    }
-}
-
-fn contains_large_community(
-    bgp_update: &BgpUpdateMessage<Bytes>,
-    to_match: &LargeCommunity,
-) -> bool {
-    if let Some(mut iter) = bgp_update.large_communities().ok().flatten() {
-        iter.any(|c| c == *to_match)
-    } else {
-        false
-    }
-}
-
-fn aspath_contains(
-    bgp_update: &BgpUpdateMessage<Bytes>,
-    to_match: Asn,
-) -> bool {
-    if let Some(aspath) = bgp_update.aspath().ok().flatten() {
-        aspath.hops().any(|h| h == to_match.into())
-    } else {
-        false
-    }
-}
-
+// TODO also remove these
 fn aspath_origin(bgp_update: &BgpUpdateMessage<Bytes>) -> Option<Asn> {
     hoppath(bgp_update)
         .and_then(|hp| hp.origin().cloned())

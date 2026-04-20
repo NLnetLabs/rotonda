@@ -154,6 +154,22 @@ fn aspath_contains(maybe: Option[AsPath], to_match: Asn) -> bool {
 }
 
 
+fn contains_community(maybe: Option[List[Community]], to_match: Community) -> bool {
+    match maybe {
+        Some(communities) if communities.contains(to_match) => true,
+        _ => false
+    }
+}
+
+fn contains_large_community(maybe: Option[List[LargeCommunity]], to_match: LargeCommunity) -> bool {
+    match maybe {
+        Some(communities) if communities.contains(to_match) => true,
+        _ => false
+    }
+}
+
+
+
 // The bmp_in filter works on incoming BMP messages.
 //
 // While most BMP message will be of type RouteMonitoring (transporting route
@@ -211,7 +227,7 @@ filter bmp_in(
     // FIXME prints empty string for NOPEER, not different from other
     // branches though
     //TODO replace all contains_ withroto equivalent (like aspath_contains)
-    if bmp_msg.contains_community(community_to_log) {
+    if contains_community(bmp_msg.communities(), community_to_log) {
         output.log_matched_community(community_to_log)
     }
     accept
@@ -404,8 +420,8 @@ filter hidden_hop(attr: PathAttributes) {
 
 // Another example based on (Large) communities.
 filter specific_communities(attr: PathAttributes) {
-    if (!contains_community(Community.from("NOPEER"))) && 
-       attr.contains_large_community(LargeCommunity.from("AS211321:1:2")) {
+    if !contains_community(attr.communities(), Community.from("NOPEER")) &&
+       contains_large_community(attr.large_communities(), LargeCommunity.from("AS211321:1:2")) {
         accept
     }
     reject

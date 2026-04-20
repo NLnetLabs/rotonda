@@ -182,7 +182,7 @@ filter bmp_in(
 ) {
     //let my_asn = AS12345;
     let asn_to_log = AS65536;
-    let community_to_log = Community.from("NOPEER");
+    let community_to_log = Community.NO_PEER;
 
     if bmp_msg.is_peer_down() {
         // this prints $prefix,$asn
@@ -407,7 +407,7 @@ filter hidden_hop(attr: PathAttributes) {
 
 // Another example based on (Large) communities.
 filter specific_communities(attr: PathAttributes) {
-    if !contains_community(attr.communities(), Community.from("NOPEER")) &&
+    if !contains_community(attr.communities(), Community.NO_PEER) &&
        contains_large_community(attr.large_communities(), LargeCommunity.from("AS211321:1:2")) {
         accept
     }

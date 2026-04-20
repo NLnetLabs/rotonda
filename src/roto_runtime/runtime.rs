@@ -1009,6 +1009,12 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         #[copy] type Community = Val<StandardCommunity>;
 
         impl Val<StandardCommunity> {
+            const NO_EXPORT: Val<StandardCommunity> = Val(Wellknown::NoExport.into());
+            const NO_ADVERTISE: Val<StandardCommunity> = Val(Wellknown::NoAdvertise.into());
+            const NO_EXPORT_SUBCONFED: Val<StandardCommunity> = Val(Wellknown::NoExportSubconfed.into());
+            const NO_PEER: Val<StandardCommunity> = Val(Wellknown::NoPeer.into());
+            const BLACKHOLE: Val<StandardCommunity> = Val(Wellknown::Blackhole.into());
+
             fn from(s: RotoString) -> Val<StandardCommunity> {
                 Val(StandardCommunity::from_str(&s)
                     .unwrap_or(StandardCommunity::from_u32(0))

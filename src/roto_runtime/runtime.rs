@@ -347,35 +347,15 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             }
 
             /// Return a `List` of `Community`s
-            // XXX also no support to use List[T] in f-strings?
-            fn communities(rr: Val<MutRotondaRoute>) -> List<Val<StandardCommunity>> {
-                let res = List::new();
-                // XXX in the next roto release we can use from_iter /
-                // .collect
-                if let Some(pa) = rr.lock().unwrap().owned_map()
-                    .get::<StandardCommunitiesList>()
-                {
-                    pa.communities().iter()
-                        .for_each(|c| res.push(Val(*c)))
-                }
-                res
-
+            fn communities(rr: Val<MutRotondaRoute>) -> Option<List<Val<StandardCommunity>>> {
+                let communities = rr.lock().unwrap().owned_map().get::<StandardCommunitiesList>()?;
+                Some(communities.communities().iter().cloned().map(Val).collect())
             }
 
             /// Return a `List` of `LargeCommunity`s
-            // XXX also no support to use List[T] in f-strings?
-            fn large_communities(rr: Val<MutRotondaRoute>) -> List<Val<LargeCommunity>> {
-                let res = List::new();
-                // XXX something like a List::from_iter (impl FromIterator)
-                // would allow a .collect::<List<_>>(), that'd be nice.
-                if let Some(pa) = rr.lock().unwrap().owned_map()
-                    .get::<LargeCommunitiesList>()
-                {
-                    pa.communities().iter()
-                        .for_each(|c| res.push(Val(*c)))
-                }
-                res
-
+            fn large_communities(rr: Val<MutRotondaRoute>) -> Option<List<Val<LargeCommunity>>> {
+                let communities = rr.lock().unwrap().owned_map().get::<LargeCommunitiesList>()?;
+                Some(communities.communities().iter().cloned().map(Val).collect())
             }
         }
 
@@ -392,18 +372,13 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
 
             fn communities(pamap: Val<ArcRotondaPaMap>) -> Option<List<Val<StandardCommunity>>> {
                 let communities = pamap.path_attributes().get::<StandardCommunitiesList>()?;
-                let res = List::new();
-                communities.communities().iter().for_each(|&c| res.push(Val(c)));
-                Some(res)
+                Some(communities.communities().iter().cloned().map(Val).collect())
             }
 
             fn large_communities(pamap: Val<ArcRotondaPaMap>) -> Option<List<Val<LargeCommunity>>> {
                 let communities = pamap.path_attributes().get::<LargeCommunitiesList>()?;
-                let res = List::new();
-                communities.communities().iter().for_each(|&c| res.push(Val(c)));
-                Some(res)
+                Some(communities.communities().iter().cloned().map(Val).collect())
             }
-
         }
 
 
@@ -1155,23 +1130,15 @@ fn has_attribute(bgp_update: &BgpUpdateMessage<Bytes>, to_match: u8) -> bool {
 fn _communities(
     bgp_update: &BgpUpdateMessage<Bytes>,
 ) -> Option<List<Val<StandardCommunity>>> {
-    if let Some(iter) = bgp_update.communities().ok().flatten() {
-        let res = List::new();
-        iter.for_each(|c| res.push(Val(c)));
-        return Some(res);
-    }
-    None
+    let iter = bgp_update.communities().ok().flatten()?;
+    Some(iter.map(Val).collect())
 }
 
 fn _large_communities(
     bgp_update: &BgpUpdateMessage<Bytes>,
 ) -> Option<List<Val<LargeCommunity>>> {
-    if let Some(iter) = bgp_update.large_communities().ok().flatten() {
-        let res = List::new();
-        iter.for_each(|c| res.push(Val(c)));
-        return Some(res);
-    }
-    None
+    let iter = bgp_update.large_communities().ok().flatten()?;
+    Some(iter.map(Val).collect())
 }
 
 // TODO also remove these

@@ -286,34 +286,21 @@ fn fmt_aspath_origin(r: Route) -> String {
     }
 }
 
-// XXX requires .join() from roto main
-// and ideally, something like .map() on List[T]
-fn fmt_communities(c: List[Community]) -> String {
+fn fmt_communities(c: Option[List[Community]]) -> String {
+    let list = match c {
+        Some(list) => list,
+        None => return "",
+    };
     let strings = List.new();
-    for c in c {
+    for c in list {
         strings.push(c.to_string());
     }
-
-    // list comprehension would be cool:
-    //let j = [for c in c {
-    //    c.to_string()
-    //}].join(",");
 
     f"[{strings.join(", ")}]"
 }
 
-// XXX bit poor, with that trailing comma.
-// A .split_first might be nice
-// though a map + join is perhaps even nicer.
-//fn fmt_communities(c: List[Community]) -> String {
-//    let res = StringBuf.from("[");
-//    for c in c {
-//        res.push_string(f"{c}, ");
-//    }
-//    
-//    res.push_char(']');
-//    res.as_string()
-//}
+
+
 
 // The vrp_update filter processes updates pertaining to VRPs coming in via RTR.
 //

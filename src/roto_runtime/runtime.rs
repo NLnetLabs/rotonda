@@ -250,14 +250,14 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         // Extends the roto std lib Prefix type
         impl Prefix {
             fn covered_by(prefix: Prefix, list: List<Prefix>) -> bool {
-                list.to_vec().iter().any(|p| p.covers(prefix))
+                list.into_iter().any(|p| p.covers(prefix))
             }
         }
 
 
         fn command(cmd: RotoString, args: List<RotoString>) -> bool {
             let Ok(output) = Command::new(cmd.as_ref())
-                .args(args.to_vec().iter().map(|s| s.as_ref()))
+                .args(args.into_iter().map(|s| s.to_string()))
                 .output()
                 else {
                     error!("error running command() from roto");

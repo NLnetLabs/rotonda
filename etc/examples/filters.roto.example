@@ -126,15 +126,33 @@ filter bgp_in(
     if bgp_msg.match_aspath_origin(origin_to_log) {
         output.log_matched_origin(origin_to_log);
     }
-    if bgp_msg.contains_community(community_to_log) {
-        output.log_matched_community(community_to_log)
+    match bgp_msg.communities() {
+        Some(communities) -> {
+            if communities.contains(community_to_log) {
+                output.log_matched_community(community_to_log)
+            }
+        }
+        None -> { }
     }
+    #if bgp_msg.communities().contains(community_to_log) {
+    #    output.log_matched_community(community_to_log)
+    #}
 
     accept
 }
 
 
 const MY_ASN: Asn =  AS211321;
+
+# Helper method to 'shortcut' the Option, returning false when the Option is
+# None. 
+fn aspath_contains(maybe: Option[AsPath], to_match: Asn) -> bool {
+    match maybe {
+        Some(aspath) | aspath.contains(to_match) -> true,
+        _ -> false
+    }
+}
+
 
 # The bmp_in filter works on incoming BMP messages.
 #
@@ -151,7 +169,9 @@ filter bmp_in(
     let community_to_log = Community.from("NOPEER");
 
     if bmp_msg.is_peer_down() {
-        output.log_peer_down()
+        # this prints $prefix,$asn
+        # probably replaceable now that we have roto Strings
+        #output.log_peer_down()
     }
 
     # Keep track of a specific deprecated (and possibly problematic) attribute.
@@ -167,16 +187,34 @@ filter bmp_in(
     }
 
     if bmp_msg.is_ibgp(MY_ASN) {
+        #return Verdict.Reject(());
         reject
-    } else {
-        if bmp_msg.aspath_contains(asn_to_log) {
-            output.log_matched_asn(asn_to_log);
-        }
-        if bmp_msg.contains_community(community_to_log) {
-            output.log_matched_community(community_to_log)
-        }
-        accept
+
     }
+
+    if aspath_contains(bmp_msg.aspath(), asn_to_log) {
+        output.log_matched_asn(asn_to_log);
+    }
+
+    match bmp_msg.aspath() {
+        Some(aspath) -> {
+            if aspath.contains(asn_to_log) {
+                output.log_matched_asn(asn_to_log);
+            }
+        }
+        None -> { }
+    }
+    #if bmp_msg.aspath_contains(asn_to_log) {
+    #    output.log_matched_asn(asn_to_log);
+    #}
+
+    # FIXME prints empty string for NOPEER, not different from other
+    # branches though
+#TODO replace all contains_ withroto equivalent (like aspath_contains)
+    if bmp_msg.contains_community(community_to_log) {
+        output.log_matched_community(community_to_log)
+    }
+    accept
 }
 
 # The rib_in_pre filter processes individual routes prior to insertion into the
@@ -216,26 +254,32 @@ fn fmt_aspath_origin(r: Route) -> String {
 
 # XXX requires .join() from roto main
 # and ideally, something like .map() on List[T]
-#fn fmt_communities(c: List[Community]) -> String {
-#    let strings = List.new();
-#    for c in c {
-#        strings.push(c.to_string());
-#    }
-#    f"[{strings.join(",")}]"
-#}
+fn fmt_communities(c: List[Community]) -> String {
+    let strings = List.new();
+    for c in c {
+        strings.push(c.to_string());
+    }
+
+    # list comprehension would be cool:
+    #let j = [for c in c {
+    #    c.to_string()
+    #}].join(",");
+
+    f"[{strings.join(", ")}]"
+}
 
 # XXX bit poor, with that trailing comma.
 # A .split_first might be nice
 # though a map + join is perhaps even nicer.
-fn fmt_communities(c: List[Community]) -> String {
-    let res = StringBuf.from("[");
-    for c in c {
-        res.push_string(f"{c}, ");
-    }
-    
-    res.push_char(']');
-    res.as_string()
-}
+#fn fmt_communities(c: List[Community]) -> String {
+#    let res = StringBuf.from("[");
+#    for c in c {
+#        res.push_string(f"{c}, ");
+#    }
+#    
+#    res.push_char(']');
+#    res.as_string()
+#}
 
 # The vrp_update filter processes updates pertaining to VRPs coming in via RTR.
 #

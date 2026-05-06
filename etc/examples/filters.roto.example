@@ -183,7 +183,6 @@ filter bmp_in(
     bmp_msg: BmpMsg,
     ingress_info: IngressInfo,
 ) {
-    //let my_asn = AS12345;
     let asn_to_log = AS65536;
     let community_to_log = Community.NO_PEER;
 
@@ -206,9 +205,7 @@ filter bmp_in(
     }
 
     if bmp_msg.is_ibgp(MY_ASN) {
-        //return Verdict.Reject(());
         reject
-
     }
 
     if aspath_contains(bmp_msg.aspath(), asn_to_log) {
@@ -223,13 +220,9 @@ filter bmp_in(
         }
         None => { }
     }
-    //if bmp_msg.aspath_contains(asn_to_log) {
-    //    output.log_matched_asn(asn_to_log);
-    //}
 
     // FIXME prints empty string for NOPEER, not different from other
     // branches though
-    //TODO replace all contains_ withroto equivalent (like aspath_contains)
     if contains_community(bmp_msg.communities(), community_to_log) {
         output.log_matched_community(community_to_log)
     }
@@ -261,12 +254,6 @@ filter rib_in_pre(
                         "--route", route.to_json(),
                 ]);
                 output.print(f"AS1133 communities: {fmt_communities(route.communities())}");
-                //match route.communities() {
-                //    Some(c) => {
-                //        output.print(f"AS1133 communities: {fmt_communities(c)}");
-                //    }
-                //    None => { }
-                //}
             }
         }
         None => { }
@@ -345,11 +332,6 @@ filter vrp_update(vrp_update: VrpUpdate) {
         output.timestamped_print(f"[RTR] (BOGON): {vrp_update}")
     }
 
-    //tmp just to test new fmt stuff
-// TODO issue / idea: warn when using a String that is not an f-string, but
-    // looks like one? So, curly braces containing an identifier?
-    output.timestamped_print(f"[RTR] {vrp_update}");
-
     accept
 }
 
@@ -367,11 +349,8 @@ fn rib_in_rov_status_update(rov_update: RovStatusUpdate) {
         if rov_update.current_status().is_invalid() {
             output.timestamped_print(f"[RTR] {fmt_rov_upd(rov_update)}")
         }
-
-        // tmp to compare with output of fmt_rov_upd() below
-        //output.timestamped_print("[RTR] " + rov_update.fmt());
-        //output.timestamped_print(f"[RTR] {fmt_rov_upd(rov_update)}");
     }
+
     // When it concerns any of 'my_prefixes', always log:
     if rov_update.prefix().covered_by(MY_PREFIXES) {
         output.timestamped_print(f"[RTR] (my prefixes): {fmt_rov_upd(rov_update)}")

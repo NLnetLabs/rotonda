@@ -625,10 +625,15 @@ impl Manager {
             return Ok(());
         };
 
+        let t0 = Instant::now();
         let roto_package = roto::FileTree::read(path)
             .map_err(|e| e.to_string())?
             .compile(&create_runtime()?)
             .map_err(|e| e.to_string())?;
+        info!(
+            "compiled roto scripts in {}ms",
+            Instant::now().duration_since(t0).as_millis()
+        );
 
         self.roto_package = Some(Arc::new(Mutex::new(roto_package)));
         Ok(())

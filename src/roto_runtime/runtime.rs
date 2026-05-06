@@ -307,21 +307,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 rr_prefix == to_match
             }
 
-            /// Check whether the AS_PATH origin matches the given `Asn`
-            fn match_aspath_origin(
-                rr: Val<MutRotondaRoute>,
-                to_match: Asn,
-            ) -> bool {
-                let rr = rr.lock().unwrap();
-                if let Some(hoppath) = rr.owned_map().get::<HopPath>() {
-                    if let Some(Hop::Asn(asn)) = hoppath.origin() {
-                        return *asn == to_match;
-                    }
-                }
-                false
-            }
-
-
             /// Check whether this `RotondaRoute` contains the given Path
             /// Attribute
             fn has_attribute(rr: Val<MutRotondaRoute>, to_match: u8) -> bool {
@@ -777,14 +762,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         /// BGP UPDATE message
         #[clone] type BgpMsg = Val<BgpUpdateMessage<Bytes>>;
         impl Val<BgpUpdateMessage<Bytes>> {
-            /// Check whether the AS_PATH origin matches the given `Asn`
-            fn match_aspath_origin(
-                msg: Val<BgpUpdateMessage<Bytes>>,
-                to_match: Asn,
-            ) -> bool {
-                match_aspath_origin(&msg, to_match)
-            }
-
             /// Check whether this message contains the given Path Attribute
             fn has_attribute(
                 msg: Val<BgpUpdateMessage<Bytes>>,
@@ -853,25 +830,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             /// Check whether this message is of type 'PeerUpNotification'
             fn is_peer_up(msg: Val<BmpMsg<Bytes>>) -> bool {
                 msg.msg_type() == BmpMsgType::PeerUpNotification
-            }
-
-            /// Check whether the AS_PATH origin matches the given `Asn`
-            fn match_aspath_origin(
-                msg: Val<BmpMsg<Bytes>>,
-                to_match: Asn,
-            ) -> bool {
-                let update = if let BmpMsg::RouteMonitoring(rm) = &*msg {
-                    if let Ok(upd) = rm.bgp_update(&SessionConfig::modern()) {
-                        upd
-                    } else {
-                        // log error?
-                        return false;
-                    }
-                } else {
-                    return false;
-                };
-
-                match_aspath_origin(&update, to_match)
             }
 
             /// Check whether this message contains the given Path Attribute
@@ -1119,18 +1077,6 @@ fn _large_communities(
 ) -> Option<List<Val<LargeCommunity>>> {
     let iter = bgp_update.large_communities().ok().flatten()?;
     Some(iter.map(Val).collect())
-}
-
-// XXX can we do without this, now with roto's Option[T]?
-fn match_aspath_origin(
-    bgp_update: &BgpUpdateMessage<Bytes>,
-    to_match: Asn,
-) -> bool {
-    if let Some(aspath) = bgp_update.aspath().ok().flatten() {
-        aspath.origin() == Some(to_match.into())
-    } else {
-        false
-    }
 }
 
 fn announcements_count(bgp_update: &BgpUpdateMessage<Bytes>) -> u64 {

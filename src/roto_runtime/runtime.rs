@@ -1158,8 +1158,6 @@ mod tests {
             .inspect_err(|e| eprintln!("{e}"))
             .unwrap();
 
-        let _: CompileListsFunc =
-            roto_package.get_function(COMPILE_LISTS_FUNC_NAME).unwrap();
         let _: BgpInFunc =
             roto_package.get_function(ROTO_FUNC_BGP_IN_NAME).unwrap();
         let _: BmpInFunc =

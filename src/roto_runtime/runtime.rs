@@ -340,12 +340,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 rr.lock().unwrap().owned_map().get::<HopPath>().map(Val)
             }
 
-            fn aspath_origin(rr: Val<MutRotondaRoute>) -> Option<Asn> {
-                rr.lock().unwrap().owned_map().get::<HopPath>()
-                    .and_then(|hp| hp.origin().cloned())
-                    .and_then(|hop| Asn::try_from(hop).ok())
-            }
-
             /// Return a `List` of `Community`s
             fn communities(rr: Val<MutRotondaRoute>) -> Option<List<Val<StandardCommunity>>> {
                 let communities = rr.lock().unwrap().owned_map().get::<StandardCommunitiesList>()?;
@@ -783,12 +777,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         /// BGP UPDATE message
         #[clone] type BgpMsg = Val<BgpUpdateMessage<Bytes>>;
         impl Val<BgpUpdateMessage<Bytes>> {
-            /// Returns the right-most `Asn` in the 'AS_PATH' attribute, if
-            /// any.
-            fn aspath_origin(msg: Val<BgpUpdateMessage<Bytes>>) -> Option<Asn> {
-                aspath_origin(&msg)
-            }
-
             /// Check whether the AS_PATH origin matches the given `Asn`
             fn match_aspath_origin(
                 msg: Val<BgpUpdateMessage<Bytes>>,
@@ -866,26 +854,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             fn is_peer_up(msg: Val<BmpMsg<Bytes>>) -> bool {
                 msg.msg_type() == BmpMsgType::PeerUpNotification
             }
-
-            /// Returns the right-most `Asn` in the 'AS_PATH' attribute
-            ///
-            /// Note that the returned value is of type `OriginAsn`, which
-            /// optionally contains an `Asn`. In case of empty an 'AS_PATH'
-            /// (e.g. in iBGP) this method will still return an `OriginAsn`,
-            /// though representing 'None'.
-            ///
-            /// When called on BMP messages not of type 'RouteMonitoring', the
-            /// 'None'-variant is returned as well.
-            fn aspath_origin(msg: Val<BmpMsg<Bytes>>) -> Option<Asn> {
-                if let BmpMsg::RouteMonitoring(rm) = &*msg {
-                    rm.bgp_update(&SessionConfig::modern())
-                        .ok()
-                        .and_then(|ref upd| aspath_origin(upd))
-                } else {
-                    None
-                }
-            }
-
 
             /// Check whether the AS_PATH origin matches the given `Asn`
             fn match_aspath_origin(
@@ -992,6 +960,12 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         /// AS_PATH path attribute
         #[clone] type AsPath = Val<HopPath>;
         impl Val<HopPath> {
+
+            fn origin(hoppath: Val<HopPath>) -> Option<Asn> {
+                hoppath.origin().cloned()
+                    .and_then(|o| Asn::try_from(o).ok())
+            }
+
             fn contains(hoppath: Val<HopPath>, asn: Asn) -> bool {
                 hoppath.contains(&asn.into())
             }
@@ -1145,13 +1119,6 @@ fn _large_communities(
 ) -> Option<List<Val<LargeCommunity>>> {
     let iter = bgp_update.large_communities().ok().flatten()?;
     Some(iter.map(Val).collect())
-}
-
-// TODO also remove these
-fn aspath_origin(bgp_update: &BgpUpdateMessage<Bytes>) -> Option<Asn> {
-    hoppath(bgp_update)
-        .and_then(|hp| hp.origin().cloned())
-        .and_then(|o| Asn::try_from(o).ok())
 }
 
 // XXX can we do without this, now with roto's Option[T]?

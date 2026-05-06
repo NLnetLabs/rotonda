@@ -35,35 +35,30 @@ fn compile_prefix_lists() -> List[Prefix] {
     list
 }
 
-fn compile_bogon_asns() -> List[Asn] {
-    let bogons = [
-        AS0,            // RFC 7607
-        AS23456,        // RFC 4893 AS_TRANS
-        AS65535,        // RFC 7300 Last 16 bit ASN
-        AS4294967295    // RFC 7300 Last 32 bit ASN
-    ];
+const MY_ASNS: List[Asn] = [AS1, AS2, AS3];
+const MANY_ASNS: List[Asn] = compile_many_asns();
+
+const BOGON_ASNS: List[AsnRange] = [
+    AsnRange.single(AS0),            // RFC 7607
+    AsnRange.single(AS23456),        // RFC 4893 AS_TRANS
+    AsnRange.single(AS65535),        // RFC 7300 Last 16 bit ASN
+    AsnRange.single(AS4294967295),   // RFC 7300 Last 32 bit ASN
 
     // RFC 5398 and documentation/example ASNs
-    bogons = bogons.concat(Asn.range(AS64496, AS64511));
+    AsnRange.new(AS64496, AS64511),
 
     // RFC 6996 Private ASNs
-    bogons = bogons.concat(Asn.range(AS64512, AS65534));
+    AsnRange.new(AS64512, AS65534),
 
     // RFC 5398 and documentation/example ASNs
-    bogons = bogons.concat(Asn.range(AS65536, AS65551));
+    AsnRange.new(AS65536, AS65551),
 
     // RFC IANA reserved ASNs
-    bogons = bogons.concat(Asn.range(AS65552, AS131071));
+    AsnRange.new(AS65552, AS131071),
 
     // RFC 6996 Private ASNs
-    bogons = bogons.concat(Asn.range(AS4200000000, AS4294967294));
-
-    bogons
-}
-
-const BOGON_ASNS: List[Asn] = compile_bogon_asns();
-const MANY_ASNS: List[Asn] = compile_many_asns();
-const MY_ASNS: List[Asn] = [AS1, AS2, AS3];
+    AsnRange.new(AS4200000000, AS4294967294),
+];
 
 const MY_PREFIXES: List[Prefix] = [
     185.49.140.0/23,
@@ -313,13 +308,12 @@ fn fmt_communities(c: Option[List[Community]]) -> String {
 // RTR Cache Reset sync.
 filter vrp_update(vrp_update: VrpUpdate) {
 
-    command("/usr/bin/echo", [f"{vrp_update}"]);
-
     if MY_ASNS.contains(vrp_update.asn()) {
         output.entry().timestamped_custom(f"[RTR] (my_asns): {vrp_update}");
         output.write_entry();
     }
-    if BOGON_ASNS.contains(vrp_update.asn()) {
+
+    if vrp_update.asn().appears_on(BOGON_ASNS) {
         output.entry().timestamped_custom(f"[RTR] (bogon): {vrp_update}");
         output.write_entry();
     }

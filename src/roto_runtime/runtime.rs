@@ -1,4 +1,5 @@
 use std::net::{IpAddr, Ipv6Addr};
+use std::ops::RangeInclusive;
 use std::process::Command;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
@@ -230,9 +231,26 @@ impl RotondaCtx {
     }
 }
 
+// Inclusive range of [`Asn`]s.
+#[derive(Clone, Eq, PartialEq)]
+pub struct AsnRange(RangeInclusive<Asn>);
+
+impl AsnRange {
+    /// Create a new **inclusive** range 
+    pub fn new(start: Asn, end: Asn) -> Self {
+        Self(start..=end)
+    }
+
+    pub fn contains(&self, asn: &Asn) -> bool {
+        self.0.contains(asn)
+    }
+}
+
 pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
 {
     let lib = roto::library! {
+
+        #[clone] type AsnRange = Val<AsnRange>;
 
         // Extends the roto std lib Asn type
         impl Asn {
@@ -240,12 +258,23 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 Asn::from_u32(v)
             }
 
-            fn range(start: Asn, end: Asn) -> List<Asn> {
-                List::from_iter(
-                    (u32::from(start)..=u32::from(end)).map(Asn::from_u32)
-                )
+            fn appears_on(asn: Asn, list: List<Val<AsnRange>>) -> bool {
+                list.into_iter().any(|r| r.contains(&asn))
             }
         }
+
+        impl Val<AsnRange> {
+            /// Create a new range from `start` to `end`, inclusive
+            fn new(start: Asn, end: Asn) -> Val<AsnRange> {
+                Val(AsnRange::new(start, end))
+            }
+
+            /// Create a new range for a single Asn.
+            fn single(asn: Asn) -> Val<AsnRange> {
+                Val(AsnRange::new(asn, asn))
+            }
+        }
+
 
         // Extends the roto std lib Prefix type
         impl Prefix {

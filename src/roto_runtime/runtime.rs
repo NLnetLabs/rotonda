@@ -3,7 +3,7 @@ use std::process::Command;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
-use roto::String as RotoString;
+use roto::RotoString;
 
 use bytes::Bytes;
 use chrono::{SecondsFormat, Utc};

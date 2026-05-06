@@ -18,11 +18,12 @@
 fn compile_many_asns() -> List[Asn] {
     let many_asns = List.new();
     let a = 1;
-    // underscores in numeral literals would be nice, e.g. 10_000
+
     while a < 100000 {
         many_asns.push(Asn.from_u32(a));
         a = a + 1;
     }
+
     many_asns
 }
 
@@ -61,16 +62,8 @@ fn compile_bogon_asns() -> List[Asn] {
 }
 
 const BOGON_ASNS: List[Asn] = compile_bogon_asns();
-
 const MANY_ASNS: List[Asn] = compile_many_asns();
 const MY_ASNS: List[Asn] = [AS1, AS2, AS3];
-
-// TODO issue: ambiguous with anonymous record syntax
-//const MY_ASNS: List[Asn] = {
-//    let list = List.new();
-//    list.push(AS123);
-//    list
-//};
 
 const MY_PREFIXES: List[Prefix] = [
     185.49.140.0/23,
@@ -123,9 +116,10 @@ filter bgp_in(
     let origin_to_log = AS65536;
     let community_to_log = NO_PEER;
 
-    if bgp_msg.match_aspath_origin(origin_to_log) {
+    if aspath_origin_matches(bgp_msg.aspath(), origin_to_log) {
         output.log_matched_origin(origin_to_log);
     }
+
     match bgp_msg.communities() {
         Some(communities) => {
             if communities.contains(community_to_log) {
@@ -134,9 +128,6 @@ filter bgp_in(
         }
         None => { }
     }
-    //if bgp_msg.communities().contains(community_to_log) {
-    //    output.log_matched_community(community_to_log)
-    //}
 
     accept
 }
@@ -149,6 +140,18 @@ const MY_ASN: Asn =  AS211321;
 fn aspath_contains(maybe: Option[AsPath], to_match: Asn) -> bool {
     match maybe {
         Some(aspath) if aspath.contains(to_match) => true,
+        _ => false
+    }
+}
+
+fn aspath_origin_matches(maybe: Option[AsPath], to_match: Asn) -> bool {
+    match maybe {
+        Some(aspath) => {
+            match aspath.origin() {
+                Some(asn) => asn == to_match,
+                None => false,
+            }
+        }
         _ => false
     }
 }
@@ -280,9 +283,14 @@ filter rib_in_pre(
 }
 
 fn fmt_aspath_origin(r: Route) -> String {
-    match r.aspath_origin() {
-        Some(asn) => f"{asn}",
-        None => "no origin in route"
+    match r.aspath() {
+        Some(aspath) => {
+            match aspath.origin() {
+                Some(asn) => f"{asn}",
+                None => "no origin in aspath"
+            }
+        }
+        None => "no aspath in route"
     }
 }
 

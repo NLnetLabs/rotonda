@@ -5,17 +5,105 @@
 Released yyyy-mm-dd.
 
 
+This release contains many changes in both the Roto language as well as the
+Rotonda-specific Roto runtime. In addition to the points described in this
+changelog, please also refer to the
+[online docs](https://rotonda.docs.nlnetlabs.nl/en/v0.6.0/roto/02_rotonda_std.html)
+for the latest documentation on all the types and methods available in Roto
+filters and functions.
+
 ### Breaking changes
 
+#### Roto runtime
+
+Roto gained plenty of string related functionality, making many formatting
+helpers obsolete. This means almost all `fmt_` Roto methods are removed. 
+
+Instead, most types can now be used in formatting strings directly, for
+example
+
+```
+let s = f"{route.prefix()"};
+```
+
+Many of the removed `fmt_` methods papered over the fact that most fields in
+BGP are optional. There is no guarantee there is an AS_PATH in a BGP PDU for
+example. And if there _is_ an AS_PATH, it could be empty, in which case there
+is no originating ASN.
+
+Instead of hiding this from users in Roto scripts, we can now make this
+explicit with the new Roto `Option[T]` type.
+
+
+```
+match route.origin_as() {
+    Some(asn) -> f"got an origin AS: {asn}",
+    None -> f"no origin AS"
+}
+```
+
+
+Eventually, the Roto language might gain ways to deal with optional values in
+more ergonomic ways. For now, things can get a bit verbose.
+
+
+List of removed methods:
+
+```
+Route.fmt_prefix()
+Route.fmt_rov_status()
+Route.fmt_aspath()
+Route.fmt_aspath_origin()
+Route.fmt_communities()
+Route.fmt_large_communities()
+
+BgpMsg.fmt_aspath()
+BgpMsg.fmt_aspath_origin()
+BgpMsg.fmt_communities()
+BgpMsg.fmt_large_communities()
+
+BmpMsg.fmt_aspath()
+BmpMsg.fmt_aspath_origin()
+BmpMsg.fmt_communities()
+BmpMsg.fmt_large_communities()
+
+```
+
+
+The packaged Roto example (`etc/examples/filters.roto.example`) includes
+Roto functions showing how one can deal with the printing of optional
+values (such as `route.aspath_origin()`), and lists (such as
+`route.communities()`). 
+
+Similarly to `fmt_` methods, several `match` and `contains` methods papered
+over optionals as well. Those too are replaced by Roto native equivalents.
+These methods are:
+
+```
+{Route, BgpMsg, BmpMsg}.match_aspath_origin()
+{Route, BgpMsg, BmpMsg}.aspath_contains()
+{Route, BgpMsg, BmpMsg}.contains_community()
+{Route, BgpMsg, BmpMsg}.contains_large_community()
+{Route, BgpMsg, BmpMsg}.aspath_contains()
+```
 
 ### New
 
-* Rotonda now uses Roto 0.10.
-  [#158](https://github.com/NLnetLabs/rotonda/pull/158) (XXX depending on much
-  we change the runtime, this might need to go under Breaking changes)
+* Rotonda now uses Roto 0.11.
   More details on changes in Roto not affecting Rotonda per se can be found in
-  its
-  [changelog](https://codeberg.org/NLnetLabs/roto/src/tag/v0.10.0/Changelog.md).
+  the
+  [changelog](https://codeberg.org/NLnetLabs/roto/src/tag/v0.11.0/Changelog.md).
+
+* Several format methods are introduced on the various Roto types:
+  * The raw, over-the-wire bytes of `BgpMsg` and `BmpMsg` can be turned into
+    hexadecimal and base64 strings via `.fmt_hex()` and `.fmt_base64()`,
+    respectively.
+  * The `Route` type also has these methods, returning hex/base64 for the
+    wireformat of the path attributes. Additionaly, there is
+    `Route.fmt_json()` that includes the NLRI.
+* In Roto scripts, external commands can be executed using the new `command()`
+  function, which can be combined with e.g. the `fmt_json()` method described
+  above to pass a route as an argument to an external script.
 
 ### Bug fixes
 

@@ -1085,24 +1085,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 Val(rov_update.current_status)
             }
         }
-
-
-        /// The well-known NO_EXPORT community (RFC1997)
-        const NO_EXPORT: Val<StandardCommunity> =
-            Val(StandardCommunity::from_wellknown(Wellknown::NoExport));
-
-        /// The well-known NO_ADVERTISE community (RFC1997)
-        const NO_ADVERTISE: Val<StandardCommunity> =
-            Val(StandardCommunity::from_wellknown(Wellknown::NoAdvertise));
-
-        /// The well-known NO_EXPORT_SUBCONFED community (RFC1997)
-        const NO_EXPORT_SUBCONFED: Val<StandardCommunity> =
-            Val(StandardCommunity::from_wellknown(Wellknown::NoExportSubconfed));
-
-        /// The well-known NO_PEER community (RFC1997)
-        const NO_PEER: Val<StandardCommunity> =
-            Val(StandardCommunity::from_wellknown(Wellknown::NoPeer));
-
     };
 
     roto::Runtime::from_lib(lib)

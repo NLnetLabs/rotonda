@@ -109,7 +109,7 @@ filter bgp_in(
 ) {
 
     let origin_to_log = AS65536;
-    let community_to_log = NO_PEER;
+    let community_to_log = Community.NO_PEER;
 
     if aspath_origin_matches(bgp_msg.aspath(), origin_to_log) {
         output.log_matched_origin(origin_to_log);

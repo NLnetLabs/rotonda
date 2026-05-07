@@ -1,9 +1,11 @@
+use std::fmt;
 use std::net::{IpAddr, Ipv6Addr};
 use std::ops::RangeInclusive;
 use std::process::Command;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 
+use base64::prelude::*;
 use roto::RotoString;
 
 use bytes::Bytes;
@@ -236,7 +238,7 @@ impl RotondaCtx {
 pub struct AsnRange(RangeInclusive<Asn>);
 
 impl AsnRange {
-    /// Create a new **inclusive** range 
+    /// Create a new **inclusive** range
     pub fn new(start: Asn, end: Asn) -> Self {
         Self(start..=end)
     }
@@ -311,6 +313,15 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
 
             fn to_json(rr: Val<MutRotondaRoute>) -> RotoString {
                 serde_json::to_string(&rr.cloned_inner()).unwrap().into()
+            }
+
+            fn fmt_hex(rr: Val<MutRotondaRoute>) -> RotoString {
+                RawHex(rr.cloned_inner().rotonda_pamap().as_ref()).to_string().into()
+            }
+
+            fn fmt_base64(rr: Val<MutRotondaRoute>) -> RotoString {
+                BASE64_STANDARD.encode(rr.cloned_inner().rotonda_pamap().as_ref()).into()
+
             }
 
             /// Return the prefix for this `RotondaRoute`
@@ -822,6 +833,14 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 fmt_pcap(msg.as_ref())
             }
 
+            fn fmt_hex(msg: Val<BgpUpdateMessage<Bytes>>) -> RotoString {
+                RawHex(msg.as_ref()).to_string().into()
+            }
+
+            fn fmt_base64(msg: Val<BgpUpdateMessage<Bytes>>) -> RotoString {
+                BASE64_STANDARD.encode(msg.as_ref()).into()
+            }
+
         }
 
         /// BMP message
@@ -937,6 +956,14 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             /// Format this message as hexadecimal Wireshark input
             fn fmt_pcap(msg: Val<BmpMsg<Bytes>>) -> RotoString {
                 fmt_pcap(msg.as_ref())
+            }
+
+            fn fmt_hex(msg: Val<BgpUpdateMessage<Bytes>>) -> RotoString {
+                RawHex(msg.as_ref()).to_string().into()
+            }
+
+            fn fmt_base64(msg: Val<BgpUpdateMessage<Bytes>>) -> RotoString {
+                BASE64_STANDARD.encode(msg.as_ref()).into()
             }
         }
 
@@ -1148,6 +1175,16 @@ fn fmt_pcap(buf: impl AsRef<[u8]>) -> RotoString {
         res.push_str(&format!("{:02x} ", b));
     }
     res.into()
+}
+
+struct RawHex<'a>(&'a [u8]);
+impl fmt::Display for RawHex<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        for &b in self.0 {
+            write!(f, "{:x}", b)?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

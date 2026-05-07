@@ -246,7 +246,7 @@ filter rib_in_pre(
         Some(aspath) => {
             if aspath.contains(AS1133) {
                 command("/home/luuk/bin/handle_route.py", [
-                        "--route", route.to_json(),
+                        "--route", route.fmt_json(),
                 ]);
                 output.print(f"AS1133 communities: {fmt_communities(route.communities())}");
             }

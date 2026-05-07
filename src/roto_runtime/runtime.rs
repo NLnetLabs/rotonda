@@ -311,7 +311,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         #[clone] type Route  = Val<MutRotondaRoute>;
         impl Val<MutRotondaRoute> {
 
-            fn to_json(rr: Val<MutRotondaRoute>) -> RotoString {
+            fn fmt_json(rr: Val<MutRotondaRoute>) -> RotoString {
                 serde_json::to_string(&rr.cloned_inner()).unwrap().into()
             }
 
@@ -321,7 +321,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
 
             fn fmt_base64(rr: Val<MutRotondaRoute>) -> RotoString {
                 BASE64_STANDARD.encode(rr.cloned_inner().rotonda_pamap().as_ref()).into()
-
             }
 
             /// Return the prefix for this `RotondaRoute`

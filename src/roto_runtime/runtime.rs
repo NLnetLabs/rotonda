@@ -252,14 +252,17 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
 {
     let lib = roto::library! {
 
+        /// Inclusive range of [`Asn`](Asn)'s
         #[clone] type AsnRange = Val<AsnRange>;
 
         // Extends the roto std lib Asn type
         impl Asn {
+            /// Create an `Asn` from a [`u32`](u32)
             fn from_u32(v: u32) -> Asn {
                 Asn::from_u32(v)
             }
 
+            /// Check whether this ASN is in `list`
             fn appears_on(asn: Asn, list: List<Val<AsnRange>>) -> bool {
                 list.into_iter().any(|r| r.contains(&asn))
             }
@@ -286,6 +289,10 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         }
 
 
+        /// Execute an external command
+        ///
+        /// The `args` list of arguments is passed to the command.
+        /// See also <https://doc.rust-lang.org/std/process/struct.Command.html#method.args>.
         fn command(cmd: RotoString, args: List<RotoString>) -> bool {
             let Ok(output) = Command::new(cmd.as_ref())
                 .args(args.into_iter().map(|s| s.to_string()))
@@ -310,18 +317,6 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         /// A single announced or withdrawn path
         #[clone] type Route  = Val<MutRotondaRoute>;
         impl Val<MutRotondaRoute> {
-
-            fn fmt_json(rr: Val<MutRotondaRoute>) -> RotoString {
-                serde_json::to_string(&rr.cloned_inner()).unwrap().into()
-            }
-
-            fn fmt_hex(rr: Val<MutRotondaRoute>) -> RotoString {
-                RawHex(rr.cloned_inner().rotonda_pamap().as_ref()).to_string().into()
-            }
-
-            fn fmt_base64(rr: Val<MutRotondaRoute>) -> RotoString {
-                BASE64_STANDARD.encode(rr.cloned_inner().rotonda_pamap().as_ref()).into()
-            }
 
             /// Return the prefix for this `RotondaRoute`
             fn prefix(rr: Val<MutRotondaRoute>) -> Prefix {
@@ -356,10 +351,12 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             }
 
 
+            /// Return the RPKI [`RovStatus`] for this Route
             fn rov_status(rr: Val<MutRotondaRoute>) -> Val<RovStatus> {
                 Val(rr.lock().unwrap().rotonda_pamap().rpki_info().rov_status())
             }
 
+            /// Return the [`AsPath`](AsPath)
             fn aspath(rr: Val<MutRotondaRoute>) -> Option<Val<HopPath>> {
                 rr.lock().unwrap().owned_map().get::<HopPath>().map(Val)
             }
@@ -375,24 +372,46 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 let communities = rr.lock().unwrap().owned_map().get::<LargeCommunitiesList>()?;
                 Some(communities.communities().iter().cloned().map(Val).collect())
             }
+
+            /// Format the NLRI and path attributes as JSON
+            fn fmt_json(rr: Val<MutRotondaRoute>) -> RotoString {
+                serde_json::to_string(&rr.cloned_inner()).unwrap().into()
+            }
+
+            /// Format the path attributes as hex
+            fn fmt_hex(rr: Val<MutRotondaRoute>) -> RotoString {
+                RawHex(rr.cloned_inner().rotonda_pamap().as_ref()).to_string().into()
+            }
+
+            /// Format the path attributes as base64
+            fn fmt_base64(rr: Val<MutRotondaRoute>) -> RotoString {
+                BASE64_STANDARD.encode(rr.cloned_inner().rotonda_pamap().as_ref()).into()
+            }
+
         }
 
         /// The Path attributes pertaining to a certain Route
+        ///
+        /// Currently only used in custom HTTP endpoint `filter`s.
         #[clone] type PathAttributes = Val<ArcRotondaPaMap>;
         impl Val<ArcRotondaPaMap> {
+            /// Return the OTC attribute
             fn otc(pamap: Val<ArcRotondaPaMap>) -> Option<Asn> {
                 pamap.path_attributes().get::<Otc>().map(|a| a.0)
             }
 
+            /// Return the [`AsPath`](AsPath)
             fn aspath(pamap: Val<ArcRotondaPaMap>) -> Option<Val<HopPath>> {
                 pamap.path_attributes().get::<HopPath>().map(Val)
             }
 
+            /// Return a [`List[T]`](List) of [`Community`](Community)
             fn communities(pamap: Val<ArcRotondaPaMap>) -> Option<List<Val<StandardCommunity>>> {
                 let communities = pamap.path_attributes().get::<StandardCommunitiesList>()?;
                 Some(communities.communities().iter().cloned().map(Val).collect())
             }
 
+            /// Return a [`List[T]`](List) of [`LargeCommunity`](LargeCommunity)
             fn large_communities(pamap: Val<ArcRotondaPaMap>) -> Option<List<Val<LargeCommunity>>> {
                 let communities = pamap.path_attributes().get::<LargeCommunitiesList>()?;
                 Some(communities.communities().iter().cloned().map(Val).collect())
@@ -553,6 +572,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         /// User-defined Prometheus style metrics
         #[clone] type Metrics = Val<MutMetrics>;
         impl Val<MutMetrics> {
+            /// Increase the counter for key `name` with `value`
             fn increase_counter(metrics: Val<MutMetrics>, name: RotoString, value: u64) {
                 // first try with only a read-lock (for already existing keys)
                 // if that fails, try again with a write lock so the new key
@@ -569,6 +589,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 }
             }
 
+            /// Set the gauge for key `name` to `value`
             fn set_gauge(metrics: Val<MutMetrics>, name: RotoString, value: u64) {
                 // first try with only a read-lock (for already existing keys)
                 // if that fails, try again with a write lock so the new key can get inserted.
@@ -586,11 +607,13 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         /// Information pertaining to the source of the Message or Route
         #[clone] type IngressInfo = Val<MutIngressInfoCache>;
         impl Val<MutIngressInfoCache> {
+            /// Return the peer [`Asn`](Asn)
             fn peer_asn(iic: Val<MutIngressInfoCache>) -> Asn {
                 let mut iic = iic.lock().unwrap();
                 iic.peer_asn()
             }
 
+            /// Return the peer [`IpAddr`](IpAddr)
             fn peer_address(iic: Val<MutIngressInfoCache>) -> IpAddr {
                 let mut iic = iic.lock().unwrap();
                 iic.peer_address()
@@ -819,12 +842,19 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 withdrawals_count(&msg)
             }
 
+            /// Return the [`AsPath`](AsPath) in this message
             fn aspath(msg: Val<BgpUpdateMessage<Bytes>>) -> Option<Val<HopPath>> {
                 hoppath(&msg)
             }
 
+            /// Return a [`List`](List[T]) of [`Community`](Community) in this message
             fn communities(msg: Val<BgpUpdateMessage<Bytes>>) -> Option<List<Val<StandardCommunity>>> {
                 _communities(&msg)
+            }
+
+            /// Return a [`List`](List[T]) of [`LargeCommunity`](LargeCommunity) in this message
+            fn large_communities(msg: Val<BgpUpdateMessage<Bytes>>) -> Option<List<Val<LargeCommunity>>> {
+                _large_communities(&msg)
             }
 
             /// Format this message as hexadecimal Wireshark input
@@ -832,10 +862,12 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 fmt_pcap(msg.as_ref())
             }
 
+            /// Format this message as hex
             fn fmt_hex(msg: Val<BgpUpdateMessage<Bytes>>) -> RotoString {
                 RawHex(msg.as_ref()).to_string().into()
             }
 
+            /// Format this message as base64
             fn fmt_base64(msg: Val<BgpUpdateMessage<Bytes>>) -> RotoString {
                 BASE64_STANDARD.encode(msg.as_ref()).into()
             }
@@ -922,6 +954,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 0
             }
 
+            /// Return the [`AsPath`](AsPath)
             fn aspath(msg: Val<BmpMsg<Bytes>>) -> Option<Val<HopPath>> {
                 if let BmpMsg::RouteMonitoring(rm) = &*msg {
                     rm.bgp_update(&SessionConfig::modern())
@@ -932,6 +965,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 }
             }
 
+            /// Return a [`List`](List[T]) of [`Community`](Community) in this message
             fn communities(msg: Val<BmpMsg<Bytes>>) -> Option<List<Val<StandardCommunity>>> {
                 if let BmpMsg::RouteMonitoring(rm) = &*msg {
                     rm.bgp_update(&SessionConfig::modern())
@@ -942,6 +976,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 }
             }
 
+            /// Return a [`List`](List[T]) of [`LargeCommunity`](LargeCommunity) in this message
             fn large_communities(msg: Val<BmpMsg<Bytes>>) -> Option<List<Val<LargeCommunity>>> {
                 if let BmpMsg::RouteMonitoring(rm) = &*msg {
                     rm.bgp_update(&SessionConfig::modern())
@@ -957,40 +992,45 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 fmt_pcap(msg.as_ref())
             }
 
+            /// Format this message as hex
             fn fmt_hex(msg: Val<BgpUpdateMessage<Bytes>>) -> RotoString {
                 RawHex(msg.as_ref()).to_string().into()
             }
 
+            /// Format this message as base64
             fn fmt_base64(msg: Val<BgpUpdateMessage<Bytes>>) -> RotoString {
                 BASE64_STANDARD.encode(msg.as_ref()).into()
             }
         }
 
 
-        /// BMP Per Peer Header
-        #[clone] type PerPeerHeader = Val<PerPeerHeader<Bytes>>;
+        ///// BMP Per Peer Header
+        //#[clone] type PerPeerHeader = Val<PerPeerHeader<Bytes>>;
 
         /// AS_PATH path attribute
         #[clone] type AsPath = Val<HopPath>;
         impl Val<HopPath> {
 
+            /// Return the (right-most) originator [`Asn`](Asn)
             fn origin(hoppath: Val<HopPath>) -> Option<Asn> {
                 hoppath.origin().cloned()
                     .and_then(|o| Asn::try_from(o).ok())
             }
 
+            /// Return true if `asn` occurs in this [`AsPath`](AsPath)
             fn contains(hoppath: Val<HopPath>, asn: Asn) -> bool {
                 hoppath.contains(&asn.into())
             }
 
+            /// Return a string representation
             fn to_string(hoppath: Val<HopPath>) -> RotoString {
                 hoppath.to_string().into()
             }
 
         }
 
-        /// Information from the RIB on an inserted route
-        #[copy] type InsertionInfo = Val<InsertionInfo>;
+        ///// Information from the RIB on an inserted route
+        //#[copy] type InsertionInfo = Val<InsertionInfo>;
 
         /// A BGP Standard Community (RFC1997)
         #[copy] type Community = Val<StandardCommunity>;
@@ -1002,12 +1042,15 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
             const NO_PEER: Val<StandardCommunity> = Val(Wellknown::NoPeer.into());
             const BLACKHOLE: Val<StandardCommunity> = Val(Wellknown::Blackhole.into());
 
+            // TODO get rid of unwrap_or
+            /// Parse a `Community` from a string
             fn from(s: RotoString) -> Val<StandardCommunity> {
                 Val(StandardCommunity::from_str(&s)
                     .unwrap_or(StandardCommunity::from_u32(0))
                 )
             }
 
+            /// Return the string representation
             fn to_string(c: Val<StandardCommunity>) -> RotoString {
                 c.to_string().into()
             }
@@ -1016,12 +1059,15 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
         /// A BGP Large Community (RFC8092)
         #[copy] type LargeCommunity = Val<LargeCommunity>;
         impl Val<LargeCommunity> {
+            // TODO get rid of unwrap_or
+            /// Parse a `LargeCommunity` from a string
             fn from(s: RotoString) -> Val<LargeCommunity> {
                 Val(LargeCommunity::from_str(&s)
                     .unwrap_or(LargeCommunity::from([0u8;12]))
                 )
             }
 
+            /// Return the string representation
             fn to_string(c: Val<LargeCommunity>) -> RotoString {
                 c.to_string().into()
             }
@@ -1045,6 +1091,7 @@ pub fn create_runtime() -> Result<roto::Runtime<roto::Ctx<RotondaCtx>>, String>
                 *status == RovStatus::NotFound
             }
 
+            /// Return the string representation
             fn to_string(status: Val<RovStatus>) -> RotoString {
                 status.to_string().into()
             }
@@ -1162,7 +1209,7 @@ struct RawHex<'a>(&'a [u8]);
 impl fmt::Display for RawHex<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         for &b in self.0 {
-            write!(f, "{:x}", b)?;
+            write!(f, "{:02x}", b)?;
         }
         Ok(())
     }

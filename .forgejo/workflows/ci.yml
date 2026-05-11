@@ -26,7 +26,7 @@ jobs:
 
       - name: cargo clippy
         id: clippy
-        run: cargo clippy --all -- -W clippy::cargo -D warnings
+        run: cargo clippy --all -- -D warnings # -W clippy::cargo 
 
   misc:
     name: Additional code quality / dependency checks

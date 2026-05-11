@@ -523,13 +523,19 @@ impl Rib {
     //  - in apply_filter, check for such info and branch: if let Some(passed_info), etc
     
     fn apply_filter(&self, records: &mut Vec<Record<RotondaPaMap>>, filter: &QueryFilter, roto_filter: Option<RotoHttpFilter>) {
-        debug!("in apply filter: {filter:?}");
-        if filter.include_local_announcements.is_some() {
-            debug!("got include_local_announcements");
-        }
-        if filter.include_local_announcements.is_some_and(|x| x) {
-            // by default, self originated on Some(true), 
 
+        if let Some(ingress_type) = filter.ingress_type {
+            records.retain(|r|{
+                self.ingress_register.get(r.multi_uniq_id).map(|ii|
+                    ii.ingress_type == Some(ingress_type)
+                ).unwrap_or(true)
+            });
+        }
+
+        // by default, we don't want to include self originated routes.
+        // In QueryFilter, the default for include_local_announcements is None.
+        // Hence, 
+        if filter.include_local_announcements.is_some_and(|x| x) {
 
             //records.retain(|r|{
             //    self.ingress_register.get(r.multi_uniq_id).map(|ii|

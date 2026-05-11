@@ -468,7 +468,7 @@ impl IngressInfo {
     }
 }
 
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
+#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum IngressType {
     Bmp,

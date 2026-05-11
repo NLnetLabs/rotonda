@@ -149,7 +149,7 @@ filter vrp_update(vrp_update: VrpUpdate) {
     #}
 
     if prefix_lists.covers("my_prefixes", vrp_update.prefix()) {
-        output.timestamped_print("[RTR] (my prefixes): " + vrp_update.fmt())
+        output.timestamped_print(f"[RTR] (my prefixes): {vrp_update}")
     }
 
     accept

@@ -2561,6 +2561,7 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.10.0"
+source = "git+https://codeberg.org/NLnetLabs/roto?branch=main#f7996df95434391d286e162e107fc33342bfbc81"
 dependencies = [
  "ariadne",
  "clap",
@@ -2580,6 +2581,7 @@ dependencies = [
 [[package]]
 name = "roto-macros"
 version = "0.10.0"
+source = "git+https://codeberg.org/NLnetLabs/roto?branch=main#f7996df95434391d286e162e107fc33342bfbc81"
 dependencies = [
  "proc-macro2",
  "quote",

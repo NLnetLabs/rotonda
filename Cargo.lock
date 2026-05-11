@@ -231,6 +231,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b52af3cb4058c895d37317bb27508dccc8e5f2d39454016b297bf4a400597b8"
 dependencies = [
  "axum-core 0.5.6",
+ "axum-macros",
  "bytes",
  "form_urlencoded",
  "futures-util",
@@ -293,6 +294,17 @@ dependencies = [
  "sync_wrapper",
  "tower-layer",
  "tower-service",
+]
+
+[[package]]
+name = "axum-macros"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "604fde5e028fea851ce1d8570bbdc034bec850d157f7569d10f347d06808c05c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
@@ -2549,8 +2561,6 @@ dependencies = [
 [[package]]
 name = "roto"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06e0c74337d08db49e883ef324fd131d68f0a257fb3eb276b88c3046dedc2ac4"
 dependencies = [
  "ariadne",
  "clap",
@@ -2570,8 +2580,6 @@ dependencies = [
 [[package]]
 name = "roto-macros"
 version = "0.10.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad56c92e26859cb45bedfc47f294887cfb49dc101badebe2907d391c286f9e41"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2618,7 +2626,7 @@ dependencies = [
  "reqwest",
  "roto",
  "rotonda-store",
- "routecore 0.7.1",
+ "routecore 0.7.2-dev",
  "rpki",
  "rshtml",
  "rumqttc",
@@ -2630,6 +2638,7 @@ dependencies = [
  "sha2",
  "smallvec",
  "syslog",
+ "tempfile",
  "tokio",
  "tokio-metrics",
  "tokio-stream",
@@ -2680,9 +2689,8 @@ dependencies = [
 
 [[package]]
 name = "routecore"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c4f291ffed01142b35232c7d7062238b5df843d9abe0db029fe9810e9710db1"
+version = "0.7.2-dev"
+source = "git+https://codeberg.org/NLnetLabs/routecore?branch=rotonda-bgp-pdu-out#048a45e54e17b41cda118bf9565178d1bb2d2290"
 dependencies = [
  "bytes",
  "chrono",

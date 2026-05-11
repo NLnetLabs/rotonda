@@ -220,6 +220,7 @@ impl fmt::Debug for BgpTcpInRunner {
 }
 
 impl BgpTcpInRunner {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         bgp: BgpTcpIn,
         gate: Gate,

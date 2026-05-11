@@ -25,12 +25,11 @@ use routecore::bgp::path_attributes::{
     LargeCommunitiesList, OwnedPathAttributes,
 };
 use routecore::bgp::types::Otc;
-use routecore::bmp::message::PerPeerHeader;
 use routecore::bmp::message::{Message as BmpMsg, MessageType as BmpMsgType};
 
 use roto::{Context, List, Val};
 
-use super::types::{InsertionInfo, Output, RotoOutputStream};
+use super::types::{Output, RotoOutputStream};
 use crate::ingress::{self, IngressId, IngressInfo};
 use crate::payload::{RotondaPaMap, RotondaRoute};
 use crate::roto_runtime::metrics::MutMetrics;
@@ -44,6 +43,12 @@ pub struct Log(Arc<Mutex<RotoOutputStream>>);
 impl Log {
     pub fn new() -> Self {
         Self(RotoOutputStream::new_arced())
+    }
+}
+
+impl Default for Log {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

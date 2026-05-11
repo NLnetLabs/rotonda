@@ -1,0 +1,62 @@
+name: ci
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test+clippy
+    runs-on: docker
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        uses: https://github.com/dtolnay/rust-toolchain@v1
+        with:
+          components: clippy
+
+      - run: cargo build --verbose
+      - run: cargo test --verbose
+
+      - name: cargo clippy
+        id: clippy
+        run: cargo clippy --all -- -W clippy::cargo -D warnings
+
+  misc:
+    name: Additional code quality / dependency checks
+    runs-on: docker
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Rust
+        uses: https://github.com/dtolnay/rust-toolchain@v1
+        with:
+          toolchain: stable
+      - name: Install cargo-binstall
+        uses: https://github.com/cargo-bins/cargo-binstall@main
+      - name: Install cargo-{audit,shear}
+        run: cargo binstall --no-confirm cargo-audit cargo-shear
+
+      - id: audit
+        # RUSTSEC-2024-0436: paste - no longer maintained
+        run: cargo audit --ignore RUSTSEC-2024-0436
+        continue-on-error: true
+
+      - id: shear
+        run: cargo shear
+        continue-on-error: true
+
+      # now check the outcomes of all individual 'run's
+      - name: Check all
+        if: |
+          steps.audit.outcome != 'success'
+          || steps.shear.outcome != 'success'
+          
+        run: exit 1

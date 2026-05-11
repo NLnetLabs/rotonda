@@ -66,7 +66,8 @@ inetnum            = { workspace = true }
 mqtt               = { version = "0.23.0", package = "rumqttc", default-features = false }
 memmap2            = "0.9.9"
 non-empty-vec      = { version = "0.2", features = ["serde"]}
-roto               = { version = "0.10", features = ["selinux-fix"]}
+#roto               = { git = "https://codeberg.org/NLnetLabs/roto", branch="constants", features = ["selinux-fix"]}
+roto               = { path = "../../roto", features = ["selinux-fix"]}
 rotonda-store      = { workspace = true }
 serde_with         = "3"
 smallvec           = { version = "1.15", features = ["const_generics", "const_new", "union"] }
@@ -85,6 +86,7 @@ rshtml             = { version = "0.5", features = ["functions"] }
 tower-http         = { version = "0.5.2", features = ["compression-gzip"], optional = true }
 serde_qs           = "0.15.0"
 rayon = "1.11.0"
+base64 = "0.22.1"
 
 [target.'cfg(unix)'.dependencies]
 syslog             = "7.0"
@@ -95,6 +97,7 @@ env_logger         = "0.11"
 prometheus-parse   = "0.2"
 reqwest            = { version = "0.12", default-features = false, features = ["json"] }
 rumqttd            = { version = "0.20.0", default-features = false }
+tempfile = "3.27.0"
 
 [profile.release]
 strip = true

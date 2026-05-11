@@ -1,84 +1,197 @@
-# Optionally prepare lists of ASNs or prefixes to match against in filters.
-#
-# The lists constructed in this function are available in all the filters, but
-# the list compilation only happens once. Up to 64 lists of each type (ASN list
-# or prefix list) can be defined.
-#
-# To use the ASN lists in other filters, be aware roto currently supports two
-# types to represent ASNs: the `Asn` type, and the `OriginAsn` type which either
-# holds an `Asn` or is empty. The `OriginAsn` type is returned from methods that
-# try to get the origin ASN from the AS_PATH attribute (i.e. in a `BgpMsg`, a
-# `BmpMsg` or in a `Route`) which might be empty (e.g. in case of iBGP).
-# To distinguish between the two, there are dedicated methods for each type,
-# e.g.:
-#   - asn_lists.contains("my_asns", vrp_update.asn())
-#   - asn_lists.contains_origin("my_asns", bmp_msg.aspath_origin())
-# 
+// Optionally prepare lists of ASNs or prefixes to match against in filters.
+//
+// The lists constructed in this function are available in all the filters, but
+// the list compilation only happens once. Up to 64 lists of each type (ASN list
+// or prefix list) can be defined.
+//
+// To use the ASN lists in other filters, be aware roto currently supports two
+// types to represent ASNs: the `Asn` type, and the `OriginAsn` type which either
+// holds an `Asn` or is empty. The `OriginAsn` type is returned from methods that
+// try to get the origin ASN from the AS_PATH attribute (i.e. in a `BgpMsg`, a
+// `BmpMsg` or in a `Route`) which might be empty (e.g. in case of iBGP).
+// To distinguish between the two, there are dedicated methods for each type,
+// e.g.:
+//   - asn_lists.contains("my_asns", vrp_update.asn())
+//   - asn_lists.contains_origin("my_asns", bmp_msg.aspath_origin())
+// 
 
-fn compile_lists() {
-    # First parameter of `add` is the name of the list, the second is a
-    # whitespace separated list of ASNs, optionally prefixed with 'AS'.
-    # Non-parseable items are ignored.
-    asn_lists.add("my_asns", "AS211321");
-    asn_lists.add("other_asns", "AS65536 65537 65538 not65536 foo");
+fn compile_many_asns() -> List[Asn] {
+    let many_asns = List.new();
+    let a = 1;
 
+    while a < 100000 {
+        many_asns.push(Asn.from_u32(a));
+        a = a + 1;
+    }
 
-    # Similarly, create a named list of prefixes. IPv4 and IPv6 can be mixed in
-    # a single list.
-    prefix_lists.add("my_prefixes",
-    "
-        185.49.140.0/23
-        2a04:b900::/29
-    ");
-
+    many_asns
 }
 
-# The bgp_in filter works on incoming BGP UPDATE messages.
-#
-# One such message can contain multiple NLRI, thus multiple announcements or
-# withdrawals. To act on individual announcements or withdrawals, use the
-# 'rib-in' filter-map below.
+fn compile_prefix_lists() -> List[Prefix] {
+    //let prefix_lists = PrefixLists.new();
+    //prefix_lists
+    let list = List.new();
+    list.push(1.2.3.0/24);
+    list
+}
+
+const MY_ASNS: List[Asn] = [AS1, AS2, AS3];
+const MANY_ASNS: List[Asn] = compile_many_asns();
+
+const BOGON_ASNS: List[AsnRange] = [
+    AsnRange.single(AS0),            // RFC 7607
+    AsnRange.single(AS23456),        // RFC 4893 AS_TRANS
+    AsnRange.single(AS65535),        // RFC 7300 Last 16 bit ASN
+    AsnRange.single(AS4294967295),   // RFC 7300 Last 32 bit ASN
+
+    // RFC 5398 and documentation/example ASNs
+    AsnRange.new(AS64496, AS64511),
+
+    // RFC 6996 Private ASNs
+    AsnRange.new(AS64512, AS65534),
+
+    // RFC 5398 and documentation/example ASNs
+    AsnRange.new(AS65536, AS65551),
+
+    // RFC IANA reserved ASNs
+    AsnRange.new(AS65552, AS131071),
+
+    // RFC 6996 Private ASNs
+    AsnRange.new(AS4200000000, AS4294967294),
+];
+
+const MY_PREFIXES: List[Prefix] = [
+    185.49.140.0/23,
+    2a04:b900::/29,
+];
+
+const BOGONS: List[Prefix] = [
+    // source: https://bgpfilterguide.nlnog.net/guides/bogon_prefixes/
+    // retrieved April 2026
+    0.0.0.0/8,          //	RFC 1122 ‘this’ network
+    10.0.0.0/8,         //	RFC 1918 private space
+    100.64.0.0/10,      //	RFC 6598 Carrier grade nat space
+    127.0.0.0/8,        //	RFC 1122 localhost
+    169.254.0.0/16,     //	RFC 3927 link local
+    172.16.0.0/12,      //	RFC 1918 private space
+    192.0.2.0/24,       //	RFC 5737 TEST-NET-1
+    192.88.99.0/24,     //	RFC 7526 6to4 anycast relay
+    192.168.0.0/16,     //	RFC 1918 private space
+    198.18.0.0/15,      //	RFC 2544 benchmarking
+    198.51.100.0/24,    //	RFC 5737 TEST-NET-2
+    203.0.113.0/24,     //	RFC 5737 TEST-NET-3
+    224.0.0.0/4,        //	multicast
+    240.0.0.0/4,        //	reserved
+    0100::/64,          //	RFC 6666 Discard-Only
+    2001:2::/48,        //	RFC 5180 BMWG
+    2001:10::/28,       //	RFC 4843 ORCHID
+    2001:db8::/32,      //	RFC 3849 documentation
+    2002::/16,          //	RFC 7526 6to4 anycast relay
+    3ffe::/16,          //	RFC 3701 old 6bone
+    3fff::/20,          //	RFC 9637 documentation
+    5f00::/16,          //	RFC 9602 SRv6 SIDs
+    fc00::/7,           //	RFC 4193 unique local unicast
+    fe80::/10,          //	RFC 4291 link local unicast
+    fec0::/10,          //	RFC 3879 old site local unicast
+    ff00::/8,           //	RFC 4291 multicast
+];
+
+
+
+// The bgp_in filter works on incoming BGP UPDATE messages.
+//
+// One such message can contain multiple NLRI, thus multiple announcements or
+// withdrawals. To act on individual announcements or withdrawals, use the
+// 'rib-in' filter-map below.
 filter bgp_in(
     bgp_msg: BgpMsg,
     ingress_info: IngressInfo,
 ) {
 
     let origin_to_log = AS65536;
-    let community_to_log = NO_PEER;
+    let community_to_log = Community.NO_PEER;
 
-    if bgp_msg.match_aspath_origin(origin_to_log) {
+    if aspath_origin_matches(bgp_msg.aspath(), origin_to_log) {
         output.log_matched_origin(origin_to_log);
     }
-    if bgp_msg.contains_community(community_to_log) {
-        output.log_matched_community(community_to_log)
+
+    match bgp_msg.communities() {
+        Some(communities) => {
+            if communities.contains(community_to_log) {
+                output.log_matched_community(community_to_log)
+            }
+        }
+        None => { }
     }
 
     accept
 }
 
-# The bmp_in filter works on incoming BMP messages.
-#
-# While most BMP message will be of type RouteMonitoring (transporting route
-# information via an encapsulated BGP UPDATE message), this filter-map can act
-# on different types as well. Helper methods are provided, e.g.
-# 'is_peer_down()' returns true if the message is a BMP PeerDownNotification.
+
+const MY_ASN: Asn =  AS211321;
+
+// Helper method to 'shortcut' the Option, returning false when the Option is
+// None. 
+fn aspath_contains(maybe: Option[AsPath], to_match: Asn) -> bool {
+    match maybe {
+        Some(aspath) if aspath.contains(to_match) => true,
+        _ => false
+    }
+}
+
+fn aspath_origin_matches(maybe: Option[AsPath], to_match: Asn) -> bool {
+    match maybe {
+        Some(aspath) => {
+            match aspath.origin() {
+                Some(asn) => asn == to_match,
+                None => false,
+            }
+        }
+        _ => false
+    }
+}
+
+
+fn contains_community(maybe: Option[List[Community]], to_match: Community) -> bool {
+    match maybe {
+        Some(communities) if communities.contains(to_match) => true,
+        _ => false
+    }
+}
+
+fn contains_large_community(maybe: Option[List[LargeCommunity]], to_match: LargeCommunity) -> bool {
+    match maybe {
+        Some(communities) if communities.contains(to_match) => true,
+        _ => false
+    }
+}
+
+
+
+// The bmp_in filter works on incoming BMP messages.
+//
+// While most BMP message will be of type RouteMonitoring (transporting route
+// information via an encapsulated BGP UPDATE message), this filter-map can act
+// on different types as well. Helper methods are provided, e.g.
+// 'is_peer_down()' returns true if the message is a BMP PeerDownNotification.
 filter bmp_in(
     bmp_msg: BmpMsg,
     ingress_info: IngressInfo,
 ) {
-    let my_asn = AS12345;
     let asn_to_log = AS65536;
-    let community_to_log = Community.from("NOPEER");
+    let community_to_log = Community.NO_PEER;
 
     if bmp_msg.is_peer_down() {
-        output.log_peer_down()
+        // this prints $prefix,$asn
+        // probably replaceable now that we have roto Strings
+        //output.log_peer_down()
     }
 
-    # Keep track of a specific deprecated (and possibly problematic) attribute.
-    # This will show up in the /metrics endpoint as
-    #
-    #   'roto_user_defined_unwanted_attribute'
-    #
+    // Keep track of a specific deprecated (and possibly problematic) attribute.
+    // This will show up in the /metrics endpoint as
+    //
+    //   'roto_user_defined_unwanted_attribute'
+    //
     if bmp_msg.has_attribute(28) {
         metrics.increase_counter(
             f"unwanted_attribute{{peer_asn=\"{ingress_info.peer_asn()}\"}}",
@@ -86,128 +199,197 @@ filter bmp_in(
         );
     }
 
-    if bmp_msg.is_ibgp(my_asn) {
+    if bmp_msg.is_ibgp(MY_ASN) {
         reject
-    } else {
-        if bmp_msg.aspath_contains(asn_to_log) {
-            output.log_matched_asn(asn_to_log);
-        }
-        if bmp_msg.contains_community(community_to_log) {
-            output.log_matched_community(community_to_log)
-        }
-        accept
     }
+
+    if aspath_contains(bmp_msg.aspath(), asn_to_log) {
+        output.log_matched_asn(asn_to_log);
+    }
+
+    match bmp_msg.aspath() {
+        Some(aspath) => {
+            if aspath.contains(asn_to_log) {
+                output.log_matched_asn(asn_to_log);
+            }
+        }
+        None => { }
+    }
+
+    // FIXME prints empty string for NOPEER, not different from other
+    // branches though
+    if contains_community(bmp_msg.communities(), community_to_log) {
+        output.log_matched_community(community_to_log)
+    }
+    accept
 }
 
-# The rib_in_pre filter processes individual routes prior to insertion into the
-# main RIB.
-#
-# Different from the BGP UPDATE message in the bgp-in filter-map, and the BMP
-# RouteMonitoring message in the bmp-in filter-map, the rib-in filter works on
-# individual announcements and withdrawals, typed Route.
-#
-# This enables for fine-grained, per announcement filtering and logging, and
-# allows comparing of and acting on the actual NLRI (most often, the prefix).
-#
-# Filtering purely based on values of attributes (regardless of the individual
-# NLRI) can and should be done in the bmp-in/bgp-in filter-maps, as making such
-# a decision early on is more efficient.
+// The rib_in_pre filter processes individual routes prior to insertion into the
+// main RIB.
+//
+// Different from the BGP UPDATE message in the bgp-in filter-map, and the BMP
+// RouteMonitoring message in the bmp-in filter-map, the rib-in filter works on
+// individual announcements and withdrawals, typed Route.
+//
+// This enables for fine-grained, per announcement filtering and logging, and
+// allows comparing of and acting on the actual NLRI (most often, the prefix).
+//
+// Filtering purely based on values of attributes (regardless of the individual
+// NLRI) can and should be done in the bmp-in/bgp-in filter-maps, as making such
+// a decision early on is more efficient.
 filter rib_in_pre(
     route: Route,
     ingress_info: IngressInfo,
 ) {
 
-    if prefix_lists.contains("my_prefixes", route.prefix()) {
+    match route.aspath() {
+        Some(aspath) => {
+            if aspath.contains(AS1133) {
+                command("/home/luuk/bin/handle_route.py", [
+                        "--route", route.fmt_json(),
+                ]);
+                output.print(f"AS1133 communities: {fmt_communities(route.communities())}");
+            }
+        }
+        None => { }
+    }
+
+    if MY_PREFIXES.contains(route.prefix()) {
         output.log_prefix(route.prefix());
     }
 
-    # Only has effect when an RTR unit is configured in rotonda.conf
+    // Only has effect when an RTR unit is configured in rotonda.conf
     rpki.check_rov(route);
 
     accept
 }
 
-# The vrp_update filter processes updates pertaining to VRPs coming in via RTR.
-#
-# This is mainly useful for monitoring and generally, one would like to always
-# return 'accept' from this filter: Returning 'reject' will cause Rotonda to not
-# apply the update which is probably not what you want. As such, if this filter
-# definition is omitted, Rotonda defaults to 'accept'.
-#
-# Note that this filter is triggered for any incoming VRP update, regardless of
-# whether the prefixes in the VRPs are stored in the RIB. To act on actual
-# changes in terms of ROV status of stored prefixes, see the
-# `rib_in_rov_status_update` function below.
-#
-# NB: this function is only called for RTR Serial updates, not for the initial
-# RTR Cache Reset sync.
+fn fmt_aspath_origin(r: Route) -> String {
+    match r.aspath() {
+        Some(aspath) => {
+            match aspath.origin() {
+                Some(asn) => f"{asn}",
+                None => "no origin in aspath"
+            }
+        }
+        None => "no aspath in route"
+    }
+}
+
+fn fmt_communities(c: Option[List[Community]]) -> String {
+    let list = match c {
+        Some(list) => list,
+        None => return "",
+    };
+    let strings = List.new();
+    for c in list {
+        strings.push(c.to_string());
+    }
+
+    f"[{strings.join(", ")}]"
+}
+
+
+
+
+// The vrp_update filter processes updates pertaining to VRPs coming in via RTR.
+//
+// This is mainly useful for monitoring and generally, one would like to always
+// return 'accept' from this filter: Returning 'reject' will cause Rotonda to not
+// apply the update which is probably not what you want. As such, if this filter
+// definition is omitted, Rotonda defaults to 'accept'.
+//
+// Note that this filter is triggered for any incoming VRP update, regardless of
+// whether the prefixes in the VRPs are stored in the RIB. To act on actual
+// changes in terms of ROV status of stored prefixes, see the
+// `rib_in_rov_status_update` function below.
+//
+// NB: this function is only called for RTR Serial updates, not for the initial
+// RTR Cache Reset sync.
 filter vrp_update(vrp_update: VrpUpdate) {
 
-    #if asn_lists.contains("my_asns", vrp_update.asn()) {
-    #    output.entry().timestamped_custom("[RTR] (my asns): " + vrp_update.fmt());
-    #    output.write_entry();
-    #}
+    if MY_ASNS.contains(vrp_update.asn()) {
+        output.entry().timestamped_custom(f"[RTR] (my_asns): {vrp_update}");
+        output.write_entry();
+    }
 
-    if prefix_lists.covers("my_prefixes", vrp_update.prefix()) {
-        output.timestamped_print("[RTR] (my prefixes): " + vrp_update.fmt())
+    if vrp_update.asn().appears_on(BOGON_ASNS) {
+        output.entry().timestamped_custom(f"[RTR] (bogon): {vrp_update}");
+        output.write_entry();
+    }
+
+    if vrp_update.prefix().covered_by(MY_PREFIXES) {
+        output.timestamped_print(f"[RTR] (my prefixes): {vrp_update}")
+    }
+
+    if vrp_update.prefix().covered_by(BOGONS) {
+        output.timestamped_print(f"[RTR] (BOGON): {vrp_update}")
     }
 
     accept
 }
 
-# After applying a VRP update, this function is called for every stored route
-# that was affected by the new VRP. Note that even renewals that did not cause a
-# change in ROV status will trigger the call to this function.
-#
-# NB: this function is only called for updates caused by RTR Serial updates, not
-# during the initial RTR Cache Reset sync or when calling `rpki.check_rov` from
-# the `rib_in_pre` filter.
+// After applying a VRP update, this function is called for every stored route
+// that was affected by the new VRP. Note that even renewals that did not cause a
+// change in ROV status will trigger the call to this function.
+//
+// NB: this function is only called for updates caused by RTR Serial updates, not
+// during the initial RTR Cache Reset sync or when calling `rpki.check_rov` from
+// the `rib_in_pre` filter.
 fn rib_in_rov_status_update(rov_update: RovStatusUpdate) {
 
     if rov_update.has_changed() {
-        # Only log whenever something changed to Invalid:
+        // Only log whenever something changed to Invalid:
         if rov_update.current_status().is_invalid() {
-            output.timestamped_print("[RTR]" + rov_update.fmt())
+            output.timestamped_print(f"[RTR] {fmt_rov_upd(rov_update)}")
         }
     }
-    # When it concerns any of 'my_prefixes', always log:
-    if prefix_lists.covers("my_prefixes", rov_update.prefix()) {
-        output.timestamped_print("[RTR] (my prefixes): " + rov_update.fmt())
+
+    // When it concerns any of 'my_prefixes', always log:
+    if rov_update.prefix().covered_by(MY_PREFIXES) {
+        output.timestamped_print(f"[RTR] (my prefixes): {fmt_rov_upd(rov_update)}")
     }
 }
 
+fn fmt_rov_upd(r: RovStatusUpdate) -> String {
+    f"[{r.previous_status()}] -> [{r.current_status()}] \
+    {r.prefix()} originated by {r.origin()}, learned from {r.peer_asn()}"
+}
 
-# The ribs/$address_family/routes endpoints take a
-# `?function[roto]=$function_name` parameter, which enables the use of a roto
-# filter like the one below to be applied on the result set.
-# 
-# The filter is applied to every route in the (candidate) result set. When
-# returning 'reject', the route will not be part of the returned results.
-#
-# In this example, we only wants routes that contain both an OTC and an AS_PATH
-# path attribute, but where the OTC ASN does not appear within that AS_PATH.
+
+
+
+// The ribs/$address_family/routes endpoints take a
+// `?function[roto]=$function_name` parameter, which enables the use of a roto
+// filter like the one below to be applied on the result set.
+// 
+// The filter is applied to every route in the (candidate) result set. When
+// returning 'reject', the route will not be part of the returned results.
+//
+// In this example, we only wants routes that contain both an OTC and an AS_PATH
+// path attribute, but where the OTC ASN does not appear within that AS_PATH.
 filter hidden_hop(attr: PathAttributes) {
     match attr.otc() {
-        Some(otc) -> {
+        Some(otc) => {
             match attr.aspath() {
-                Some(aspath) -> {
-                    if not aspath.contains(otc) {
+                Some(aspath) => {
+                    if !aspath.contains(otc) {
                         accept
                     } else {
                         reject
                     }
                 },
-                None -> reject,
+                None => reject,
             }
         }
-        None -> { reject }
+        None => { reject }
     }
 }
 
-# Another example based on (Large) communities.
+// Another example based on (Large) communities.
 filter specific_communities(attr: PathAttributes) {
-    if (not attr.contains_community(Community.from("NOPEER"))) && 
-       attr.contains_large_community(LargeCommunity.from("AS211321:1:2")) {
+    if !contains_community(attr.communities(), Community.NO_PEER) &&
+       contains_large_community(attr.large_communities(), LargeCommunity.from("AS211321:1:2")) {
         accept
     }
     reject

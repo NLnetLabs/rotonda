@@ -290,10 +290,6 @@ impl BgpTcpInRunner {
             roto_context.set_metrics(roto_metrics.metrics.clone());
         }
 
-        if let Some(c) = arc_self.roto_compiled.clone() {
-            roto_context.prepare(&mut c.lock().unwrap());
-        }
-
         let roto_context = Arc::new(Mutex::new(roto_context));
 
         loop {

@@ -7,7 +7,7 @@ use crate::{
         Terminated, TriggerData,
     }, ingress, manager::{Component, WaitPoint}, payload::{
         Payload, RotondaPaMap, RotondaRoute, RouterId, Update, UpstreamStatus
-    }, roto_runtime::{self, types::{FilterName, InsertionInfo, Output, OutputStream, OutputStreamMessage, RotoOutputStream}, CompileListsFunc, RotondaCtx, COMPILE_LISTS_FUNC_NAME}, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::{rib_unit::rpki::MaxLenList, rtr::client::VrpUpdate, Unit}
+    }, roto_runtime::{self, types::{FilterName, InsertionInfo, Output, OutputStream, OutputStreamMessage, RotoOutputStream}, RotondaCtx}, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::{rib_unit::rpki::MaxLenList, rtr::client::VrpUpdate, Unit}
 };
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
@@ -275,7 +275,7 @@ impl RibUnitRunner {
         let rtr_cache: Arc<RtrCache> = Default::default();
 
         let mut roto_context = RotondaCtx::new(
-            RotoOutputStream::new_rced(),
+            roto_runtime::Log::new(), 
             rtr_cache.clone()
         );
 
@@ -283,10 +283,6 @@ impl RibUnitRunner {
             roto_context.set_metrics(roto_metrics.metrics.clone());
         } else {
             debug!("no roto_metrics available to set in Ctx in rib-unit");
-        }
-
-        if let Some(c) = roto_compiled.clone() {
-            roto_context.prepare(&mut c.lock().unwrap());
         }
 
         let roto_context = Arc::new(Mutex::new(roto_context));
@@ -851,7 +847,7 @@ impl RibUnitRunner {
                                             osms = self.process_output_stream(
                                                 None,
                                                 None,
-                                                &mut ctx.output.borrow_mut(),
+                                                &mut ctx.output.lock().unwrap(),
                                             );
                                             }
                                             self.gate.update_data(Update::OutputStream(osms)).await;
@@ -953,7 +949,7 @@ impl RibUnitRunner {
                                                 osms = self.process_output_stream(
                                                     None,
                                                     None,
-                                                    &mut ctx.output.borrow_mut(),
+                                                    &mut ctx.output.lock().unwrap(),
                                                 );
                                                 }
                                                 self.gate.update_data(Update::OutputStream(osms)).await;
@@ -1023,7 +1019,7 @@ impl RibUnitRunner {
             if let Some(ref roto_function) = self.roto_function_pre {
                 let Payload{ rx_value, trace_id, received, ingress_id, route_status} = p;
                 let mutrr: roto_runtime::MutRotondaRoute = rx_value.into();
-                let mutiic = roto_runtime::IngressInfoCache::new_rc(
+                let mutiic = roto_runtime::IngressInfoCache::new_arc(
                     ingress_id, //.unwrap(),
                     self.ingress_register.clone()
                 );
@@ -1033,7 +1029,7 @@ impl RibUnitRunner {
                     roto::Val(mutiic.clone()),
                 ) {
                     roto::Verdict::Accept(_) => {
-                        let modified_rr = std::rc::Rc::into_inner(mutrr).unwrap().into_inner();
+                        let modified_rr = mutrr.cloned_inner();
                         p = Payload {
                             rx_value: modified_rr,
                             trace_id,
@@ -1046,7 +1042,7 @@ impl RibUnitRunner {
                     }
                     roto::Verdict::Reject(_) => {
                         //debug!("roto::Verdict Reject, dropping {p:#?}");
-                        let modified_rr = std::rc::Rc::into_inner(mutrr).unwrap().into_inner();
+                        let modified_rr = mutrr.cloned_inner();
                         p = Payload {
                             rx_value: modified_rr,
                             trace_id,
@@ -1062,7 +1058,7 @@ impl RibUnitRunner {
                 res.push(p.clone());
             }
 
-            let mut output_stream  = ctx.output.borrow_mut();
+            let mut output_stream  = ctx.output.lock().unwrap();
             osms = self.process_output_stream(
                 Some(&p.rx_value),
                 Some(p.ingress_id),

@@ -1,10 +1,9 @@
 use core::fmt;
 use std::{
-    cell::RefCell,
     collections::{HashMap, HashSet},
     net::IpAddr,
     path::PathBuf,
-    rc::Rc,
+    sync::{Arc, Mutex},
 };
 
 use chrono::serde::ts_microseconds;
@@ -89,7 +88,7 @@ impl RotoScripts {
 
 pub type RotoPackage = std::sync::Mutex<roto::Package<roto::Ctx<RotondaCtx>>>;
 
-#[derive(Default)]
+#[derive(Default, PartialEq)]
 pub struct OutputStream<M> {
     msgs: Vec<M>,
     entry: MutLogEntry,
@@ -105,13 +104,13 @@ impl<M> OutputStream<M> {
     pub fn with_vec(v: Vec<M>) -> Self {
         Self {
             msgs: v,
-            entry: Rc::new(RefCell::new(LogEntry::new())),
+            entry: MutLogEntry::default(),
         }
     }
 
-    /// Create a new `OutputStream` wrapped in an `Rc<RefCell<>>`
-    pub fn new_rced() -> Rc<RefCell<Self>> {
-        Rc::new(RefCell::new(Self::new()))
+    /// Create a new `OutputStream` wrapped in an `Arc<Mutex<>>`
+    pub fn new_arced() -> Arc<Mutex<Self>> {
+        Arc::new(Mutex::new(Self::new()))
     }
 
     pub fn push(&mut self, msg: M) {
@@ -149,7 +148,7 @@ impl<M> IntoIterator for OutputStream<M> {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Output {
     /// Community observed in Path Attributes.
     Community(u32),
@@ -174,7 +173,7 @@ pub enum Output {
     Entry(LogEntry),
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct InsertionInfo {
     pub prefix_new: bool,
     pub new_peer: bool,

@@ -380,7 +380,7 @@ impl WebUI {
                 .entry((info.remote_asn.unwrap(), info.remote_addr.unwrap()))
                 .or_default();
             infos.push((*id, info.clone()));
-            infos.sort_by(|a, b| a.1.peer_rib_type.cmp(&b.1.peer_rib_type));
+            infos.sort_by_key(|a| a.1.peer_rib_type);
         }
 
         res

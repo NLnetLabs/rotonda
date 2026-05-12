@@ -15,6 +15,7 @@ use tokio::net::{TcpListener, TcpStream};
 use crate::{
     comms::{Gate, GateStatus, Terminated},
     manager::{Component, WaitPoint},
+    roto_runtime::{MutIngressInfoCache, RotondaCtx},
 };
 
 #[serde_as]
@@ -28,7 +29,7 @@ pub struct BmpTcpIn {
     /// Roto filter name to use.
     ///
     /// If set, the filter must be found in the configured roto script.
-    pub roto_filter_name: Option<String>,
+    pub roto_filter: Option<String>,
 
     /// Read stream from binary file
     pub read_from_file: Option<PathBuf>,
@@ -45,6 +46,53 @@ impl BmpTcpIn {
         // do we need a metrics-ng as well?
 
         let roto_package = component.roto_package().clone();
+
+        // XXX checking for the roto_filter can not happen here:
+        // returning Terminated does not stop Rotonda
+        // These checks need to happen earlier, somewhere in the Manager
+        // supposedly.
+
+        //let roto_filter = if let Some(ref filter_name) = self.roto_filter {
+        //    let Some(package) = roto_package else {
+        //        error!(
+        //            "roto filter '{filter_name}' configured for unit '{}' \
+        //            but 'roto_script' not set.",
+        //            component.name()
+        //        );
+        //        return Err(Terminated);
+        //    };
+        //    let mut package = package.lock().unwrap();
+        //    let Ok(roto_filter) = package.get_function(filter_name) else {
+        //        error!("filter {filter_name} not found in roto script");
+        //        return Err(Terminated);
+        //    };
+        //    Some(roto_filter)
+        //} else {
+        //    None
+        //};
+
+        let roto_filter = if let Some(ref filter_name) = self.roto_filter {
+            if let Some(package) = roto_package {
+                let mut package = package.lock().unwrap();
+                if let Ok(roto_filter) = package.get_function(filter_name) {
+                    Some(roto_filter)
+                } else {
+                    error!("filter {filter_name} not found in roto script");
+                    None
+                }
+            } else {
+                error!(
+                    "roto filter '{filter_name}' configured for unit '{}' \
+                    but 'roto_script' not set.",
+                    component.name()
+                );
+                //return Err(Terminated);
+                None
+            }
+        } else {
+            None
+        };
+
         let ingress_register = component.ingresses();
 
         // Wait for other components to be, and signal to other components
@@ -59,20 +107,36 @@ impl BmpTcpIn {
         // them.
         waitpoint.running().await;
 
-        let _ = Runner::new(self.clone(), gate).run().await;
+        let _ = Runner::new(self.clone(), gate, roto_filter).run().await;
 
         Ok(())
     }
 }
 
+type RotoFilter = roto::TypedFunc<
+    roto::Ctx<RotondaCtx>,
+    fn(
+        roto::Val<routecore::bmp::message::Message<bytes::Bytes>>, // TODO this will be the new BmpMessage
+        roto::Val<MutIngressInfoCache>,
+    ) -> roto::Verdict<(), ()>,
+>;
 struct Runner {
     config: BmpTcpIn,
     gate: Gate,
+    roto_filter: Option<RotoFilter>,
 }
 
 impl Runner {
-    fn new(config: BmpTcpIn, gate: Gate) -> Self {
-        Self { config, gate }
+    fn new(
+        config: BmpTcpIn,
+        gate: Gate,
+        roto_filter: Option<RotoFilter>,
+    ) -> Self {
+        Self {
+            config,
+            gate,
+            roto_filter,
+        }
     }
 
     async fn run(mut self) -> Result<(), Terminated> {

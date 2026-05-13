@@ -176,25 +176,36 @@ impl Runner {
     }
 
     fn spawn_stream_handler(&mut self, stream: TcpStream, socket: SocketAddr) {
+        let gate = self.gate.clone();
         tokio::spawn(async move {
             info!(
                 "spawning handler for tcp stream from {:?}",
                 stream.peer_addr()
             );
-            let handler = RouterHandler::new(stream);
+            let handler = RouterHandler::new(stream, gate);
             let _ = Box::pin(handler.run()).await;
         });
     }
 
     fn spawn_file_handler(&mut self, filename: PathBuf) {
+        let gate = self.gate.clone();
         tokio::spawn(async move {
-            info!("spawning handler for file {}", filename.to_string_lossy());
+            let name = filename.to_string_lossy().to_string();
+            info!("spawning handler for file {name}");
+            let t0 = std::time::Instant::now();
             let Ok(handle) = File::open(filename).await else {
                 error!("can't open file");
                 return;
             };
-            let handler = RouterHandler::new(handle);
+            let filesize = handle.metadata().await.unwrap().len();
+            let handler = RouterHandler::new(handle, gate);
             let _ = Box::pin(handler.run()).await;
+            eprintln!(
+                "processed {name} in {}ms, {:.1}MB/s",
+                //filename.to_string_lossy(),
+                t0.elapsed().as_millis(),
+                (filesize >> 20) as f64 / t0.elapsed().as_secs_f64()
+            );
         });
     }
 

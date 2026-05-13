@@ -10,13 +10,17 @@ use futures::{
 use log::{error, info};
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
+use tokio::fs::File;
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::{
     comms::{Gate, GateStatus, Terminated},
     manager::{Component, WaitPoint},
     roto_runtime::{MutIngressInfoCache, RotondaCtx},
+    units::bmp_tcp_in_ng::{error::BmpNgError, router_handler::RouterHandler},
 };
+
+use super::router_handler;
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
@@ -174,16 +178,23 @@ impl Runner {
     fn spawn_stream_handler(&mut self, stream: TcpStream, socket: SocketAddr) {
         tokio::spawn(async move {
             info!(
-                "handler spawn for tcp stream from {:?}",
+                "spawning handler for tcp stream from {:?}",
                 stream.peer_addr()
             );
-            todo!()
+            let handler = RouterHandler::new(stream);
+            let _ = Box::pin(handler.run()).await;
         });
     }
+
     fn spawn_file_handler(&mut self, filename: PathBuf) {
         tokio::spawn(async move {
-            info!("handler spawned for file {}", filename.to_string_lossy());
-            todo!()
+            info!("spawning handler for file {}", filename.to_string_lossy());
+            let Ok(handle) = File::open(filename).await else {
+                error!("can't open file");
+                return;
+            };
+            let handler = RouterHandler::new(handle);
+            let _ = Box::pin(handler.run()).await;
         });
     }
 

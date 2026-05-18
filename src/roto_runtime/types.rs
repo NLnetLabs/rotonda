@@ -231,6 +231,29 @@ impl From<(bool, routecore::bmp::message::RibType)> for PeerRibType {
         }
     }
 }
+//impl From<(bool, routecore::bmp::message_ng::common::RibType)> for PeerRibType {
+//    fn from(
+//        (is_post_policy, rib_type): (bool, routecore::bmp::message_ng::common::RibType),
+//    ) -> Self {
+//        match rib_type {
+//            routecore::bmp::message_ng::common::RibType::AdjRibIn => {
+//                if is_post_policy {
+//                    PeerRibType::InPost
+//                } else {
+//                    PeerRibType::InPre
+//                }
+//            }
+//            routecore::bmp::message_ng::common::RibType::AdjRibOut => {
+//                if is_post_policy {
+//                    PeerRibType::OutPost
+//                } else {
+//                    PeerRibType::OutPre
+//                }
+//            }
+//            routecore::bmp::message_ng::common::RibType::LocRib => PeerRibType::Loc,
+//        }
+//    }
+//}
 
 impl fmt::Display for PeerRibType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {

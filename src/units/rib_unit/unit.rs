@@ -21,7 +21,7 @@ use log::{debug, error, info, log_enabled, trace, warn};
 use non_empty_vec::NonEmpty;
 
 use inetnum::{addr::Prefix, asn::Asn};
-use routecore::bgp::{aspath::{Hop, HopPath}, types::AfiSafiType};
+use routecore::bgp::{aspath::{Hop, HopPath}, message::PduParseInfo, types::AfiSafiType};
 use serde::Deserialize;
 use smallvec::{smallvec, SmallVec};
 use std::{
@@ -562,6 +562,80 @@ impl RibUnitRunner {
             Update::OutputStream(..) => {
                 // Nothing to do, pass it on
                 self.gate.update_data(update).await;
+            }
+
+            // XXX see comment on payload::Update: we pass the entire raw
+            // UPDATE PDU for now so we don't have to introduce a lifetime
+            // that bleeds into everything. To be polished after we've
+            // established routecore-ng works as expected and we've setteld on
+            // all new APIs.
+            Update::NgBulk(raw_update, ingress_id, sc) => {
+                // We can unwrap, as this all has been checked in the ingress
+                // unit already.
+                let mut update = routecore::bgp::message_ng::Update::try_from_raw(&raw_update).unwrap().into_checked_parts(&sc).unwrap();
+
+
+                let received = std::time::Instant::now();
+
+                if let Some(attr) = update.take_conv_attributes2() {
+                    let conv_iter = update.conv_reach_iter_raw();
+                    // create a impl Iterator<Item = Payload>
+                    let payloads = conv_iter.map(|(_maybe_pid, nlri)| {
+                        let mut buf = [0u8; 4];
+                        buf[..&nlri.len()-1].copy_from_slice(&nlri[1..]);
+                        let v4 = std::net::Ipv4Addr::from(buf);
+                        let ppi = PduParseInfo::modern();
+                        // TODO do RotondaPaMap.set_rpki_info()
+                        Payload {
+                            rx_value: RotondaRoute::Ipv4Unicast(
+                                        routecore::bgp::nlri::afisafi::Ipv4UnicastNlri(Prefix::new_v4(v4, nlri[0]).unwrap()),
+                                        RotondaPaMap::new(
+                                            //routecore::bgp::path_attributes::OwnedPathAttributes::new(ppi, attr.clone())
+                                            routecore::bgp::path_attributes::OwnedPathAttributes::new(ppi, attr.path_attributes().to_vec())
+                                        )
+                                    )
+                            ,
+                            trace_id: None,
+                            received,
+                            ingress_id,
+                            route_status: RouteStatus::Active,
+                        }
+                    }).collect::<Vec<_>>();
+                    
+                    //debug!("NgBulk for ingress {ingress_id}, {} routes", payloads.len());
+
+                    self.filter_payload(payloads /* insert_fn*/).await?
+                }
+                if let Some(attr) = update.take_mp_attributes() {
+                    let mp_iter = update.mp_reach_iter_raw();
+                    if update.mp_reach_afisafi() == Some(routecore::bgp::message_ng::common::AfiSafiType::IPV6UNICAST) {
+                        let payloads = mp_iter.map(|(_maybe_pid, nlri)| {
+                            let mut buf = [0u8; 16];
+                            buf[..&nlri.len()-1].copy_from_slice(&nlri[1..]);
+                            let v6 = std::net::Ipv6Addr::from(buf);
+                            let ppi = PduParseInfo::modern();
+
+                            Payload {
+                                rx_value: RotondaRoute::Ipv6Unicast(
+                                              routecore::bgp::nlri::afisafi::Ipv6UnicastNlri(Prefix::new_v6(v6, nlri[0]).unwrap()),
+                                              RotondaPaMap::new(
+                                                  routecore::bgp::path_attributes::OwnedPathAttributes::new(ppi, attr.clone())
+                                              )
+                                          )
+                                    ,
+                                    trace_id: None,
+                                    received,
+                                    ingress_id,
+                                    route_status: RouteStatus::Active,
+                            }
+                        }).collect::<Vec<_>>();
+
+
+                        self.filter_payload(payloads /* insert_fn*/).await?
+                    } else {
+                        panic!("MP_REACH but not IPV6 TODO");
+                    }
+                }
             }
 
             Update::Rtr(rtr_update) => {

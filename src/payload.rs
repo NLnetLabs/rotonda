@@ -1,5 +1,6 @@
 use rotonda_store::prefix_record::{Meta, RouteStatus};
 use routecore::bgp::message::PduParseInfo;
+use routecore::bgp::message_ng::update::CheckedParts;
 use routecore::bgp::path_attributes::OwnedPathAttributes;
 use routecore::bgp::path_selection::TiebreakerInfo;
 use routecore::bgp::types::AfiSafiType;
@@ -323,6 +324,15 @@ pub enum Update {
 
     OutputStream(SmallVec<[OutputStreamMessage; 2]>),
     Rtr(crate::units::RtrUpdate),
+    // XXX passing a routecore CheckedParts<'_> would require introduction of
+    // a lifetime which bleeds into loads of places.
+    // For now, we just pass the entire UPDATE PDU as a Vec<u8> and generate a
+    // CheckedParts (again) in the rib unit.
+    // After we verified routecore-ng working as expected, we can start
+    // improving this. As we might get rid of the entire RTRTR style
+    // communication anyway, let's not optimize to workaround any of it.
+    // This might also need an IngressId and some additional stuff.
+    NgBulk(Vec<u8>, IngressId, routecore::bgp::message_ng::common::SessionConfig),
 }
 
 impl Update {
@@ -344,6 +354,7 @@ impl Update {
             Update::UpstreamStatusChange(_) => smallvec![],
             Update::OutputStream(..) => smallvec![],
             Update::Rtr(..) => smallvec![],
+            Update::NgBulk(..) => smallvec![],
         }
     }
 }

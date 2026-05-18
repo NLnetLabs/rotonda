@@ -235,7 +235,8 @@ impl FileRunner {
                             Update::WithdrawBulk(..)  |
                             Update::IngressReappeared(..) |
                             Update::UpstreamStatusChange(..) |
-                            Update::Rtr(..) =>  { }
+                            Update::Rtr(..) =>  { }|
+                            Update::NgBulk(..) => { }
                     }
                 }
             }

@@ -1,5 +1,6 @@
 use std::{collections::BTreeMap, sync::Arc};
 
+use log::{debug, warn};
 use routecore::{
     bgp::message_ng::common::SessionConfig,
     bmp::message_ng::common::PerPeerHeaderV3,
@@ -7,7 +8,7 @@ use routecore::{
 
 use crate::ingress::{self, IngressId};
 
-#[derive(Default)]
+//#[derive(Default)]
 pub struct PphRegister {
     // based on peer type byte
     // currently, types [0..3] (inclusive) are defined
@@ -16,6 +17,7 @@ pub struct PphRegister {
     per_peer_type: [RibViewRegister; 4], // FIXME 256? or how to prevent indexing out of bounds
     ingress_register: Arc<ingress::Register>,
 }
+
 
 #[derive(Debug, Default)]
 pub struct RibViewRegister {
@@ -36,7 +38,7 @@ impl PphRegister {
     pub fn new(ingress_register: Arc<ingress::Register>) -> Self {
         Self {
             ingress_register,
-            ..Default::default()
+            per_peer_type: Default::default(),
         }
     }
 
@@ -78,7 +80,7 @@ impl PphRegister {
         &mut self,
         pph: &PerPeerHeaderV3,
         session_config: SessionConfig,
-    ) -> Option<(IngressId, SessionConfig)> {
+    ) -> IngressId {
         // Check whether we already registered a peer_id in the ingress::Register, by going over
         // our own cache.     ■■ change this to: `pph`
         //let peer_id = if let Some((ingress_id, _)) =
@@ -99,9 +101,10 @@ impl PphRegister {
 
         // TODO move this into the ingress::Register, that is responsible and authoritative for
         // this kind of logic
-        let mui = u32::from(peer_id) << 16
-            | u32::from(u8::from(pph.peer_type)) << 8
-            | u32::from(pph.flags);
+        //let mui = u32::from(peer_id) << 16
+        //    | u32::from(u8::from(pph.peer_type)) << 8
+        //    | u32::from(pph.flags);
+        let mui = peer_id;
 
         //eprintln!(
         //    "inserting into partition 0x{:x} , 0x{:x}\n{:?}",
@@ -110,11 +113,15 @@ impl PphRegister {
         //    HexFormatted(pph.without_type_and_flags())
         //);
 
-        self.per_peer_type[u8::from(pph.peer_type) as usize].per_rib_view
+        if let Some((mui, _sc)) = self.per_peer_type[u8::from(pph.peer_type) as usize].per_rib_view
             [pph.flags.reverse_bits() as usize]
             .insert(
                 pph.without_type_and_flags().try_into().unwrap(),
                 (mui, session_config),
             )
+        {
+            warn!("inserting already existing PPH into PphRegister, mui {mui}");
+        }
+        mui
     }
 }

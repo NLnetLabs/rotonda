@@ -1,6 +1,7 @@
-use std::{borrow::Cow, io::Read};
+use std::{borrow::Cow, io::Read, sync::Arc};
 
-use log::error;
+use inetnum::asn::Asn;
+use log::{debug, error, warn};
 use routecore::{
     bgp::message_ng::common::SessionConfig,
     bmp::{
@@ -19,32 +20,53 @@ use tokio::io::AsyncRead;
 
 use crate::{
     comms::Gate,
+    ingress::{self, IngressId, IngressInfo, IngressType},
     payload::Update,
     units::bmp_tcp_in_ng::{error::BmpNgError, pph_register::PphRegister},
 };
 
 pub struct RouterHandler<R> {
     bmp_handler: BmpHandler<R>,
-    gate: Gate,
-}
-
-pub struct RouterState {
-    pph_register: PphRegister,
+    ingress_register: Arc<ingress::Register>,
+    unit_ingress_id: IngressId,
     gate: Gate,
 }
 
 impl<R: AsyncRead + Unpin> RouterHandler<R> {
-    pub fn new(stream: R, gate: Gate) -> Self {
+    pub fn new(
+        stream: R,
+        gate: Gate,
+        ingress_register: Arc<ingress::Register>,
+        unit_ingress_id: IngressId,
+    ) -> Self {
         let bmp_handler = BmpHandler::for_stream(stream);
-        Self { bmp_handler, gate }
+        Self {
+            bmp_handler,
+            ingress_register,
+            unit_ingress_id,
+            gate,
+        }
     }
 
-    pub async fn run(mut self) -> Result<(), BmpNgError> {
+    pub async fn run(
+        mut self,
+        partial_ingress_info: IngressInfo,
+    ) -> Result<(), BmpNgError> {
         let version = self.bmp_handler.process_initiation().await;
+
+        let partial_ingress_info = partial_ingress_info.with_name("TODO");
+
         match version {
             BmpVersion(3) => {
                 let v3handler: BmpV3Handler<_> = self.bmp_handler.into();
-                Self::process(v3handler, self.gate).await;
+                Self::process(
+                    v3handler,
+                    self.gate,
+                    self.ingress_register,
+                    self.unit_ingress_id,
+                    partial_ingress_info,
+                )
+                .await;
                 Ok(())
             }
             BmpVersion(4) => Err("BMPv4 not yet implemented".into()),
@@ -52,8 +74,19 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
         }
     }
     //impl<R: AsyncRead + Unpin> RouterV3Handler<R> {
-    async fn process(mut bmp_handler: BmpV3Handler<R>, gate: Gate) {
-        let mut router_state = RouterState::new(gate);
+    async fn process(
+        mut bmp_handler: BmpV3Handler<R>,
+        gate: Gate,
+        ingress_register: Arc<ingress::Register>,
+        unit_ingress_id: IngressId,
+        partial_ingress_info: IngressInfo,
+    ) {
+        let mut router_state = RouterState::new(
+            gate,
+            ingress_register,
+            unit_ingress_id,
+            partial_ingress_info,
+        );
         //let mut cnt = 0;
         while let Ok(Some(_)) = bmp_handler.msg_iter.read_into_buf().await {
             while let Ok(msg) = bmp_handler.msg_iter.get_message() {
@@ -68,9 +101,12 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                         );
                     }
                     MessageType::ROUTE_MONITORING => {
-                        let _ = router_state.process_route_monitoring(
-                            RouteMonitoringV3::try_from_message(msg).unwrap(),
-                        );
+                        let _ = router_state
+                            .process_route_monitoring(
+                                RouteMonitoringV3::try_from_message(msg)
+                                    .unwrap(),
+                            )
+                            .await;
                     }
                     MessageType::PEER_DOWN_NOTIFICATION => {
                         let _ = router_state.process_peer_down_notification(
@@ -83,7 +119,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                             StatisticsReport::try_from_message(msg).unwrap(),
                         );
                     }
-                    MessageType(_) => {
+                    _ => {
                         panic!("TODO {}", msg.common.msg_type)
                     }
                 }
@@ -92,12 +128,50 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
     }
 }
 
+/// State for a BMP stream multiplexing N BGP sessions/views
+///
+/// In the `ingress::Register`, the BMP unit that accepted the TCP stream is the
+/// parent of this `RouterState`. For every monitored BGP session in this
+/// stream, this `RouterState` will be the parent of such sessions.
+///
+/// BMP ingress Unit - (`unit_ingress_id`)
+///                   |
+///                   -> `RouterState` - (`bmp_stream_ingress_id`)
+///                                   |
+///                                   |-> BGP session 1
+///                                   |-> BGP session ..
+///                                   |-> BGP session N
+///                   
+pub struct RouterState {
+    pph_register: PphRegister,
+    ingress_register: Arc<ingress::Register>,
+    bmp_stream_ingress_id: IngressId,
+    gate: Gate,
+}
+
 #[allow(clippy::unnecessary_wraps)]
 impl RouterState {
-    pub fn new(gate: Gate) -> Self {
+    pub fn new(
+        gate: Gate,
+        ingress_register: Arc<ingress::Register>,
+        unit_ingress_id: IngressId,
+        partial_ingress_info: IngressInfo,
+    ) -> Self {
+        let bmp_stream_ingress_id = ingress_register.register();
+        debug!("bmp_stream registered {bmp_stream_ingress_id}");
+        //let bmp_stream_info = IngressInfo::new()
+        let bmp_stream_info = partial_ingress_info
+            .with_ingress_type(IngressType::Bmp)
+            .with_parent_ingress(unit_ingress_id)
+            .with_state(ingress::register::IngressState::Connected);
+
+        ingress_register.update_info(bmp_stream_ingress_id, bmp_stream_info);
+
         Self {
+            pph_register: PphRegister::new(ingress_register.clone()),
+            ingress_register,
+            bmp_stream_ingress_id,
             gate,
-            pph_register: PphRegister::default(),
         }
     }
 
@@ -111,48 +185,100 @@ impl RouterState {
         //let sc = SessionConfig::from(msg.bgp_opens()?);
         let sc = SessionConfig::default();
 
-        self.pph_register.insert(msg.per_peer_header(), sc);
+        let ingress_id = self.pph_register.insert(msg.per_peer_header(), sc);
+        debug!("ingress_id registered {ingress_id}");
+        let ingress_info = IngressInfo::new()
+            .with_parent_ingress(self.bmp_stream_ingress_id)
+            .with_ingress_type(IngressType::BgpViaBmp)
+            .with_remote_addr(pph.address())
+            // convert ng Asn into old (inetnum) Asn, TODO remove
+            .with_remote_asn(Asn::from_u32(pph.asn().to_u32()))
+            .with_peer_type(u8::from(pph.peer_type()))
+            .with_rib_type(pph.rib_type())
+            .with_peer_rib_type((pph.is_post_policy(), pph.rib_type()));
+
+        self.ingress_register.update_info(ingress_id, ingress_info);
         Ok(())
     }
 
-    fn process_route_monitoring(
+    async fn process_route_monitoring(
         &mut self,
         msg: &RouteMonitoringV3,
     ) -> Result<(), BmpNgError> {
-        let (ingress_id, sc) =
-            if let Some(t) = self.pph_register.get(msg.per_peer_header()) {
-                t
+        let (ingress_id, sc) = if let Some(t) =
+            self.pph_register.get(msg.per_peer_header())
+        {
+            t
+        } else {
+            // XXX pph_register should actually use find_other_ribviews
+
+            let pph = msg.per_peer_header();
+            let maybe_existing = self
+                .pph_register
+                .find_other_ribviews(msg.per_peer_header())
+                .cloned();
+
+            if let Some((existing_ingress_id, sc)) = maybe_existing {
+                let mut existing_info =
+                    self.ingress_register.get(existing_ingress_id).unwrap();
+                existing_info = existing_info
+                    .with_peer_type(u8::from(pph.peer_type()))
+                    .with_rib_type(pph.rib_type())
+                    .with_peer_rib_type((
+                        pph.is_post_policy(),
+                        pph.rib_type(),
+                    ));
+                let new_ingress_id = self
+                    .pph_register
+                    .insert(msg.per_peer_header(), sc.clone());
+                self.ingress_register
+                    .update_info(new_ingress_id, existing_info);
+
+                &(new_ingress_id, sc)
             } else {
-                // XXX pph_register should actually use find_other_ribviews
-                self.pph_register
-                    .insert(msg.per_peer_header(), SessionConfig::default());
-                self.pph_register.get(msg.per_peer_header()).unwrap()
-            };
+                warn!("RouteMonitoring message for which no PeerUp was found");
+                &(
+                    self.pph_register.insert(
+                        msg.per_peer_header(),
+                        SessionConfig::default(),
+                    ),
+                    SessionConfig::default(),
+                )
+            }
+        };
 
         let update = msg.bgp_update()?;
-        let mut update = update.into_checked_parts(sc)?;
-        if let Some(attr) = update.take_conv_attributes() {
-            let conv_iter = update.conv_reach_iter_raw();
-            let _ = conv_iter.count();
-            //eprintln!(
-            //    "[{ingress_id:x}] {} bytes of attributes for {} conv NLRI",
-            //    attr.len(),
-            //    conv_iter.count()
-            //);
-            //self.gate.update_data(Update::NgReach(_attr,conv_iter);
-        }
-        if let Some(attr) = update.take_mp_attributes() {
-            let mp_iter = update.mp_reach_iter_raw();
-            let _ = mp_iter.count();
-            //eprintln!(
-            //    "[{ingress_id:x}] {} bytes of attributes for {} mp NLRI",
-            //    attr.len(),
-            //    mp_iter.count()
-            //);
-            //self.gate.update_data(Update::NgReach(_attr,conv_iter);
-        }
+        //let mut update = update.into_checked_parts(sc)?;
+        //if let Some(attr) = update.take_conv_attributes() {
+        //    let conv_iter = update.conv_reach_iter_raw();
+        //    let _ = conv_iter.count();
+        //    //eprintln!(
+        //    //    "[{ingress_id:x}] {} bytes of attributes for {} conv NLRI",
+        //    //    attr.len(),
+        //    //    conv_iter.count()
+        //    //);
+        //    //self.gate.update_data(Update::NgReach(_attr,conv_iter);
 
-        //self.gate.update_data(Update::TODO).await;
+        //    //TODO variant aan Update toevoegen om attr+conv_iter te sturen
+        //}
+        //if let Some(attr) = update.take_mp_attributes() {
+        //    let mp_iter = update.mp_reach_iter_raw();
+        //    let _ = mp_iter.count();
+        //    //eprintln!(
+        //    //    "[{ingress_id:x}] {} bytes of attributes for {} mp NLRI",
+        //    //    attr.len(),
+        //    //    mp_iter.count()
+        //    //);
+        //    //self.gate.update_data(Update::NgReach(_attr,conv_iter);
+        //}
+
+        self.gate
+            .update_data(Update::NgBulk(
+                update.to_vec(),
+                *ingress_id,
+                sc.clone(),
+            ))
+            .await;
         Ok(())
     }
 

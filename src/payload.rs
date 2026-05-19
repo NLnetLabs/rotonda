@@ -94,10 +94,10 @@ impl RotondaRoute {
 
     pub fn rotonda_pamap_mut(&mut self) -> &mut RotondaPaMap {
         match self {
-            RotondaRoute::Ipv4Unicast(_, ref mut p) => p,
-            RotondaRoute::Ipv6Unicast(_, ref mut p) => p,
-            RotondaRoute::Ipv4Multicast(_, ref mut p) => p,
-            RotondaRoute::Ipv6Multicast(_, ref mut p) => p,
+            RotondaRoute::Ipv4Unicast(_, p) => p,
+            RotondaRoute::Ipv6Unicast(_, p) => p,
+            RotondaRoute::Ipv4Multicast(_, p) => p,
+            RotondaRoute::Ipv6Multicast(_, p) => p,
         }
     }
 }

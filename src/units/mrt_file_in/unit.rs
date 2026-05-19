@@ -56,8 +56,8 @@ impl Iterator for PathsIterator<'_> {
 
     fn next(&mut self) -> Option<Self::Item> {
         match self {
-            PathsIterator::One(ref mut p) => p.take(),
-            PathsIterator::Many(ref mut iter) => {
+            PathsIterator::One(p) => p.take(),
+            PathsIterator::Many(iter) => {
                 iter.next().cloned().map(Into::into)
             }
         }

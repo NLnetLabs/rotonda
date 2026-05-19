@@ -199,9 +199,7 @@ impl RouterState {
     ) -> Result<(), BmpNgError> {
         let pph = msg.per_peer_header();
 
-        // TODO: make a proper SC from the BGP OPENS
-        //let sc = SessionConfig::from(msg.bgp_opens()?);
-        let sc = SessionConfig::default();
+        let sc = msg.session_config()?;
 
         let ingress_id = self.pph_register.insert(msg.per_peer_header(), sc);
         debug!("ingress_id registered {ingress_id}");

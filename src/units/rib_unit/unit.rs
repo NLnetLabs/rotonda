@@ -572,12 +572,23 @@ impl RibUnitRunner {
             Update::NgBulk(raw_update, ingress_id, sc) => {
                 // We can unwrap, as this all has been checked in the ingress
                 // unit already.
-                let mut update = routecore::bgp::message_ng::Update::try_from_raw(&raw_update).unwrap().into_checked_parts(&sc).unwrap();
+                // Turns out we can't _yet_, because non v4/v6-unicast might
+                // still blow up.
+                //let mut update = routecore::bgp::message_ng::Update::try_from_raw(&raw_update).unwrap().into_checked_parts(&sc).unwrap();
+
+                let update = match routecore::bgp::message_ng::Update::try_from_raw(&raw_update).unwrap().into_checked_parts(&sc) {
+                    Ok(update) => update,
+                    Err(e) => {
+                        //error!("processing NgBulk: {e}"); 
+                        return Ok(()) // abort
+                    }
+                };
 
 
                 let received = std::time::Instant::now();
 
-                if let Some(attr) = update.take_conv_attributes2() {
+                let addpath = update.conv_nlri_hints.get(routecore::bgp::message_ng::nlri::NlriHints::ADDPATH);
+                if let Some(attr) = update.prepped_conv_attributes() && !addpath {
                     let conv_iter = update.conv_reach_iter_raw();
                     // create a impl Iterator<Item = Payload>
                     let payloads = conv_iter.map(|(_maybe_pid, nlri)| {
@@ -591,7 +602,7 @@ impl RibUnitRunner {
                                         routecore::bgp::nlri::afisafi::Ipv4UnicastNlri(Prefix::new_v4(v4, nlri[0]).unwrap()),
                                         RotondaPaMap::new(
                                             //routecore::bgp::path_attributes::OwnedPathAttributes::new(ppi, attr.clone())
-                                            routecore::bgp::path_attributes::OwnedPathAttributes::new(ppi, attr.path_attributes().to_vec())
+                                            routecore::bgp::path_attributes::OwnedPathAttributes::new(ppi, attr.without_header().to_vec())
                                         )
                                     )
                             ,
@@ -606,7 +617,8 @@ impl RibUnitRunner {
 
                     self.filter_payload(payloads /* insert_fn*/).await?
                 }
-                if let Some(attr) = update.take_mp_attributes() {
+                let addpath = update.mp_reach_hints.get(routecore::bgp::message_ng::nlri::NlriHints::ADDPATH);
+                if let Some(attr) = update.prepped_mp_attributes() && !addpath {
                     let mp_iter = update.mp_reach_iter_raw();
                     if update.mp_reach_afisafi() == Some(routecore::bgp::message_ng::common::AfiSafiType::IPV6UNICAST) {
                         let payloads = mp_iter.map(|(_maybe_pid, nlri)| {
@@ -619,7 +631,34 @@ impl RibUnitRunner {
                                 rx_value: RotondaRoute::Ipv6Unicast(
                                               routecore::bgp::nlri::afisafi::Ipv6UnicastNlri(Prefix::new_v6(v6, nlri[0]).unwrap()),
                                               RotondaPaMap::new(
-                                                  routecore::bgp::path_attributes::OwnedPathAttributes::new(ppi, attr.clone())
+                                                  routecore::bgp::path_attributes::OwnedPathAttributes::new(ppi, attr.without_header().to_vec())
+                                              )
+                                          )
+                                    ,
+                                    trace_id: None,
+                                    received,
+                                    ingress_id,
+                                    route_status: RouteStatus::Active,
+                            }
+                        }).collect::<Vec<_>>();
+
+
+                        self.filter_payload(payloads /* insert_fn*/).await?
+                    } else if update.mp_reach_afisafi() == Some(routecore::bgp::message_ng::common::AfiSafiType::IPV4UNICAST) {
+                        let payloads = mp_iter.map(|(maybe_pid, nlri)| {
+                            let mut buf = [0u8; 4];
+                            buf[..&nlri.len()-1].copy_from_slice(&nlri[1..]);
+                            let v4 = std::net::Ipv4Addr::from(buf);
+                            let ppi = PduParseInfo::modern();
+
+                            if let Some(pid) = maybe_pid { 
+                                dbg!(pid);
+                            }
+                            Payload {
+                                rx_value: RotondaRoute::Ipv4Unicast(
+                                              routecore::bgp::nlri::afisafi::Ipv4UnicastNlri(Prefix::new_v4(v4, nlri[0]).unwrap()),
+                                              RotondaPaMap::new(
+                                                  routecore::bgp::path_attributes::OwnedPathAttributes::new(ppi, attr.without_header().to_vec())
                                               )
                                           )
                                     ,
@@ -633,7 +672,7 @@ impl RibUnitRunner {
 
                         self.filter_payload(payloads /* insert_fn*/).await?
                     } else {
-                        panic!("MP_REACH but not IPV6 TODO");
+                        panic!("MP_REACH but not IPV6/IPV4 TODO");
                     }
                 }
             }

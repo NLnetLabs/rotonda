@@ -50,11 +50,29 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
 
     pub async fn run(
         mut self,
-        partial_ingress_info: IngressInfo,
+        mut partial_ingress_info: IngressInfo,
     ) -> Result<(), BmpNgError> {
-        let version = self.bmp_handler.process_initiation().await;
+        let (version, msg) = self.bmp_handler.process_initiation().await;
 
-        let partial_ingress_info = partial_ingress_info.with_name("TODO");
+        match msg {
+            Ok(init_msg) => {
+                partial_ingress_info = partial_ingress_info.with_name(
+                    init_msg
+                        .get_sys_name()
+                        .unwrap_or_else(|| "__no_sys_name".into()),
+                );
+                partial_ingress_info = partial_ingress_info.with_desc(
+                    init_msg
+                        .get_sys_desc()
+                        .unwrap_or_else(|| "__no_sys_desc".into()),
+                );
+            }
+            Err(_other_msg) => {
+                warn!("unexpected first message of BMP stream");
+                partial_ingress_info = partial_ingress_info
+                    .with_desc("__invalid_stream_missing_initation_msg");
+            }
+        }
 
         match version {
             BmpVersion(3) => {

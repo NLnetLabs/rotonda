@@ -1,5 +1,6 @@
 use std::{
-    future::Future, net::SocketAddr, ops::ControlFlow, path::PathBuf, sync::Arc, time::Duration
+    future::Future, net::SocketAddr, ops::ControlFlow, path::PathBuf,
+    sync::Arc, time::Duration,
 };
 
 use futures::{
@@ -13,7 +14,11 @@ use tokio::fs::File;
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::{
-    comms::{Gate, GateStatus, Terminated}, ingress::{self, IngressId, IngressInfo}, manager::{Component, WaitPoint}, roto_runtime::{MutIngressInfoCache, RotondaCtx}, units::bmp_tcp_in_ng::{error::BmpNgError, router_handler::RouterHandler}
+    comms::{Gate, GateStatus, Terminated},
+    ingress::{self, IngressId, IngressInfo},
+    manager::{Component, WaitPoint},
+    roto_runtime::{MutIngressInfoCache, RotondaCtx},
+    units::bmp_tcp_in_ng::{error::BmpNgError, router_handler::RouterHandler},
 };
 
 use super::router_handler;
@@ -107,7 +112,9 @@ impl BmpTcpIn {
         // them.
         waitpoint.running().await;
 
-        let _ = Runner::new(self.clone(), gate, roto_filter, ingress_register).run().await;
+        let _ = Runner::new(self.clone(), gate, roto_filter, ingress_register)
+            .run()
+            .await;
 
         Ok(())
     }
@@ -135,7 +142,6 @@ impl Runner {
         roto_filter: Option<RotoFilter>,
         ingress_register: Arc<ingress::Register>,
     ) -> Self {
-
         let unit_ingress_id = ingress_register.register();
         debug!("Runner registered {unit_ingress_id}");
 
@@ -151,7 +157,6 @@ impl Runner {
     async fn run(mut self) -> Result<(), Terminated> {
         // depending on whether Config.read_from_file is_some, read from that
         // file or spawn a socket
-
 
         if let Some(filename) = self.config.read_from_file.clone() {
             self.spawn_file_handler(filename);
@@ -185,15 +190,19 @@ impl Runner {
         let gate = self.gate.clone();
         let ingress_register = self.ingress_register.clone();
         let unit_ingress_id = self.unit_ingress_id;
-        let partial_ingress_info = IngressInfo::new()
-            .with_remote_addr(socket.ip())
-        ;
+        let partial_ingress_info =
+            IngressInfo::new().with_remote_addr(socket.ip());
         tokio::spawn(async move {
             info!(
                 "spawning handler for tcp stream from {:?}",
                 stream.peer_addr()
             );
-            let handler = RouterHandler::new(stream, gate, ingress_register, unit_ingress_id);
+            let handler = RouterHandler::new(
+                stream,
+                gate,
+                ingress_register,
+                unit_ingress_id,
+            );
             let _ = Box::pin(handler.run(partial_ingress_info)).await;
         });
     }
@@ -202,9 +211,8 @@ impl Runner {
         let gate = self.gate.clone();
         let ingress_register = self.ingress_register.clone();
         let unit_ingress_id = self.unit_ingress_id;
-        let partial_ingress_info = IngressInfo::new()
-            .with_filename(filename.clone())
-        ;
+        let partial_ingress_info =
+            IngressInfo::new().with_filename(filename.clone());
         tokio::spawn(async move {
             let name = filename.to_string_lossy().to_string();
             info!("spawning handler for file {name}");
@@ -214,7 +222,12 @@ impl Runner {
                 return;
             };
             let filesize = handle.metadata().await.unwrap().len();
-            let handler = RouterHandler::new(handle, gate, ingress_register, unit_ingress_id);
+            let handler = RouterHandler::new(
+                handle,
+                gate,
+                ingress_register,
+                unit_ingress_id,
+            );
             let _ = Box::pin(handler.run(partial_ingress_info)).await;
             eprintln!(
                 "processed {name} in {}ms, {:.1}MB/s",
@@ -227,15 +240,15 @@ impl Runner {
 
     fn process_gate_status(&self, gate_status: GateStatus) {
         match gate_status {
-            GateStatus::Active => todo!(),
-            GateStatus::Dormant => todo!(),
             GateStatus::Reconfiguring { new_config: _ } => {
                 todo!()
             }
             GateStatus::ReportLinks { report } => {
                 report.declare_source();
             }
-            GateStatus::Triggered { data: _ } => todo!(),
+            GateStatus::Active
+            | GateStatus::Dormant
+            | GateStatus::Triggered { data: _ } => {}
         }
     }
 

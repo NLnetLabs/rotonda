@@ -51,6 +51,8 @@ impl WebUI {
         router.add_get("/routes/peer_ip/{peer_ip}", Self::routes_peer_ip);
         router.add_get("/routes/{prefix}/{prefix_len}", Self::routes_prefix);
 
+        router.add_get("/routes/out", Self::routes_out);
+
         router.add_get("/peers/overview", Self::peers_overview);
         router.add_get("/peers/overview/ext", Self::peers_overview_ext);
         router.add_get(
@@ -163,6 +165,7 @@ impl WebUI {
             QueryFilter {
                 include: vec![Include::LessSpecifics, Include::MoreSpecifics],
                 ingress_id: Some(ingress_id),
+                include_local_announcements: Some(true),
                 ..Default::default()
             },
         )?;
@@ -320,6 +323,37 @@ impl WebUI {
         res
     }
 
+    async fn routes_out(
+        //Path((prefix, prefix_len)): Path<(IpAddr, u8)>,
+        state: State<ApiState>,
+    ) -> Result<Html<String>, String> {
+        let t0 = std::time::Instant::now();
+        let mut page = Self::routes_with_filter(
+            state,
+            QueryFilter {
+                include: vec![Include::LessSpecifics, Include::MoreSpecifics],
+                ingress_type: Some(IngressType::BgpOut),
+                include_local_announcements: Some(true),
+                ..Default::default()
+            },
+        )?;
+        page.show_only_more_specifics = true;
+        page.title = "Routes originated by Rotonda".into();
+
+        let res = page
+            .render()
+            .map(Into::into)
+            .map_err(|e| format!("rendering error: {}", e));
+
+        debug!(
+            "/routes/out html search/filter/rendering \
+            ({} prefixes): {:?}",
+            page.routes.len(),
+            Instant::elapsed(&t0),
+        );
+        res
+    }
+
     fn bmp_tree(state: &State<ApiState>) -> BmpTree {
         let mut res = BmpTree::new();
 
@@ -346,7 +380,7 @@ impl WebUI {
                 .entry((info.remote_asn.unwrap(), info.remote_addr.unwrap()))
                 .or_default();
             infos.push((*id, info.clone()));
-            infos.sort_by(|a, b| a.1.peer_rib_type.cmp(&b.1.peer_rib_type));
+            infos.sort_by_key(|a| a.1.peer_rib_type);
         }
 
         res

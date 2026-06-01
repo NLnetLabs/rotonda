@@ -33,7 +33,7 @@ use crate::{
     }, comms::{Gate, GateStatus, Terminated}, ingress::{self, IngressId, IngressInfo}, manager::{Component, WaitPoint}, payload::Update, roto_runtime::{
         metrics::RotoMetricsWrapper, types::{
             FilterName, RotoOutputStream, RotoPackage, RotoScripts
-        }, Ctx, MutIngressInfoCache
+        }, RotondaCtx, MutIngressInfoCache
     }, tokio::TokioTaskMetrics, tracing::Tracer, units::Unit
 };
 
@@ -93,12 +93,12 @@ impl std::fmt::Display for TracingMode {
 }
 
 pub(crate) type RotoFunc = roto::TypedFunc<
-    Ctx,
+    roto::Ctx<RotondaCtx>,
     fn (
         roto::Val<BmpMessage<Bytes>>,
         roto::Val<MutIngressInfoCache>
     ) ->
-    roto::Verdict<(), ()>,
+    roto::Verdict<(), ()>
 >;
 
 pub const ROTO_FUNC_FILTER_NAME: &str = "bmp_in";
@@ -359,15 +359,11 @@ impl BmpTcpInRunner {
                 .ok()
             });
 
-        let mut roto_context = Ctx::empty();
+        let mut roto_context = RotondaCtx::empty();
 
         if let Some(roto_metrics) = self.roto_metrics.as_ref() {
             debug!("setting roto_metrics from component in bmp-in");
             roto_context.set_metrics(roto_metrics.metrics.clone());
-        }
-
-        if let Some(c) = self.roto_compiled.clone() {
-            roto_context.prepare(&mut c.lock().unwrap());
         }
 
         let roto_context = Arc::new(std::sync::Mutex::new(roto_context));

@@ -13,7 +13,7 @@ use serde_with::StringWithSeparator;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::{http_ng::{Api, ApiError, ApiState}, ingress::IngressId, representation::{GenOutput, Json}, roto_runtime::types::PeerRibType, units::rib_unit::rpki::RovStatus};
+use crate::{http_ng::{Api, ApiError, ApiState}, ingress::{IngressId, IngressType}, representation::{GenOutput, Json}, roto_runtime::types::PeerRibType, units::rib_unit::rpki::RovStatus};
 
 /// Add ingress register specific endpoints to a HTTP API
 pub fn register_routes(router: &mut Api) {
@@ -85,6 +85,13 @@ pub struct QueryFilter {
 
     #[serde(rename = "filter[peerAddress]")]
     pub peer_addr: Option<IpAddr>,
+
+    // XXX this would allow us to easily filter on type=bgpOut,
+    // but is that the way to go?
+    #[serde(rename = "filter[ingressType]")]
+    pub ingress_type: Option<IngressType>,
+
+    pub include_local_announcements: Option<bool>,
 
     // TODO: RouteDistinguisher, 
 

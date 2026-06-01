@@ -186,6 +186,11 @@ impl RotondaPaMap {
         Self { raw }
     }
 
+    // for withdrawals
+    pub fn empty() -> Self {
+        Self { raw: vec![] }
+    }
+
     pub fn set_rpki_info(&mut self, rpki_info: RpkiInfo) {
         self.raw[0] = rpki_info.into();
     }

@@ -14,6 +14,7 @@ use crate::log::Terminate;
 use crate::targets::Target;
 use crate::tracing::Tracer;
 use crate::units::Unit;
+use crate::units::bgp_tcp_in::unit::LiveSessions;
 use crate::{ingress, metrics};
 use arc_swap::ArcSwap;
 use futures::future::{join_all, select, Either};
@@ -58,6 +59,8 @@ pub struct Component {
     /// A reference to the ingress sources.
     ingresses: Arc<ingress::Register>,
 
+    global_bgp_sessions: Arc<Mutex<LiveSessions>>,
+
     http_ng_api: Arc<Mutex<http_ng::Api>>,
 }
 
@@ -72,6 +75,7 @@ impl Default for Component {
             roto_metrics: Default::default(),
             tracer: Default::default(),
             ingresses: Default::default(),
+            global_bgp_sessions: Default::default(),
             http_ng_api: Default::default(),
         }
     }
@@ -88,6 +92,7 @@ impl Component {
         roto_metrics: Option<Arc<RotoMetricsWrapper>>,
         tracer: Arc<Tracer>,
         ingresses: Arc<ingress::Register>,
+        global_bgp_sessions: Arc<Mutex<LiveSessions>>,
         http_ng_api: Arc<Mutex<http_ng::Api>>,
     ) -> Self {
         Component {
@@ -98,6 +103,7 @@ impl Component {
             roto_metrics,
             tracer,
             ingresses,
+            global_bgp_sessions,
             http_ng_api,
         }
     }
@@ -140,6 +146,10 @@ impl Component {
 
     pub fn ingresses(&self) -> Arc<ingress::Register> {
         self.ingresses.clone()
+    }
+
+    pub fn global_bgp_sessions(&self) -> Arc<Mutex<LiveSessions>> {
+        self.global_bgp_sessions.clone()
     }
 
     pub fn http_ng_api_arc(&self) -> Arc<Mutex<http_ng::Api>> {
@@ -358,6 +368,8 @@ pub struct Manager {
 
     ingresses: Arc<ingress::Register>,
 
+    global_bgp_sessions: Arc<Mutex<LiveSessions>>,
+
     http_ng_api: Arc<Mutex<http_ng::Api>>,
 }
 
@@ -376,12 +388,14 @@ impl Manager {
         )));
         let tracer = Arc::new(Tracer::new());
         let ingresses = Arc::new(ingress::Register::new());
+        let global_bgp_sessions = Arc::new(Mutex::new(LiveSessions::new()));
         let metrics: metrics::Collection = Default::default();
         let roto_metrics = Some(Arc::new(RotoMetricsWrapper::default()));
         metrics.register("roto_metrics".into(), Arc::downgrade(roto_metrics.as_ref().unwrap()) as Weak<dyn metrics::Source>);
         let http_ng_api = Arc::new(Mutex::new(http_ng::Api::new(
             Vec::with_capacity(1), // interfaces come from config, later on
             ingresses.clone(),
+            global_bgp_sessions.clone(),
             metrics.clone()
         )));
 
@@ -401,6 +415,7 @@ impl Manager {
             tracer,
             ingresses,
             http_ng_api,
+            global_bgp_sessions,
         };
 
         manager
@@ -625,11 +640,15 @@ impl Manager {
             return Ok(());
         };
 
-        let i = roto::FileTree::read(path);
-            // .map_err(|e| e.to_string())?;
-        let roto_package = i
-            .compile(&create_runtime().unwrap())
+        let t0 = Instant::now();
+        let roto_package = roto::FileTree::read(path)
+            .map_err(|e| e.to_string())?
+            .compile(&create_runtime()?)
             .map_err(|e| e.to_string())?;
+        info!(
+            "compiled roto scripts in {}ms",
+            Instant::now().duration_since(t0).as_millis()
+        );
 
         self.roto_package = Some(Arc::new(Mutex::new(roto_package)));
         Ok(())
@@ -858,6 +877,7 @@ impl Manager {
                 self.roto_metrics.clone(),
                 self.tracer.clone(),
                 self.ingresses.clone(),
+                self.global_bgp_sessions.clone(),
                 self.http_ng_api.clone(),
             );
 
@@ -936,6 +956,7 @@ impl Manager {
                 self.roto_metrics.clone(),
                 self.tracer.clone(),
                 self.ingresses.clone(),
+                self.global_bgp_sessions.clone(),
                 self.http_ng_api.clone(),
             );
 

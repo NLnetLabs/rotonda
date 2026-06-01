@@ -41,7 +41,7 @@ use crate::comms::{
 use crate::ingress;
 use crate::manager::{Component, WaitPoint};
 use crate::payload::Update;
-use crate::roto_runtime::{Ctx, MutIngressInfoCache};
+use crate::roto_runtime::{RotondaCtx, MutIngressInfoCache};
 use crate::units::rib_unit::rpki::RtrCache;
 use crate::units::{Gate, Unit};
 
@@ -54,12 +54,12 @@ use super::peer_config::{CombinedConfig, PeerConfigs};
 //----------- BgpTcpIn -------------------------------------------------------
 
 pub(crate) type RotoFunc = roto::TypedFunc<
-    crate::roto_runtime::Ctx,
+    roto::Ctx<crate::roto_runtime::RotondaCtx>,
     fn(
         roto::Val<UpdateMessage<Bytes>>,
         roto::Val<MutIngressInfoCache>,
     ) ->
-    roto::Verdict<(), ()>,
+    roto::Verdict<(), ()>
 >;
 
 pub const ROTO_FUNC_FILTER_NAME: &str = "bgp_in";
@@ -116,6 +116,7 @@ impl BgpTcpIn {
         let metrics = Arc::new(BgpTcpInMetrics::new(&gate));
         component.register_metrics(metrics.clone());
 
+        let global_live_sessions = component.global_bgp_sessions();
         let ingresses = component.ingresses();
         let roto_metrics = component.roto_metrics().clone();
 
@@ -146,10 +147,12 @@ impl BgpTcpIn {
         BgpTcpInRunner::new(
             self,
             gate,
+            component,
             metrics,
             status_reporter,
             roto_compiled,
             roto_metrics,
+            global_live_sessions,
             ingresses,
         )
         .run::<_, _, StandardTcpStream, BgpTcpInRunner>(
@@ -166,7 +169,7 @@ trait ConfigAcceptor {
     fn accept_config(
         child_name: String,
         roto_function: Option<RotoFunc>,
-        roto_context: Arc<Mutex<Ctx>>,
+        roto_context: Arc<Mutex<RotondaCtx>>,
         gate: &Gate,
         bgp: &BgpTcpIn,
         tcp_stream: impl TcpStreamWrapper,
@@ -174,6 +177,7 @@ trait ConfigAcceptor {
         remote_net: super::peer_config::PrefixOrExact,
         child_status_reporter: Arc<BgpTcpInStatusReporter>,
         live_sessions: Arc<Mutex<LiveSessions>>,
+        global_live_sessions: Arc<Mutex<LiveSessions>>,
         ingresses: Arc<ingress::Register>,
         connector_ingress_id: ingress::IngressId,
     );
@@ -202,6 +206,8 @@ struct BgpTcpInRunner {
     // To send commands to a Session based on peer IP + ASN.
     live_sessions: Arc<Mutex<LiveSessions>>,
 
+    global_live_sessions: Arc<Mutex<LiveSessions>>,
+
     ingresses: Arc<ingress::Register>,
 }
 
@@ -214,15 +220,26 @@ impl fmt::Debug for BgpTcpInRunner {
 }
 
 impl BgpTcpInRunner {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         bgp: BgpTcpIn,
         gate: Gate,
+        component: Component,
         metrics: Arc<BgpTcpInMetrics>,
         status_reporter: Arc<BgpTcpInStatusReporter>,
         roto_compiled: Option<Arc<RotoPackage>>,
         roto_metrics: Option<Arc<RotoMetricsWrapper>>,
+        global_live_sessions: Arc<Mutex<LiveSessions>>,
         ingresses: Arc<ingress::Register>,
     ) -> Self {
+        
+
+        if let Ok(mut api) = component.http_ng_api_arc().lock() {
+            super::http_ng::register_routes(&mut api);
+        } else {
+            debug!("could not get lock on HTTP API");
+        }
+
         BgpTcpInRunner {
             bgp: Arc::new(ArcSwap::from_pointee(bgp)),
             gate,
@@ -231,6 +248,7 @@ impl BgpTcpInRunner {
             roto_compiled,
             roto_metrics,
             live_sessions: Arc::new(Mutex::new(HashMap::new())),
+            global_live_sessions,
             ingresses,
         }
     }
@@ -245,6 +263,7 @@ impl BgpTcpInRunner {
             metrics: Default::default(),
             status_reporter: Default::default(),
             live_sessions: Arc::new(Mutex::new(HashMap::new())),
+            global_live_sessions: Arc::new(Mutex::new(HashMap::new())),
             ingresses: Arc::new(ingress::Register::default()),
             roto_compiled: None,
             roto_metrics: Default::default(),
@@ -284,14 +303,10 @@ impl BgpTcpInRunner {
                 .ok()
             });
 
-        let mut roto_context = Ctx::empty();
+        let mut roto_context = RotondaCtx::empty();
 
         if let Some(roto_metrics) = arc_self.roto_metrics.as_ref() {
             roto_context.set_metrics(roto_metrics.metrics.clone());
-        }
-
-        if let Some(c) = arc_self.roto_compiled.clone() {
-            roto_context.prepare(&mut c.lock().unwrap());
         }
 
         let roto_context = Arc::new(Mutex::new(roto_context));
@@ -368,6 +383,7 @@ impl BgpTcpInRunner {
                                 remote_net,
                                 child_status_reporter,
                                 arc_self.live_sessions.clone(),
+                                arc_self.global_live_sessions.clone(),
                                 arc_self.ingresses.clone(),
                                 // XXX we need to do a find_existing_peer here instead of blindly
                                 // doing a .register().
@@ -576,7 +592,7 @@ impl ConfigAcceptor for BgpTcpInRunner {
     fn accept_config(
         child_name: String,
         roto_function: Option<RotoFunc>,
-        roto_context: Arc<Mutex<Ctx>>,
+        roto_context: Arc<Mutex<RotondaCtx>>,
         gate: &Gate,
         bgp: &BgpTcpIn,
         tcp_stream: impl TcpStreamWrapper,
@@ -584,6 +600,7 @@ impl ConfigAcceptor for BgpTcpInRunner {
         remote_net: super::peer_config::PrefixOrExact,
         child_status_reporter: Arc<BgpTcpInStatusReporter>,
         live_sessions: Arc<Mutex<LiveSessions>>,
+        global_live_sessions: Arc<Mutex<LiveSessions>>,
         ingresses: Arc<ingress::Register>,
         connector_ingress_id: ingress::IngressId,
     ) {
@@ -603,6 +620,7 @@ impl ConfigAcceptor for BgpTcpInRunner {
                 cmds_rx,
                 child_status_reporter,
                 live_sessions,
+                global_live_sessions,
                 ingresses,
                 connector_ingress_id,
             ),
@@ -798,7 +816,7 @@ mod tests {
         fn accept_config(
             _child_name: String,
             _roto_function: Option<RotoFunc>,
-            _roto_context: Arc<std::sync::Mutex<crate::roto_runtime::Ctx>>,
+            _roto_context: Arc<std::sync::Mutex<crate::roto_runtime::RotondaCtx>>,
             _gate: &Gate,
             _bgp: &BgpTcpIn,
             _tcp_stream: impl TcpStreamWrapper,
@@ -806,6 +824,7 @@ mod tests {
             _remote_net: PrefixOrExact,
             _child_status_reporter: Arc<BgpTcpInStatusReporter>,
             _live_sessions: Arc<std::sync::Mutex<LiveSessions>>,
+            _global_live_sessions: Arc<std::sync::Mutex<LiveSessions>>,
             _ingressess: Arc<ingress::Register>,
             _connector_ingress_id: ingress::IngressId,
         ) {

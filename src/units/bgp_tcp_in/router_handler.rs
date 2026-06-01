@@ -35,7 +35,7 @@ use crate::roto_runtime::types::{
 use crate::comms::{Gate, GateStatus, Terminated};
 use crate::{ingress, roto_runtime};
 use crate::payload::{Payload, RotondaRoute, Update};
-use crate::roto_runtime::Ctx;
+use crate::roto_runtime::RotondaCtx;
 use crate::units::bgp_tcp_in::status_reporter::BgpTcpInStatusReporter;
 use crate::units::rib_unit::rpki::RtrCache;
 use crate::units::Unit;
@@ -77,7 +77,7 @@ impl BgpSession<CombinedConfig> for Session<CombinedConfig> {
 
 struct Processor {
     roto_function: Option<RotoFunc>,
-    roto_context: Arc<Mutex<Ctx>>,
+    roto_context: Arc<Mutex<RotondaCtx>>,
     gate: Gate,
     unit_cfg: BgpTcpIn,
     //bgp_ltime: u64, // XXX or should this be on Unit level?
@@ -99,7 +99,7 @@ impl Processor {
     #[allow(clippy::too_many_arguments)]
     fn new(
         roto_function: Option<RotoFunc>,
-        roto_context: Arc<Mutex<Ctx>>,
+        roto_context: Arc<Mutex<RotondaCtx>>,
         gate: Gate,
         unit_cfg: BgpTcpIn,
         tx: mpsc::Sender<Command>,
@@ -132,7 +132,7 @@ impl Processor {
 
         let processor = Self {
             roto_function: None,
-            roto_context: Arc::new(Mutex::new(Ctx::empty())),
+            roto_context: Arc::new(Mutex::new(RotondaCtx::empty())),
             gate,
             unit_cfg,
             //bgp_ltime: 0,
@@ -152,6 +152,7 @@ impl Processor {
         mut session: T,
         mut rx_sess: mpsc::Receiver<Message>,
         live_sessions: Arc<Mutex<super::unit::LiveSessions>>,
+        global_live_sessions: Arc<Mutex<super::unit::LiveSessions>>,
     ) -> (T, mpsc::Receiver<Message>) {
         let peer_addr_cfg = session.config().remote_prefix_or_exact();
 
@@ -277,7 +278,7 @@ impl Processor {
                             let received = std::time::Instant::now();
                             { // lock scope
                             let mut ctx = self.roto_context.lock().unwrap();
-                            let mutiic = roto_runtime::IngressInfoCache::new_rc(
+                            let mutiic = roto_runtime::IngressInfoCache::new_arc(
                                 session_ingress_id,
                                 self.ingresses.clone()
                             );
@@ -293,7 +294,7 @@ impl Processor {
                             });
 
 
-                            let mut output_stream = ctx.output.borrow_mut();
+                            let mut output_stream = ctx.output.lock().unwrap();
 
                             if !output_stream.is_empty() {
                                 use crate::roto_runtime::types::Output;
@@ -421,6 +422,17 @@ impl Processor {
                                 "inserted into live_sessions (current count: {})",
                                 live_sessions.len()
                             );
+
+                            let mut global_live_sessions = global_live_sessions.lock().unwrap();
+                            global_live_sessions.insert(
+                                (negotiated.remote_addr(), negotiated.remote_asn()),
+                                (self.tx.clone(), self.pdu_out_tx.clone())
+                            );
+                            debug!(
+                                "inserted into global_live_sessions (current count: {})",
+                                global_live_sessions.len()
+                            );
+
                             }
                             // register ingress
                             //session_ingress_id = self.ingresses.register();
@@ -476,6 +488,17 @@ impl Processor {
                     negotiated.remote_asn(),
                     negotiated.remote_addr(),
                     live_sessions.lock().unwrap().len()
+                );
+
+                global_live_sessions.lock().unwrap().remove(&(
+                    negotiated.remote_addr(),
+                    negotiated.remote_asn(),
+                ));
+                debug!(
+                    "removed {}@{} from global_live_sessions (current count: {})",
+                    negotiated.remote_asn(),
+                    negotiated.remote_addr(),
+                    global_live_sessions.lock().unwrap().len()
                 );
 
                 self.ingresses.update_info(session_ingress_id,
@@ -570,7 +593,7 @@ impl Processor {
 #[allow(clippy::too_many_arguments)]
 pub async fn handle_connection(
     roto_function: Option<RotoFunc>,
-    roto_context: Arc<Mutex<Ctx>>,
+    roto_context: Arc<Mutex<RotondaCtx>>,
     gate: Gate,
     unit_config: BgpTcpIn,
     tcp_stream: TcpStream,
@@ -579,6 +602,7 @@ pub async fn handle_connection(
     cmds_rx: mpsc::Receiver<Command>,
     status_reporter: Arc<BgpTcpInStatusReporter>,
     live_sessions: Arc<Mutex<super::unit::LiveSessions>>,
+    global_live_sessions: Arc<Mutex<super::unit::LiveSessions>>,
     ingresses: Arc<ingress::Register>,
     connector_ingress_id: ingress::IngressId,
 ) {
@@ -676,7 +700,7 @@ pub async fn handle_connection(
         debug!("post tcp_out.forget()");
     });
 
-    p.process(session, sess_rx, live_sessions).await;
+    p.process(session, sess_rx, live_sessions, global_live_sessions).await;
 }
 
 #[cfg(test)]
@@ -798,11 +822,12 @@ mod tests {
         let (mut p, gate_agent) = Processor::mock(unit_settings);
         let (sess_tx, sess_rx) = mpsc::channel::<Message>(100);
         let live_sessions = Arc::new(Mutex::new(HashMap::new()));
+        let global_live_sessions = Arc::new(Mutex::new(HashMap::new()));
         let status_reporter = p.status_reporter.clone();
 
         let join_handle =
             crate::tokio::spawn("mock_bgp_tcp_in_processor", async move {
-                p.process(session, sess_rx, live_sessions).await
+                p.process(session, sess_rx, live_sessions, global_live_sessions).await
             });
 
         (join_handle, status_reporter, gate_agent, sess_tx)

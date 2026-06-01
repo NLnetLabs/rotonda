@@ -4,10 +4,10 @@
 pkg:
   - 'rotonda'
 image:
-  - "ubuntu:bionic"   # ubuntu/18.04
   - "ubuntu:focal"    # ubuntu/20.04
   - "ubuntu:jammy"    # ubuntu/22.04
   - "ubuntu:noble"    # ubuntu/24.04
+  - "ubuntu:resolute" # ubuntu/26.04
   - "debian:buster"   # debian/10
   - "debian:bullseye" # debian/11
   - "debian:bookworm" # debian/12
@@ -87,12 +87,9 @@ test-mode:
   - 'fresh-install'
 
 
-# Disable upgrade testing on Alma Linux 10 and Debian Bookworm as we haven't published any packages for
+# Disable upgrade testing on Ubuntu Resolute Raccoon as we haven't published any packages for
 # those O/S versions yet.
-#test-exclude:
-#  - pkg: 'rotonda'
-#    image: 'almalinux:10'
-#    mode: 'upgrade-from-published'
-#  - pkg: 'rotonda'
-#    image: 'debian:trixie'
-#    mode: 'upgrade-from-published'
+test-exclude:
+ - pkg: 'rotonda'
+   image: 'ubuntu:resolute'
+   mode: 'upgrade-from-published'

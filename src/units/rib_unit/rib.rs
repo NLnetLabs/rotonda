@@ -24,7 +24,7 @@ use routecore::bgp::{
 use serde::{ser::{SerializeSeq, SerializeStruct}, Serialize, Serializer};
 
 use crate::{
-    ingress::{self, register::{IdAndInfo, OwnedIdAndInfo}, IngressId, IngressInfo}, payload::{RotondaPaMap, RotondaPaMapWithQueryFilter, RotondaRoute, RouterId}, representation::{GenOutput, Json}, roto_runtime::{types::{RotoPackage}, Ctx}
+    ingress::{self, register::{IdAndInfo, OwnedIdAndInfo}, IngressId, IngressInfo}, payload::{RotondaPaMap, RotondaPaMapWithQueryFilter, RotondaRoute, RouterId}, representation::{GenOutput, Json}, roto_runtime::{types::{RotoPackage}, RotondaCtx}
 };
 
 use super::{http_ng::Include, QueryFilter};
@@ -32,8 +32,8 @@ use super::{http_ng::Include, QueryFilter};
 type Store = StarCastRib<RotondaPaMap, MemoryOnlyConfig>;
 
 type RotoHttpFilter = roto::TypedFunc<
-    Ctx,
-    fn (roto::Val<crate::roto_runtime::RcRotondaPaMap>,) -> roto::Verdict<(), ()>,
+    roto::Ctx<RotondaCtx>,
+    fn (roto::Val<crate::roto_runtime::ArcRotondaPaMap>,) -> roto::Verdict<(), ()>,
 >;
 
 #[derive(Clone)]
@@ -45,7 +45,7 @@ pub struct Rib {
         HashMap<AfiSafiType, HashMap<(IngressId, Nlri<bytes::Bytes>), PaMap>>,
     ingress_register: Arc<ingress::Register>,
     roto_package: Option<Arc<RotoPackage>>,
-    roto_context: Arc<Mutex<Ctx>>,
+    roto_context: Arc<Mutex<RotondaCtx>>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -55,7 +55,7 @@ impl Rib {
     pub fn new(
         ingress_register: Arc<ingress::Register>,
         roto_package: Option<Arc<RotoPackage>>,
-        roto_context: Arc<Mutex<Ctx>>,
+        roto_context: Arc<Mutex<RotondaCtx>>,
     ) -> Result<Self, PrefixStoreError> {
         Ok(Rib {
             unicast: Arc::new(Some(Store::try_default()?)),
@@ -414,7 +414,6 @@ impl Rib {
         //nlri: Nlri<&[u8]>,
         nlri: Prefix, // change to Nlri or equivalent after routecore refactor
         filter: QueryFilter,
-    //) -> Result<QueryResult<RotondaPaMap>, String> {
     ) -> Result<SearchResult, String> {
         let guard = &epoch::pin();
 
@@ -454,13 +453,6 @@ impl Rib {
             .map_err(|err| err.to_string());
 
         // filter on:
-        // X origin asn
-        // X peer rib type
-        // X ingress_id -> done via Store.match_prefix already
-        // X otc
-        //
-        // - community
-        // - large community
         // - peer distinguisher
         
         debug!("store lookup took {:?}", std::time::Instant::now().duration_since(t0));
@@ -470,13 +462,6 @@ impl Rib {
         // We do this here, once, to reduce acquiring locks and such over and over.
         // If the query contains a filter name for which no roto function exists, this simply
         // filters as if no filter was passed:
-
-        //let maybe_roto_function: Option<RotoHttpFilter> = filter.roto_function.as_ref().and_then(|name| {
-        //    self.roto_package.as_ref().and_then(|package| {
-        //        let mut package = package.lock().unwrap();
-        //        package.get_function(name.as_str()).ok()
-        //    })
-        //});
 
         // Alternatively, we could return an error:
         let maybe_roto_function: Option<RotoHttpFilter> = match filter.roto_function.as_ref() {
@@ -538,6 +523,33 @@ impl Rib {
     //  - in apply_filter, check for such info and branch: if let Some(passed_info), etc
     
     fn apply_filter(&self, records: &mut Vec<Record<RotondaPaMap>>, filter: &QueryFilter, roto_filter: Option<RotoHttpFilter>) {
+
+        if let Some(ingress_type) = filter.ingress_type {
+            records.retain(|r|{
+                self.ingress_register.get(r.multi_uniq_id).map(|ii|
+                    ii.ingress_type == Some(ingress_type)
+                ).unwrap_or(true)
+            });
+        }
+
+        // by default, we don't want to include self originated routes.
+        // In QueryFilter, the default for include_local_announcements is None.
+        // Hence, 
+        if filter.include_local_announcements.is_some_and(|x| x) {
+
+            //records.retain(|r|{
+            //    self.ingress_register.get(r.multi_uniq_id).map(|ii|
+            //        ii.ingress_type == Some(ingress::IngressType::BgpOut)
+            //    ).unwrap_or(true)
+            //});
+        } else {
+            records.retain(|r|{
+                self.ingress_register.get(r.multi_uniq_id).map(|ii|
+                    ii.ingress_type != Some(ingress::IngressType::BgpOut)
+                ).unwrap_or(true)
+            });
+        }
+
         if let Some(rib_type) = filter.rib_type {
             records.retain(|r|{
                 self.ingress_register.get(r.multi_uniq_id).map(|ii|
@@ -565,10 +577,10 @@ impl Rib {
         if let Some(f) = roto_filter {
             let mut ctx = self.roto_context.lock().unwrap();
             records.retain_mut(|r| {
-                let rc_r: crate::roto_runtime::RcRotondaPaMap = std::mem::take(&mut r.meta).into();
+                let rc_r: crate::roto_runtime::ArcRotondaPaMap = std::mem::take(&mut r.meta).into();
                 match f.call(&mut ctx, roto::Val(rc_r.clone())) {
                     roto::Verdict::Accept(_) => {
-                        r.meta = std::rc::Rc::into_inner(rc_r).unwrap();
+                        r.meta = std::sync::Arc::into_inner(rc_r).unwrap();
                         true
                     }
                     roto::Verdict::Reject(_) => {
@@ -627,8 +639,6 @@ impl Rib {
             });
 
             // TODO:
-            // - communities
-            // - large communities
             // - route distinguisher
 
         }

@@ -79,7 +79,7 @@ impl std::fmt::Display for RovStatus {
 
 
 /// Route Origin Validation status update for a route
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq)]
 pub struct RovStatusUpdate {
     /// The prefix of the route
     pub prefix: Prefix,
@@ -164,6 +164,13 @@ pub struct RtrCache {
     pub router_keys: RwLock<HashSet<rpki::rtr::payload::RouterKey>>,
     pub aspas: RwLock<HashSet<rpki::rtr::payload::Aspa>>,
     pub vrps: VrpStore,
+}
+
+impl PartialEq for RtrCache {
+    fn eq(&self, _other: &Self) -> bool {
+        // XXX double check
+        false
+    }
 }
 
 impl RtrCache {

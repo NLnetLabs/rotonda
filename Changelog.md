@@ -12,8 +12,6 @@ changelog, please also refer to the
 for the latest documentation on all the types and methods available in Roto
 filters and functions.
 
-### Breaking changes
-
 #### Roto runtime
 
 Roto gained plenty of string related functionality as well as support for
@@ -105,8 +103,8 @@ These methods are:
 * In Roto scripts, external commands can be executed using the new `command()`
   function, which can be combined with e.g. the `fmt_json()` method described
   above to pass a route as an argument to an external script.
-
-### Bug fixes
+* Experimental HTTP endpoints are added enabling sending BGP PDUs out over
+  established BGP sessions.
 
 
 ### Other changes

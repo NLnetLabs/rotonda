@@ -113,10 +113,14 @@ These methods are:
   documentation, and described command line arguments that are not supported
   anymore.
 
+
 ### Acknowledgements
 
+We would like to very much thank Jannis Imhof (@withjannis) for their
+(ongoing) input and support.
 
  
+
 ## 0.5.2 't.ex. mjölkkartonger'
 
 Released 2026-03-23.

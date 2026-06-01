@@ -2622,7 +2622,7 @@ dependencies = [
  "reqwest",
  "roto",
  "rotonda-store",
- "routecore 0.7.2-dev",
+ "routecore 0.7.2",
  "rpki",
  "rshtml",
  "rumqttc",
@@ -2684,8 +2684,9 @@ dependencies = [
 
 [[package]]
 name = "routecore"
-version = "0.7.2-dev"
-source = "git+https://codeberg.org/NLnetLabs/routecore?branch=rotonda-bgp-pdu-out#048a45e54e17b41cda118bf9565178d1bb2d2290"
+version = "0.7.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "147996561971de180027887212e1811bb888c09b518c73d488a6c69dfc026cdc"
 dependencies = [
  "bytes",
  "chrono",
@@ -3187,7 +3188,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",

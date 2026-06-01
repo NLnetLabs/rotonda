@@ -2554,8 +2554,9 @@ dependencies = [
 
 [[package]]
 name = "roto"
-version = "0.10.0"
-source = "git+https://codeberg.org/NLnetLabs/roto?branch=main#f7996df95434391d286e162e107fc33342bfbc81"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "043bc6ac4a395f568b72f13f36c25a125329f82d1588d6332db5207d26d93e0f"
 dependencies = [
  "ariadne",
  "clap",
@@ -2574,8 +2575,9 @@ dependencies = [
 
 [[package]]
 name = "roto-macros"
-version = "0.10.0"
-source = "git+https://codeberg.org/NLnetLabs/roto?branch=main#f7996df95434391d286e162e107fc33342bfbc81"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "249940fa5c4df2ca7d4be84172b0995786a758fdd0d0a99f1b8e8b73288d1292"
 dependencies = [
  "proc-macro2",
  "quote",

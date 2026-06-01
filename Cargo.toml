@@ -37,9 +37,9 @@ log                = "0.4"
 
 
 [dependencies]
-arc-swap           = "1.8"
+arc-swap           = "1.9"
 chrono             = { version = "0.4", default-features = false, features = ["serde", "now"] }
-clap               = { version = "4.5", default-features = false, features = ["cargo"] }
+clap               = { version = "4.6", default-features = false, features = ["cargo"] }
 crossbeam-utils    = "0.8"
 fern               = "0.7"
 futures            = "0.3"
@@ -50,7 +50,7 @@ pin-project-lite   = "0.2"
 routecore          = { workspace = true }
 serde              = { version = "1.0", features = ["derive", "rc"] }
 serde_json         = { version = "1.0", features = ["preserve_order"] }
-tokio              = { version = "1.49", default-features = false, features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "test-util", "time", "tracing"] }
+tokio              = { version = "1.52", default-features = false, features = ["fs", "io-util", "macros", "net", "rt", "rt-multi-thread", "signal", "sync", "test-util", "time", "tracing"] }
 toml               = "0.9"
 
 # Dependencies specifically used by the BGP/BMP related modifications to the original RTRTR base
@@ -65,14 +65,14 @@ hashbrown          = "0.16" # will go if we remove custom alloc
 hex-slice          = "0.1" # might go after refactor of bmp
 inetnum            = { workspace = true }
 mqtt               = { version = "0.23.0", package = "rumqttc", default-features = false }
-memmap2            = "0.9.9"
+memmap2            = "0.9.10"
 non-empty-vec      = { version = "0.2", features = ["serde"]}
 roto               = { version = "0.11", features = ["selinux-fix"] }
 rotonda-store      = { workspace = true }
 serde_with         = "3"
 smallvec           = { version = "1.15", features = ["const_generics", "const_new", "union"] }
 tokio-metrics      = { version = "0.4", default-features = false }
-uuid               = { version = "1.20", features = ["v4", "fast-rng"] }
+uuid               = { version = "1.23", features = ["v4", "fast-rng"] }
 sha2               = "0.10"
 csv                = "1.4"
 bzip2              = "0.6"
@@ -80,10 +80,10 @@ tokio-stream       = "0.1.18"
 rpki               = { version = "0.19.2", features = ["crypto", "rtr"] }
 futures-util       = "0.3"
 paste              = "1.0.15"
-axum               = { version = "0.8.8", features = ["query", "http1", "http2", "tokio", "json", "macros"], default-features = false }
+axum               = { version = "0.8.9", features = ["query", "http1", "http2", "tokio", "json", "macros"], default-features = false }
 rshtml             = { version = "0.5", features = ["functions"] }
 tower-http         = { version = "0.5.2", features = ["compression-gzip"], optional = true }
-rayon = "1.11.0"
+rayon = "1.12.0"
 base64 = "0.22.1"
 
 [target.'cfg(unix)'.dependencies]

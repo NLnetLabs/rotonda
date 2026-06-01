@@ -1,43 +1,16 @@
-// Optionally prepare lists of ASNs or prefixes to match against in filters.
+// Prepare lists of ASNs or prefixes to match against in filters.
 //
 // The lists constructed in this function are available in all the filters, but
-// the list compilation only happens once. Up to 64 lists of each type (ASN list
-// or prefix list) can be defined.
-//
-// To use the ASN lists in other filters, be aware roto currently supports two
-// types to represent ASNs: the `Asn` type, and the `OriginAsn` type which either
-// holds an `Asn` or is empty. The `OriginAsn` type is returned from methods that
-// try to get the origin ASN from the AS_PATH attribute (i.e. in a `BgpMsg`, a
-// `BmpMsg` or in a `Route`) which might be empty (e.g. in case of iBGP).
-// To distinguish between the two, there are dedicated methods for each type,
-// e.g.:
-//   - asn_lists.contains("my_asns", vrp_update.asn())
-//   - asn_lists.contains_origin("my_asns", bmp_msg.aspath_origin())
-// 
+// compiling the lists only happens once.
 
-fn compile_many_asns() -> List[Asn] {
-    let many_asns = List.new();
-    let a = 1;
 
-    while a < 100000 {
-        many_asns.push(Asn.from_u32(a));
-        a = a + 1;
-    }
-
-    many_asns
-}
-
-fn compile_prefix_lists() -> List[Prefix] {
-    //let prefix_lists = PrefixLists.new();
-    //prefix_lists
-    let list = List.new();
-    list.push(1.2.3.0/24);
-    list
-}
-
+// Define a single Asn or a List of Asns:
+const MY_ASN: Asn =  AS211321;
 const MY_ASNS: List[Asn] = [AS1, AS2, AS3];
-const MANY_ASNS: List[Asn] = compile_many_asns();
 
+
+// A list of `AsnRange`'s, for all defined bogons.
+// For larger ranges, this type is preferred over constructing a `List[Asn]`.
 const BOGON_ASNS: List[AsnRange] = [
     AsnRange.single(AS0),            // RFC 7607
     AsnRange.single(AS23456),        // RFC 4893 AS_TRANS
@@ -60,11 +33,23 @@ const BOGON_ASNS: List[AsnRange] = [
     AsnRange.new(AS4200000000, AS4294967294),
 ];
 
+
+
+// Create a list containing specific prefixes.
+fn compile_prefix_lists() -> List[Prefix] {
+    let list = List.new();
+    list.push(1.2.3.0/24);
+    list
+}
+
+// Another way to create a list of prefixes.
 const MY_PREFIXES: List[Prefix] = [
     185.49.140.0/23,
     2a04:b900::/29,
 ];
 
+
+// Bogon prefixes.
 const BOGONS: List[Prefix] = [
     // source: https://bgpfilterguide.nlnog.net/guides/bogon_prefixes/
     // retrieved April 2026
@@ -98,6 +83,8 @@ const BOGONS: List[Prefix] = [
 
 
 
+
+
 // The bgp_in filter works on incoming BGP UPDATE messages.
 //
 // One such message can contain multiple NLRI, thus multiple announcements or
@@ -128,46 +115,6 @@ filter bgp_in(
 }
 
 
-const MY_ASN: Asn =  AS211321;
-
-// Helper method to 'shortcut' the Option, returning false when the Option is
-// None. 
-fn aspath_contains(maybe: Option[AsPath], to_match: Asn) -> bool {
-    match maybe {
-        Some(aspath) if aspath.contains(to_match) => true,
-        _ => false
-    }
-}
-
-fn aspath_origin_matches(maybe: Option[AsPath], to_match: Asn) -> bool {
-    match maybe {
-        Some(aspath) => {
-            match aspath.origin() {
-                Some(asn) => asn == to_match,
-                None => false,
-            }
-        }
-        _ => false
-    }
-}
-
-
-fn contains_community(maybe: Option[List[Community]], to_match: Community) -> bool {
-    match maybe {
-        Some(communities) if communities.contains(to_match) => true,
-        _ => false
-    }
-}
-
-fn contains_large_community(maybe: Option[List[LargeCommunity]], to_match: LargeCommunity) -> bool {
-    match maybe {
-        Some(communities) if communities.contains(to_match) => true,
-        _ => false
-    }
-}
-
-
-
 // The bmp_in filter works on incoming BMP messages.
 //
 // While most BMP message will be of type RouteMonitoring (transporting route
@@ -182,9 +129,7 @@ filter bmp_in(
     let community_to_log = Community.NO_PEER;
 
     if bmp_msg.is_peer_down() {
-        // this prints $prefix,$asn
-        // probably replaceable now that we have roto Strings
-        //output.log_peer_down()
+        output.log_peer_down()
     }
 
     // Keep track of a specific deprecated (and possibly problematic) attribute.
@@ -216,11 +161,6 @@ filter bmp_in(
         None => { }
     }
 
-    // FIXME prints empty string for NOPEER, not different from other
-    // branches though
-    if contains_community(bmp_msg.communities(), community_to_log) {
-        output.log_matched_community(community_to_log)
-    }
     accept
 }
 
@@ -242,17 +182,17 @@ filter rib_in_pre(
     ingress_info: IngressInfo,
 ) {
 
-    match route.aspath() {
-        Some(aspath) => {
-            if aspath.contains(AS1133) {
-                command("/home/luuk/bin/handle_route.py", [
-                        "--route", route.fmt_json(),
-                ]);
-                output.print(f"AS1133 communities: {fmt_communities(route.communities())}");
-            }
-        }
-        None => { }
-    }
+    // Example of calling external programs via `command()`:
+    //match route.aspath() {
+    //    Some(aspath) => {
+    //        if aspath.contains(AS1133) {
+    //            command("/usr/bin/handle_route.py", [
+    //                    "--route", route.fmt_json(),
+    //            ]);
+    //        }
+    //    }
+    //    None => { }
+    //}
 
     if MY_PREFIXES.contains(route.prefix()) {
         output.log_prefix(route.prefix());
@@ -263,33 +203,6 @@ filter rib_in_pre(
 
     accept
 }
-
-fn fmt_aspath_origin(r: Route) -> String {
-    match r.aspath() {
-        Some(aspath) => {
-            match aspath.origin() {
-                Some(asn) => f"{asn}",
-                None => "no origin in aspath"
-            }
-        }
-        None => "no aspath in route"
-    }
-}
-
-fn fmt_communities(c: Option[List[Community]]) -> String {
-    let list = match c {
-        Some(list) => list,
-        None => return "",
-    };
-    let strings = List.new();
-    for c in list {
-        strings.push(c.to_string());
-    }
-
-    f"[{strings.join(", ")}]"
-}
-
-
 
 
 // The vrp_update filter processes updates pertaining to VRPs coming in via RTR.
@@ -358,7 +271,6 @@ fn fmt_rov_upd(r: RovStatusUpdate) -> String {
 
 
 
-
 // The ribs/$address_family/routes endpoints take a
 // `?function[roto]=$function_name` parameter, which enables the use of a roto
 // filter like the one below to be applied on the result set.
@@ -394,3 +306,72 @@ filter specific_communities(attr: PathAttributes) {
     }
     reject
 }
+
+
+
+
+// Helper and formatting methods.
+
+
+
+// Helper method to 'shortcut' the Option, returning false when the Option is
+// None. 
+fn aspath_contains(maybe: Option[AsPath], to_match: Asn) -> bool {
+    match maybe {
+        Some(aspath) if aspath.contains(to_match) => true,
+        _ => false
+    }
+}
+
+fn aspath_origin_matches(maybe: Option[AsPath], to_match: Asn) -> bool {
+    match maybe {
+        Some(aspath) => {
+            match aspath.origin() {
+                Some(asn) => asn == to_match,
+                None => false,
+            }
+        }
+        _ => false
+    }
+}
+
+
+fn contains_community(maybe: Option[List[Community]], to_match: Community) -> bool {
+    match maybe {
+        Some(communities) if communities.contains(to_match) => true,
+        _ => false
+    }
+}
+
+fn contains_large_community(maybe: Option[List[LargeCommunity]], to_match: LargeCommunity) -> bool {
+    match maybe {
+        Some(communities) if communities.contains(to_match) => true,
+        _ => false
+    }
+}
+
+fn fmt_aspath_origin(r: Route) -> String {
+    match r.aspath() {
+        Some(aspath) => {
+            match aspath.origin() {
+                Some(asn) => f"{asn}",
+                None => "no origin in aspath"
+            }
+        }
+        None => "no aspath in route"
+    }
+}
+
+fn fmt_communities(c: Option[List[Community]]) -> String {
+    let list = match c {
+        Some(list) => list,
+        None => return "",
+    };
+    let strings = List.new();
+    for c in list {
+        strings.push(c.to_string());
+    }
+
+    f"[{strings.join(", ")}]"
+}
+

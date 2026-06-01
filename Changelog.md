@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased version
+## 0.6.0 'Pollens!'
 
-Released yyyy-mm-dd.
+Released 2026-06-01.
 
 
 This release contains many changes in both the Roto language as well as the
@@ -16,8 +16,9 @@ filters and functions.
 
 #### Roto runtime
 
-Roto gained plenty of string related functionality, making many formatting
-helpers obsolete. This means almost all `fmt_` Roto methods are removed. 
+Roto gained plenty of string related functionality as well as support for
+optional types, making many formatting helpers obsolete. This means almost all
+`fmt_` Roto methods are removed. 
 
 Instead, most types can now be used in formatting strings directly, for
 example

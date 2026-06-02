@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased version
+
+Released yyyy-mm-dd.
+
+
+### Breaking changes
+
+### Bug fixes
+
+### New
+
+### Other changes
+
+### Acknowledgements
+
+
+
 ## 0.6.0 'Pollens!'
 
 Released 2026-06-01.

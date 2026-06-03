@@ -22,4 +22,12 @@ pub mod units;
 pub mod representation;
 
 pub mod tests;
+use std::sync::atomic::{AtomicU64, Ordering};
+
 pub use tests::util::bgp;
+
+
+static LTIME: AtomicU64 = AtomicU64::new(1);
+pub fn ltime() -> std::num::NonZeroU64 {
+    std::num::NonZeroU64::new(LTIME.fetch_add(1, Ordering::Relaxed)).unwrap()
+}

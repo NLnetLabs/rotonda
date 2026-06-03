@@ -1,10 +1,5 @@
 use std::{
-    collections::{hash_set, HashMap},
-    fmt,
-    hash::{BuildHasher, Hasher},
-    net::IpAddr,
-    ops::Deref,
-    sync::{Arc, Mutex},
+    collections::{HashMap, hash_set}, fmt, hash::{BuildHasher, Hasher}, net::IpAddr, num::NonZeroU32, ops::Deref, sync::{Arc, Mutex}
 };
 
 use chrono::{Duration, Utc};
@@ -21,6 +16,7 @@ use rotonda_store::{
 use routecore::bgp::{
     aspath::HopPath, nlri::afisafi::{IsPrefix, Nlri}, path_attributes::PaMap, path_selection::{OrdRoute, Rfc4271, TiebreakerInfo}, types::{AfiSafiType, Otc}
 };
+use routedb::{TableGroupKey, index_set::table_props_partitions::TableProperties, route_db::RouteDb};
 use serde::{ser::{SerializeSeq, SerializeStruct}, Serialize, Serializer};
 
 use crate::{
@@ -46,6 +42,7 @@ pub struct Rib {
     ingress_register: Arc<ingress::Register>,
     roto_package: Option<Arc<RotoPackage>>,
     roto_context: Arc<Mutex<RotondaCtx>>,
+    pub routedb: Arc<RouteDb>,
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -57,6 +54,8 @@ impl Rib {
         roto_package: Option<Arc<RotoPackage>>,
         roto_context: Arc<Mutex<RotondaCtx>>,
     ) -> Result<Self, PrefixStoreError> {
+        let routedb = RouteDb::new().map_err(|_| PrefixStoreError::FatalError)?;
+
         Ok(Rib {
             unicast: Arc::new(Some(Store::try_default()?)),
             multicast: Arc::new(Some(Store::try_default()?)),
@@ -64,6 +63,7 @@ impl Rib {
             ingress_register,
             roto_package,
             roto_context,
+            routedb: Arc::new(routedb)
         })
     }
 

@@ -5,14 +5,15 @@ use crate::{
     }, comms::{
         AnyDirectUpdate, DirectLink, DirectUpdate, Gate, GateStatus, Link,
         Terminated, TriggerData,
-    }, ingress, manager::{Component, WaitPoint}, payload::{
+    }, ingress::{self, IngressId}, manager::{Component, WaitPoint}, payload::{
         Payload, RotondaPaMap, RotondaRoute, RouterId, Update, UpstreamStatus
-    }, roto_runtime::{self, types::{FilterName, InsertionInfo, Output, OutputStream, OutputStreamMessage, RotoOutputStream}, RotondaCtx}, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::{rib_unit::rpki::MaxLenList, rtr::client::VrpUpdate, Unit}
+    }, roto_runtime::{self, RotondaCtx, types::{FilterName, InsertionInfo, Output, OutputStream, OutputStreamMessage, RotoOutputStream}}, tokio::TokioTaskMetrics, tracing::{BoundTracer, Tracer}, units::{Unit, rib_unit::rpki::MaxLenList, rtr::client::VrpUpdate}
 };
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use roto::Verdict;
-use std::{collections::{HashMap, HashSet}, io::prelude::*, sync::{Mutex, RwLock, Weak}};
+use routedb::{TableGroupKey, index_set::table_props_partitions::TableProperties};
+use std::{collections::{HashMap, HashSet}, io::prelude::*, num::NonZeroU32, sync::{Mutex, RwLock, Weak}};
 use rotonda_store::{errors::PrefixStoreError, match_options::{IncludeHistory, MatchOptions, MatchType, QueryResult}, prefix_record::{Record, RecordSet, RouteStatus}, rib::{config::MemoryOnlyConfig, StarCastRib}, stats::UpsertReport};
 use std::io::prelude::*;
 
@@ -21,7 +22,7 @@ use log::{debug, error, info, log_enabled, trace, warn};
 use non_empty_vec::NonEmpty;
 
 use inetnum::{addr::Prefix, asn::Asn};
-use routecore::bgp::{aspath::{Hop, HopPath}, message::PduParseInfo, types::AfiSafiType};
+use routecore::bgp::{aspath::{Hop, HopPath}, message::PduParseInfo, message_ng::common::SessionConfig, types::AfiSafiType};
 use serde::Deserialize;
 use smallvec::{smallvec, SmallVec};
 use std::{
@@ -576,6 +577,7 @@ impl RibUnitRunner {
                 // still blow up.
                 //let mut update = routecore::bgp::message_ng::Update::try_from_raw(&raw_update).unwrap().into_checked_parts(&sc).unwrap();
 
+
                 let update = match routecore::bgp::message_ng::Update::try_from_raw(&raw_update).unwrap().into_checked_parts(&sc) {
                     Ok(update) => update,
                     Err(e) => {
@@ -584,6 +586,7 @@ impl RibUnitRunner {
                     }
                 };
 
+                self.handle_bulk_ng(&raw_update, ingress_id, sc.clone());
 
                 let received = std::time::Instant::now();
 
@@ -1116,6 +1119,118 @@ impl RibUnitRunner {
         }
 
         Ok(())
+    }
+
+    fn handle_bulk_ng(&self, raw_update: &[u8], ingress_id: IngressId, sc: SessionConfig) {
+        let rib = self.rib.load();
+        let tgrp = rib.routedb.table_groups().get_or_create_group(
+            // TODO use proper IDs, perhaps the ingress_id for the unit/stream
+            // (i.e. the parent from `ingress_id` here?);
+            TableGroupKey::new(routedb::Source::BMP, NonZeroU32::new(1).unwrap())
+        ).unwrap();
+
+        let Ok(update) = routecore::bgp::message_ng::Update::try_from_raw(raw_update)
+            .unwrap().into_checked_parts(&sc) else {
+                error!("failed to parse UPDATE in handle_bulk_ng");
+                return
+            };
+
+        let Some(peer_rib_type) = self.ingress_register
+            .get(ingress_id)
+            .and_then(|ii| ii.peer_rib_type) else {
+                error!("no ingress info
+                    found for {ingress_id}, aborting");
+                return
+            }
+        ;
+
+
+        if let Some(attr) = update.prepped_conv_attributes() {
+            
+            let mut tbl_props = TableProperties::new(
+                    ingress_id,
+                    routecore::bgp::message_ng::common::AfiSafiType::IPV4UNICAST,
+                    peer_rib_type.into()
+            );
+
+            if update.conv_nlri_hints.addpath() {
+                debug!("enabling ADDPATH for this RoutingTable");
+                tbl_props = tbl_props.with_add_path_cap();
+            }
+
+            let tbl = tgrp.get_or_create_table(tbl_props).unwrap();
+
+            let Some(routing_table) = tgrp.by_id(tbl) else {
+                error!("no table for TableId {tbl:?}");
+                return
+            };
+
+            //let ltime = std::num::NonZeroU64::new(1).unwrap();
+            let ltime = crate::ltime();
+            let attr_header = attr.header().as_bytes();
+            let mut pa_hints = [0u8; 10];
+            pa_hints[..attr_header.len()].copy_from_slice(attr_header);
+            let path_attrs = attr.without_header();
+
+            for nlri in update.conv_reach_iter_wireformat() {
+                // nlri s a &[u8] might contain addpath path ids!
+
+                routing_table.upsert_single(
+                    nlri,
+                    routedb::prefix_record::RouteStatus::Active,
+                    ltime,
+                    Some(pa_hints), //: Option<[u8; {const}]>,
+                    path_attrs,
+                ).unwrap();
+            }
+        }
+
+
+
+
+
+        //let addpath = update.conv_nlri_hints.addpath();
+        //if let Some(attr) = update.prepped_conv_attributes() && !addpath {
+        //    let conv_iter = update.conv_reach_iter_raw();
+
+        //    let tbl = tgrp.get_or_create_table(
+        //        TableProperties::new(
+        //            ingress_id,
+        //            routecore::bgp::message_ng::common::AfiSafiType::IPV4UNICAST,
+        //            peer_rib_type.into()
+        //        )
+        //    ).unwrap();
+
+        //    let Some(routing_table) = tgrp.by_id(tbl) else {
+        //        error!("no table for TableId {tbl:?}");
+        //        return
+        //    };
+
+        //    let ltime = std::num::NonZeroU64::new(1).unwrap();
+        //    let attr_header = attr.header().as_bytes();
+        //    let mut pa_hints = [0u8; 10];
+        //    pa_hints[..attr_header.len()].copy_from_slice(attr_header);
+        //    let path_attrs = attr.without_header().to_vec();
+
+        //    for (_no_path_id, nlri) in conv_iter {
+        //        routing_table.upsert_single(
+        //            nlri,
+        //            routedb::prefix_record::RouteStatus::Active,
+        //            ltime,
+        //            Some(pa_hints), //: Option<[u8; {const}]>,
+        //            path_attrs.clone(), //: Vec<u8>
+        //        ).unwrap();
+        //    }
+
+        //}
+
+
+
+
+
+        //tgrp.get_or_create_table(TableProperties::new(ingress_id, afisafitype, rib_view));
+
+            
     }
 
     async fn filter_payload(

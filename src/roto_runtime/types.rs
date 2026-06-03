@@ -206,6 +206,18 @@ pub enum PeerRibType {
     OutPost, // This is the default for BGP messages
 }
 
+impl From<PeerRibType> for routedb::PeerRibType {
+    fn from(value: PeerRibType) -> Self {
+        match value {
+            PeerRibType::InPre => routedb::PeerRibType::InPre,
+            PeerRibType::InPost => routedb::PeerRibType::InPost,
+            PeerRibType::Loc => routedb::PeerRibType::Loc,
+            PeerRibType::OutPre => routedb::PeerRibType::OutPre,
+            PeerRibType::OutPost => routedb::PeerRibType::OutPost,
+        }
+    }
+}
+
 // XXX LH: perhaps we can/should get rid of PeerRibType here if we extend the
 // one in routecore?
 impl From<(bool, routecore::bmp::message::RibType)> for PeerRibType {

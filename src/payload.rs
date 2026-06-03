@@ -1,5 +1,6 @@
 use rotonda_store::prefix_record::{Meta, RouteStatus};
 use routecore::bgp::message::PduParseInfo;
+use routecore::bgp::message_ng::path_attributes::common::{PathAttributeHints, PreppedAttributesBuilder, UncheckedPathAttributes};
 use routecore::bgp::message_ng::update::CheckedParts;
 use routecore::bgp::path_attributes::OwnedPathAttributes;
 use routecore::bgp::path_selection::TiebreakerInfo;

@@ -675,7 +675,7 @@ impl RibUnitRunner {
 
                         self.filter_payload(payloads /* insert_fn*/).await?
                     } else {
-                        panic!("MP_REACH but not IPV6/IPV4 TODO");
+                        warn!("MP_REACH but not IPV6/IPV4 TODO: {:?}", update.mp_reach_afisafi());
                     }
                 }
             }

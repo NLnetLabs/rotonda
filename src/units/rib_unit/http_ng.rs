@@ -26,6 +26,14 @@ pub fn register_routes(router: &mut Api) {
     router.add_get("/ribs/{afisafi}/routes", generic_afisafi_all);
 
 
+    router.add_get("/ribs/ng", routedb_test);
+
+    router.add_get("/ng/ribs/ipv4unicast/routes", routedb_ipv4unicast_all);
+    router.add_get("/ng/ribs/ipv6unicast/routes", routedb_ipv6unicast_all);
+
+
+        
+
     // Possible shortcuts:
     //router.add_get("/origin_asn/{asn}", search_origin_asn_shortcut);
     //router.add_get("/ipv4unicast/origin_asn/{asn}", search_origin_asn);
@@ -194,6 +202,21 @@ fn stream_search_result(
     ([("content-type", "application/json")], Body::from_stream(stream))
 }
 
+fn stream_routedb_routing_tables(
+    tables: super::serialize::RouteDbRoutingTables,
+) -> impl IntoResponse {
+    let (tx, rx) = mpsc::channel::<Result<Bytes, io::Error>>(64);
+    let stream = ReceiverStream::new(rx);
+
+    tokio::task::spawn_blocking(move || {
+        let mut writer = StreamResponseWriter::new(tx);
+        let _ = tables.write(&mut Json(&mut writer));
+        let _ = writer.flush();
+    });
+
+    ([("content-type", "application/json")], Body::from_stream(stream))
+}
+
 #[derive(Debug)]
 pub struct UnknownInclude;
 impl Display for UnknownInclude {
@@ -276,4 +299,114 @@ async fn search_ipv6unicast_all(
 ) -> Result<impl IntoResponse, ApiError> {
     filter.enable_more_specifics();
     search_ipv6unicast(Path((0.into(), 0)), filter, state).await
+}
+
+
+async fn routedb_test(
+
+    state: State<ApiState>
+) -> Result<impl IntoResponse, ApiError> {
+
+    let s = state.store.load();
+    let Some(ref rib) = *s else {
+        return Err(ApiError::InternalServerError("routedb unavailable".into()))
+    };
+
+    let mut res = String::new();
+    for rt in rib.routedb.routing_tables().iter() {
+        res.push_str(&format!("{:?}\n", rt.props().unwrap()));
+        res.push_str(&format!("{} nlri\n", rt.iter().count()));
+        for route in rt.iter() {
+            let nlri = route.nlri();
+            let pa_header = routecore::bgp::message_ng::path_attributes::common::PreppedAttributesHeader::from(route.pa_hints()); // XXX why is this not [u8; 10]?
+            //dbg!(&pa_header);
+            let attrs = route.path_attrs();
+            // TODO in routecore, make a version of PreppedAttributes that is
+            // not zerocopy, takes an owned Header, and an
+            // UncheckedPathAttributes
+            // -> There is this PreppedAttributes2 now. If that suffices,
+            // rename to PreppedAttributes and move all methods to it
+            // Can we do without it being zerocopy?
+            
+
+            let prepped_attrs = routecore::bgp::message_ng::path_attributes::common::PreppedAttributes {
+                header: &pa_header,
+                path_attributes: routecore::bgp::message_ng::path_attributes::common::UncheckedPathAttributes::from_slice_unchecked(attrs),
+            };
+            res.push_str(&format!("{nlri:?}\n"));
+            res.push_str(&serde_json::to_string(&prepped_attrs).unwrap());
+            //res.push_str(&format!("{attrs:?}\n"));
+            //PreppedAttributes
+        }
+    }
+
+    Ok(res)
+}
+
+
+
+async fn routedb_ipv4unicast_all(
+
+    state: State<ApiState>
+) -> Result<impl IntoResponse, ApiError> {
+
+    let s = state.store.load();
+    let Some(rib) = (*s).clone() else {
+        return Err(ApiError::InternalServerError("routedb unavailable".into()))
+    };
+
+
+    //TODO next up: count number of results, compare with old endpoint
+
+    let ids = rib.routedb.routing_tables().iter().filter(|rt| {
+        if let Ok(props) = rt.props() {
+            props.afi_safi_type == routecore::bgp::message_ng::common::AfiSafiType::IPV4UNICAST
+        } else {
+            false
+        }
+    })
+    .map(|rt| rt.table_id()).collect::<Vec<_>>();
+
+    Ok(
+        stream_routedb_routing_tables(
+            super::serialize::RouteDbRoutingTables {
+                routedb: rib.routedb.clone(),
+                ids
+            }
+        )
+    )
+    
+}
+
+async fn routedb_ipv6unicast_all(
+
+    state: State<ApiState>
+) -> Result<impl IntoResponse, ApiError> {
+
+    let s = state.store.load();
+    let Some(rib) = (*s).clone() else {
+        return Err(ApiError::InternalServerError("routedb unavailable".into()))
+    };
+
+
+    //TODO next up: count number of results, compare with old endpoint
+
+    let ids = rib.routedb.routing_tables().iter().filter(|rt| {
+        if let Ok(props) = rt.props() {
+            props.afi_safi_type == routecore::bgp::message_ng::common::AfiSafiType::IPV6UNICAST
+        } else {
+            false
+        }
+    })
+    .map(|rt| rt.table_id()).collect::<Vec<_>>();
+
+    Ok(
+        stream_routedb_routing_tables(
+            super::serialize::RouteDbRoutingTables {
+                routedb: rib.routedb.clone(),
+                ids
+            }
+        )
+    )
+    
 }

@@ -1137,13 +1137,59 @@ impl RibUnitRunner {
 
         let Some(peer_rib_type) = self.ingress_register
             .get(ingress_id)
+            //.inspect(|iinfo| {dbg!(&iinfo);})
             .and_then(|ii| ii.peer_rib_type) else {
-                error!("no ingress info
-                    found for {ingress_id}, aborting");
+                error!("no ingress info found for {ingress_id}, aborting");
                 return
             }
         ;
 
+        // XXX one single ltime for the entire PDU?
+        // If the PDU contains a mix of withdrawals and announcements, they
+        // will all be passed to routedb with the same ltime.
+        let ltime = crate::ltime();
+
+
+        // Pick or create the conventional table, possibly with ADDPATH:
+
+        let mut conv_tbl_props = TableProperties::new(
+            ingress_id,
+            routecore::bgp::message_ng::common::AfiSafiType::IPV4UNICAST,
+            peer_rib_type.into()
+        );
+
+        if update.conv_nlri_hints.addpath() {
+            //debug!("enabling ADDPATH for conv unreach in this RoutingTable");
+            conv_tbl_props = conv_tbl_props.with_add_path_cap();
+        }
+
+        let conv_tbl = tgrp.get_or_create_table(conv_tbl_props).unwrap();
+
+        let Some(conv_routing_table) = tgrp.by_id(conv_tbl) else {
+            error!("no table for TableId {conv_tbl:?}");
+            return
+        };
+
+        // Process conventional withdraws:
+
+        if let Some(conv_unreach_iter) = update.conv_unreach_iter_wireformat() {
+            for nlri in conv_unreach_iter {
+                eprint!("-");
+                // TODO use routing_table.withdraw_single() once implemented
+                // in routedb
+                conv_routing_table.upsert_single(
+                    nlri,
+                    routedb::prefix_record::RouteStatus::Withdrawn,
+                    ltime,
+                    None, // no pa_hints
+                    &[],  // no path_attrs
+                ).unwrap();
+            }
+
+        }
+
+
+        // Process conventional announcements:
 
         if let Some(attr) = update.prepped_conv_attributes() {
             
@@ -1154,7 +1200,7 @@ impl RibUnitRunner {
             );
 
             if update.conv_nlri_hints.addpath() {
-                debug!("enabling ADDPATH for this RoutingTable");
+                //debug!("enabling ADDPATH for conv reach in this RoutingTable");
                 tbl_props = tbl_props.with_add_path_cap();
             }
 
@@ -1165,8 +1211,6 @@ impl RibUnitRunner {
                 return
             };
 
-            //let ltime = std::num::NonZeroU64::new(1).unwrap();
-            let ltime = crate::ltime();
             let attr_header = attr.header().as_bytes();
             let mut pa_hints = [0u8; 10];
             pa_hints[..attr_header.len()].copy_from_slice(attr_header);
@@ -1175,6 +1219,7 @@ impl RibUnitRunner {
             for nlri in update.conv_reach_iter_wireformat() {
                 // nlri s a &[u8] might contain addpath path ids!
 
+                //eprint!("+");
                 routing_table.upsert_single(
                     nlri,
                     routedb::prefix_record::RouteStatus::Active,
@@ -1185,52 +1230,88 @@ impl RibUnitRunner {
             }
         }
 
+        // Pick or create the mp unreach table, possibly with ADDPATH:
+
+        if let Some(mp_unreach_afisafi) = update.mp_unreach_afisafi() {
+            let mut mp_tbl_props = TableProperties::new(
+                ingress_id,
+                mp_unreach_afisafi,
+                peer_rib_type.into()
+            );
+
+            if update.mp_unreach_hints.addpath() {
+                //debug!("enabling ADDPATH for mp unreach in this RoutingTable");
+                mp_tbl_props = mp_tbl_props.with_add_path_cap();
+            }
+
+            let mp_unreach_tbl = tgrp.get_or_create_table(mp_tbl_props).unwrap();
+
+            let Some(mp_unreach_routing_table) = tgrp.by_id(mp_unreach_tbl) else {
+                error!("no table for TableId {mp_unreach_tbl:?}");
+                return
+            };
+
+            // XXX needs:
+            // - routecore wireformat iter on mp unreach
+            // - routedb withdraw_single
+            //for nlri in update.mp_unreach_iter_wireformat() {
+            //    mp_unreach_routing_table.withdraw_single(nlri, ltime).unwrap();
+            //}
+
+        }
 
 
 
+        // Pick or create the mp reach table, possibly with ADDPATH:
 
-        //let addpath = update.conv_nlri_hints.addpath();
-        //if let Some(attr) = update.prepped_conv_attributes() && !addpath {
-        //    let conv_iter = update.conv_reach_iter_raw();
+        if let Some(mp_reach_afisafi) = update.mp_reach_afisafi() {
+            let mut mp_tbl_props = TableProperties::new(
+                ingress_id,
+                mp_reach_afisafi,
+                peer_rib_type.into()
+            );
 
-        //    let tbl = tgrp.get_or_create_table(
-        //        TableProperties::new(
-        //            ingress_id,
-        //            routecore::bgp::message_ng::common::AfiSafiType::IPV4UNICAST,
-        //            peer_rib_type.into()
-        //        )
-        //    ).unwrap();
+            if update.mp_reach_hints.addpath() {
+                //debug!("enabling ADDPATH for mp reach in this RoutingTable");
+                mp_tbl_props = mp_tbl_props.with_add_path_cap();
+            }
 
-        //    let Some(routing_table) = tgrp.by_id(tbl) else {
-        //        error!("no table for TableId {tbl:?}");
-        //        return
-        //    };
+            let mp_reach_tbl = tgrp.get_or_create_table(mp_tbl_props).unwrap();
 
-        //    let ltime = std::num::NonZeroU64::new(1).unwrap();
-        //    let attr_header = attr.header().as_bytes();
-        //    let mut pa_hints = [0u8; 10];
-        //    pa_hints[..attr_header.len()].copy_from_slice(attr_header);
-        //    let path_attrs = attr.without_header().to_vec();
+            let Some(mp_reach_routing_table) = tgrp.by_id(mp_reach_tbl) else {
+                error!("no table for TableId {mp_reach_tbl:?}");
+                return
+            };
 
-        //    for (_no_path_id, nlri) in conv_iter {
-        //        routing_table.upsert_single(
-        //            nlri,
-        //            routedb::prefix_record::RouteStatus::Active,
-        //            ltime,
-        //            Some(pa_hints), //: Option<[u8; {const}]>,
-        //            path_attrs.clone(), //: Vec<u8>
-        //        ).unwrap();
-        //    }
+            let Some(attr) = update.prepped_mp_attributes() else {
+                warn!("No attributes for MP announcement, not upserting");
+                return;
+            };
 
-        //}
+            let attr_header = attr.header().as_bytes();
+            let mut pa_hints = [0u8; 10];
+            pa_hints[..attr_header.len()].copy_from_slice(attr_header);
 
+            let path_attrs = attr.without_header();
 
+            // XXX needs:
+            // - routecore wireformat iter on mp reach
+            for nlri in update.mp_reach_iter_wireformat() {
+                mp_reach_routing_table.upsert_single(
+                    nlri,
+                    routedb::prefix_record::RouteStatus::Active,
+                    ltime,
+                    Some(pa_hints), //: Option<[u8; {const}]>,
+                    path_attrs,
+                ).unwrap();
+            }
 
+        }
 
+        if u64::from(crate::read_ltime()).is_multiple_of(100_000) {
+            eprintln!("{:?}", rib.routedb.counters());
+        }
 
-        //tgrp.get_or_create_table(TableProperties::new(ingress_id, afisafitype, rib_view));
-
-            
     }
 
     async fn filter_payload(

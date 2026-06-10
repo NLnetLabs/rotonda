@@ -260,10 +260,33 @@ impl RouterState {
                     ),
                     SessionConfig::default(),
                 )
+                // TODO insert ingress_info and mark as 'missing_peer_up' or
+                // something
             }
         };
 
         let update = msg.bgp_update()?;
+
+        // dbg snippet:
+        //match update.into_checked_parts(sc) {
+        //    Ok(parts) => {
+        //        if let Some(afisafi) = parts.mp_reach_afisafi() {
+        //            if afisafi
+        //            == routecore::bgp::message_ng::common::AfiSafiType::IPV4UNICAST
+        //        {
+        //            eprintln!(
+        //                "{:?}",
+        //                routecore::bgp::message_ng::common::PcapHex(msg.as_ref())
+        //            );
+        //        }
+        //        }
+        //    }
+        //    Err(e) => {
+        //        eprintln!("tmp error: {e}");
+        //        return Ok(());
+        //    }
+        //}
+
         //let mut update = update.into_checked_parts(sc)?;
         //if let Some(attr) = update.take_conv_attributes() {
         //    let conv_iter = update.conv_reach_iter_raw();

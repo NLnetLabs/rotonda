@@ -220,9 +220,13 @@ impl Serialize for RotondaPaMap {
     {
         let mut s = serializer.serialize_struct("route", 2)?;
         s.serialize_field("rpki", &self.rpki_info())?;
+        
         s.serialize_field("pathAttributes", &self.path_attributes().iter().flatten()
             .filter(|pa| pa.type_code() != 15)
             .flat_map(|pa| pa.to_owned()).collect::<Vec<_>>())?;
+
+        //s.serialize_field("pathAttributesNg", &PreppedAttributesBuilder::from(self.path_attributes()).as_prepped())?;
+
         s.end()
     }
 }

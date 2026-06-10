@@ -404,7 +404,7 @@ async fn routedb_ipv6unicast_all(
 
     let ids = rib.routedb.routing_tables().iter().filter(|rt| {
         if let Ok(props) = rt.props() {
-            props.afi_safi_type == AfiSafiTypeNg::IPV6UNICAST
+            props.afi_safi == AfiSafiTypeNg::IPV6UNICAST
         } else {
             false
         }
@@ -439,7 +439,7 @@ async fn routedb_ipv4unicast_search(
 
     debug!("searching for {} {:?}", nlri.as_ref(), nlri.as_ref().as_ref());
     let mut res = String::new();
-    for rt in rib.routedb.routing_tables().iter().filter(|rt| rt.props().unwrap().afi_safi_type == AfiSafiTypeNg::IPV4UNICAST) {
+    for rt in rib.routedb.routing_tables().iter().filter(|rt| rt.props().unwrap().afi_safi == AfiSafiTypeNg::IPV4UNICAST) {
 
         dbg!(&rt.props());
 
@@ -483,7 +483,7 @@ async fn routedb_ipv6unicast_search(
 
     debug!("searching for {} {:?}", nlri.as_ref(), nlri.as_ref().as_ref());
     let mut res = String::new();
-    for rt in rib.routedb.routing_tables().iter().filter(|rt| rt.props().unwrap().afi_safi_type == AfiSafiTypeNg::IPV6UNICAST) {
+    for rt in rib.routedb.routing_tables().iter().filter(|rt| rt.props().unwrap().afi_safi == AfiSafiTypeNg::IPV6UNICAST) {
 
         dbg!(&rt.props());
 

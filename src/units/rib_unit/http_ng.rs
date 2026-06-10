@@ -5,7 +5,7 @@ use axum::{body::Body, extract::{Path, Query, State}, response::IntoResponse};
 use bytes::Bytes;
 use inetnum::{addr::Prefix, asn::Asn};
 use log::{debug, warn};
-use routecore::{bgp::{communities::{LargeCommunity, StandardCommunity}, path_attributes::PathAttributeType, types::AfiSafiType}, bmp::message::RibType};
+use routecore::{bgp::{communities::{LargeCommunity, StandardCommunity}, message_ng::{common::AfiSafiType as AfiSafiTypeNg, nlri::{Nlri, OwnedIpv4UnicastNlri, OwnedIpv6UnicastNlri}}, path_attributes::PathAttributeType, types::AfiSafiType}, bmp::message::RibType};
 use serde::Deserialize;
 use serde_with::serde_as;
 use serde_with::formats::CommaSeparator;
@@ -29,7 +29,11 @@ pub fn register_routes(router: &mut Api) {
     router.add_get("/ribs/ng", routedb_test);
 
     router.add_get("/ng/ribs/ipv4unicast/routes", routedb_ipv4unicast_all);
+    router.add_get("/ng/ribs/ipv4unicast/routes/{prefix}/{prefix_len}", routedb_ipv4unicast_search);
     router.add_get("/ng/ribs/ipv6unicast/routes", routedb_ipv6unicast_all);
+    router.add_get("/ng/ribs/ipv6unicast/routes/{prefix}/{prefix_len}", routedb_ipv6unicast_search);
+
+    //router.add_get("/ng/ribs/{afisafi}/routes", routedb_generic_all);
 
 
         
@@ -358,14 +362,21 @@ async fn routedb_ipv4unicast_all(
 
     //TODO next up: count number of results, compare with old endpoint
 
-    let ids = rib.routedb.routing_tables().iter().filter(|rt| {
-        if let Ok(props) = rt.props() {
-            props.afi_safi_type == routecore::bgp::message_ng::common::AfiSafiType::IPV4UNICAST
-        } else {
-            false
-        }
-    })
-    .map(|rt| rt.table_id()).collect::<Vec<_>>();
+    //let ids = rib.routedb.routing_tables().iter().filter(|rt| {
+    //    if let Ok(props) = rt.props() {
+    //        props.afi_safi_type == routecore::bgp::message_ng::common::AfiSafiType::IPV4UNICAST
+    //    } else {
+    //        false
+    //    }
+    //})
+    //.map(|rt| rt.table_id()).collect::<Vec<_>>();
+
+
+    // attempt based on iter_grouped_by_table_id
+    let ids = rib.routedb.routes().iter_grouped_by_table_id().filter_map(|(rt_props,_)|
+        (rt_props.afi_safi() == Ok(AfiSafiTypeNg::IPV4UNICAST)).then(|| rt_props.table_id())
+    ).collect::<Vec<_>>();
+
 
     Ok(
         stream_routedb_routing_tables(
@@ -393,7 +404,7 @@ async fn routedb_ipv6unicast_all(
 
     let ids = rib.routedb.routing_tables().iter().filter(|rt| {
         if let Ok(props) = rt.props() {
-            props.afi_safi_type == routecore::bgp::message_ng::common::AfiSafiType::IPV6UNICAST
+            props.afi_safi_type == AfiSafiTypeNg::IPV6UNICAST
         } else {
             false
         }
@@ -402,11 +413,100 @@ async fn routedb_ipv6unicast_all(
 
     Ok(
         stream_routedb_routing_tables(
-            super::serialize::RouteDbRoutingTables {
+            super::serialize::RouteDbRoutingTables::<routecore::bgp::message_ng::nlri::Ipv6UnicastNlri<'_>> {
                 routedb: rib.routedb.clone(),
-                ids
+                ids,
+                _nlri: std::marker::PhantomData
             }
         )
     )
     
+}
+
+async fn routedb_ipv4unicast_search(
+    Path((prefix, prefix_len)): Path<(Ipv4Addr, u8)>,
+    Query(filter): Query<QueryFilter>,
+    state: State<ApiState>
+) -> Result<impl IntoResponse, ApiError> {
+
+    let s = state.store.load();
+    let Some(rib) = (*s).clone() else {
+        return Err(ApiError::InternalServerError("routedb unavailable".into()))
+    };
+
+    let Ok(nlri) = OwnedIpv4UnicastNlri::try_from((prefix, prefix_len)) else {
+        return Err(ApiError::BadRequest("invalid prefix".into()));
+    };
+
+    debug!("searching for {} {:?}", nlri.as_ref(), nlri.as_ref().as_ref());
+    let mut res = String::new();
+    for rt in rib.routedb.routing_tables().iter().filter(|rt| rt.props().unwrap().afi_safi_type == AfiSafiTypeNg::IPV4UNICAST) {
+
+        dbg!(&rt.props());
+
+        if let Some(r) = rt.get(nlri.as_ref().as_ref())  {
+            debug!("got a route");
+
+            assert_eq!(nlri.as_ref().as_ref(), r.nlri());
+
+            res.push_str(&format!("nlri: {}\n", nlri.as_ref()));
+
+            let pa_header = routecore::bgp::message_ng::path_attributes::common::PreppedAttributesHeader::from(r.pa_hints());
+            let attrs = r.path_attrs();
+            let prepped_attrs = routecore::bgp::message_ng::path_attributes::common::PreppedAttributes {
+                header: &pa_header,
+                path_attributes: routecore::bgp::message_ng::path_attributes::common::UncheckedPathAttributes::from_slice_unchecked(attrs),
+            };
+
+            res.push_str(&format!("pathAttributes: {}\n", serde_json::to_string(&prepped_attrs).unwrap()));
+        }
+
+    }
+
+
+    Ok(res)
+}
+
+async fn routedb_ipv6unicast_search(
+    Path((prefix, prefix_len)): Path<(Ipv6Addr, u8)>,
+    Query(filter): Query<QueryFilter>,
+    state: State<ApiState>
+) -> Result<impl IntoResponse, ApiError> {
+
+    let s = state.store.load();
+    let Some(rib) = (*s).clone() else {
+        return Err(ApiError::InternalServerError("routedb unavailable".into()))
+    };
+
+    let Ok(nlri) = OwnedIpv6UnicastNlri::try_from((prefix, prefix_len)) else {
+        return Err(ApiError::BadRequest("invalid prefix".into()));
+    };
+
+    debug!("searching for {} {:?}", nlri.as_ref(), nlri.as_ref().as_ref());
+    let mut res = String::new();
+    for rt in rib.routedb.routing_tables().iter().filter(|rt| rt.props().unwrap().afi_safi_type == AfiSafiTypeNg::IPV6UNICAST) {
+
+        dbg!(&rt.props());
+
+        if let Some(r) = rt.get(nlri.as_ref().as_ref())  {
+            debug!("got a route");
+
+            assert_eq!(nlri.as_ref().as_ref(), r.nlri());
+
+            res.push_str(&format!("nlri: {}\n", nlri.as_ref()));
+
+            let pa_header = routecore::bgp::message_ng::path_attributes::common::PreppedAttributesHeader::from(r.pa_hints());
+            let attrs = r.path_attrs();
+            let prepped_attrs = routecore::bgp::message_ng::path_attributes::common::PreppedAttributes {
+                header: &pa_header,
+                path_attributes: routecore::bgp::message_ng::path_attributes::common::UncheckedPathAttributes::from_slice_unchecked(attrs),
+            };
+
+            res.push_str(&format!("pathAttributes: {}\n", serde_json::to_string(&prepped_attrs).unwrap()));
+        }
+
+    }
+
+
+    Ok(res)
 }

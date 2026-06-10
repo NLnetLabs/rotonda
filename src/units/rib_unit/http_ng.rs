@@ -413,10 +413,9 @@ async fn routedb_ipv6unicast_all(
 
     Ok(
         stream_routedb_routing_tables(
-            super::serialize::RouteDbRoutingTables::<routecore::bgp::message_ng::nlri::Ipv6UnicastNlri<'_>> {
+            super::serialize::RouteDbRoutingTables {
                 routedb: rib.routedb.clone(),
                 ids,
-                _nlri: std::marker::PhantomData
             }
         )
     )

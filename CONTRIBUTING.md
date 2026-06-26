@@ -10,10 +10,9 @@ guidelines here give your contributions the best chance at getting merged.
 This project and everyone participating in it is governed by the [NLnet Labs
 Code of Conduct]. By participating, you are expected to uphold this code.
 
-## A note on Generative AI
+## LLM Policy
 
-We do not accept any content -- code, documentation or otherwise -- generated
-by large language models or other generative AI.
+To contribute to this project, must comply with the [NLnet Labs LLM Policy].
 
 ## Discussion
 
@@ -161,6 +160,7 @@ The steps for releasing a new version of Rotonda are described in RELEASING.md
 in the root of this repository.
 
 [NLnet Labs Code of Conduct]: https://www.nlnetlabs.nl/conduct
+[NLnet Labs LLM Policy]: https://www.nlnetlabs.nl/llm-policy
 [Discourse]: https://community.nlnetlabs.nl/c/rotonda/5
 [issue tracker]: https://github.com/rotonda/NLnetLabs/issues
 [reStructuredText]: http://www.sphinx-doc.org/en/stable/rest.html

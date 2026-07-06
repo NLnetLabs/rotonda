@@ -10,9 +10,9 @@ use routecore::{
             common::MessageType,
             io::{BmpHandler, BmpV3Handler, BmpVersion, Parseable},
             peer_down_notification::PeerDownNotificationV3,
-            peer_up_notification::PeerUpNotification,
+            peer_up_notification::PeerUpNotificationV3,
             route_monitoring::RouteMonitoringV3,
-            statistics_report::StatisticsReport,
+            statistics_report::StatisticsReportV3,
         },
     },
 };
@@ -115,7 +115,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                 match msg.common.msg_type {
                     MessageType::PEER_UP_NOTIFICATION => {
                         let _ = router_state.process_peer_up(
-                            PeerUpNotification::try_from_message(msg).unwrap(),
+                            PeerUpNotificationV3::try_from_message(msg).unwrap(),
                         );
                     }
                     MessageType::ROUTE_MONITORING => {
@@ -134,7 +134,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                     }
                     MessageType::STATISTICS_REPORT => {
                         let _ = router_state.process_statistics_report(
-                            StatisticsReport::try_from_message(msg).unwrap(),
+                            StatisticsReportV3::try_from_message(msg).unwrap(),
                         );
                     }
                     _ => {
@@ -195,7 +195,7 @@ impl RouterState {
 
     fn process_peer_up(
         &mut self,
-        msg: &PeerUpNotification,
+        msg: &PeerUpNotificationV3,
     ) -> Result<(), BmpNgError> {
         let pph = msg.per_peer_header();
 
@@ -330,7 +330,7 @@ impl RouterState {
 
     fn process_statistics_report(
         &mut self,
-        msg: &StatisticsReport,
+        msg: &StatisticsReportV3,
     ) -> Result<(), BmpNgError> {
         Ok(())
     }

@@ -1,20 +1,17 @@
-use std::{borrow::Cow, io::Read, sync::Arc};
+use std::{borrow::Cow, io::{BufWriter, Read, Write}, sync::Arc};
 
 use inetnum::asn::Asn;
 use log::{debug, error, warn};
 use routecore::{
     bgp::message_ng::common::SessionConfig,
-    bmp::{
-        message::PeerDownNotification,
-        message_ng::{
-            common::MessageType,
+    bmp::message_ng::{
+            common::{MessageType, PerPeerHeader},
             io::{BmpHandler, BmpV3Handler, BmpVersion, Parseable},
-            peer_down_notification::PeerDownNotificationV3,
-            peer_up_notification::PeerUpNotificationV3,
-            route_monitoring::RouteMonitoringV3,
-            statistics_report::StatisticsReportV3,
+            peer_down_notification::{PeerDownNotification as PeerDownNotification, PeerDownNotificationV3, PeerDownNotificationV4},
+            peer_up_notification::{PeerUpNotification, PeerUpNotificationV3, PeerUpNotificationV4},
+            route_monitoring::{RouteMonitoring, RouteMonitoringV3, RouteMonitoringV4},
+            statistics_report::{StatisticsReport, StatisticsReportV3, StatisticsReportV4},
         },
-    },
 };
 use tokio::io::AsyncRead;
 
@@ -22,7 +19,7 @@ use crate::{
     comms::Gate,
     ingress::{self, IngressId, IngressInfo, IngressType},
     payload::Update,
-    units::bmp_tcp_in_ng::{error::BmpNgError, pph_register::PphRegister},
+    units::bmp_tcp_in_ng::{BmpTcpIn, error::BmpNgError, pph_register::PphRegister},
 };
 
 pub struct RouterHandler<R> {
@@ -30,6 +27,7 @@ pub struct RouterHandler<R> {
     ingress_register: Arc<ingress::Register>,
     unit_ingress_id: IngressId,
     gate: Gate,
+    config: BmpTcpIn,
 }
 
 impl<R: AsyncRead + Unpin> RouterHandler<R> {
@@ -38,6 +36,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
         gate: Gate,
         ingress_register: Arc<ingress::Register>,
         unit_ingress_id: IngressId,
+        config: BmpTcpIn,
     ) -> Self {
         let bmp_handler = BmpHandler::for_stream(stream);
         Self {
@@ -45,6 +44,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
             ingress_register,
             unit_ingress_id,
             gate,
+            config,
         }
     }
 
@@ -66,14 +66,40 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                         .get_sys_desc()
                         .unwrap_or_else(|| "__no_sys_desc".into()),
                 );
+
+                if let Some(output) = self.config.write_v4_to_file_bin.as_ref() {
+                    match std::fs::OpenOptions::new()
+                        .create(true)
+                        .truncate(true)
+                        .append(false)
+                        .write(true)
+                        .open(output) {
+                            Ok(mut fh) => {
+                                let _ = init_msg.write_as_v4(&mut fh, None);
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "Failed to open {} for writing: {e}",
+                                    output.to_string_lossy()
+                                );
+                            }
+
+                        }
+                }
+
             }
             Err(_other_msg) => {
+                // NB: this message is not consumed, so it will be picked up
+                // in process() below.
                 warn!("unexpected first message of BMP stream");
                 partial_ingress_info = partial_ingress_info
                     .with_desc("__invalid_stream_missing_initation_msg");
             }
         }
 
+        // XXX while figuring out whether or not we need a different code path
+        // here for v3 vs v4, silence clippy
+        #[allow(clippy::match_same_arms)]
         match version {
             BmpVersion(3) => {
                 let v3handler: BmpV3Handler<_> = self.bmp_handler.into();
@@ -83,21 +109,35 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                     self.ingress_register,
                     self.unit_ingress_id,
                     partial_ingress_info,
+                    self.config,
                 )
                 .await;
                 Ok(())
             }
-            BmpVersion(4) => Err("BMPv4 not yet implemented".into()),
+            BmpVersion(4) => {
+                let v4handler: BmpV3Handler<_> = self.bmp_handler.into();
+                Self::process_v4(
+                    v4handler,
+                    self.gate,
+                    self.ingress_register,
+                    self.unit_ingress_id,
+                    partial_ingress_info,
+                    self.config,
+                )
+                .await;
+                Ok(())
+            }
             BmpVersion(v) => Err(format!("invalid BMP version {v}").into()),
         }
     }
-    //impl<R: AsyncRead + Unpin> RouterV3Handler<R> {
-    async fn process(
+
+    async fn process_v4(
         mut bmp_handler: BmpV3Handler<R>,
         gate: Gate,
         ingress_register: Arc<ingress::Register>,
         unit_ingress_id: IngressId,
         partial_ingress_info: IngressInfo,
+        config: BmpTcpIn,
     ) {
         let mut router_state = RouterState::new(
             gate,
@@ -106,35 +146,200 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
             partial_ingress_info,
         );
         //let mut cnt = 0;
+        
+        let mut output = config.write_v4_to_file_bin.and_then(|output|
+            match std::fs::OpenOptions::new()
+                .create(false)
+                .append(true)
+                .open(&output) {
+                    Ok(fh) => Some(BufWriter::new(fh)),
+                    Err(e) => {
+                        warn!(
+                            "Failed to open {} for writing: {e}",
+                            output.to_string_lossy()
+                        );
+                        None
+                    }
+                }
+        );
         while let Ok(Some(_)) = bmp_handler.msg_iter.read_into_buf().await {
             while let Ok(msg) = bmp_handler.msg_iter.get_message() {
                 //cnt += 1;
                 //if cnt % 1000 == 0 {
                 //    eprint!("\r{cnt}");
                 //}
+
+                // This is a V3 handler, so if we are configured to write to a
+                // (bin|pcap|mrt) file, it needs to be converted.
+
+
+
                 match msg.common.msg_type {
                     MessageType::PEER_UP_NOTIFICATION => {
+
+                        //debug!("peer_up msg len: {}", msg.as_ref().len());
+                        //debug!("peer_up first bytes: {:?}", &msg.as_ref()[..std::cmp::min(msg.as_ref().len(), 64)]);
+                        let peer_up = PeerUpNotificationV4::try_from_message(msg)
+                            .unwrap();
+
+                        if let Some(output) = output.as_mut() {
+                            let _ = output.write(peer_up.as_ref());
+                            //let _ = peer_up.write_as_v4(output, None);
+                        }
+
                         let _ = router_state.process_peer_up(
-                            PeerUpNotificationV3::try_from_message(msg).unwrap(),
+                            peer_up
                         );
                     }
                     MessageType::ROUTE_MONITORING => {
+                        //debug!("route_mon msg len: {}", msg.as_ref().len());
+                        //debug!("route_mon first bytes: {:?}", &msg.as_ref()[..std::cmp::min(msg.as_ref().len(), 64)]);
+
+                        let route_mon = RouteMonitoringV4::try_from_message(msg)
+                            .unwrap();
+
+                        if let Some(output) = output.as_mut() {
+                            let _ = output.write(route_mon.as_ref());
+                            //let _ = route_mon.write_as_v4(output, None);
+                        }
                         let _ = router_state
                             .process_route_monitoring(
-                                RouteMonitoringV3::try_from_message(msg)
-                                    .unwrap(),
+                                route_mon
                             )
                             .await;
                     }
                     MessageType::PEER_DOWN_NOTIFICATION => {
+                        //debug!("peer_down msg len: {}", msg.as_ref().len());
+                        //debug!("peer_down first bytes: {:?}", &msg.as_ref()[..std::cmp::min(msg.as_ref().len(), 64)]);
+                        let peer_down = PeerDownNotificationV4::try_from_message(msg)
+                                .unwrap();
+
+                        if let Some(output) = output.as_mut() {
+                            let _ = output.write(peer_down.as_ref());
+                            //let _ = peer_down.write_as_v4(output, None);
+                        }
+
                         let _ = router_state.process_peer_down_notification(
-                            PeerDownNotificationV3::try_from_message(msg)
-                                .unwrap(),
+                            peer_down
                         );
                     }
                     MessageType::STATISTICS_REPORT => {
+                        //debug!("stats report msg len: {}", msg.as_ref().len());
+                        //debug!("stats report first bytes: {:?}", &msg.as_ref()[..std::cmp::min(msg.as_ref().len(), 64)]);
+                        //debug!("stats report bytes: {:?}", &msg.as_ref());
+                        let stats_report = StatisticsReportV4::try_from_message(msg).unwrap();
+
+                        if let Some(output) = output.as_mut() {
+                            let _ = output.write(stats_report.as_ref());
+                            //let _ = stats_report.write_as_v4(output, None);
+                        }
+
                         let _ = router_state.process_statistics_report(
-                            StatisticsReportV3::try_from_message(msg).unwrap(),
+                            stats_report
+                        );
+                    }
+                    _ => {
+                        panic!("TODO {}", msg.common.msg_type)
+                    }
+                }
+            }
+        }
+    }
+    
+    async fn process(
+        mut bmp_handler: BmpV3Handler<R>,
+        gate: Gate,
+        ingress_register: Arc<ingress::Register>,
+        unit_ingress_id: IngressId,
+        partial_ingress_info: IngressInfo,
+        config: BmpTcpIn,
+    ) {
+        let mut router_state = RouterState::new(
+            gate,
+            ingress_register,
+            unit_ingress_id,
+            partial_ingress_info,
+        );
+        //let mut cnt = 0;
+        
+        let mut output = config.write_v4_to_file_bin.and_then(|output|
+            match std::fs::OpenOptions::new()
+                .create(false)
+                .append(true)
+                .open(&output) {
+                    Ok(fh) => Some(BufWriter::new(fh)),
+                    Err(e) => {
+                        warn!(
+                            "Failed to open {} for writing: {e}",
+                            output.to_string_lossy()
+                        );
+                        None
+                    }
+                }
+        );
+        while let Ok(Some(_)) = bmp_handler.msg_iter.read_into_buf().await {
+            while let Ok(msg) = bmp_handler.msg_iter.get_message() {
+                //cnt += 1;
+                //if cnt % 1000 == 0 {
+                //    eprint!("\r{cnt}");
+                //}
+
+                // This is a V3 handler, so if we are configured to write to a
+                // (bin|pcap|mrt) file, it needs to be converted.
+
+
+
+                match msg.common.msg_type {
+                    MessageType::PEER_UP_NOTIFICATION => {
+
+                        let peer_up = PeerUpNotificationV3::try_from_message(msg)
+                            .unwrap();
+
+                        if let Some(output) = output.as_mut() {
+                            let len = peer_up.write_as_v4(output, None).unwrap();
+                            //debug!("wrote PeerUp len {len}");
+                        }
+
+                        let _ = router_state.process_peer_up(
+                            peer_up
+                        );
+                    }
+                    MessageType::ROUTE_MONITORING => {
+                        let route_mon = RouteMonitoringV3::try_from_message(msg)
+                            .unwrap();
+
+                        if let Some(output) = output.as_mut() {
+                            let len = route_mon.write_as_v4(output, None).unwrap();
+                            //debug!("wrote RouteMon len {len}");
+                        }
+                        let _ = router_state
+                            .process_route_monitoring(
+                                route_mon
+                            )
+                            .await;
+                    }
+                    MessageType::PEER_DOWN_NOTIFICATION => {
+                        let peer_down = PeerDownNotificationV3::try_from_message(msg)
+                                .unwrap();
+
+                        if let Some(output) = output.as_mut() {
+                            let _ = peer_down.write_as_v4(output, None);
+                        }
+
+                        let _ = router_state.process_peer_down_notification(
+                            peer_down
+                        );
+                    }
+                    MessageType::STATISTICS_REPORT => {
+                        let stats_report = StatisticsReportV3::try_from_message(msg).unwrap();
+
+                        if let Some(output) = output.as_mut() {
+                            eprintln!("writing stats report");
+                            let _ = stats_report.write_as_v4(output, None);
+                        }
+
+                        let _ = router_state.process_statistics_report(
+                            stats_report
                         );
                     }
                     _ => {
@@ -193,9 +398,9 @@ impl RouterState {
         }
     }
 
-    fn process_peer_up(
+    fn process_peer_up<M: PeerUpNotification + ?Sized>(
         &mut self,
-        msg: &PeerUpNotificationV3,
+        msg: &M
     ) -> Result<(), BmpNgError> {
         let pph = msg.per_peer_header();
 
@@ -217,9 +422,9 @@ impl RouterState {
         Ok(())
     }
 
-    async fn process_route_monitoring(
+    async fn process_route_monitoring<M: RouteMonitoring + ?Sized>(
         &mut self,
-        msg: &RouteMonitoringV3,
+        msg: &M
     ) -> Result<(), BmpNgError> {
         let (ingress_id, sc) = if let Some(t) =
             self.pph_register.get(msg.per_peer_header())
@@ -265,7 +470,15 @@ impl RouterState {
             }
         };
 
-        let update = msg.bgp_update()?;
+        //let update = msg.bgp_update()?; // this triggers a lifetime error
+
+        let update = match msg.bgp_update() {
+            Ok(update) => update,
+            Err(e) =>  {
+                let msg = e.to_string();
+                return Err(BmpNgError::new(msg.into()));
+            }
+    };
 
         // dbg snippet:
         //match update.into_checked_parts(sc) {
@@ -321,16 +534,16 @@ impl RouterState {
         Ok(())
     }
 
-    fn process_peer_down_notification(
+    fn process_peer_down_notification<M: PeerDownNotification + ?Sized>(
         &mut self,
-        msg: &PeerDownNotificationV3,
+        msg: &M,
     ) -> Result<(), BmpNgError> {
         Ok(())
     }
 
-    fn process_statistics_report(
+    fn process_statistics_report<M: StatisticsReport + ?Sized>(
         &mut self,
-        msg: &StatisticsReportV3,
+        msg: &M,
     ) -> Result<(), BmpNgError> {
         Ok(())
     }

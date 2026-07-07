@@ -36,8 +36,17 @@ pub struct BmpTcpIn {
     /// If set, the filter must be found in the configured roto script.
     pub roto_filter: Option<String>,
 
-    /// Read stream from binary file
+    /// Read stream from binary file.
     pub read_from_file: Option<PathBuf>,
+
+    /// (Convert to and) write BMPv4 messages to file as a binary stream.
+    pub write_v4_to_file_bin: Option<PathBuf>,
+
+    ///// (Convert to and) write BMPv4 messages to a .pcap file.
+    //pub write_v4_to_file_pcap: Option<PathBuf>,
+
+    ///// (Convert to and) write BMPv4 messages to an .mrt file.
+    //pub write_v4_to_file_mrt: Option<PathBuf>,
 }
 
 impl BmpTcpIn {
@@ -190,6 +199,7 @@ impl Runner {
         let gate = self.gate.clone();
         let ingress_register = self.ingress_register.clone();
         let unit_ingress_id = self.unit_ingress_id;
+        let config = self.config.clone();
         let partial_ingress_info =
             IngressInfo::new().with_remote_addr(socket.ip());
         tokio::spawn(async move {
@@ -202,6 +212,7 @@ impl Runner {
                 gate,
                 ingress_register,
                 unit_ingress_id,
+                config,
             );
             let _ = Box::pin(handler.run(partial_ingress_info)).await;
         });
@@ -211,6 +222,7 @@ impl Runner {
         let gate = self.gate.clone();
         let ingress_register = self.ingress_register.clone();
         let unit_ingress_id = self.unit_ingress_id;
+        let config = self.config.clone();
         let partial_ingress_info =
             IngressInfo::new().with_filename(filename.clone());
         tokio::spawn(async move {
@@ -227,8 +239,11 @@ impl Runner {
                 gate,
                 ingress_register,
                 unit_ingress_id,
+                config,
             );
-            let _ = Box::pin(handler.run(partial_ingress_info)).await;
+            if let Err(e) = Box::pin(handler.run(partial_ingress_info)).await {
+                error!("error while handling {name}: {e}");
+            }
             eprintln!(
                 "processed {name} in {}ms, {:.1}MB/s",
                 //filename.to_string_lossy(),

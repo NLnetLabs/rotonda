@@ -203,20 +203,32 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                 }
         );
 
+        // Helper to write PDUs verbatim to a binary file.
+        // The resulting file can be injected using e.g. socat.
+        macro_rules! write_bin(
+            ($msg:ident) => {
+                if let Some(output) = output.as_mut() {
+                    let _ = output.write($msg.as_ref());
+                }
+            }
+        );
+
+        // Helper to write .mrt files.
         macro_rules! write_mrt(
             // With timestamp
-            ($var:ident, $ts:expr) => {
+            ($msg:ident, $ts:expr) => {
                 if let Some(output_mrt) = output_mrt.as_mut() {
-                    let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(output_mrt, Some($ts), $var.as_ref());
+                    let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(output_mrt, Some($ts), $msg.as_ref());
                 }
             };
             // Without timestamp
-            ($var:ident) => {
+            ($msg:ident) => {
                 if let Some(output_mrt) = output_mrt.as_mut() {
-                    let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(output_mrt, None, $var.as_ref());
+                    let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(output_mrt, None, $msg.as_ref());
                 }
             };
         );
+
         while let Ok(Some(_)) = bmp_handler.msg_iter.read_into_buf().await {
             while let Ok(msg) = bmp_handler.msg_iter.get_message() {
                 //cnt += 1;
@@ -231,16 +243,10 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
 
                 match msg.common.msg_type {
                     MessageType::PEER_UP_NOTIFICATION => {
-
-                        //debug!("peer_up msg len: {}", msg.as_ref().len());
-                        //debug!("peer_up first bytes: {:?}", &msg.as_ref()[..std::cmp::min(msg.as_ref().len(), 64)]);
                         let peer_up = PeerUpNotificationV4::try_from_message(msg)
                             .unwrap();
 
-                        if let Some(output) = output.as_mut() {
-                            let _ = output.write(peer_up.as_ref());
-                        }
-
+                        write_bin!(peer_up);
                         write_mrt!(peer_up);
 
                         let _ = router_state.process_peer_up(
@@ -254,10 +260,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                         let route_mon = RouteMonitoringV4::try_from_message(msg)
                             .unwrap();
 
-                        if let Some(output) = output.as_mut() {
-                            let _ = output.write(route_mon.as_ref());
-                        }
-
+                        write_bin!(route_mon);
                         write_mrt!(route_mon);
 
                         let _ = router_state
@@ -272,10 +275,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                         let peer_down = PeerDownNotificationV4::try_from_message(msg)
                                 .unwrap();
 
-                        if let Some(output) = output.as_mut() {
-                            let _ = output.write(peer_down.as_ref());
-                        }
-
+                        write_bin!(peer_down);
                         write_mrt!(peer_down);
 
                         let _ = router_state.process_peer_down_notification(
@@ -288,10 +288,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                         //debug!("stats report bytes: {:?}", &msg.as_ref());
                         let stats_report = StatisticsReportV4::try_from_message(msg).unwrap();
 
-                        if let Some(output) = output.as_mut() {
-                            let _ = output.write(stats_report.as_ref());
-                        }
-
+                        write_bin!(stats_report);
                         write_mrt!(stats_report);
 
                         let _ = router_state.process_statistics_report(
@@ -355,24 +352,34 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
 
         let mut outbuf = Vec::with_capacity(1<<20);
 
+        // Helper to create binary files.
+        macro_rules! write_bin(
+            ($msg:ident) => {
+                if let Some(output) = output.as_mut() {
+                    let _len = $msg.write_as_v4(output, None).unwrap();
+                }
+            }
+        );
+
+        // Helper to create .mrt files.
         macro_rules! write_mrt(
             // With timestamp
-            ($var:ident, $ts:expr) => {
+            ($msg:ident, $ts:expr) => {
                 if let Some(output_mrt) = output_mrt.as_mut() {
                     // convert to v4 first
                     assert!(outbuf.is_empty());
-                    let len = $var.write_as_v4(&mut outbuf, Some($ts)).unwrap();
+                    let len = $msg.write_as_v4(&mut outbuf, Some($ts)).unwrap();
                     // then write to file
                     let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(output_mrt, None, &outbuf[..len]);
                     outbuf.clear();
                 }
             };
             // Without timestamp
-            ($var:ident) => {
+            ($msg:ident) => {
                 if let Some(output_mrt) = output_mrt.as_mut() {
                     // convert to v4 first
                     assert!(outbuf.is_empty());
-                    let len = $var.write_as_v4(&mut outbuf, None).unwrap();
+                    let len = $msg.write_as_v4(&mut outbuf, None).unwrap();
                     // then write to file
                     let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(output_mrt, None, &outbuf[..len]);
                     outbuf.clear();
@@ -388,21 +395,13 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                 //    eprint!("\r{cnt}");
                 //}
 
-                // This is a V3 handler, so if we are configured to write to a
-                // (bin|pcap|mrt) file, it needs to be converted.
-
-
-
                 match msg.common.msg_type {
                     MessageType::PEER_UP_NOTIFICATION => {
 
                         let peer_up = PeerUpNotificationV3::try_from_message(msg)
                             .unwrap();
 
-                        if let Some(output) = output.as_mut() {
-                            let len = peer_up.write_as_v4(output, None).unwrap();
-                            //debug!("wrote PeerUp len {len}");
-                        }
+                        write_bin!(peer_up);
                         write_mrt!(peer_up);
 
                         let _ = router_state.process_peer_up(
@@ -413,11 +412,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                         let route_mon = RouteMonitoringV3::try_from_message(msg)
                             .unwrap();
 
-                        if let Some(output) = output.as_mut() {
-                            let len = route_mon.write_as_v4(output, None).unwrap();
-                            //debug!("wrote RouteMon len {len}");
-                        }
-
+                        write_bin!(route_mon);
                         write_mrt!(route_mon);
 
                         let _ = router_state
@@ -430,10 +425,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                         let peer_down = PeerDownNotificationV3::try_from_message(msg)
                                 .unwrap();
 
-                        if let Some(output) = output.as_mut() {
-                            let _ = peer_down.write_as_v4(output, None);
-                        }
-
+                        write_bin!(peer_down);
                         write_mrt!(peer_down);
 
                         let _ = router_state.process_peer_down_notification(
@@ -443,11 +435,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                     MessageType::STATISTICS_REPORT => {
                         let stats_report = StatisticsReportV3::try_from_message(msg).unwrap();
 
-                        if let Some(output) = output.as_mut() {
-                            eprintln!("writing stats report");
-                            let _ = stats_report.write_as_v4(output, None);
-                        }
-
+                        write_bin!(stats_report);
                         write_mrt!(stats_report);
 
                         let _ = router_state.process_statistics_report(

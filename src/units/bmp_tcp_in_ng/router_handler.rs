@@ -5,12 +5,7 @@ use log::{debug, error, warn};
 use routecore::{
     bgp::message_ng::common::SessionConfig,
     bmp::message_ng::{
-            common::{MessageType, PerPeerHeader},
-            io::{BmpHandler, BmpV3Handler, BmpVersion, Parseable},
-            peer_down_notification::{PeerDownNotification as PeerDownNotification, PeerDownNotificationV3, PeerDownNotificationV4},
-            peer_up_notification::{PeerUpNotification, PeerUpNotificationV3, PeerUpNotificationV4},
-            route_monitoring::{RouteMonitoring, RouteMonitoringV3, RouteMonitoringV4},
-            statistics_report::{StatisticsReport, StatisticsReportV3, StatisticsReportV4},
+            common::{MessageType, PerPeerHeader}, io::{BmpHandler, BmpV3Handler, BmpVersion, Parseable}, peer_down_notification::{PeerDownNotification as PeerDownNotification, PeerDownNotificationV3, PeerDownNotificationV4}, peer_up_notification::{PeerUpNotification, PeerUpNotificationV3, PeerUpNotificationV4}, route_monitoring::{RouteMonitoring, RouteMonitoringV3, RouteMonitoringV4}, snapshot::SnapshotMessage, statistics_report::{StatisticsReport, StatisticsReportV3, StatisticsReportV4}
         },
 };
 use tokio::io::AsyncRead;
@@ -75,6 +70,12 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                         .write(true)
                         .open(output) {
                             Ok(mut fh) => {
+                                if self.config.write_snapshot.is_some_and(|v| v) {
+                                    // FIXME properly generate and store this
+                                    // somewhere
+                                    let uuid: [u8; 16] = std::array::from_fn(|i| u8::try_from(i).unwrap());
+                                    let _ = SnapshotMessage::write_new(&mut fh, uuid);
+                                }
                                 let _ = init_msg.write_as_v4(&mut fh, None);
                             }
                             Err(e) => {
@@ -96,6 +97,17 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                         .open(output_mrt) {
                             Ok(mut fh) => {
                                 let mut outbuf = Vec::with_capacity(1<<16);
+                                if self.config.write_snapshot.is_some_and(|v| v) {
+                                    // FIXME properly generate and store this
+                                    // somewhere
+                                    let uuid: [u8; 16] = std::array::from_fn(|i| u8::try_from(i).unwrap());
+                                    let len = SnapshotMessage::write_new(&mut outbuf, uuid).unwrap();
+                                    let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(&mut fh, None, &outbuf[..len]);
+                                    outbuf.clear();
+                                }
+
+
+
                                 let len = init_msg.write_as_v4(&mut outbuf, None).unwrap();
                                 let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(&mut fh, None, &outbuf[..len]);
                                 outbuf.clear();
@@ -352,11 +364,24 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
 
         let mut outbuf = Vec::with_capacity(1<<20);
 
+
+
+        let mut additional_tlvs_buf = Vec::new();
+        let additional_tlvs = if let Some(true) = config.write_snapshot {
+            // FIXME this should be stored in the runner somewhere
+            let uuid: [u8; 16] = std::array::from_fn(|i| u8::try_from(i).unwrap());
+            let _ = routecore::bmp::message_ng::tlvs::Tlv::write(&mut additional_tlvs_buf, routecore::bmp::message_ng::tlvs::GenericCodepoint::SNAPSHOT_ID, uuid);
+            Some(routecore::bmp::message_ng::tlvs::Tlvs::from_slice(additional_tlvs_buf.as_ref()))
+        } else {
+            None
+        };
+
         // Helper to create binary files.
         macro_rules! write_bin(
             ($msg:ident) => {
                 if let Some(output) = output.as_mut() {
-                    let _len = $msg.write_as_v4(output, None).unwrap();
+                    //let _len = $msg.write_as_v4(output, None).unwrap();
+                    let _len = $msg.write_as_v4(output, additional_tlvs).unwrap();
                 }
             }
         );
@@ -368,9 +393,9 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                 if let Some(output_mrt) = output_mrt.as_mut() {
                     // convert to v4 first
                     assert!(outbuf.is_empty());
-                    let len = $msg.write_as_v4(&mut outbuf, Some($ts)).unwrap();
+                    let len = $msg.write_as_v4(&mut outbuf, additional_tlvs).unwrap();
                     // then write to file
-                    let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(output_mrt, None, &outbuf[..len]);
+                    let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(output_mrt, Some($ts), &outbuf[..len]);
                     outbuf.clear();
                 }
             };
@@ -379,7 +404,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                 if let Some(output_mrt) = output_mrt.as_mut() {
                     // convert to v4 first
                     assert!(outbuf.is_empty());
-                    let len = $msg.write_as_v4(&mut outbuf, None).unwrap();
+                    let len = $msg.write_as_v4(&mut outbuf, additional_tlvs).unwrap();
                     // then write to file
                     let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(output_mrt, None, &outbuf[..len]);
                     outbuf.clear();

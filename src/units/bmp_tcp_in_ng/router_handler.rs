@@ -87,6 +87,29 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                         }
                 }
 
+                if let Some(output_mrt) = self.config.write_v4_to_file_mrt.as_ref() {
+                    match std::fs::OpenOptions::new()
+                        .create(true)
+                        .truncate(true)
+                        .append(false)
+                        .write(true)
+                        .open(output_mrt) {
+                            Ok(mut fh) => {
+                                let mut outbuf = Vec::with_capacity(1<<16);
+                                let len = init_msg.write_as_v4(&mut outbuf, None).unwrap();
+                                let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(&mut fh, None, &outbuf[..len]);
+                                outbuf.clear();
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "Failed to open {} for writing: {e}",
+                                    output_mrt.to_string_lossy()
+                                );
+                            }
+
+                        }
+                }
+
             }
             Err(_other_msg) => {
                 // NB: this message is not consumed, so it will be picked up
@@ -138,6 +161,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
         unit_ingress_id: IngressId,
         partial_ingress_info: IngressInfo,
         config: BmpTcpIn,
+        // XXX maybe instead pass in the BufWriters directly?
     ) {
         let mut router_state = RouterState::new(
             gate,
@@ -162,6 +186,37 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                     }
                 }
         );
+
+        let mut output_mrt = config.write_v4_to_file_mrt.and_then(|output|
+            match std::fs::OpenOptions::new()
+                .create(false)
+                .append(true)
+                .open(&output) {
+                    Ok(fh) => Some(BufWriter::new(fh)),
+                    Err(e) => {
+                        warn!(
+                            "Failed to open {} for writing: {e}",
+                            output.to_string_lossy()
+                        );
+                        None
+                    }
+                }
+        );
+
+        macro_rules! write_mrt(
+            // With timestamp
+            ($var:ident, $ts:expr) => {
+                if let Some(output_mrt) = output_mrt.as_mut() {
+                    let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(output_mrt, Some($ts), $var.as_ref());
+                }
+            };
+            // Without timestamp
+            ($var:ident) => {
+                if let Some(output_mrt) = output_mrt.as_mut() {
+                    let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(output_mrt, None, $var.as_ref());
+                }
+            };
+        );
         while let Ok(Some(_)) = bmp_handler.msg_iter.read_into_buf().await {
             while let Ok(msg) = bmp_handler.msg_iter.get_message() {
                 //cnt += 1;
@@ -184,8 +239,9 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
 
                         if let Some(output) = output.as_mut() {
                             let _ = output.write(peer_up.as_ref());
-                            //let _ = peer_up.write_as_v4(output, None);
                         }
+
+                        write_mrt!(peer_up);
 
                         let _ = router_state.process_peer_up(
                             peer_up
@@ -200,8 +256,10 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
 
                         if let Some(output) = output.as_mut() {
                             let _ = output.write(route_mon.as_ref());
-                            //let _ = route_mon.write_as_v4(output, None);
                         }
+
+                        write_mrt!(route_mon);
+
                         let _ = router_state
                             .process_route_monitoring(
                                 route_mon
@@ -216,8 +274,9 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
 
                         if let Some(output) = output.as_mut() {
                             let _ = output.write(peer_down.as_ref());
-                            //let _ = peer_down.write_as_v4(output, None);
                         }
+
+                        write_mrt!(peer_down);
 
                         let _ = router_state.process_peer_down_notification(
                             peer_down
@@ -231,8 +290,9 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
 
                         if let Some(output) = output.as_mut() {
                             let _ = output.write(stats_report.as_ref());
-                            //let _ = stats_report.write_as_v4(output, None);
                         }
+
+                        write_mrt!(stats_report);
 
                         let _ = router_state.process_statistics_report(
                             stats_report
@@ -277,6 +337,50 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                     }
                 }
         );
+        let mut output_mrt = config.write_v4_to_file_mrt.and_then(|output_mrt|
+            match std::fs::OpenOptions::new()
+                .create(false)
+                .append(true)
+                .open(&output_mrt) {
+                    Ok(fh) => Some(BufWriter::new(fh)),
+                    Err(e) => {
+                        warn!(
+                            "Failed to open {} for writing: {e}",
+                            output_mrt.to_string_lossy()
+                        );
+                        None
+                    }
+                }
+        );
+
+        let mut outbuf = Vec::with_capacity(1<<20);
+
+        macro_rules! write_mrt(
+            // With timestamp
+            ($var:ident, $ts:expr) => {
+                if let Some(output_mrt) = output_mrt.as_mut() {
+                    // convert to v4 first
+                    assert!(outbuf.is_empty());
+                    let len = $var.write_as_v4(&mut outbuf, Some($ts)).unwrap();
+                    // then write to file
+                    let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(output_mrt, None, &outbuf[..len]);
+                    outbuf.clear();
+                }
+            };
+            // Without timestamp
+            ($var:ident) => {
+                if let Some(output_mrt) = output_mrt.as_mut() {
+                    // convert to v4 first
+                    assert!(outbuf.is_empty());
+                    let len = $var.write_as_v4(&mut outbuf, None).unwrap();
+                    // then write to file
+                    let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(output_mrt, None, &outbuf[..len]);
+                    outbuf.clear();
+                }
+            };
+        );
+
+
         while let Ok(Some(_)) = bmp_handler.msg_iter.read_into_buf().await {
             while let Ok(msg) = bmp_handler.msg_iter.get_message() {
                 //cnt += 1;
@@ -299,6 +403,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                             let len = peer_up.write_as_v4(output, None).unwrap();
                             //debug!("wrote PeerUp len {len}");
                         }
+                        write_mrt!(peer_up);
 
                         let _ = router_state.process_peer_up(
                             peer_up
@@ -312,6 +417,9 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                             let len = route_mon.write_as_v4(output, None).unwrap();
                             //debug!("wrote RouteMon len {len}");
                         }
+
+                        write_mrt!(route_mon);
+
                         let _ = router_state
                             .process_route_monitoring(
                                 route_mon
@@ -326,6 +434,8 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                             let _ = peer_down.write_as_v4(output, None);
                         }
 
+                        write_mrt!(peer_down);
+
                         let _ = router_state.process_peer_down_notification(
                             peer_down
                         );
@@ -337,6 +447,8 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                             eprintln!("writing stats report");
                             let _ = stats_report.write_as_v4(output, None);
                         }
+
+                        write_mrt!(stats_report);
 
                         let _ = router_state.process_statistics_report(
                             stats_report

@@ -93,7 +93,6 @@ impl PphRegister {
 
     pub fn insert(
         &mut self,
-        //pph: &PerPeerHeaderV3,
         pph: &impl PerPeerHeader,
         session_config: SessionConfig,
     ) -> IngressId {

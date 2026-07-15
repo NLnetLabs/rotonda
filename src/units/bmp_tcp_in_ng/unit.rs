@@ -45,8 +45,8 @@ pub struct BmpTcpIn {
     ///// (Convert to and) write BMPv4 messages to a .pcap file.
     //pub write_v4_to_file_pcap: Option<PathBuf>,
 
-    ///// (Convert to and) write BMPv4 messages to an .mrt file.
-    //pub write_v4_to_file_mrt: Option<PathBuf>,
+    /// (Convert to and) write BMPv4 messages to an .mrt file.
+    pub write_v4_to_file_mrt: Option<PathBuf>,
 }
 
 impl BmpTcpIn {

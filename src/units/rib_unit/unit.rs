@@ -586,7 +586,11 @@ impl RibUnitRunner {
                     }
                 };
 
+                // Use the new routedb:
                 self.handle_bulk_ng(&raw_update, ingress_id, sc.clone());
+
+
+                // Everything below is for the old rotonda-store:
 
                 let received = std::time::Instant::now();
 
@@ -1163,6 +1167,8 @@ impl RibUnitRunner {
             conv_tbl_props = conv_tbl_props.with_add_path_cap();
         }
 
+        // TODO convert to by_properties once this does the creation
+        // rib.routedb.routing_tables().by_properties(conv_tbl_props).map(..)
         let conv_tbl = tgrp.get_or_create_table(conv_tbl_props).unwrap();
 
         let Some(conv_routing_table) = tgrp.by_id(conv_tbl) else {
@@ -1177,6 +1183,9 @@ impl RibUnitRunner {
                 eprint!("-");
                 // TODO use routing_table.withdraw_single() once implemented
                 // in routedb
+
+
+
                 conv_routing_table.upsert_single(
                     nlri,
                     routedb::prefix_record::RouteStatus::Withdrawn,
@@ -1394,7 +1403,14 @@ impl RibUnitRunner {
         Ok(())
     }
 
+    pub fn insert_payload_ng(&self, payload: &Payload) {
+
+    }
+
     pub fn insert_payload(&self, payload: &Payload) {
+
+        self.insert_payload_ng(payload);
+
         let rib = self.rib.load();
 
         let pre_insert = std::time::Instant::now();

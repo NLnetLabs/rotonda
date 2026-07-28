@@ -5,8 +5,8 @@ use log::{debug, error, warn};
 use routecore::{
     bgp::message_ng::common::SessionConfig,
     bmp::message_ng::{
-            common::{MessageType, PerPeerHeader}, io::{BmpHandler, BmpV3Handler, BmpVersion, Parseable}, peer_down_notification::{PeerDownNotification as PeerDownNotification, PeerDownNotificationV3, PeerDownNotificationV4}, peer_up_notification::{PeerUpNotification, PeerUpNotificationV3, PeerUpNotificationV4}, route_monitoring::{RouteMonitoring, RouteMonitoringV3, RouteMonitoringV4}, snapshot::SnapshotMessage, statistics_report::{StatisticsReport, StatisticsReportV3, StatisticsReportV4}
-        },
+            common::{MessageType, PerPeerHeader}, io::{BmpHandler, BmpV3Handler, BmpVersion, Parseable}, peer_down_notification::{PeerDownNotification as PeerDownNotification, PeerDownNotificationV3, PeerDownNotificationV4}, peer_up_notification::{PeerUpNotification, PeerUpNotificationV3, PeerUpNotificationV4}, route_monitoring::{RouteMonitoring, RouteMonitoringV3, RouteMonitoringV4}, snapshot::SnapshotMessage, statistics_report::{StatisticsReport, StatisticsReportV3, StatisticsReportV4}, tlvs::Index
+        }, util::pcapng::{PcapNgWriter, PcapNgWriterExt},
 };
 use tokio::io::AsyncRead;
 
@@ -49,6 +49,10 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
     ) -> Result<(), BmpNgError> {
         let (version, msg) = self.bmp_handler.process_initiation().await;
 
+        debug!("version: {version:?}");
+
+        let mut output_pcapng = None;
+
         match msg {
             Ok(init_msg) => {
                 partial_ingress_info = partial_ingress_info.with_name(
@@ -74,7 +78,8 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                                     // FIXME properly generate and store this
                                     // somewhere
                                     let uuid: [u8; 16] = std::array::from_fn(|i| u8::try_from(i).unwrap());
-                                    let _ = SnapshotMessage::write_new(&mut fh, uuid);
+                                    let snapshot_written_bytes = SnapshotMessage::write_new(&mut fh, uuid).unwrap();
+                                    //dbg!(snapshot_written_bytes);
                                 }
                                 let _ = init_msg.write_as_v4(&mut fh, None);
                             }
@@ -106,8 +111,6 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                                     outbuf.clear();
                                 }
 
-
-
                                 let len = init_msg.write_as_v4(&mut outbuf, None).unwrap();
                                 let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(&mut fh, None, &outbuf[..len]);
                                 outbuf.clear();
@@ -122,11 +125,41 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                         }
                 }
 
+                if let Some(pcapng_filename) = self.config.write_v4_to_file_pcapng.as_ref() {
+                    match std::fs::OpenOptions::new()
+                        .create(true)
+                        .truncate(true)
+                        .append(false)
+                        .write(true)
+                        .open(pcapng_filename) {
+                            Ok(mut fh) => {
+                                let mut res = PcapNgWriter::new_custom(fh).unwrap();
+                                res.start_snapshot();
+                                output_pcapng = Some(res);
+
+                            }
+                            Err(e) => {
+                                warn!(
+                                    "Failed to open {} for writing: {e}",
+                                    pcapng_filename.to_string_lossy()
+                                );
+                            }
+
+                        }
+                }
+
             }
-            Err(_other_msg) => {
+            Err(other_msg) => {
                 // NB: this message is not consumed, so it will be picked up
                 // in process() below.
                 warn!("unexpected first message of BMP stream");
+
+                if let Ok(snapshot_msg) = SnapshotMessage::try_from_raw(other_msg) {
+                    debug!("raw msg (len {}): {:?}", &other_msg.len(), &other_msg);
+                    let id = snapshot_msg.snapshot_id();
+                    warn!("but it turns out to be a SnapshotMessage, id {id:?}");
+                }
+
                 partial_ingress_info = partial_ingress_info
                     .with_desc("__invalid_stream_missing_initation_msg");
             }
@@ -145,6 +178,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                     self.unit_ingress_id,
                     partial_ingress_info,
                     self.config,
+                    output_pcapng,
                 )
                 .await;
                 Ok(())
@@ -307,6 +341,14 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                             stats_report
                         );
                     }
+                    MessageType::INITIATION => {
+                        // We end up here if the first message was not an
+                        // Initiation (e.g. in case of a BMP Snapshot) or when
+                        // the exporter sends an Initiation mid-stream to
+                        // provide new information (in the TLVs).
+                        debug!("Got an Initiation message after the first message in this stream");
+                        debug!("TODO handle Initiation TLVs mid stream");
+                    }
                     _ => {
                         panic!("TODO {}", msg.common.msg_type)
                     }
@@ -315,17 +357,18 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
         }
     }
     
-    async fn process(
+    async fn process<W: Write>(
         mut bmp_handler: BmpV3Handler<R>,
         gate: Gate,
         ingress_register: Arc<ingress::Register>,
         unit_ingress_id: IngressId,
         partial_ingress_info: IngressInfo,
         config: BmpTcpIn,
+        mut output_pcapng: Option<PcapNgWriter<W>>,
     ) {
         let mut router_state = RouterState::new(
             gate,
-            ingress_register,
+            ingress_register.clone(),
             unit_ingress_id,
             partial_ingress_info,
         );
@@ -361,6 +404,36 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                     }
                 }
         );
+        let mut output_bgp_mrt_pcapng = config.write_bgp_as_mrt_in_pcapng.and_then(|output|
+            match std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open(&output) {
+                    Ok(fh) => {
+                        let mut res = PcapNgWriter::new_custom(fh).unwrap();
+                        res.start_mrt();
+                        Some(res)
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to open {} for writing: {e}",
+                            output.to_string_lossy()
+                        );
+                        None
+                    }
+                }
+        );
+
+        let mut tmp_mrt_only_output = match std::fs::OpenOptions::new()
+                .create(true)
+                .truncate(true)
+                .write(true)
+                .open("/tmp/mrtonly.mrt") {
+                    Ok(fh) => Some(BufWriter::new(fh)),
+                    Err(e) => None,
+                };
+
 
         let mut outbuf = Vec::with_capacity(1<<20);
 
@@ -376,6 +449,19 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
             None
         };
 
+        let mut additional_indexed_tlvs_buf = Vec::new();
+        let additional_indexed_tlvs = if let Some(true) = config.write_snapshot {
+            // FIXME this should be stored in the runner somewhere
+            let uuid: [u8; 16] = std::array::from_fn(|i| u8::try_from(i).unwrap());
+            let _ = routecore::bmp::message_ng::tlvs::IndexedTlv::write(&mut additional_indexed_tlvs_buf, routecore::bmp::message_ng::tlvs::GenericCodepoint::SNAPSHOT_ID, Index::ALL, uuid);
+            // FIXME: we create a Tlvs here instead of an IndexedTlvs, because
+            // the fn write_as_v4 from the trait takes a Tlvs... make that
+            // nicer.
+            Some(routecore::bmp::message_ng::tlvs::Tlvs::from_slice(additional_indexed_tlvs_buf.as_ref()))
+        } else {
+            None
+        };
+
         // Helper to create binary files.
         macro_rules! write_bin(
             ($msg:ident) => {
@@ -385,6 +471,61 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                 }
             }
         );
+
+        // Helper to create binary files.
+        macro_rules! write_pcapng(
+            ($msg:ident) => {
+                if let Some(pcapng_writer) = output_pcapng.as_mut() {
+                    let len = $msg.write_as_v4(&mut outbuf, additional_tlvs).unwrap();
+                    pcapng_writer.write_msg(&outbuf[..len]);
+                    outbuf.clear();
+                }
+            }
+        );
+
+        macro_rules! write_indexed_pcapng(
+            ($msg:ident) => {
+                if let Some(pcapng_writer) = output_pcapng.as_mut() {
+                    let len = $msg.write_as_v4(&mut outbuf, additional_indexed_tlvs).unwrap();
+                    pcapng_writer.write_msg(&outbuf[..len]);
+                    outbuf.clear();
+                }
+            }
+        );
+
+
+        macro_rules! write_bgp_as_mrt_in_pcapng(
+            ($msg:ident, $ingress_info:ident) => {
+                if let Some(output) = output_bgp_mrt_pcapng.as_mut() {
+
+                    // FIXME:
+                    // double check what the remote/local addr in the
+                    // ingressinfo actually are: BMP or BGP level? we need the
+                    // latter.
+                    // NOT the BGP level session. Those are in the PPH itself.
+                    //
+
+                    let len = routecore::mrt_ng::common::CommonHeader::write_bgp4mp_et_msg(
+                        &mut outbuf,
+                        // converting old inetnum Asn into Asn ng
+                        routecore::bmp::message_ng::common::Asn::from_u32($ingress_info.remote_asn.unwrap_or(Asn::from_u32(0)).into_u32()),
+                        routecore::bmp::message_ng::common::Asn::from_u32($ingress_info.local_asn.unwrap_or(Asn::from_u32(0)).into_u32()),
+                        0_u16, // interface_idx,
+                        $ingress_info.remote_addr.unwrap(),
+                        // FIXME we don't keep a local addr in the ingress reg
+                        //$ingress_info.local_addr.unwrap(),
+                        $ingress_info.remote_addr.unwrap(),
+
+                        $msg.bgp_update().unwrap()
+                    ).unwrap();
+                    output.write_msg(&outbuf[..len]);
+                    let _ = tmp_mrt_only_output.as_mut().unwrap().write(&outbuf[..len]);
+                    outbuf.clear();
+                }
+            };
+        );
+
+
 
         // Helper to create .mrt files.
         macro_rules! write_mrt(
@@ -428,6 +569,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
 
                         write_bin!(peer_up);
                         write_mrt!(peer_up);
+                        write_pcapng!(peer_up);
 
                         let _ = router_state.process_peer_up(
                             peer_up
@@ -439,6 +581,16 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
 
                         write_bin!(route_mon);
                         write_mrt!(route_mon);
+                        write_indexed_pcapng!(route_mon);
+
+
+                        if let Some(ingress_info) = router_state.pph_register.get(
+                            route_mon.per_peer_header()).and_then(|(id,_session_config)| ingress_register.get(*id)) {
+                            write_bgp_as_mrt_in_pcapng!(route_mon, ingress_info);
+                        } else {
+                            warn!("not writing mrt to pcapng: missing PPH/ingressinfo");
+                        }
+                        
 
                         let _ = router_state
                             .process_route_monitoring(
@@ -542,6 +694,10 @@ impl RouterState {
             .with_peer_type(u8::from(pph.peer_type()))
             .with_rib_type(pph.rib_type())
             .with_peer_rib_type((pph.is_post_policy(), pph.rib_type()));
+
+        //for tlv in msg.tlvs().unwrap() {
+        //    dbg!(&tlv);
+        //}
 
         self.ingress_register.update_info(ingress_id, ingress_info);
         Ok(())

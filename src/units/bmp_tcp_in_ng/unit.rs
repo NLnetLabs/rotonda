@@ -42,14 +42,16 @@ pub struct BmpTcpIn {
     /// (Convert to and) write BMPv4 messages to file as a binary stream.
     pub write_v4_to_file_bin: Option<PathBuf>,
 
-    ///// (Convert to and) write BMPv4 messages to a .pcap file.
-    //pub write_v4_to_file_pcap: Option<PathBuf>,
+    ///// (Convert to and) write BMPv4 messages to a .pcapng file.
+    pub write_v4_to_file_pcapng: Option<PathBuf>,
 
     /// (Convert to and) write BMPv4 messages to an .mrt file.
     pub write_v4_to_file_mrt: Option<PathBuf>,
 
     /// Tmp dev: When writing to .bin/.mrt/.pcap, make it a BMP Snapshot
     pub write_snapshot: Option<bool>,
+
+    pub write_bgp_as_mrt_in_pcapng: Option<PathBuf>,
 }
 
 impl BmpTcpIn {

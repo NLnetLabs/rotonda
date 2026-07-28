@@ -1,4 +1,4 @@
-use std::{borrow::Cow, io::{BufWriter, Read, Write}, sync::Arc};
+use std::{borrow::Cow, collections::HashMap, io::{BufWriter, Read, Write}, net::IpAddr, sync::Arc};
 
 use inetnum::asn::Asn;
 use log::{debug, error, warn};
@@ -826,6 +826,94 @@ impl RouterState {
         &mut self,
         msg: &M,
     ) -> Result<(), BmpNgError> {
+
+
+        #[derive(Eq, Hash, PartialEq)]
+        struct Key {
+            rib_view: routecore::bmp::message_ng::common::RibViewType,
+            distinguisher: [u8; 8],
+            address: IpAddr,
+            asn: routecore::bmp::message_ng::common::Asn,
+            bgp_id: [u8; 4]
+        }
+
+        struct Value {
+            timestamp: std::time::SystemTime,
+            raw_stats: Vec<u8>,
+        }
+
+        // import enum
+        use routecore::bmp::message_ng::statistics_report::Stat::{CounterStat, GaugeStat, AfiSafiGaugeStat};
+
+        let pph = msg.per_peer_header();
+
+        let key = Key {
+            // not sure whether rib_view is useful or necessary:
+            // some stat type are rib_view specific anyway (e.g. 
+            // 'routes_per_afi_safi_pre_policy_adj_rib_out' )
+            // We need to find out whether exporter implementations really
+            // send out StatsReport for different rib views, or whether it is
+            // always AdjRibInPre (i.e. all related types/flags are 0 in the
+            // PPH)
+            rib_view: pph.rib_view(),
+            distinguisher: pph.distinguisher(),
+            address: pph.address(),
+            asn: pph.asn(),
+            // do we need to include this in the metrics output?
+            bgp_id: pph.bgp_id(),
+        };
+
+
+
+        // store the entire Stats blob per peer
+        // XXX move this to RouterHandler itself
+        // print on every insert and see if we keep state?
+        let mut stats = HashMap::<Key, Value>::new();
+
+        stats.insert(key, Value {
+            timestamp: std::time::SystemTime::now(),
+            raw_stats: msg.stats().as_ref().to_vec()
+        });
+
+
+        for (session, Value { timestamp, raw_stats: blob}) in stats {
+            let timestamp = timestamp.duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_millis();
+            let iter = routecore::bmp::message_ng::statistics_report::StatIterator::for_slice(&blob);
+
+            // labels lacks the closing curly brace
+            // we add this at 'print' time, so we can still add afisafi= for
+            // the AfiSafiGaugeStat.
+            let labels = format_args!("{{\
+                asn=\"{}\",\
+                address=\"{}\",\
+                ribview=\"{}\",\
+                distinguisher=\"{:?}\"\
+                ", // no closing curly brace!
+                session.asn,
+                session.address,
+                session.rib_view,
+                session.distinguisher,
+                );
+            for stat in iter {
+                let Ok(stat) = stat.into_specific() else {
+                    warn!("unknown stat type");
+                    continue
+                };
+                match stat {
+                    CounterStat(counter_stat) => {
+                        eprintln!("bmp_stats_report_{}{labels}}} {} {}", counter_stat.stat_type, routecore::bmp::message_ng::statistics_report::StatValue::value(counter_stat), timestamp);
+                    }
+                    GaugeStat(gauge_stat) => {
+                        eprintln!("bmp_stats_report_{}{labels}}} {} {}", gauge_stat.stat_type, routecore::bmp::message_ng::statistics_report::StatValue::value(gauge_stat), timestamp);
+                    }
+                    AfiSafiGaugeStat(afi_safi_gauge_stat) => {
+                        let (afisafi, gauge) = routecore::bmp::message_ng::statistics_report::StatValue::value(afi_safi_gauge_stat);
+                        
+                        eprintln!("bmp_stats_report_{}{labels},afisafi=\"{afisafi}\"}} {} {}", afi_safi_gauge_stat.stat_type, gauge, timestamp);
+                    }
+                }
+            }
+        }
         Ok(())
     }
 }

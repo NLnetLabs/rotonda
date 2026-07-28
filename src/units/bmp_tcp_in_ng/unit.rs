@@ -50,6 +50,8 @@ pub struct BmpTcpIn {
 
     /// Tmp dev: When writing to .bin/.mrt/.pcap, make it a BMP Snapshot
     pub write_snapshot: Option<bool>,
+
+    pub write_bgp_as_mrt_in_pcapng: Option<PathBuf>,
 }
 
 impl BmpTcpIn {

@@ -5,7 +5,7 @@ mod error;
 mod io;
 mod pph_register;
 pub mod router_handler;
-mod unit;
+pub mod unit;
 mod util;
 
 pub use unit::BmpTcpIn;

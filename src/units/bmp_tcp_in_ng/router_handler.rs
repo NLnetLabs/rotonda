@@ -14,7 +14,7 @@ use crate::{
     comms::Gate,
     ingress::{self, IngressId, IngressInfo, IngressType},
     payload::Update,
-    units::bmp_tcp_in_ng::{BmpTcpIn, error::BmpNgError, pph_register::PphRegister},
+    units::bmp_tcp_in_ng::{BmpTcpIn, error::BmpNgError, pph_register::PphRegister, unit::{StatsKey, StatsValue}},
 };
 
 pub struct RouterHandler<R> {
@@ -23,6 +23,7 @@ pub struct RouterHandler<R> {
     unit_ingress_id: IngressId,
     gate: Gate,
     config: BmpTcpIn,
+    stats_db: super::unit::StatsStore,
 }
 
 impl<R: AsyncRead + Unpin> RouterHandler<R> {
@@ -32,6 +33,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
         ingress_register: Arc<ingress::Register>,
         unit_ingress_id: IngressId,
         config: BmpTcpIn,
+        stats_db: super::unit::StatsStore,
     ) -> Self {
         let bmp_handler = BmpHandler::for_stream(stream);
         Self {
@@ -40,6 +42,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
             unit_ingress_id,
             gate,
             config,
+            stats_db,
         }
     }
 
@@ -179,6 +182,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                     partial_ingress_info,
                     self.config,
                     output_pcapng,
+                    self.stats_db,
                 )
                 .await;
                 Ok(())
@@ -192,6 +196,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                     self.unit_ingress_id,
                     partial_ingress_info,
                     self.config,
+                    self.stats_db,
                 )
                 .await;
                 Ok(())
@@ -207,6 +212,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
         unit_ingress_id: IngressId,
         partial_ingress_info: IngressInfo,
         config: BmpTcpIn,
+        stats_db: super::unit::StatsStore,
         // XXX maybe instead pass in the BufWriters directly?
     ) {
         let mut router_state = RouterState::new(
@@ -214,6 +220,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
             ingress_register,
             unit_ingress_id,
             partial_ingress_info,
+            stats_db,
         );
         //let mut cnt = 0;
         
@@ -365,12 +372,15 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
         partial_ingress_info: IngressInfo,
         config: BmpTcpIn,
         mut output_pcapng: Option<PcapNgWriter<W>>,
+        stats_db: super::unit::StatsStore,
     ) {
         let mut router_state = RouterState::new(
             gate,
             ingress_register.clone(),
             unit_ingress_id,
             partial_ingress_info,
+            stats_db,
+
         );
         //let mut cnt = 0;
         
@@ -647,6 +657,10 @@ pub struct RouterState {
     ingress_register: Arc<ingress::Register>,
     bmp_stream_ingress_id: IngressId,
     gate: Gate,
+    stats_db: super::unit::StatsStore,
+    bmp_router_name: String,
+    bmp_router_addr: IpAddr,
+
 }
 
 #[allow(clippy::unnecessary_wraps)]
@@ -656,9 +670,14 @@ impl RouterState {
         ingress_register: Arc<ingress::Register>,
         unit_ingress_id: IngressId,
         partial_ingress_info: IngressInfo,
+        stats_db: super::unit::StatsStore,
     ) -> Self {
         let bmp_stream_ingress_id = ingress_register.register();
         debug!("bmp_stream registered {bmp_stream_ingress_id}");
+
+        let bmp_router_name = partial_ingress_info.name.clone().unwrap_or("__no_router_name".into());
+        let bmp_router_addr = partial_ingress_info.remote_addr.unwrap_or("::".parse().unwrap());
+
         //let bmp_stream_info = IngressInfo::new()
         let bmp_stream_info = partial_ingress_info
             .with_ingress_type(IngressType::Bmp)
@@ -667,11 +686,15 @@ impl RouterState {
 
         ingress_register.update_info(bmp_stream_ingress_id, bmp_stream_info);
 
+
         Self {
             pph_register: PphRegister::new(ingress_register.clone()),
             ingress_register,
             bmp_stream_ingress_id,
             gate,
+            stats_db,
+            bmp_router_name,
+            bmp_router_addr,
         }
     }
 
@@ -827,27 +850,14 @@ impl RouterState {
         msg: &M,
     ) -> Result<(), BmpNgError> {
 
-
-        #[derive(Eq, Hash, PartialEq)]
-        struct Key {
-            rib_view: routecore::bmp::message_ng::common::RibViewType,
-            distinguisher: [u8; 8],
-            address: IpAddr,
-            asn: routecore::bmp::message_ng::common::Asn,
-            bgp_id: [u8; 4]
-        }
-
-        struct Value {
-            timestamp: std::time::SystemTime,
-            raw_stats: Vec<u8>,
-        }
-
         // import enum
         use routecore::bmp::message_ng::statistics_report::Stat::{CounterStat, GaugeStat, AfiSafiGaugeStat};
 
         let pph = msg.per_peer_header();
 
-        let key = Key {
+        let key = StatsKey {
+            bmp_router_name: self.bmp_router_name.clone(),
+            bmp_router_addr: self.bmp_router_addr,
             // not sure whether rib_view is useful or necessary:
             // some stat type are rib_view specific anyway (e.g. 
             // 'routes_per_afi_safi_pre_policy_adj_rib_out' )
@@ -864,56 +874,12 @@ impl RouterState {
         };
 
 
-
-        // store the entire Stats blob per peer
-        // XXX move this to RouterHandler itself
-        // print on every insert and see if we keep state?
-        let mut stats = HashMap::<Key, Value>::new();
-
-        stats.insert(key, Value {
+        let mut db = self.stats_db.lock().unwrap();
+        db.insert(key, StatsValue {
             timestamp: std::time::SystemTime::now(),
             raw_stats: msg.stats().as_ref().to_vec()
         });
 
-
-        for (session, Value { timestamp, raw_stats: blob}) in stats {
-            let timestamp = timestamp.duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_millis();
-            let iter = routecore::bmp::message_ng::statistics_report::StatIterator::for_slice(&blob);
-
-            // labels lacks the closing curly brace
-            // we add this at 'print' time, so we can still add afisafi= for
-            // the AfiSafiGaugeStat.
-            let labels = format_args!("{{\
-                asn=\"{}\",\
-                address=\"{}\",\
-                ribview=\"{}\",\
-                distinguisher=\"{:?}\"\
-                ", // no closing curly brace!
-                session.asn,
-                session.address,
-                session.rib_view,
-                session.distinguisher,
-                );
-            for stat in iter {
-                let Ok(stat) = stat.into_specific() else {
-                    warn!("unknown stat type");
-                    continue
-                };
-                match stat {
-                    CounterStat(counter_stat) => {
-                        eprintln!("bmp_stats_report_{}{labels}}} {} {}", counter_stat.stat_type, routecore::bmp::message_ng::statistics_report::StatValue::value(counter_stat), timestamp);
-                    }
-                    GaugeStat(gauge_stat) => {
-                        eprintln!("bmp_stats_report_{}{labels}}} {} {}", gauge_stat.stat_type, routecore::bmp::message_ng::statistics_report::StatValue::value(gauge_stat), timestamp);
-                    }
-                    AfiSafiGaugeStat(afi_safi_gauge_stat) => {
-                        let (afisafi, gauge) = routecore::bmp::message_ng::statistics_report::StatValue::value(afi_safi_gauge_stat);
-                        
-                        eprintln!("bmp_stats_report_{}{labels},afisafi=\"{afisafi}\"}} {} {}", afi_safi_gauge_stat.stat_type, gauge, timestamp);
-                    }
-                }
-            }
-        }
         Ok(())
     }
 }

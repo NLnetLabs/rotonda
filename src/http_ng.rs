@@ -15,7 +15,7 @@ use tower_http::compression::CompressionLayer;
 
 use crate::{
     ingress::{self, http_ng::IngressApi},
-    units::{bgp_tcp_in::unit::LiveSessions, rib_unit::rib::Rib},
+    units::{bgp_tcp_in::unit::LiveSessions, bmp_tcp_in_ng::unit::StatsStore, rib_unit::rib::Rib},
     webui::WebUI,
 };
 
@@ -46,6 +46,9 @@ pub struct Api {
     serve_handles: Vec<JoinHandle<()>>,
 
     global_bgp_sessions: Arc<Mutex<LiveSessions>>,
+
+    /// Tmp BMP Stats Report store, until we put that in routedb too.
+    stats_store: StatsStore,
 }
 
 #[derive(Clone)]
@@ -60,6 +63,9 @@ pub struct ApiState {
 
     /// The metrics collection
     pub(crate) metrics: crate::metrics::Collection,
+
+    /// The (temporary) BMP Stats Report store.
+    pub(crate) stats_db: StatsStore,
 }
 
 impl ApiState {
@@ -93,11 +99,13 @@ impl Api {
         global_bgp_sessions: Arc<Mutex<LiveSessions>>,
         metrics: crate::metrics::Collection,
     ) -> Self {
+        let stats_db = StatsStore::default();
         let state = ApiState {
             store: Default::default(),
             ingress_register: ingress_register.clone(),
             global_bgp_sessions: global_bgp_sessions.clone(),
             metrics: metrics.clone(),
+            stats_db: stats_db.clone(),
         };
 
         let router = axum::Router::<ApiState>::new()
@@ -114,6 +122,7 @@ impl Api {
             signal_txs: vec![],
             global_bgp_sessions,
             serve_handles: vec![],
+            stats_store: stats_db,
         };
 
         // The web-ui lives on /
@@ -137,6 +146,10 @@ impl Api {
             .assemble(crate::metrics::OutputFormat::Prometheus))
     }
 
+    pub fn get_stats_store(&self) -> StatsStore {
+        self.stats_store.clone() 
+    }
+
     /// Clone an `ApiState` based on the references to the store an ingress registry
     pub fn cloned_api_state(&self) -> ApiState {
         debug!(
@@ -148,6 +161,7 @@ impl Api {
             ingress_register: self.ingress_register.clone(),
             global_bgp_sessions: self.global_bgp_sessions.clone(),
             metrics: self.metrics.clone(),
+            stats_db: self.stats_store.clone(),
         }
     }
 

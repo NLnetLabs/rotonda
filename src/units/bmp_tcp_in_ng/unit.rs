@@ -1,24 +1,21 @@
 use std::{
-    future::Future, net::SocketAddr, ops::ControlFlow, path::PathBuf,
-    sync::Arc, time::Duration,
+    collections::{HashMap, HashSet}, future::Future, net::{IpAddr, SocketAddr}, ops::ControlFlow, path::PathBuf, sync::{Arc, Mutex}, time::Duration
 };
 
+use axum::extract::State;
 use futures::{
     future::{select, Either},
     pin_mut,
 };
-use log::{debug, error, info};
+use log::{debug, error, info, warn};
+use routecore::bmp::message_ng::statistics_report::{StatType, StatValue};
 use serde::Deserialize;
 use serde_with::{serde_as, DisplayFromStr};
 use tokio::fs::File;
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::{
-    comms::{Gate, GateStatus, Terminated},
-    ingress::{self, IngressId, IngressInfo},
-    manager::{Component, WaitPoint},
-    roto_runtime::{MutIngressInfoCache, RotondaCtx},
-    units::bmp_tcp_in_ng::{error::BmpNgError, router_handler::RouterHandler},
+    comms::{Gate, GateStatus, Terminated}, http_ng::ApiState, ingress::{self, IngressId, IngressInfo}, manager::{Component, WaitPoint}, roto_runtime::{MutIngressInfoCache, RotondaCtx}, units::bmp_tcp_in_ng::{error::BmpNgError, router_handler::RouterHandler}
 };
 
 use super::router_handler;
@@ -126,7 +123,18 @@ impl BmpTcpIn {
         // them.
         waitpoint.running().await;
 
-        let _ = Runner::new(self.clone(), gate, roto_filter, ingress_register)
+        let stats_db;
+
+        if let Ok(mut api) = component.http_ng_api_arc().lock() {
+            api.add_get("/bmp_stats_reports_metrics", serve_stats_as_metrics);
+            stats_db = api.get_stats_store();
+
+        } else {
+            debug!("could not get lock on HTTP API");
+            stats_db = StatsStore::default();
+        }
+
+        let _ = Runner::new(self.clone(), gate, roto_filter, ingress_register, stats_db)
             .run()
             .await;
 
@@ -141,12 +149,114 @@ type RotoFilter = roto::TypedFunc<
         roto::Val<MutIngressInfoCache>,
     ) -> roto::Verdict<(), ()>,
 >;
+
+
+async fn serve_stats_as_metrics(state: State<ApiState> ) -> Result<String, crate::http_ng::ApiError> {
+    use routecore::bmp::message_ng::statistics_report::Stat::{CounterStat, GaugeStat, AfiSafiGaugeStat};
+    use std::fmt::Write;
+
+    const METRIC_PREFIX: &str = "bmp_stats_report_";
+
+    let mut res = String::new();
+    let mut type_lines_printed = HashSet::<routecore::bmp::message_ng::statistics_report::StatType>::new();
+
+    macro_rules! write_type_help_once(
+        (&mut $res:ident, $stat_type:expr, $metric_type:literal) => {
+            if !type_lines_printed.contains(&$stat_type) {
+                let suffix = if $metric_type == "counter" {
+                    "_total"
+                } else {
+                    ""
+                };
+                let _ = writeln!(&mut $res, "# HELP {METRIC_PREFIX}{} BMP Statistics Report type {}", $stat_type, u16::from($stat_type));
+                let _ = writeln!(&mut $res, "# TYPE {METRIC_PREFIX}{}{suffix} {}", $stat_type, $metric_type);
+                type_lines_printed.insert($stat_type);
+            }
+        }
+
+    );
+
+    let db = state.stats_db.lock().unwrap();
+    for (session, StatsValue { timestamp, raw_stats: blob}) in &*db {
+        let timestamp = timestamp.duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_millis();
+        let iter = routecore::bmp::message_ng::statistics_report::StatIterator::for_slice(blob);
+
+        // labels lacks the closing curly brace
+        // we add this at 'print' time, so we can still add afisafi= for
+        // the AfiSafiGaugeStat.
+        // TODO include bmp-ingress-unit-name
+        let labels = format_args!("{{\
+                bmp_router_name=\"{}\",\
+                bmp_router_addr=\"{}\",\
+                asn=\"{}\",\
+                address=\"{}\",\
+                ribview=\"{}\",\
+                distinguisher=\"{:?}\"\
+                ", // no closing curly brace!
+                session.bmp_router_name,
+                session.bmp_router_addr,
+                session.asn,
+                session.address,
+                session.rib_view,
+                session.distinguisher,
+        );
+
+        for stat in iter {
+            let Ok(stat) = stat.into_specific() else {
+                warn!("unknown stat type");
+                continue
+            };
+            match stat {
+                CounterStat(counter_stat) => {
+                    write_type_help_once!(&mut res, counter_stat.stat_type, "counter");
+                    let _ = writeln!(&mut res, "{METRIC_PREFIX}{}{labels}}} {} {}", counter_stat.stat_type, StatValue::value(counter_stat), timestamp);
+                }
+                GaugeStat(gauge_stat) => {
+                    write_type_help_once!(&mut res, gauge_stat.stat_type, "gauge");
+                    let _ = writeln!(&mut res, "{METRIC_PREFIX}{}{labels}}} {} {}", gauge_stat.stat_type, StatValue::value(gauge_stat), timestamp);
+                }
+                AfiSafiGaugeStat(afi_safi_gauge_stat) => {
+                    write_type_help_once!(&mut res, afi_safi_gauge_stat.stat_type, "gauge");
+                    let (afisafi, gauge) = StatValue::value(afi_safi_gauge_stat);
+                    let _ = writeln!(&mut res, "{METRIC_PREFIX}{}{labels},afisafi=\"{afisafi}\"}} {} {}", afi_safi_gauge_stat.stat_type, gauge, timestamp);
+                }
+            }
+        }
+    }
+
+
+    Ok(res)
+
+}
+
+// Types to store BMP Stats Reports.
+// This should move into routedb eventually.
+#[derive(Eq, Hash, PartialEq)]
+pub struct StatsKey {
+    pub bmp_router_name: String,
+    pub bmp_router_addr: IpAddr,
+    pub rib_view: routecore::bmp::message_ng::common::RibViewType,
+    pub distinguisher: [u8; 8],
+    pub address: IpAddr,
+    pub asn: routecore::bmp::message_ng::common::Asn,
+    pub bgp_id: [u8; 4],
+}
+
+pub struct StatsValue {
+    pub timestamp: std::time::SystemTime,
+    pub raw_stats: Vec<u8>,
+}
+
+pub(crate) type StatsStore = Arc<Mutex<HashMap::<StatsKey, StatsValue>>>;
+
+
 struct Runner {
     config: BmpTcpIn,
     gate: Gate,
     roto_filter: Option<RotoFilter>,
     ingress_register: Arc<ingress::Register>,
     unit_ingress_id: IngressId,
+    stats_db: StatsStore,
 }
 
 impl Runner {
@@ -155,6 +265,7 @@ impl Runner {
         gate: Gate,
         roto_filter: Option<RotoFilter>,
         ingress_register: Arc<ingress::Register>,
+        stats_db: StatsStore,
     ) -> Self {
         let unit_ingress_id = ingress_register.register();
         debug!("Runner registered {unit_ingress_id}");
@@ -165,6 +276,7 @@ impl Runner {
             roto_filter,
             ingress_register,
             unit_ingress_id,
+            stats_db,
         }
     }
 
@@ -207,6 +319,9 @@ impl Runner {
         let config = self.config.clone();
         let partial_ingress_info =
             IngressInfo::new().with_remote_addr(socket.ip());
+
+        let stats_db = self.stats_db.clone();
+        
         tokio::spawn(async move {
             info!(
                 "spawning handler for tcp stream from {:?}",
@@ -218,6 +333,7 @@ impl Runner {
                 ingress_register,
                 unit_ingress_id,
                 config,
+                stats_db,
             );
             let _ = Box::pin(handler.run(partial_ingress_info)).await;
         });
@@ -230,6 +346,9 @@ impl Runner {
         let config = self.config.clone();
         let partial_ingress_info =
             IngressInfo::new().with_filename(filename.clone());
+
+        let stats_db = self.stats_db.clone();
+
         tokio::spawn(async move {
             let name = filename.to_string_lossy().to_string();
             info!("spawning handler for file {name}");
@@ -245,6 +364,7 @@ impl Runner {
                 ingress_register,
                 unit_ingress_id,
                 config,
+                stats_db,
             );
             if let Err(e) = Box::pin(handler.run(partial_ingress_info)).await {
                 error!("error while handling {name}: {e}");

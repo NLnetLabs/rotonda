@@ -5,13 +5,14 @@ use std::{collections::HashSet, sync::RwLock};
 
 use inetnum::{addr::Prefix, asn::Asn};
 use log::warn;
-use rotonda_store::{match_options::{IncludeHistory, MatchOptions, MatchType}, rib::{config::MemoryOnlyConfig, StarCastRib}};
+use rotonda_store::{
+    match_options::{IncludeHistory, MatchOptions, MatchType},
+    rib::{StarCastRib, config::MemoryOnlyConfig},
+};
 use serde::{Deserialize, Serialize};
 
-
 /// RPKI related information for individual routes
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
-#[derive(Serialize)]
+#[derive(Debug, Default, Copy, Clone, Eq, PartialEq, Serialize)]
 pub struct RpkiInfo {
     rov: RovStatus,
 }
@@ -29,7 +30,7 @@ impl From<u8> for RpkiInfo {
             1 => RovStatus::NotFound,
             2 => RovStatus::Valid,
             4 => RovStatus::Invalid,
-            _ => RovStatus::NotChecked
+            _ => RovStatus::NotChecked,
         };
 
         Self { rov }
@@ -47,7 +48,6 @@ impl From<RpkiInfo> for u8 {
     }
 }
 
-
 impl From<RovStatus> for RpkiInfo {
     fn from(value: RovStatus) -> Self {
         Self { rov: value }
@@ -55,8 +55,9 @@ impl From<RovStatus> for RpkiInfo {
 }
 
 /// RPKI Route Origin Validation status for a route
-#[derive(Debug, Default, Copy, Clone, Eq, PartialEq)]
-#[derive(Serialize, Deserialize)]
+#[derive(
+    Debug, Default, Copy, Clone, Eq, PartialEq, Serialize, Deserialize,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum RovStatus {
     #[default]
@@ -76,7 +77,6 @@ impl std::fmt::Display for RovStatus {
         }
     }
 }
-
 
 /// Route Origin Validation status update for a route
 #[derive(Copy, Clone, Debug, PartialEq)]
@@ -106,12 +106,14 @@ impl RovStatusUpdate {
         peer_asn: Asn,
     ) -> Self {
         Self {
-            prefix, previous_status, current_status, origin, peer_asn,
+            prefix,
+            previous_status,
+            current_status,
+            origin,
+            peer_asn,
         }
     }
 }
-
-
 
 type VrpStore = StarCastRib<MaxLenList, MemoryOnlyConfig>;
 
@@ -158,7 +160,6 @@ impl rotonda_store::prefix_record::Meta for MaxLenList {
     }
 }
 
-
 pub struct RtrCache {
     pub route_origins: RwLock<HashSet<rpki::rtr::payload::RouteOrigin>>,
     pub router_keys: RwLock<HashSet<rpki::rtr::payload::RouterKey>>,
@@ -189,11 +190,7 @@ impl RtrCache {
         };
 
         let guard = &rotonda_store::epoch::pin();
-        let res = match self.vrps.match_prefix(
-            prefix,
-            &match_options,
-            guard
-        ) {
+        let res = match self.vrps.match_prefix(prefix, &match_options, guard) {
             Ok(res) => res,
             Err(e) => {
                 warn!("could not lookup {}: {}", &prefix, e);
@@ -249,7 +246,6 @@ impl RtrCache {
     }
 }
 
-
 impl Default for RtrCache {
     fn default() -> Self {
         Self {
@@ -260,9 +256,6 @@ impl Default for RtrCache {
         }
     }
 }
-
-
-
 
 //// TODO
 //

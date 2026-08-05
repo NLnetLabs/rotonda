@@ -1,7 +1,7 @@
 use std::{
     sync::{
-        atomic::{AtomicU64, AtomicUsize, Ordering::SeqCst},
         Arc,
+        atomic::{AtomicU64, AtomicUsize, Ordering::SeqCst},
     },
     time::{Duration, Instant},
 };
@@ -13,7 +13,7 @@ use crate::{
     comms::{Gate, GateMetrics},
     ingress::IngressId,
     metrics::{
-        self, util::append_per_router_metric, Metric, MetricType, MetricUnit,
+        self, Metric, MetricType, MetricUnit, util::append_per_router_metric,
     },
     payload::RouterId,
 };
@@ -114,12 +114,13 @@ impl RibUnitMetrics {
         MetricType::Counter,
         MetricUnit::Total,
     );
-    const NUM_WITHDRAWN_ROUTES_WITHOUT_ANNOUNCEMENTS_METRIC: Metric = Metric::new(
-        "rib_unit_num_route_withdrawals_without_announcements",
-        "the number of route withdrawals processed without a corresponding announcement",
-        MetricType::Counter,
-        MetricUnit::Total,
-    );
+    const NUM_WITHDRAWN_ROUTES_WITHOUT_ANNOUNCEMENTS_METRIC: Metric =
+        Metric::new(
+            "rib_unit_num_route_withdrawals_without_announcements",
+            "the number of route withdrawals processed without a corresponding announcement",
+            MetricType::Counter,
+            MetricUnit::Total,
+        );
     const LAST_INSERT_DURATION_METRIC: Metric = Metric::new(
         "rib_unit_insert_duration",
         "the time taken to insert the last prefix inserted into the RIB unit store",

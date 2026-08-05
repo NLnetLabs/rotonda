@@ -31,8 +31,8 @@
 /// a [`BoundTracer`] and only that need be passed down deeper into the
 /// application code.
 use std::sync::{
-    atomic::{AtomicU8, Ordering::SeqCst},
     Arc, Mutex,
+    atomic::{AtomicU8, Ordering::SeqCst},
 };
 
 #[allow(unused_imports)]
@@ -67,11 +67,7 @@ pub struct TraceMsg {
 }
 
 impl TraceMsg {
-    pub fn new(
-        gate_id: Uuid,
-        msg: String,
-        msg_relation: MsgRelation,
-    ) -> Self {
+    pub fn new(gate_id: Uuid, msg: String, msg_relation: MsgRelation) -> Self {
         // ALL is intended for querying, a trace msg cannot be both for a
         // gate and a component at the same time so ALL is nonsensical.
         if msg_relation == MsgRelation::ALL {
@@ -274,10 +270,7 @@ mod tests {
         assert_eq!(trace_msg.gate_id, gate_id);
         assert_eq!(trace_msg.msg, msg);
         assert_eq!(trace_msg.msg_relation, msg_relation);
-        assert_eq!(
-            trace_msg.timestamp.trunc_subsecs(0),
-            now.trunc_subsecs(0)
-        );
+        assert_eq!(trace_msg.timestamp.trunc_subsecs(0), now.trunc_subsecs(0));
     }
 
     #[test]
@@ -292,10 +285,7 @@ mod tests {
         assert_eq!(trace_msg.gate_id, gate_id);
         assert_eq!(trace_msg.msg, msg);
         assert_eq!(trace_msg.msg_relation, msg_relation);
-        assert_eq!(
-            trace_msg.timestamp.trunc_subsecs(0),
-            now.trunc_subsecs(0)
-        );
+        assert_eq!(trace_msg.timestamp.trunc_subsecs(0), now.trunc_subsecs(0));
     }
 
     #[test]
@@ -308,9 +298,11 @@ mod tests {
     fn new_trace_is_empty() {
         let trace = Trace::new();
         assert_eq!(trace.msgs(), &[]);
-        assert!(trace
-            .msg_indices(Uuid::new_v4(), MsgRelation::ALL)
-            .is_empty());
+        assert!(
+            trace
+                .msg_indices(Uuid::new_v4(), MsgRelation::ALL)
+                .is_empty()
+        );
     }
 
     #[test]
@@ -318,9 +310,11 @@ mod tests {
         let mut trace = Trace::new();
         trace.clear();
         assert_eq!(trace.msgs(), &[]);
-        assert!(trace
-            .msg_indices(Uuid::new_v4(), MsgRelation::ALL)
-            .is_empty());
+        assert!(
+            trace
+                .msg_indices(Uuid::new_v4(), MsgRelation::ALL)
+                .is_empty()
+        );
     }
 
     #[test]
@@ -332,14 +326,13 @@ mod tests {
 
         trace.append_msg(gate_id, msg.clone(), msg_relation);
 
-        assert_eq!(
-            trace.msgs(),
-            &[TraceMsg::new(gate_id, msg, msg_relation)]
-        );
+        assert_eq!(trace.msgs(), &[TraceMsg::new(gate_id, msg, msg_relation)]);
 
-        assert!(trace
-            .msg_indices(Uuid::new_v4(), MsgRelation::ALL)
-            .is_empty());
+        assert!(
+            trace
+                .msg_indices(Uuid::new_v4(), MsgRelation::ALL)
+                .is_empty()
+        );
 
         assert_eq!(trace.msg_indices(gate_id, MsgRelation::ALL), vec![0]);
     }

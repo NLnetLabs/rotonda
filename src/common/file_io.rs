@@ -1,5 +1,5 @@
 //! Support for dumping of BMP messages to files for diagnostic purposes.
-//! 
+//!
 
 use std::path::Path;
 
@@ -48,10 +48,7 @@ pub trait FileIo: Default {
 #[cfg(not(test))]
 mod fileio {
     //! Filesystem I/O.
-    use std::{
-        io::Error,
-        path::Path,
-    };
+    use std::{io::Error, path::Path};
 
     use async_trait::async_trait;
     use tokio::io::AsyncWrite;
@@ -65,11 +62,7 @@ mod fileio {
 
     #[async_trait]
     impl super::FileIo for RealFileIo {
-        async fn rename<P, Q>(
-            &mut self,
-            from: P,
-            to: Q,
-        ) -> std::io::Result<()>
+        async fn rename<P, Q>(&mut self, from: P, to: Q) -> std::io::Result<()>
         where
             P: AsRef<std::path::Path> + Send + Sync,
             Q: AsRef<std::path::Path> + Send + Sync,
@@ -109,9 +102,10 @@ mod fileio {
             path: P,
         ) -> std::io::Result<String> {
             std::fs::read_to_string(path.as_ref()).map_err(|err| {
-                Error::other(
-                    format!("For path '{}': {err}", path.as_ref().display()),
-                )
+                Error::other(format!(
+                    "For path '{}': {err}",
+                    path.as_ref().display()
+                ))
             })
         }
 
@@ -183,11 +177,7 @@ mod fileio {
 
     #[async_trait]
     impl super::FileIo for MockFileIo {
-        async fn rename<P, Q>(
-            &mut self,
-            from: P,
-            to: Q,
-        ) -> std::io::Result<()>
+        async fn rename<P, Q>(&mut self, from: P, to: Q) -> std::io::Result<()>
         where
             P: AsRef<std::path::Path> + Send + Sync,
             Q: AsRef<std::path::Path> + Send + Sync,
@@ -233,10 +223,7 @@ mod fileio {
                 .map(|v| v.to_string())
                 .ok_or(Error::new(
                     ErrorKind::Other,
-                    format!(
-                        "Test path {} not known",
-                        path.as_ref().display()
-                    ),
+                    format!("Test path {} not known", path.as_ref().display()),
                 ))
         }
 

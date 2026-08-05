@@ -19,7 +19,7 @@ use routecore::bgp::{
     },
     types::{AfiSafiType, Otc, PathAttributeType},
 };
-use rshtml::{traits::RsHtml, RsHtml};
+use rshtml::{RsHtml, traits::RsHtml};
 
 use rayon::prelude::*;
 
@@ -28,7 +28,7 @@ use crate::{
     ingress::{IngressId, IngressInfo, IngressType},
     representation::GenOutput,
     roto_runtime::types::PeerRibType,
-    units::rib_unit::{rpki::RovStatus, Include, QueryFilter},
+    units::rib_unit::{Include, QueryFilter, rpki::RovStatus},
 };
 
 pub struct WebUI {}
@@ -367,8 +367,8 @@ impl WebUI {
         for (id, info) in register.iter().filter(|(_id, info)| {
             info.ingress_type == Some(crate::ingress::IngressType::BgpViaBmp)
         }) {
-            let Some((_bmp_ingress_info, bgp)) = res
-                .get_mut(&info.parent_ingress.expect("should have parent"))
+            let Some((_bmp_ingress_info, bgp)) =
+                res.get_mut(&info.parent_ingress.expect("should have parent"))
             else {
                 // if the BMP connection has state 'Disconnected', it is still
                 // present in the ingress::Register but not in the BmpTree map
@@ -892,8 +892,7 @@ fn bmp_details(bmp_router: &BmpRouter) -> BmpRouterLink<'_> {
 
 impl fmt::Display for BmpRouter {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if let Some(name) = self.info.name.as_ref().filter(|n| !n.is_empty())
-        {
+        if let Some(name) = self.info.name.as_ref().filter(|n| !n.is_empty()) {
             write!(f, "{name}")
         } else {
             write!(f, "__unnamed-bmp-{}", self.id)
@@ -1170,8 +1169,7 @@ impl GenOutput<&mut Routes> for crate::units::rib_unit::rib::SearchResult {
         );
 
         if let Some(prefix) = self.query_result.prefix {
-            let routes =
-                self.collect_routes(self.query_result.records.iter());
+            let routes = self.collect_routes(self.query_result.records.iter());
             if !routes.is_empty() {
                 target.routes.push((prefix, routes));
             }

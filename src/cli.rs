@@ -9,7 +9,6 @@ pub struct CliApi {
     pub ingress_register: Arc<ingress::Register>,
 }
 
-
 impl CliApi {
     pub fn bgp_neighbors(&self) {
         let mut stdout = io::stdout().lock();

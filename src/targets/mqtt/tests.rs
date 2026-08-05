@@ -1,8 +1,8 @@
 use std::{
     fmt::Display,
     sync::{
-        atomic::{AtomicU16, Ordering},
         Arc,
+        atomic::{AtomicU16, Ordering},
     },
     time::Duration,
 };
@@ -10,8 +10,8 @@ use std::{
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use mqtt::{
-    ClientError, ConnAck, ConnectReturnCode, ConnectionError, Event,
-    Incoming, MqttOptions, NetworkOptions, Outgoing, PubAck, QoS,
+    ClientError, ConnAck, ConnectReturnCode, ConnectionError, Event, Incoming,
+    MqttOptions, NetworkOptions, Outgoing, PubAck, QoS,
 };
 use serde_json::json;
 use tokio::{
@@ -26,11 +26,11 @@ use crate::{
     metrics::Target,
     payload::Update,
     roto_runtime::types::{LogEntry, OutputStreamMessage},
-    targets::{mqtt::config::ClientId, Target::Mqtt},
+    targets::{Target::Mqtt, mqtt::config::ClientId},
     tests::util::{
         assert_json_eq,
         internal::{enable_logging, get_testable_metrics_snapshot},
-    }
+    },
 };
 
 use super::{
@@ -114,8 +114,7 @@ fn generate_correct_json_for_publishing_from_output_stream_roto_type_value() {
 async fn connection_established() {
     enable_logging("trace");
 
-    let (join_handle, runner, status_reporter, cmd_tx) =
-        mk_mqtt_runner_task();
+    let (join_handle, runner, status_reporter, cmd_tx) = mk_mqtt_runner_task();
 
     let metrics = status_reporter.metrics();
 
@@ -149,12 +148,11 @@ async fn connection_established() {
 //            receipt of the message with a PUBREC message and a PUBCOMP
 //            message.
 #[tokio::test]
-#[ignore = "needs refactoring because of unbounded channel" ]
+#[ignore = "needs refactoring because of unbounded channel"]
 async fn publish_msg() {
     enable_logging("trace");
 
-    let (join_handle, runner, status_reporter, cmd_tx) =
-        mk_mqtt_runner_task();
+    let (join_handle, runner, status_reporter, cmd_tx) = mk_mqtt_runner_task();
 
     let metrics = status_reporter.metrics();
 
@@ -178,8 +176,8 @@ async fn publish_msg() {
 
     let test_output_stream_message = mk_roto_output_stream_payload();
 
-    let payload = Update::OutputStream(smallvec::smallvec![test_output_stream_message]);
-
+    let payload =
+        Update::OutputStream(smallvec::smallvec![test_output_stream_message]);
 
     runner.direct_update(payload).await;
 
@@ -238,8 +236,7 @@ async fn end_to_end_time_metric_is_reported_correctly() {}
 async fn mqtt_target_can_be_reconfigured_while_running() {
     enable_logging("trace");
 
-    let (join_handle, runner, status_reporter, cmd_tx) =
-        mk_mqtt_runner_task();
+    let (join_handle, runner, status_reporter, cmd_tx) = mk_mqtt_runner_task();
 
     let metrics = status_reporter.metrics();
 
@@ -296,8 +293,7 @@ async fn mqtt_target_can_be_reconfigured_while_running() {
 async fn connection_refused() {
     enable_logging("trace");
 
-    let (join_handle, runner, status_reporter, cmd_tx) =
-        mk_mqtt_runner_task();
+    let (join_handle, runner, status_reporter, cmd_tx) = mk_mqtt_runner_task();
 
     let metrics = status_reporter.metrics();
 
@@ -341,8 +337,7 @@ async fn connection_refused() {
 async fn connection_loss_and_reconnect() {
     enable_logging("trace");
 
-    let (join_handle, runner, status_reporter, cmd_tx) =
-        mk_mqtt_runner_task();
+    let (join_handle, runner, status_reporter, cmd_tx) = mk_mqtt_runner_task();
 
     let metrics = status_reporter.metrics();
 
@@ -465,11 +460,10 @@ impl MockClient {
     }
 
     pub fn simulate_connect_ack(&self, code: ConnectReturnCode) {
-        let conn_ack_event =
-            Ok(Event::Incoming(Incoming::ConnAck(ConnAck {
-                session_present: false,
-                code,
-            })));
+        let conn_ack_event = Ok(Event::Incoming(Incoming::ConnAck(ConnAck {
+            session_present: false,
+            code,
+        })));
         self.mock_poll_result_sender.send(conn_ack_event).unwrap();
     }
 
@@ -625,7 +619,6 @@ fn mk_roto_output_stream_payload() -> OutputStreamMessage {
     entry.custom = Some("test payload".into());
     let ingress_id = 1;
     OutputStreamMessage::entry(LogEntry::new(), Some(ingress_id))
-
 }
 
 async fn assert_metric<D: Display, F: Fn(&Target) -> bool>(

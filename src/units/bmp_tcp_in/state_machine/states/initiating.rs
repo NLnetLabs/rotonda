@@ -154,7 +154,6 @@ impl Initiable for Initiating {
         self.sys_desc = Some(sys_desc);
         self.sys_extra = sys_extra;
     }
-
 }
 
 #[cfg(test)]
@@ -277,7 +276,10 @@ mod tests {
         ));
         assert!(matches!(res.next_state, BmpState::Initiating(_)));
         if let MessageType::InvalidMessage { err, .. } = res.message_type {
-            assert_eq!(err, "RFC 7854 4.3 violation: Expected BMP Initiation Message but received: PeerUpNotification");
+            assert_eq!(
+                err,
+                "RFC 7854 4.3 violation: Expected BMP Initiation Message but received: PeerUpNotification"
+            );
         }
     }
 

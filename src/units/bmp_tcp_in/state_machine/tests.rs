@@ -11,7 +11,7 @@ use inetnum::{addr::Prefix, asn::Asn};
 use routecore::bmp::message::{Message as BmpMsg, PerPeerHeader};
 
 use crate::{
-    bgp::encode::{mk_per_peer_header, Announcements, Prefixes},
+    bgp::encode::{Announcements, Prefixes, mk_per_peer_header},
     common::status_reporter::AnyStatusReporter,
     payload::{Payload, RotondaRoute, Update},
     tests::util::internal::get_testable_metrics_snapshot,
@@ -73,8 +73,7 @@ fn terminate() {
         .next_state;
 
     // When
-    let res =
-        processor.process_msg(Instant::now(), termination_msg_buf, None);
+    let res = processor.process_msg(Instant::now(), termination_msg_buf, None);
 
     // Then
     assert!(matches!(res.message_type, MessageType::StateTransition));
@@ -82,10 +81,7 @@ fn terminate() {
 
     // Check the metrics
     let processor = res.next_state;
-    assert_metrics(
-        &processor,
-        ("Terminated", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
-    );
+    assert_metrics(&processor, ("Terminated", [1, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
     //                  ^ 1 connected router
 }
 
@@ -252,15 +248,13 @@ fn peer_up_route_monitoring_peer_down() {
     assert!(matches!(res.message_type, MessageType::Other));
     let processor = res.next_state;
 
-
     // Check the metrics
     assert_metrics(&processor, ("Dumping", [1, 0, 0, 0, 0, 0, 2, 0, 0, 0]));
     //               ^ 1 connected router
     //                                 ^ 2 up peers
 
     // When the state machine processes a peer down notification for a peer that announced no routes
-    let res =
-        processor.process_msg(Instant::now(), peer_down_msg_1_buf, None);
+    let res = processor.process_msg(Instant::now(), peer_down_msg_1_buf, None);
 
     // Then the state should remain unchanged
     assert!(matches!(res.next_state, BmpState::Dumping(_)));
@@ -342,8 +336,7 @@ fn peer_up_route_monitoring_peer_down() {
     //                              another withdrawal ^
 
     // And when a peer down notification for the other peer is received
-    let res =
-        processor.process_msg(Instant::now(), peer_down_msg_2_buf, None);
+    let res = processor.process_msg(Instant::now(), peer_down_msg_2_buf, None);
 
     // Then the state should remain unchanged
     assert!(matches!(res.next_state, BmpState::Dumping(_)));
@@ -379,8 +372,7 @@ fn peer_down_without_peer_up() {
     let initiation_msg_buf =
         mk_initiation_msg(TEST_ROUTER_SYS_NAME, TEST_ROUTER_SYS_DESC);
 
-    let (pph, _) =
-        mk_eor_capable_peer_up_notification_msg("127.0.0.1", 12345);
+    let (pph, _) = mk_eor_capable_peer_up_notification_msg("127.0.0.1", 12345);
     let peer_down_msg_buf = mk_peer_down_notification_msg(&pph);
 
     let processor = processor
@@ -420,11 +412,10 @@ fn peer_up_different_peer_down() {
             "127.0.0.1",
             12345,
         );
-    let (pph_down, _, _) =
-        mk_peer_up_notification_msg_without_rfc4724_support(
-            "127.0.0.2",
-            54321,
-        );
+    let (pph_down, _, _) = mk_peer_up_notification_msg_without_rfc4724_support(
+        "127.0.0.2",
+        54321,
+    );
     let peer_down_msg_buf = mk_peer_down_notification_msg(&pph_down);
 
     assert_ne!(&pph_up, &pph_down);
@@ -1094,10 +1085,8 @@ fn mk_peer_up_notification_msg(
 fn mk_peer_down_notification_msg(
     pph: &crate::bgp::encode::PerPeerHeader,
 ) -> BmpMsg<Bytes> {
-    BmpMsg::from_octets(crate::bgp::encode::mk_peer_down_notification_msg(
-        pph,
-    ))
-    .unwrap()
+    BmpMsg::from_octets(crate::bgp::encode::mk_peer_down_notification_msg(pph))
+        .unwrap()
 }
 
 fn mk_route_monitoring_msg(
@@ -1197,7 +1186,6 @@ fn mk_test_processor() -> BmpState {
     )
 }
 
-
 fn mk_initiation_msg(sys_name: &str, sys_descr: &str) -> BmpMsg<Bytes> {
     BmpMsg::from_octets(crate::bgp::encode::mk_initiation_msg(
         sys_name, sys_descr,
@@ -1260,7 +1248,9 @@ fn assert_metrics(processor: &BmpState, expected: (&str, [usize; 10])) {
     // has the unexpected value 1 instead of 0. Once merged we can revert
     // this temporary work around.
     if expected.1[2] != actual.1[2] {
-        eprintln!("WARNING: Temporarily overriding expected value for metric `bmp_state_num_bgp_updates_with_recoverable_parsing_failure_for_known_peer` due to pending PR https://github.com/NLnetLabs/rotonda/pull/55.");
+        eprintln!(
+            "WARNING: Temporarily overriding expected value for metric `bmp_state_num_bgp_updates_with_recoverable_parsing_failure_for_known_peer` due to pending PR https://github.com/NLnetLabs/rotonda/pull/55."
+        );
         expected.1[2] = actual.1[2];
     }
 

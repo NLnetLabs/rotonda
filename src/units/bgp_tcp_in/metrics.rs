@@ -1,5 +1,5 @@
-use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 
 use crate::comms::{Gate, GateMetrics, GraphStatus};
 

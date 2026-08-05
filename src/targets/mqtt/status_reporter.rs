@@ -1,13 +1,13 @@
 use std::{
     fmt::{Debug, Display},
-    sync::{atomic::Ordering::SeqCst, Arc},
+    sync::{Arc, atomic::Ordering::SeqCst},
     time::Duration,
 };
 
 use log::{debug, info, trace, warn};
 
 use crate::common::status_reporter::{
-    sr_log, AnyStatusReporter, Chainable, Named, TargetStatusReporter,
+    AnyStatusReporter, Chainable, Named, TargetStatusReporter, sr_log,
 };
 
 use super::{config::Destination, metrics::MqttMetrics};

@@ -26,7 +26,7 @@ pub(crate) mod bmp_tcp_in_ng;
 mod mrt_file_in;
 pub(crate) mod rib_unit;
 pub use bmp_tcp_in::unit::TracingMode;
-pub use rib_unit:: unit:: RibUnit;
+pub use rib_unit::unit::RibUnit;
 pub mod rtr;
 pub use rtr::client::RtrUpdate;
 
@@ -67,21 +67,17 @@ impl Unit {
         waitpoint: WaitPoint,
     ) {
         let _ = match self {
-            Unit::BgpTcpIn(unit) => {
-                unit.run(component, gate, waitpoint).await
-            }
-            Unit::BmpTcpIn(unit) => {
-                unit.run(component, gate, waitpoint).await
-            }
+            Unit::BgpTcpIn(unit) => unit.run(component, gate, waitpoint).await,
+            Unit::BmpTcpIn(unit) => unit.run(component, gate, waitpoint).await,
             Unit::RibUnit(unit) => unit.run(component, gate, waitpoint).await,
             Unit::MrtFileIn(unit) => {
                 unit.run(component, gate, waitpoint).await
             }
-            Unit::RtrTcpIn(unit) => {
+            Unit::RtrTcpIn(unit) => unit.run(component, gate, waitpoint).await,
+
+            Unit::BmpTcpInNg(unit) => {
                 unit.run(component, gate, waitpoint).await
             }
-
-            Unit::BmpTcpInNg(unit) => unit.run(component, gate, waitpoint).await,
         };
     }
 

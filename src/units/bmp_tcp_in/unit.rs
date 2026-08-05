@@ -11,11 +11,11 @@ use std::{
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use futures::{future::select, pin_mut, Future};
+use futures::{Future, future::select, pin_mut};
 use log::{debug, warn};
 use routecore::bmp::message::Message as BmpMessage;
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use tokio::{
     sync::{Mutex, RwLock},
     time::sleep,
@@ -30,24 +30,29 @@ use crate::{
         },
         status_reporter::Chainable,
         unit::UnitActivity,
-    }, comms::{Gate, GateStatus, Terminated}, ingress::{self, IngressId, IngressInfo}, manager::{Component, WaitPoint}, payload::Update, roto_runtime::{
-        metrics::RotoMetricsWrapper, types::{
-            FilterName, RotoOutputStream, RotoPackage, RotoScripts
-        }, RotondaCtx, MutIngressInfoCache
-    }, tokio::TokioTaskMetrics, tracing::Tracer, units::Unit
+    },
+    comms::{Gate, GateStatus, Terminated},
+    ingress::{self, IngressId, IngressInfo},
+    manager::{Component, WaitPoint},
+    payload::Update,
+    roto_runtime::{
+        MutIngressInfoCache, RotondaCtx,
+        metrics::RotoMetricsWrapper,
+        types::{FilterName, RotoOutputStream, RotoPackage, RotoScripts},
+    },
+    tokio::TokioTaskMetrics,
+    tracing::Tracer,
+    units::Unit,
 };
 
-use super::{
-    state_machine::{BmpState, BmpStateMachineMetrics},
-    types::RouterInfo,
-};
 use super::{
     metrics::BmpTcpInMetrics, router_handler::RouterHandler,
     status_reporter::BmpTcpInStatusReporter, util::format_source_id,
 };
-
-
-
+use super::{
+    state_machine::{BmpState, BmpStateMachineMetrics},
+    types::RouterInfo,
+};
 
 //-------- BmpIn -------------------------------------------------------------
 
@@ -94,11 +99,10 @@ impl std::fmt::Display for TracingMode {
 
 pub(crate) type RotoFunc = roto::TypedFunc<
     roto::Ctx<RotondaCtx>,
-    fn (
+    fn(
         roto::Val<BmpMessage<Bytes>>,
-        roto::Val<MutIngressInfoCache>
-    ) ->
-    roto::Verdict<(), ()>
+        roto::Val<MutIngressInfoCache>,
+    ) -> roto::Verdict<(), ()>,
 >;
 
 pub const ROTO_FUNC_FILTER_NAME: &str = "bmp_in";
@@ -242,10 +246,7 @@ struct BmpTcpInRunner {
     listen: Arc<SocketAddr>,
     gate: Gate,
     router_states: Arc<
-        FrimMap<
-            ingress::IngressId,
-            Arc<tokio::sync::Mutex<Option<BmpState>>>,
-        >,
+        FrimMap<ingress::IngressId, Arc<tokio::sync::Mutex<Option<BmpState>>>>,
     >, // Option is never None, instead Some is take()'n and replace()'d.
     router_info: Arc<FrimMap<ingress::IngressId, Arc<RouterInfo>>>,
     bmp_metrics: Arc<BmpStateMachineMetrics>,
@@ -353,10 +354,10 @@ impl BmpTcpInRunner {
             self.roto_compiled.clone().and_then(|c| {
                 let mut c = c.lock().unwrap();
                 c.get_function(ROTO_FUNC_FILTER_NAME)
-                .inspect_err(|_|
-                    warn!("Loaded Roto script has no filter for bmp-in")
-                )
-                .ok()
+                    .inspect_err(|_| {
+                        warn!("Loaded Roto script has no filter for bmp-in")
+                    })
+                    .ok()
             });
 
         let mut roto_context = RotondaCtx::empty();
@@ -403,30 +404,38 @@ impl BmpTcpInRunner {
             'inner: loop {
                 match self.process_until(listener.accept()).await {
                     ControlFlow::Continue(Ok((tcp_stream, client_addr))) => {
-
                         let query_ingress = IngressInfo::new()
                             .with_parent_ingress(unit_ingress_id)
                             .with_remote_addr(client_addr.ip())
-                            .with_ingress_type(ingress::IngressType::Bmp)
-                        ;
+                            .with_ingress_type(ingress::IngressType::Bmp);
                         let router_ingress_id;
                         // TODO the check for existing routers needs to go to where the
                         // InitiationMessage is processed. There we have the sysName/sysDesc.
                         // We can't fill up `query_ingress` appropriately here.
                         // So, this check _and_ the .register() needs to go into initiating.rs
-                        if let Some((ingress_id, _ingress_info)) = self.ingress_register.find_existing_bmp_router(&query_ingress) {
+                        if let Some((ingress_id, _ingress_info)) = self
+                            .ingress_register
+                            .find_existing_bmp_router(&query_ingress)
+                        {
                             router_ingress_id = ingress_id;
-                            self.gate.update_data(Update::IngressReappeared(ingress_id)).await;
+                            self.gate
+                                .update_data(Update::IngressReappeared(
+                                    ingress_id,
+                                ))
+                                .await;
                         } else {
-                            router_ingress_id = self.ingress_register.register();
-                            self.ingress_register.update_info(router_ingress_id, query_ingress);
+                            router_ingress_id =
+                                self.ingress_register.register();
+                            self.ingress_register
+                                .update_info(router_ingress_id, query_ingress);
                         }
 
                         let state_machine = Arc::new(Mutex::new(Some(
                             self.router_connected(router_ingress_id),
                         )));
 
-                        let last_msg_at = Some(Arc::new(std::sync::RwLock::new(Utc::now())));
+                        let last_msg_at =
+                            Some(Arc::new(std::sync::RwLock::new(Utc::now())));
 
                         self.router_states
                             .insert(router_ingress_id, state_machine.clone());
@@ -472,7 +481,6 @@ impl BmpTcpInRunner {
                             router_handler,
                             tcp_stream,
                             client_addr,
-
                             router_ingress_id,
                             &self.router_states,
                             &self.router_info,
@@ -531,17 +539,14 @@ impl BmpTcpInRunner {
                             if rebind {
                                 // Trigger re-binding to the new listen port.
                                 let err = std::io::ErrorKind::Other;
-                                return ControlFlow::Continue(
-                                    Err(err.into()),
-                                );
+                                return ControlFlow::Continue(Err(err.into()));
                             }
                         }
 
                         GateStatus::ReportLinks { report } => {
                             report.declare_source();
-                            report.set_graph_status(
-                                self.bmp_in_metrics.clone(),
-                            );
+                            report
+                                .set_graph_status(self.bmp_in_metrics.clone());
                         }
 
                         _ => { /* Nothing to do */ }
@@ -644,8 +649,8 @@ mod tests {
     use std::{
         net::SocketAddr,
         sync::{
-            atomic::{AtomicUsize, Ordering},
             Arc,
+            atomic::{AtomicUsize, Ordering},
         },
         time::Duration,
     };
@@ -666,13 +671,13 @@ mod tests {
             },
         },
         units::{
+            Unit,
             bmp_tcp_in::{
                 metrics::BmpTcpInMetrics, router_handler::RouterHandler,
                 state_machine::BmpState,
                 status_reporter::BmpTcpInStatusReporter, types::RouterInfo,
                 unit::BmpTcpInRunner,
             },
-            Unit,
         },
     };
 
@@ -711,9 +716,8 @@ mod tests {
             |_addr| Ok(MockTcpListener::new(std::future::pending));
         let mock_listener_factory =
             Arc::new(MockTcpListenerFactory::new(wait_forever));
-        let task = runner.run::<_, _, _, NoOpConfigAcceptor>(
-            mock_listener_factory.clone(),
-        );
+        let task = runner
+            .run::<_, _, _, NoOpConfigAcceptor>(mock_listener_factory.clone());
         let join_handle = tokio::task::spawn(task);
 
         // Allow time for bind attempts to occur
@@ -749,16 +753,14 @@ mod tests {
         assert_eq!(binds[0], "1.2.3.4:12345");
         assert_eq!(binds[1], "127.0.0.1:11019");
 
-        let metrics = get_testable_metrics_snapshot(
-            &status_reporter.metrics().unwrap(),
-        );
+        let metrics =
+            get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
         assert_eq!(
             metrics.with_name::<usize>("bmp_tcp_in_listener_bound_count"),
             2
         );
         assert_eq!(
-            metrics
-                .with_name::<usize>("bmp_tcp_in_connection_accepted_count"),
+            metrics.with_name::<usize>("bmp_tcp_in_connection_accepted_count"),
             0
         );
         assert_eq!(
@@ -777,9 +779,8 @@ mod tests {
             |_addr| Ok(MockTcpListener::new(std::future::pending));
         let mock_listener_factory =
             Arc::new(MockTcpListenerFactory::new(wait_forever));
-        let task = runner.run::<_, _, _, NoOpConfigAcceptor>(
-            mock_listener_factory.clone(),
-        );
+        let task = runner
+            .run::<_, _, _, NoOpConfigAcceptor>(mock_listener_factory.clone());
         let join_handle = tokio::task::spawn(task);
 
         // Allow time for bind attempts to occur
@@ -813,16 +814,14 @@ mod tests {
         assert_eq!(binds.len(), 1);
         assert_eq!(binds[0], "127.0.0.1:11019");
 
-        let metrics = get_testable_metrics_snapshot(
-            &status_reporter.metrics().unwrap(),
-        );
+        let metrics =
+            get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
         assert_eq!(
             metrics.with_name::<usize>("bmp_tcp_in_listener_bound_count"),
             1
         );
         assert_eq!(
-            metrics
-                .with_name::<usize>("bmp_tcp_in_connection_accepted_count"),
+            metrics.with_name::<usize>("bmp_tcp_in_connection_accepted_count"),
             0
         );
         assert_eq!(
@@ -847,9 +846,8 @@ mod tests {
         let status_reporter = runner.status_reporter.clone();
         let mock_listener_factory =
             Arc::new(MockTcpListenerFactory::new(fail_on_bad_addr));
-        let task = runner.run::<_, _, _, NoOpConfigAcceptor>(
-            mock_listener_factory.clone(),
-        );
+        let task = runner
+            .run::<_, _, _, NoOpConfigAcceptor>(mock_listener_factory.clone());
         let join_handle = tokio::task::spawn(task);
 
         // Allow time for bind attempts to occur
@@ -883,16 +881,14 @@ mod tests {
         assert_eq!(binds.len(), 1);
         assert_eq!(binds[0], "127.0.0.1:11019");
 
-        let metrics = get_testable_metrics_snapshot(
-            &status_reporter.metrics().unwrap(),
-        );
+        let metrics =
+            get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
         assert_eq!(
             metrics.with_name::<usize>("bmp_tcp_in_listener_bound_count"),
             1
         );
         assert_eq!(
-            metrics
-                .with_name::<usize>("bmp_tcp_in_connection_accepted_count"),
+            metrics.with_name::<usize>("bmp_tcp_in_connection_accepted_count"),
             0
         );
         assert_eq!(
@@ -925,9 +921,8 @@ mod tests {
             setup_test("1.2.3.4:12345");
         let mock_listener_factory =
             Arc::new(MockTcpListenerFactory::new(mock_listener_factory_cb));
-        let task = runner.run::<_, _, _, NoOpConfigAcceptor>(
-            mock_listener_factory.clone(),
-        );
+        let task = runner
+            .run::<_, _, _, NoOpConfigAcceptor>(mock_listener_factory.clone());
         let join_handle = tokio::task::spawn(task);
 
         loop {
@@ -975,9 +970,8 @@ mod tests {
         let (runner, gate_agent, status_reporter) = setup_test("1.2.3.4:5");
         let mock_listener_factory =
             Arc::new(MockTcpListenerFactory::new(mock_listener_factory_cb));
-        let task = runner.run::<_, _, _, NoOpConfigAcceptor>(
-            mock_listener_factory.clone(),
-        );
+        let task = runner
+            .run::<_, _, _, NoOpConfigAcceptor>(mock_listener_factory.clone());
         let join_handle = tokio::task::spawn(task);
 
         let mut count = 0;

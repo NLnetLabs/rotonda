@@ -11,7 +11,10 @@ use routecore::{
         nlri::afisafi::Nlri,
         types::AfiSafiType,
     },
-    bmp::message::{InformationTlvIter, Message as BmpMsg, PerPeerHeader, TerminationMessage},
+    bmp::message::{
+        InformationTlvIter, Message as BmpMsg, PerPeerHeader,
+        TerminationMessage,
+    },
 };
 use smallvec::SmallVec;
 
@@ -84,9 +87,7 @@ impl BmpStateDetails<Updating> {
                 msg,
                 //NlriStatus::UpToDate,
                 trace_id,
-                |s, pph, update| {
-                    s.route_monitoring_preprocessing(pph, update)
-                },
+                |s, pph, update| s.route_monitoring_preprocessing(pph, update),
             ),
 
             BmpMsg::TerminationMessage(msg) => self.terminate(Some(msg)),
@@ -201,7 +202,6 @@ impl Initiable for Updating {
         self.sys_desc = sys_desc;
         self.sys_extra = sys_extra;
     }
-
 }
 
 impl PeerAware for Updating {
@@ -234,7 +234,8 @@ impl PeerAware for Updating {
         dst_pph: &PerPeerHeader<Bytes>,
         ingress_id: IngressId,
     ) -> bool {
-        self.peer_states.add_cloned_peer_config(source_pph, dst_pph, ingress_id)
+        self.peer_states
+            .add_cloned_peer_config(source_pph, dst_pph, ingress_id)
     }
 
     fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState> {
@@ -270,10 +271,7 @@ impl PeerAware for Updating {
         self.peer_states.remove_peer(pph)
     }
 
-    fn is_peer_eor_capable(
-        &self,
-        pph: &PerPeerHeader<Bytes>,
-    ) -> Option<bool> {
+    fn is_peer_eor_capable(&self, pph: &PerPeerHeader<Bytes>) -> Option<bool> {
         self.peer_states.is_peer_eor_capable(pph)
     }
 
@@ -296,5 +294,4 @@ impl PeerAware for Updating {
     fn num_pending_eors(&self) -> usize {
         self.peer_states.num_pending_eors()
     }
-
 }

@@ -1,13 +1,13 @@
 use std::{sync::Arc, time::Duration};
 
+use ConnectionState::*;
 use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use mqtt::{
-    ClientError, ConnAck, ConnectReturnCode, ConnectionError, Event,
-    Incoming, MqttOptions, NetworkOptions, QoS,
+    ClientError, ConnAck, ConnectReturnCode, ConnectionError, Event, Incoming,
+    MqttOptions, NetworkOptions, QoS,
 };
 use tokio::{sync::oneshot, task::JoinHandle, time::interval};
-use ConnectionState::*;
 
 use super::{config::Config, status_reporter::MqttStatusReporter};
 
@@ -94,8 +94,7 @@ impl<C: Client> Connection<C> {
     pub async fn process(&mut self) -> Option<C> {
         match &mut self.state {
             New => {
-                let broker_address =
-                    self.mqtt_options.broker_address().into();
+                let broker_address = self.mqtt_options.broker_address().into();
 
                 self.status_reporter.connecting(&broker_address);
 

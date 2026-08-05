@@ -370,15 +370,14 @@ impl ConfigFile {
         // this expansion capability to give at least some verification that
         // it is not obviously broken, but it's not enough.
         let config_str = String::from_utf8_lossy(&bytes);
-        let toml: Value =
-            if let Ok(toml) = toml::de::from_str(&config_str) {
-                toml
-            } else {
-                return Err(io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "Cannot parse config file",
-                ));
-            };
+        let toml: Value = if let Ok(toml) = toml::de::from_str(&config_str) {
+            toml
+        } else {
+            return Err(io::Error::new(
+                std::io::ErrorKind::InvalidInput,
+                "Cannot parse config file",
+            ));
+        };
 
         let config_str = toml::to_string(&toml).unwrap();
 

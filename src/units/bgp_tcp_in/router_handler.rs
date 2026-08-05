@@ -1,6 +1,6 @@
 use std::cell::RefCell;
-use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeSet;
+use std::collections::hash_map::DefaultHasher;
 use std::hash::Hash;
 use std::net::SocketAddr;
 use std::ops::ControlFlow;
@@ -9,11 +9,11 @@ use std::sync::{Arc, Mutex};
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use log::{debug, error, warn};
 use inetnum::asn::Asn;
+use log::{debug, error, warn};
 use rotonda_store::prefix_record::RouteStatus;
 use routecore::bgp::message::{Message as BgpMsg, UpdateMessage};
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 use tokio::net::TcpStream;
 use tokio::sync::mpsc;
 
@@ -27,18 +27,19 @@ use routecore::bgp::fsm::session::{
     Session,
 };
 
+use crate::comms::{Gate, GateStatus, Terminated};
 use crate::ingress::IngressType;
 use crate::ingress::register::IngressState;
-use crate::roto_runtime::types::{
-    Output, OutputStreamMessage, PeerRibType, RotoOutputStream, explode_announcements, explode_withdrawals
-};
-use crate::comms::{Gate, GateStatus, Terminated};
-use crate::{ingress, roto_runtime};
 use crate::payload::{Payload, RotondaRoute, Update};
 use crate::roto_runtime::RotondaCtx;
+use crate::roto_runtime::types::{
+    Output, OutputStreamMessage, PeerRibType, RotoOutputStream,
+    explode_announcements, explode_withdrawals,
+};
+use crate::units::Unit;
 use crate::units::bgp_tcp_in::status_reporter::BgpTcpInStatusReporter;
 use crate::units::rib_unit::rpki::RtrCache;
-use crate::units::Unit;
+use crate::{ingress, roto_runtime};
 
 use super::peer_config::{CombinedConfig, ConfigExt};
 use super::unit::BgpTcpIn;
@@ -442,7 +443,7 @@ impl Processor {
                                 session_ingress_id
                             );
                             debug!("get: {:?}", self.ingresses.get(session_ingress_id));
-                            
+
                             self.ingresses.update_info(
                                 session_ingress_id,
                                 ingress::IngressInfo::new()
@@ -501,9 +502,10 @@ impl Processor {
                     global_live_sessions.lock().unwrap().len()
                 );
 
-                self.ingresses.update_info(session_ingress_id,
+                self.ingresses.update_info(
+                    session_ingress_id,
                     ingress::IngressInfo::new()
-                    .with_state(IngressState::Disconnected)
+                        .with_state(IngressState::Disconnected),
                 );
 
                 self.gate
@@ -565,26 +567,25 @@ impl Processor {
         let rr_reach = explode_announcements(&bgp_msg)?;
         let rr_unreach = explode_withdrawals(&bgp_msg)?;
 
-        payloads.extend(
-            rr_reach.into_iter().map(|rr| {
-                Payload::with_received(
-                    rr,
-                    None,
-                    received,
-                    ingress_id,
-                    RouteStatus::Active,
-                )
-            }),
-        );
+        payloads.extend(rr_reach.into_iter().map(|rr| {
+            Payload::with_received(
+                rr,
+                None,
+                received,
+                ingress_id,
+                RouteStatus::Active,
+            )
+        }));
 
-        payloads.extend(rr_unreach.into_iter().map(|rr|
+        payloads.extend(rr_unreach.into_iter().map(|rr| {
             Payload::with_received(
                 rr,
                 None,
                 received,
                 ingress_id,
                 RouteStatus::Withdrawn,
-            )));
+            )
+        }));
 
         Ok(payloads.into())
     }
@@ -625,7 +626,6 @@ pub async fn handle_connection(
     let (sess_tx, sess_rx) = mpsc::channel::<Message>(100);
 
     let (pdu_out_tx, mut pdu_out_rx) = mpsc::channel(10);
-
 
     //  - depending on candidate_config, with or without DelayOpen
     //  Ugly use of temp bool here, because candidate_config is moved.
@@ -675,9 +675,7 @@ pub async fn handle_connection(
             }
             match tcp_out.try_write(pdu.as_ref()) {
                 Ok(_) => {}
-                Err(ref e)
-                    if e.kind() == tokio::io::ErrorKind::WouldBlock =>
-                {
+                Err(ref e) if e.kind() == tokio::io::ErrorKind::WouldBlock => {
                     debug!("WouldBlock after writable().await");
                 }
                 Err(e) => {
@@ -700,7 +698,8 @@ pub async fn handle_connection(
         debug!("post tcp_out.forget()");
     });
 
-    p.process(session, sess_rx, live_sessions, global_live_sessions).await;
+    p.process(session, sess_rx, live_sessions, global_live_sessions)
+        .await;
 }
 
 #[cfg(test)]
@@ -734,8 +733,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn processor_should_abort_on_unit_termination() {
         enable_logging("trace");
-        let (join_handle, status_reporter, gate_agent, sess_tx) =
-            setup_test();
+        let (join_handle, status_reporter, gate_agent, sess_tx) = setup_test();
 
         gate_agent.terminate().await;
 
@@ -768,9 +766,8 @@ mod tests {
         // Now it's safe to wait for the processor to abort.
         join_handle.await.unwrap();
 
-        let metrics = get_testable_metrics_snapshot(
-            &status_reporter.metrics().unwrap(),
-        );
+        let metrics =
+            get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
         assert_eq!(
             metrics.with_name::<usize>("bgp_tcp_in_connection_lost_count"),
             1
@@ -791,9 +788,8 @@ mod tests {
 
         join_handle.await.unwrap();
 
-        let metrics = get_testable_metrics_snapshot(
-            &status_reporter.metrics().unwrap(),
-        );
+        let metrics =
+            get_testable_metrics_snapshot(&status_reporter.metrics().unwrap());
         assert_eq!(
             metrics.with_name::<usize>("bgp_tcp_in_connection_lost_count"),
             1
@@ -827,7 +823,13 @@ mod tests {
 
         let join_handle =
             crate::tokio::spawn("mock_bgp_tcp_in_processor", async move {
-                p.process(session, sess_rx, live_sessions, global_live_sessions).await
+                p.process(
+                    session,
+                    sess_rx,
+                    live_sessions,
+                    global_live_sessions,
+                )
+                .await
             });
 
         (join_handle, status_reporter, gate_agent, sess_tx)

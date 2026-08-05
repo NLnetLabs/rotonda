@@ -1,6 +1,6 @@
 use std::{
     fmt::Display,
-    sync::{atomic::Ordering::SeqCst, Arc},
+    sync::{Arc, atomic::Ordering::SeqCst},
     time::{Duration, Instant},
 };
 
@@ -8,7 +8,7 @@ use log::{error, info, warn};
 
 use crate::{
     common::status_reporter::{
-        sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter,
+        AnyStatusReporter, Chainable, Named, UnitStatusReporter, sr_log,
     },
     ingress::IngressId,
     payload::RouterId,

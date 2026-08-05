@@ -1,7 +1,7 @@
 use arc_swap::ArcSwap;
 use bytes::{Bytes, BytesMut};
 use futures::{
-    future::{select, Either},
+    future::{Either, select},
     pin_mut,
 };
 use routecore::bmp::message::Message as BmpMsg;
@@ -84,9 +84,7 @@ async fn bmp_read<T: AsyncRead + Unpin>(
 
     match BmpMsg::from_octets(&msg_buf) {
         Ok(_) => Ok((rx, msg_buf, trace_id)),
-        Err(err) => {
-            Err((rx, std::io::Error::other(err.to_string())))
-        }
+        Err(err) => Err((rx, std::io::Error::other(err.to_string()))),
     }
 }
 
@@ -179,6 +177,8 @@ impl<T: AsyncRead + Unpin> BmpStream<T> {
             }
         }
 
-        Err(std::io::Error::other("Internal error: no receiver available"))
+        Err(std::io::Error::other(
+            "Internal error: no receiver available",
+        ))
     }
 }

@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use futures::{future::Either, Future};
+use futures::{Future, future::Either};
 
 use crate::comms::{GateStatus, Terminated};
 

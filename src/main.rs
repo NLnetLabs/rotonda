@@ -1,6 +1,6 @@
-use clap::{crate_authors, crate_version, error::ErrorKind, Command};
+use clap::{Command, crate_authors, crate_version, error::ErrorKind};
 use futures::{
-    future::{select, Either},
+    future::{Either, select},
     pin_mut,
 };
 use log::{debug, error, info, warn};
@@ -14,7 +14,7 @@ use std::env::current_dir;
 use std::process::exit;
 use tokio::{
     runtime::{self, Runtime},
-    signal::{self, unix::signal, unix::SignalKind},
+    signal::{self, unix::SignalKind, unix::signal},
 };
 
 fn run_with_cmdline_args() -> Result<(), Terminate> {
@@ -90,8 +90,8 @@ async fn handle_signals(
                 match config_source.path() {
                     Some(config_path) => {
                         info!(
-                        "SIGHUP signal received, re-reading configuration file '{}'",
-                        config_path.display()
+                            "SIGHUP signal received, re-reading configuration file '{}'",
+                            config_path.display()
                         );
                         match ConfigFile::load(&config_path) {
                             Ok(config_file) => {
@@ -115,9 +115,7 @@ async fn handle_signals(
                                         // spawn do the rest?
                                         manager.reload_http_ng_config(&config);
                                         manager.spawn(&mut config);
-                                        info!(
-                                            "Configuration changes applied"
-                                        );
+                                        info!("Configuration changes applied");
                                     }
                                 }
                             }
@@ -132,8 +130,11 @@ async fn handle_signals(
                     }
                     None => {
                         if let Some(ref rsp) = roto_script {
-                            info!("SIGHUP signal received, re-loading roto scripts \
-                            from location {:?}", rsp);
+                            info!(
+                                "SIGHUP signal received, re-loading roto scripts \
+                            from location {:?}",
+                                rsp
+                            );
                         } else {
                             error!(
                                 "No location for roto scripts. Not reloading"
@@ -145,7 +146,9 @@ async fn handle_signals(
                                 info!("Done reloading roto scripts");
                             }
                             Err(e) => {
-                                error!("Cannot reload roto scripts: {e}. Not reloading");
+                                error!(
+                                    "Cannot reload roto scripts: {e}. Not reloading"
+                                );
                             }
                         };
                     }
@@ -183,7 +186,11 @@ fn run_with_config(
     // default runtime.
     let _guard = runtime.enter();
 
-    manager.http_ng_api_arc().lock().unwrap().set_interfaces(config.http_ng_listen.clone().into_iter().flatten());
+    manager
+        .http_ng_api_arc()
+        .lock()
+        .unwrap()
+        .set_interfaces(config.http_ng_listen.clone().into_iter().flatten());
     manager.spawn(&mut config);
     manager.http_ng_api_arc().lock().unwrap().start();
 
@@ -209,7 +216,7 @@ mod tests {
     use std::{
         net::IpAddr,
         str::FromStr,
-        sync::{atomic::Ordering::SeqCst, Arc},
+        sync::{Arc, atomic::Ordering::SeqCst},
         time::{Duration, Instant},
     };
 
@@ -218,16 +225,16 @@ mod tests {
     use prometheus_parse::Value;
     use rotonda::{
         bgp::encode::{
+            Announcements, MyPeerType, PerPeerHeader, Prefixes,
             mk_initiation_msg, mk_peer_down_notification_msg,
             mk_peer_up_notification_msg, mk_route_monitoring_msg,
-            Announcements, MyPeerType, PerPeerHeader, Prefixes,
         },
         config::Source,
         metrics::{self, OutputFormat},
         tests::util::assert_json_eq,
     };
-    use routecore::{bmp::message::PeerType};
-    use rumqttd::{local::LinkRx, Broker, Notification};
+    use routecore::bmp::message::PeerType;
+    use rumqttd::{Broker, Notification, local::LinkRx};
     use serde_json::Number;
     use tokio::{io::AsyncWriteExt, net::TcpStream, time::sleep};
 
@@ -1072,8 +1079,7 @@ mod tests {
         base_labels: &[(&str, &str)],
         wanted_values: [i64; 7],
     ) {
-        const METRIC_NAME: &str =
-            "bmp_tcp_in_num_bmp_messages_received_total";
+        const METRIC_NAME: &str = "bmp_tcp_in_num_bmp_messages_received_total";
         const MSG_TYPES: [&str; 7] = [
             "Route Monitoring",
             "Statistics Report",
@@ -1205,9 +1211,7 @@ mod tests {
         }
     }
 
-    fn get_metrics(
-        metrics: &metrics::Collection,
-    ) -> prometheus_parse::Scrape {
+    fn get_metrics(metrics: &metrics::Collection) -> prometheus_parse::Scrape {
         let prom_txt = metrics.assemble(OutputFormat::Prometheus);
         let lines: Vec<_> =
             prom_txt.lines().map(|s| Ok(s.to_owned())).collect();
@@ -1553,8 +1557,7 @@ mod tests {
                     if res.is_err()
                         && res
                             != Err(MetricLookupResult::MetricValueNotMatched)
-                        && res
-                            != Err(MetricLookupResult::LabelValueNotMatched)
+                        && res != Err(MetricLookupResult::LabelValueNotMatched)
                         && res != Err(MetricLookupResult::LabelNameNotFound)
                     {
                         result.store(
@@ -1585,8 +1588,7 @@ mod tests {
                 .map(sample_as_i64)
                 .sum();
 
-            if result.load(SeqCst)
-                == MetricLookupResult::MetricValueNotMatched
+            if result.load(SeqCst) == MetricLookupResult::MetricValueNotMatched
             {
                 Some(sum)
             } else {

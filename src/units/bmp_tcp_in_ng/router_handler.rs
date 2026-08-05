@@ -1,12 +1,35 @@
-use std::{borrow::Cow, collections::HashMap, io::{BufWriter, Read, Write}, net::IpAddr, sync::Arc};
+use std::{
+    borrow::Cow,
+    collections::HashMap,
+    io::{BufWriter, Read, Write},
+    net::IpAddr,
+    sync::Arc,
+};
 
 use inetnum::asn::Asn;
-use log::{debug, error, warn};
+use log::{debug, error, info, trace, warn};
 use routecore::{
     bgp::message_ng::common::SessionConfig,
     bmp::message_ng::{
-            common::{MessageType, PerPeerHeader}, io::{BmpHandler, BmpV3Handler, BmpVersion, Parseable}, peer_down_notification::{PeerDownNotification as PeerDownNotification, PeerDownNotificationV3, PeerDownNotificationV4}, peer_up_notification::{PeerUpNotification, PeerUpNotificationV3, PeerUpNotificationV4}, route_monitoring::{RouteMonitoring, RouteMonitoringV3, RouteMonitoringV4}, snapshot::SnapshotMessage, statistics_report::{StatisticsReport, StatisticsReportV3, StatisticsReportV4}, tlvs::Index
-        }, util::pcapng::{PcapNgWriter, PcapNgWriterExt},
+        common::{MessageType, PerPeerHeader},
+        io::{BmpHandler, BmpV3Handler, BmpVersion, Parseable},
+        peer_down_notification::{
+            PeerDownNotification, PeerDownNotificationV3,
+            PeerDownNotificationV4,
+        },
+        peer_up_notification::{
+            PeerUpNotification, PeerUpNotificationV3, PeerUpNotificationV4,
+        },
+        route_monitoring::{
+            RouteMonitoring, RouteMonitoringV3, RouteMonitoringV4,
+        },
+        snapshot::SnapshotMessage,
+        statistics_report::{
+            StatisticsReport, StatisticsReportV3, StatisticsReportV4,
+        },
+        tlvs::Index,
+    },
+    util::pcapng::{PcapNgWriter, PcapNgWriterExt},
 };
 use tokio::io::AsyncRead;
 
@@ -14,7 +37,12 @@ use crate::{
     comms::Gate,
     ingress::{self, IngressId, IngressInfo, IngressType},
     payload::Update,
-    units::bmp_tcp_in_ng::{BmpTcpIn, error::BmpNgError, pph_register::PphRegister, unit::{StatsKey, StatsValue}},
+    units::bmp_tcp_in_ng::{
+        error::BmpNgError,
+        pph_register::PphRegister,
+        unit::{StatsKey, StatsValue},
+        BmpTcpIn,
+    },
 };
 
 pub struct RouterHandler<R> {
@@ -69,98 +97,124 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                         .unwrap_or_else(|| "__no_sys_desc".into()),
                 );
 
-                if let Some(output) = self.config.write_v4_to_file_bin.as_ref() {
+                if let Some(output) = self.config.write_v4_to_file_bin.as_ref()
+                {
                     match std::fs::OpenOptions::new()
                         .create(true)
                         .truncate(true)
                         .append(false)
                         .write(true)
-                        .open(output) {
-                            Ok(mut fh) => {
-                                if self.config.write_snapshot.is_some_and(|v| v) {
-                                    // FIXME properly generate and store this
-                                    // somewhere
-                                    let uuid: [u8; 16] = std::array::from_fn(|i| u8::try_from(i).unwrap());
-                                    let snapshot_written_bytes = SnapshotMessage::write_new(&mut fh, uuid).unwrap();
-                                    //dbg!(snapshot_written_bytes);
-                                }
-                                let _ = init_msg.write_as_v4(&mut fh, None);
+                        .open(output)
+                    {
+                        Ok(mut fh) => {
+                            if self.config.write_snapshot.is_some_and(|v| v) {
+                                // FIXME properly generate and store this
+                                // somewhere
+                                let uuid: [u8; 16] =
+                                    std::array::from_fn(|i| {
+                                        u8::try_from(i).unwrap()
+                                    });
+                                let snapshot_written_bytes =
+                                    SnapshotMessage::write_new(&mut fh, uuid)
+                                        .unwrap();
+                                //dbg!(snapshot_written_bytes);
                             }
-                            Err(e) => {
-                                warn!(
-                                    "Failed to open {} for writing: {e}",
-                                    output.to_string_lossy()
-                                );
-                            }
-
+                            let _ = init_msg.write_as_v4(&mut fh, None);
                         }
+                        Err(e) => {
+                            warn!(
+                                "Failed to open {} for writing: {e}",
+                                output.to_string_lossy()
+                            );
+                        }
+                    }
                 }
 
-                if let Some(output_mrt) = self.config.write_v4_to_file_mrt.as_ref() {
+                if let Some(output_mrt) =
+                    self.config.write_v4_to_file_mrt.as_ref()
+                {
                     match std::fs::OpenOptions::new()
                         .create(true)
                         .truncate(true)
                         .append(false)
                         .write(true)
-                        .open(output_mrt) {
-                            Ok(mut fh) => {
-                                let mut outbuf = Vec::with_capacity(1<<16);
-                                if self.config.write_snapshot.is_some_and(|v| v) {
-                                    // FIXME properly generate and store this
-                                    // somewhere
-                                    let uuid: [u8; 16] = std::array::from_fn(|i| u8::try_from(i).unwrap());
-                                    let len = SnapshotMessage::write_new(&mut outbuf, uuid).unwrap();
-                                    let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(&mut fh, None, &outbuf[..len]);
-                                    outbuf.clear();
-                                }
-
-                                let len = init_msg.write_as_v4(&mut outbuf, None).unwrap();
+                        .open(output_mrt)
+                    {
+                        Ok(mut fh) => {
+                            let mut outbuf = Vec::with_capacity(1 << 16);
+                            if self.config.write_snapshot.is_some_and(|v| v) {
+                                // FIXME properly generate and store this
+                                // somewhere
+                                let uuid: [u8; 16] =
+                                    std::array::from_fn(|i| {
+                                        u8::try_from(i).unwrap()
+                                    });
+                                let len = SnapshotMessage::write_new(
+                                    &mut outbuf,
+                                    uuid,
+                                )
+                                .unwrap();
                                 let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(&mut fh, None, &outbuf[..len]);
                                 outbuf.clear();
                             }
-                            Err(e) => {
-                                warn!(
-                                    "Failed to open {} for writing: {e}",
-                                    output_mrt.to_string_lossy()
-                                );
-                            }
 
+                            let len = init_msg
+                                .write_as_v4(&mut outbuf, None)
+                                .unwrap();
+                            let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(&mut fh, None, &outbuf[..len]);
+                            outbuf.clear();
                         }
+                        Err(e) => {
+                            warn!(
+                                "Failed to open {} for writing: {e}",
+                                output_mrt.to_string_lossy()
+                            );
+                        }
+                    }
                 }
 
-                if let Some(pcapng_filename) = self.config.write_v4_to_file_pcapng.as_ref() {
+                if let Some(pcapng_filename) =
+                    self.config.write_v4_to_file_pcapng.as_ref()
+                {
                     match std::fs::OpenOptions::new()
                         .create(true)
                         .truncate(true)
                         .append(false)
                         .write(true)
-                        .open(pcapng_filename) {
-                            Ok(mut fh) => {
-                                let mut res = PcapNgWriter::new_custom(fh).unwrap();
-                                res.start_snapshot();
-                                output_pcapng = Some(res);
-
-                            }
-                            Err(e) => {
-                                warn!(
-                                    "Failed to open {} for writing: {e}",
-                                    pcapng_filename.to_string_lossy()
-                                );
-                            }
-
+                        .open(pcapng_filename)
+                    {
+                        Ok(mut fh) => {
+                            let mut res =
+                                PcapNgWriter::new_custom(fh).unwrap();
+                            res.start_snapshot();
+                            output_pcapng = Some(res);
                         }
+                        Err(e) => {
+                            warn!(
+                                "Failed to open {} for writing: {e}",
+                                pcapng_filename.to_string_lossy()
+                            );
+                        }
+                    }
                 }
-
             }
             Err(other_msg) => {
                 // NB: this message is not consumed, so it will be picked up
                 // in process() below.
                 warn!("unexpected first message of BMP stream");
 
-                if let Ok(snapshot_msg) = SnapshotMessage::try_from_raw(other_msg) {
-                    debug!("raw msg (len {}): {:?}", &other_msg.len(), &other_msg);
+                if let Ok(snapshot_msg) =
+                    SnapshotMessage::try_from_raw(other_msg)
+                {
+                    debug!(
+                        "raw msg (len {}): {:?}",
+                        &other_msg.len(),
+                        &other_msg
+                    );
                     let id = snapshot_msg.snapshot_id();
-                    warn!("but it turns out to be a SnapshotMessage, id {id:?}");
+                    warn!(
+                        "but it turns out to be a SnapshotMessage, id {id:?}"
+                    );
                 }
 
                 partial_ingress_info = partial_ingress_info
@@ -223,38 +277,40 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
             stats_db,
         );
         //let mut cnt = 0;
-        
-        let mut output = config.write_v4_to_file_bin.and_then(|output|
-            match std::fs::OpenOptions::new()
-                .create(false)
-                .append(true)
-                .open(&output) {
-                    Ok(fh) => Some(BufWriter::new(fh)),
-                    Err(e) => {
-                        warn!(
-                            "Failed to open {} for writing: {e}",
-                            output.to_string_lossy()
-                        );
-                        None
-                    }
-                }
-        );
 
-        let mut output_mrt = config.write_v4_to_file_mrt.and_then(|output|
+        let mut output = config.write_v4_to_file_bin.and_then(|output| {
             match std::fs::OpenOptions::new()
                 .create(false)
                 .append(true)
-                .open(&output) {
-                    Ok(fh) => Some(BufWriter::new(fh)),
-                    Err(e) => {
-                        warn!(
-                            "Failed to open {} for writing: {e}",
-                            output.to_string_lossy()
-                        );
-                        None
-                    }
+                .open(&output)
+            {
+                Ok(fh) => Some(BufWriter::new(fh)),
+                Err(e) => {
+                    warn!(
+                        "Failed to open {} for writing: {e}",
+                        output.to_string_lossy()
+                    );
+                    None
                 }
-        );
+            }
+        });
+
+        let mut output_mrt = config.write_v4_to_file_mrt.and_then(|output| {
+            match std::fs::OpenOptions::new()
+                .create(false)
+                .append(true)
+                .open(&output)
+            {
+                Ok(fh) => Some(BufWriter::new(fh)),
+                Err(e) => {
+                    warn!(
+                        "Failed to open {} for writing: {e}",
+                        output.to_string_lossy()
+                    );
+                    None
+                }
+            }
+        });
 
         // Helper to write PDUs verbatim to a binary file.
         // The resulting file can be injected using e.g. socat.
@@ -292,68 +348,65 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                 // This is a V3 handler, so if we are configured to write to a
                 // (bin|pcap|mrt) file, it needs to be converted.
 
-
-
                 match msg.common.msg_type {
                     MessageType::PEER_UP_NOTIFICATION => {
-                        let peer_up = PeerUpNotificationV4::try_from_message(msg)
-                            .unwrap();
+                        let peer_up =
+                            PeerUpNotificationV4::try_from_message(msg)
+                                .unwrap();
 
                         write_bin!(peer_up);
                         write_mrt!(peer_up);
 
-                        let _ = router_state.process_peer_up(
-                            peer_up
-                        );
+                        let _ = router_state.process_peer_up(peer_up);
                     }
                     MessageType::ROUTE_MONITORING => {
                         //debug!("route_mon msg len: {}", msg.as_ref().len());
                         //debug!("route_mon first bytes: {:?}", &msg.as_ref()[..std::cmp::min(msg.as_ref().len(), 64)]);
 
-                        let route_mon = RouteMonitoringV4::try_from_message(msg)
-                            .unwrap();
+                        let route_mon =
+                            RouteMonitoringV4::try_from_message(msg).unwrap();
 
                         write_bin!(route_mon);
                         write_mrt!(route_mon);
 
                         let _ = router_state
-                            .process_route_monitoring(
-                                route_mon
-                            )
+                            .process_route_monitoring(route_mon)
                             .await;
                     }
                     MessageType::PEER_DOWN_NOTIFICATION => {
                         //debug!("peer_down msg len: {}", msg.as_ref().len());
                         //debug!("peer_down first bytes: {:?}", &msg.as_ref()[..std::cmp::min(msg.as_ref().len(), 64)]);
-                        let peer_down = PeerDownNotificationV4::try_from_message(msg)
+                        let peer_down =
+                            PeerDownNotificationV4::try_from_message(msg)
                                 .unwrap();
 
                         write_bin!(peer_down);
                         write_mrt!(peer_down);
 
-                        let _ = router_state.process_peer_down_notification(
-                            peer_down
-                        );
+                        let _ = router_state
+                            .process_peer_down_notification(peer_down);
                     }
                     MessageType::STATISTICS_REPORT => {
                         //debug!("stats report msg len: {}", msg.as_ref().len());
                         //debug!("stats report first bytes: {:?}", &msg.as_ref()[..std::cmp::min(msg.as_ref().len(), 64)]);
                         //debug!("stats report bytes: {:?}", &msg.as_ref());
-                        let stats_report = StatisticsReportV4::try_from_message(msg).unwrap();
+                        let stats_report =
+                            StatisticsReportV4::try_from_message(msg).unwrap();
 
                         write_bin!(stats_report);
                         write_mrt!(stats_report);
 
-                        let _ = router_state.process_statistics_report(
-                            stats_report
-                        );
+                        let _ = router_state
+                            .process_statistics_report(stats_report);
                     }
                     MessageType::INITIATION => {
                         // We end up here if the first message was not an
                         // Initiation (e.g. in case of a BMP Snapshot) or when
                         // the exporter sends an Initiation mid-stream to
                         // provide new information (in the TLVs).
-                        debug!("Got an Initiation message after the first message in this stream");
+                        debug!(
+                            "Got an Initiation message after the first message in this stream"
+                        );
                         debug!("TODO handle Initiation TLVs mid stream");
                     }
                     _ => {
@@ -363,7 +416,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
             }
         }
     }
-    
+
     async fn process<W: Write>(
         mut bmp_handler: BmpV3Handler<R>,
         gate: Gate,
@@ -380,30 +433,32 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
             unit_ingress_id,
             partial_ingress_info,
             stats_db,
-
         );
         //let mut cnt = 0;
-        
-        let mut output = config.write_v4_to_file_bin.and_then(|output|
+
+        let mut output = config.write_v4_to_file_bin.and_then(|output| {
             match std::fs::OpenOptions::new()
                 .create(false)
                 .append(true)
-                .open(&output) {
-                    Ok(fh) => Some(BufWriter::new(fh)),
-                    Err(e) => {
-                        warn!(
-                            "Failed to open {} for writing: {e}",
-                            output.to_string_lossy()
-                        );
-                        None
-                    }
+                .open(&output)
+            {
+                Ok(fh) => Some(BufWriter::new(fh)),
+                Err(e) => {
+                    warn!(
+                        "Failed to open {} for writing: {e}",
+                        output.to_string_lossy()
+                    );
+                    None
                 }
-        );
-        let mut output_mrt = config.write_v4_to_file_mrt.and_then(|output_mrt|
-            match std::fs::OpenOptions::new()
-                .create(false)
-                .append(true)
-                .open(&output_mrt) {
+            }
+        });
+        let mut output_mrt =
+            config.write_v4_to_file_mrt.and_then(|output_mrt| {
+                match std::fs::OpenOptions::new()
+                    .create(false)
+                    .append(true)
+                    .open(&output_mrt)
+                {
                     Ok(fh) => Some(BufWriter::new(fh)),
                     Err(e) => {
                         warn!(
@@ -413,13 +468,15 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                         None
                     }
                 }
-        );
-        let mut output_bgp_mrt_pcapng = config.write_bgp_as_mrt_in_pcapng.and_then(|output|
-            match std::fs::OpenOptions::new()
-                .create(true)
-                .truncate(true)
-                .write(true)
-                .open(&output) {
+            });
+        let mut output_bgp_mrt_pcapng =
+            config.write_bgp_as_mrt_in_pcapng.and_then(|output| {
+                match std::fs::OpenOptions::new()
+                    .create(true)
+                    .truncate(true)
+                    .write(true)
+                    .open(&output)
+                {
                     Ok(fh) => {
                         let mut res = PcapNgWriter::new_custom(fh).unwrap();
                         res.start_mrt();
@@ -433,41 +490,46 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                         None
                     }
                 }
-        );
+            });
 
         let mut tmp_mrt_only_output = match std::fs::OpenOptions::new()
-                .create(true)
-                .truncate(true)
-                .write(true)
-                .open("/tmp/mrtonly.mrt") {
-                    Ok(fh) => Some(BufWriter::new(fh)),
-                    Err(e) => None,
-                };
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open("/tmp/mrtonly.mrt")
+        {
+            Ok(fh) => Some(BufWriter::new(fh)),
+            Err(e) => None,
+        };
 
-
-        let mut outbuf = Vec::with_capacity(1<<20);
-
-
+        let mut outbuf = Vec::with_capacity(1 << 20);
 
         let mut additional_tlvs_buf = Vec::new();
         let additional_tlvs = if let Some(true) = config.write_snapshot {
             // FIXME this should be stored in the runner somewhere
-            let uuid: [u8; 16] = std::array::from_fn(|i| u8::try_from(i).unwrap());
+            let uuid: [u8; 16] =
+                std::array::from_fn(|i| u8::try_from(i).unwrap());
             let _ = routecore::bmp::message_ng::tlvs::Tlv::write(&mut additional_tlvs_buf, routecore::bmp::message_ng::tlvs::GenericCodepoint::SNAPSHOT_ID, uuid);
-            Some(routecore::bmp::message_ng::tlvs::Tlvs::from_slice(additional_tlvs_buf.as_ref()))
+            Some(routecore::bmp::message_ng::tlvs::Tlvs::from_slice(
+                additional_tlvs_buf.as_ref(),
+            ))
         } else {
             None
         };
 
         let mut additional_indexed_tlvs_buf = Vec::new();
-        let additional_indexed_tlvs = if let Some(true) = config.write_snapshot {
+        let additional_indexed_tlvs = if let Some(true) = config.write_snapshot
+        {
             // FIXME this should be stored in the runner somewhere
-            let uuid: [u8; 16] = std::array::from_fn(|i| u8::try_from(i).unwrap());
+            let uuid: [u8; 16] =
+                std::array::from_fn(|i| u8::try_from(i).unwrap());
             let _ = routecore::bmp::message_ng::tlvs::IndexedTlv::write(&mut additional_indexed_tlvs_buf, routecore::bmp::message_ng::tlvs::GenericCodepoint::SNAPSHOT_ID, Index::ALL, uuid);
             // FIXME: we create a Tlvs here instead of an IndexedTlvs, because
             // the fn write_as_v4 from the trait takes a Tlvs... make that
             // nicer.
-            Some(routecore::bmp::message_ng::tlvs::Tlvs::from_slice(additional_indexed_tlvs_buf.as_ref()))
+            Some(routecore::bmp::message_ng::tlvs::Tlvs::from_slice(
+                additional_indexed_tlvs_buf.as_ref(),
+            ))
         } else {
             None
         };
@@ -503,7 +565,6 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
             }
         );
 
-
         macro_rules! write_bgp_as_mrt_in_pcapng(
             ($msg:ident, $ingress_info:ident) => {
                 if let Some(output) = output_bgp_mrt_pcapng.as_mut() {
@@ -535,8 +596,6 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
             };
         );
 
-
-
         // Helper to create .mrt files.
         macro_rules! write_mrt(
             // With timestamp
@@ -563,7 +622,6 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
             };
         );
 
-
         while let Ok(Some(_)) = bmp_handler.msg_iter.read_into_buf().await {
             while let Ok(msg) = bmp_handler.msg_iter.get_message() {
                 //cnt += 1;
@@ -573,64 +631,80 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
 
                 match msg.common.msg_type {
                     MessageType::PEER_UP_NOTIFICATION => {
-
-                        let peer_up = PeerUpNotificationV3::try_from_message(msg)
-                            .unwrap();
+                        let peer_up =
+                            PeerUpNotificationV3::try_from_message(msg)
+                                .unwrap();
 
                         write_bin!(peer_up);
                         write_mrt!(peer_up);
                         write_pcapng!(peer_up);
 
-                        let _ = router_state.process_peer_up(
-                            peer_up
-                        );
+                        let _ = router_state.process_peer_up(peer_up);
                     }
                     MessageType::ROUTE_MONITORING => {
-                        let route_mon = RouteMonitoringV3::try_from_message(msg)
-                            .unwrap();
+                        let route_mon =
+                            RouteMonitoringV3::try_from_message(msg).unwrap();
 
                         write_bin!(route_mon);
                         write_mrt!(route_mon);
                         write_indexed_pcapng!(route_mon);
 
-
-                        if let Some(ingress_info) = router_state.pph_register.get(
-                            route_mon.per_peer_header()).and_then(|(id,_session_config)| ingress_register.get(*id)) {
-                            write_bgp_as_mrt_in_pcapng!(route_mon, ingress_info);
+                        if let Some(ingress_info) = router_state
+                            .pph_register
+                            .get(route_mon.per_peer_header())
+                            .and_then(|(id, _session_config)| {
+                                ingress_register.get(*id)
+                            })
+                        {
+                            write_bgp_as_mrt_in_pcapng!(
+                                route_mon,
+                                ingress_info
+                            );
                         } else {
-                            warn!("not writing mrt to pcapng: missing PPH/ingressinfo");
+                            warn!(
+                                "not writing mrt to pcapng: missing PPH\\
+                                ingressinfo"
+                            );
                         }
-                        
 
                         let _ = router_state
-                            .process_route_monitoring(
-                                route_mon
-                            )
+                            .process_route_monitoring(route_mon)
                             .await;
                     }
                     MessageType::PEER_DOWN_NOTIFICATION => {
-                        let peer_down = PeerDownNotificationV3::try_from_message(msg)
+                        let peer_down =
+                            PeerDownNotificationV3::try_from_message(msg)
                                 .unwrap();
 
                         write_bin!(peer_down);
                         write_mrt!(peer_down);
 
-                        let _ = router_state.process_peer_down_notification(
-                            peer_down
-                        );
+                        let _ = router_state
+                            .process_peer_down_notification(peer_down);
                     }
                     MessageType::STATISTICS_REPORT => {
-                        let stats_report = StatisticsReportV3::try_from_message(msg).unwrap();
+                        let stats_report =
+                            StatisticsReportV3::try_from_message(msg).unwrap();
 
                         write_bin!(stats_report);
                         write_mrt!(stats_report);
 
-                        let _ = router_state.process_statistics_report(
-                            stats_report
+                        let _ = router_state
+                            .process_statistics_report(stats_report);
+                    }
+                    MessageType::ROUTE_MIRRORING => {
+                        trace!(
+                            "Known, but unimplemented Message Type. Ignoring.\
+                             TODO {}",
+                            msg.common.msg_type
                         );
                     }
-                    _ => {
-                        panic!("TODO {}", msg.common.msg_type)
+                    MessageType(v) => {
+                        panic!(
+                            "Cannot handle this message type with id {v} is \
+                             unimplemented and unknown by Rotonda. It may \
+                             very well be illegal. Cannot continue."
+                        );
                     }
                 }
             }
@@ -660,7 +734,6 @@ pub struct RouterState {
     stats_db: super::unit::StatsStore,
     bmp_router_name: String,
     bmp_router_addr: IpAddr,
-
 }
 
 #[allow(clippy::unnecessary_wraps)]
@@ -675,8 +748,13 @@ impl RouterState {
         let bmp_stream_ingress_id = ingress_register.register();
         debug!("bmp_stream registered {bmp_stream_ingress_id}");
 
-        let bmp_router_name = partial_ingress_info.name.clone().unwrap_or("__no_router_name".into());
-        let bmp_router_addr = partial_ingress_info.remote_addr.unwrap_or("::".parse().unwrap());
+        let bmp_router_name = partial_ingress_info
+            .name
+            .clone()
+            .unwrap_or("__no_router_name".into());
+        let bmp_router_addr = partial_ingress_info
+            .remote_addr
+            .unwrap_or("::".parse().unwrap());
 
         //let bmp_stream_info = IngressInfo::new()
         let bmp_stream_info = partial_ingress_info
@@ -685,7 +763,6 @@ impl RouterState {
             .with_state(ingress::register::IngressState::Connected);
 
         ingress_register.update_info(bmp_stream_ingress_id, bmp_stream_info);
-
 
         Self {
             pph_register: PphRegister::new(ingress_register.clone()),
@@ -700,7 +777,7 @@ impl RouterState {
 
     fn process_peer_up<M: PeerUpNotification + ?Sized>(
         &mut self,
-        msg: &M
+        msg: &M,
     ) -> Result<(), BmpNgError> {
         let pph = msg.per_peer_header();
 
@@ -728,7 +805,7 @@ impl RouterState {
 
     async fn process_route_monitoring<M: RouteMonitoring + ?Sized>(
         &mut self,
-        msg: &M
+        msg: &M,
     ) -> Result<(), BmpNgError> {
         let (ingress_id, sc) = if let Some(t) =
             self.pph_register.get(msg.per_peer_header())
@@ -744,8 +821,16 @@ impl RouterState {
                 .cloned();
 
             if let Some((existing_ingress_id, sc)) = maybe_existing {
-                let mut existing_info =
-                    self.ingress_register.get(existing_ingress_id).unwrap();
+                let Some(mut existing_info) =
+                    self.ingress_register.get(existing_ingress_id)
+                else {
+                    debug!(
+                        "No info in ingress register for {existing_ingress_id}"
+                    );
+                    return Err("No info found in ingress register for \
+                            {existing_ingress_id}"
+                        .into());
+                };
                 existing_info = existing_info
                     .with_peer_type(u8::from(pph.peer_type()))
                     .with_rib_type(pph.rib_type())
@@ -778,11 +863,11 @@ impl RouterState {
 
         let update = match msg.bgp_update() {
             Ok(update) => update,
-            Err(e) =>  {
+            Err(e) => {
                 let msg = e.to_string();
                 return Err(BmpNgError::new(msg.into()));
             }
-    };
+        };
 
         // dbg snippet:
         //match update.into_checked_parts(sc) {
@@ -849,9 +934,10 @@ impl RouterState {
         &mut self,
         msg: &M,
     ) -> Result<(), BmpNgError> {
-
         // import enum
-        use routecore::bmp::message_ng::statistics_report::Stat::{CounterStat, GaugeStat, AfiSafiGaugeStat};
+        use routecore::bmp::message_ng::statistics_report::Stat::{
+            AfiSafiGaugeStat, CounterStat, GaugeStat,
+        };
 
         let pph = msg.per_peer_header();
 
@@ -859,7 +945,7 @@ impl RouterState {
             bmp_router_name: self.bmp_router_name.clone(),
             bmp_router_addr: self.bmp_router_addr,
             // not sure whether rib_view is useful or necessary:
-            // some stat type are rib_view specific anyway (e.g. 
+            // some stat type are rib_view specific anyway (e.g.
             // 'routes_per_afi_safi_pre_policy_adj_rib_out' )
             // We need to find out whether exporter implementations really
             // send out StatsReport for different rib views, or whether it is
@@ -873,12 +959,14 @@ impl RouterState {
             bgp_id: pph.bgp_id(),
         };
 
-
         let mut db = self.stats_db.lock().unwrap();
-        db.insert(key, StatsValue {
-            timestamp: std::time::SystemTime::now(),
-            raw_stats: msg.stats().as_ref().to_vec()
-        });
+        db.insert(
+            key,
+            StatsValue {
+                timestamp: std::time::SystemTime::now(),
+                raw_stats: msg.stats().as_ref().to_vec(),
+            },
+        );
 
         Ok(())
     }

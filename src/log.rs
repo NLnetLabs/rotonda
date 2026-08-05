@@ -8,7 +8,7 @@
 //! return quietly.
 use crate::config::ConfigPath;
 use clap::{Arg, ArgAction, ArgMatches, Command};
-use log::{error, LevelFilter, Log};
+use log::{LevelFilter, Log, error};
 use serde::Deserialize;
 use std::convert::TryFrom;
 use std::path::Path;
@@ -59,7 +59,9 @@ impl LogConfig {
                     .short('v')
                     .long("verbose")
                     .action(ArgAction::Count)
-                    .help(" Log more information, twice or thrice for even more"),
+                    .help(
+                        " Log more information, twice or thrice for even more",
+                    ),
             )
             .arg(
                 Arg::new("logfile")

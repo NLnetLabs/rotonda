@@ -24,16 +24,15 @@ use roto::types::builtin::SourceId;
 use crate::payload::Payload;
 */
 
-use routecore::bgp::message::{update::FourOctetAsns, SessionConfig};
+use routecore::bgp::message::{SessionConfig, update::FourOctetAsns};
 
 // Originally based on code in bgmp::main.rs.
 pub fn generate_alternate_config(
     peer_config: &SessionConfig,
 ) -> Option<SessionConfig> {
     let mut alt_peer_config = peer_config.clone();
-    alt_peer_config.set_four_octet_asns(FourOctetAsns(
-        !peer_config.four_octet_enabled(),
-    ));
+    alt_peer_config
+        .set_four_octet_asns(FourOctetAsns(!peer_config.four_octet_enabled()));
     // We could try to be smart and toggle addpath settings for all or some
     // address families like below, but there is a chance we start storing
     // incorrect data. The proper solution is to fix the exporting side.

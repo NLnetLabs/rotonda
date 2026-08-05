@@ -73,10 +73,10 @@ use crate::{manager, metrics};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use crossbeam_utils::atomic::AtomicCell;
-use futures::future::{select, Either, Future};
+use futures::future::{Either, Future, select};
 use futures::pin_mut;
 use inetnum::addr::Prefix;
-use log::{error, log_enabled, trace, Level};
+use log::{Level, error, log_enabled, trace};
 use rotonda_store::match_options::MatchOptions;
 use serde::Deserialize;
 use tokio::sync::mpsc::Sender;
@@ -89,8 +89,8 @@ use std::{
     fmt::{self, Debug, Display},
 };
 use std::{future::pending, sync::atomic::AtomicUsize};
-use tokio::sync::{mpsc, oneshot, RwLock};
-use tokio::time::{timeout_at, Instant};
+use tokio::sync::{RwLock, mpsc, oneshot};
+use tokio::time::{Instant, timeout_at};
 use uuid::Uuid;
 
 #[async_trait]
@@ -339,11 +339,11 @@ impl Gate {
                     self.id()
                 );
             }
-            if let Err(_err) = parent_command_sender.blocking_send(
-                GateCommand::DetachClone {
+            if let Err(_err) =
+                parent_command_sender.blocking_send(GateCommand::DetachClone {
                     clone_id: *clone_id,
-                },
-            ) {
+                })
+            {
                 // TODO
             }
         } else {
@@ -492,9 +492,7 @@ impl Gate {
                         if log_enabled!(log::Level::Trace) {
                             trace!(
                                 "Gate[{} ({})]: Reconfiguring: new ID={}",
-                                self.name,
-                                id,
-                                new_id
+                                self.name, id, new_id
                             );
                         }
                         *id = new_id;
@@ -584,7 +582,14 @@ impl Gate {
                         } else {
                             String::new()
                         };
-                        trace!("Gate[{} ({}{})]: Unable to notify clone {} of command '{}': sender is closed", self.name, clone_txt, self.id(), uuid, cmd);
+                        trace!(
+                            "Gate[{} ({}{})]: Unable to notify clone {} of command '{}': sender is closed",
+                            self.name,
+                            clone_txt,
+                            self.id(),
+                            uuid,
+                            cmd
+                        );
                     }
                     closed_sender_found = true;
                 }
@@ -700,12 +705,12 @@ impl Gate {
                             String::new()
                         };
                         trace!(
-                                "Gate[{} ({}{})]: Sending direct update for slot {}",
-                                self.name,
-                                clone_txt,
-                                self.id(),
-                                uuid
-                            );
+                            "Gate[{} ({}{})]: Sending direct update for slot {}",
+                            self.name,
+                            clone_txt,
+                            self.id(),
+                            uuid
+                        );
                     }
                     if let Some(tracer) = &self.tracer {
                         for payload in update.trace_ids() {
@@ -751,11 +756,8 @@ impl Gate {
         //     self.updates_len.store(updates.len(), SeqCst);
         // }
 
-        self.metrics.update(
-            &update,
-            self.updates.clone(),
-            sent_at_least_once,
-        );
+        self.metrics
+            .update(&update, self.updates.clone(), sent_at_least_once);
     }
 
     /// Returns the current gate status.
@@ -1472,11 +1474,7 @@ impl Link {
             updates: sub.receiver,
         });
         if log_enabled!(log::Level::Trace) {
-            trace!(
-                "Link[{}]: connected to gate slot {}",
-                self.id(),
-                sub.slot
-            );
+            trace!("Link[{}]: connected to gate slot {}", self.id(), sub.slot);
         }
         self.unit_status = UnitStatus::Healthy;
         self.suspended = suspended;
@@ -1532,8 +1530,7 @@ impl Drop for Link {
                 if log_enabled!(log::Level::Trace) {
                     trace!(
                         "Link[{}]: disconnected from gate slot {} on drop",
-                        id,
-                        slot
+                        id, slot
                     );
                 }
             });
@@ -1835,9 +1832,10 @@ mod tests {
     use tokio::sync::Notify;
 
     use crate::{
-        payload::Payload, tests::util::internal::{
+        payload::Payload,
+        tests::util::internal::{
             enable_logging, get_testable_metrics_snapshot,
-        }
+        },
     };
 
     use super::*;
@@ -1846,9 +1844,12 @@ mod tests {
     async fn gate_link_lifecycle_test() {
         use std::str::FromStr;
 
-        use routecore::bgp::{message::PduParseInfo, nlri::afisafi::Ipv4UnicastNlri, path_attributes::OwnedPathAttributes};
+        use routecore::bgp::{
+            message::PduParseInfo, nlri::afisafi::Ipv4UnicastNlri,
+            path_attributes::OwnedPathAttributes,
+        };
 
-        use crate::{payload::{RotondaPaMap, RotondaRoute}};
+        use crate::payload::{RotondaPaMap, RotondaRoute};
 
         // Lifecycle of a connected gate and link:
         //
@@ -1918,17 +1919,14 @@ mod tests {
             Payload::new(
                 RotondaRoute::Ipv4Unicast(
                     Ipv4UnicastNlri::from_str("1.2.3.0/24").unwrap(),
-                    RotondaPaMap::new(
-                        OwnedPathAttributes::new(
-                            PduParseInfo::modern(),
-                            vec![]
-                        )
-                    )
+                    RotondaPaMap::new(OwnedPathAttributes::new(
+                        PduParseInfo::modern(),
+                        vec![],
+                    )),
                 ),
                 None,
                 1234, // IngressId
                 RouteStatus::Active,
-
             )
         }
 

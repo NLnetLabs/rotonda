@@ -1,6 +1,6 @@
 use std::{
     fmt::Display,
-    sync::{atomic::Ordering::SeqCst, Arc},
+    sync::{Arc, atomic::Ordering::SeqCst},
 };
 
 use bytes::Bytes;
@@ -123,8 +123,7 @@ impl BmpStateMachineStatusReporter {
         // let n_valid_withdrawals = update_report_msg.get_n_valid_withdrawals();
         // let n_new_prefixes = update_report_msg.get_n_new_prefixes();
         // let n_stored_prefixes = update_report_msg.get_n_stored_prefixes();
-        let metrics =
-            self.metrics.router_metrics(update_report_msg.router_id);
+        let metrics = self.metrics.router_metrics(update_report_msg.router_id);
         metrics
             .num_received_prefixes
             .fetch_add(update_report_msg.n_new_prefixes, SeqCst);

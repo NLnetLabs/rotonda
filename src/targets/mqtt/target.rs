@@ -8,15 +8,15 @@ use super::{
     status_reporter::MqttStatusReporter,
 };
 
+use crate::roto_runtime::types::OutputStreamMessage;
 use crate::{
-        common::status_reporter::{AnyStatusReporter, TargetStatusReporter},
+    common::status_reporter::{AnyStatusReporter, TargetStatusReporter},
     comms::{AnyDirectUpdate, DirectLink, DirectUpdate, Terminated},
     ingress,
     manager::{Component, TargetCommand, WaitPoint},
     payload::{Update, UpstreamStatus},
     targets::Target,
 };
-use crate::roto_runtime::types::OutputStreamMessage;
 
 use arc_swap::{ArcSwap, ArcSwapOption};
 use async_trait::async_trait;
@@ -373,11 +373,8 @@ where
         };
 
         if let Some(client) = client {
-            match timeout(
-                duration,
-                client.publish(topic, qos, false, content),
-            )
-            .await
+            match timeout(duration, client.publish(topic, qos, false, content))
+                .await
             {
                 Err(_) => Err(MqttError::Timeout),
                 Ok(Ok(())) => Ok(()),
@@ -473,10 +470,10 @@ where
 
             Update::OutputStream(msgs) => {
                 for osm in msgs {
-                    if let Some(msg) = self.output_stream_message_to_msg(osm)
-                    {
+                    if let Some(msg) = self.output_stream_message_to_msg(osm) {
                         if let Err(err) =
-                            self.pub_q_tx.as_ref().unwrap().send(msg)//.await
+                            self.pub_q_tx.as_ref().unwrap().send(msg)
+                        //.await
                         {
                             error!("failed to send MQTT message: {err}");
                         }

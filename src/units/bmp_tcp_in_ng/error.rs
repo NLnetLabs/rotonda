@@ -2,7 +2,7 @@ use std::{borrow::Cow, fmt};
 
 #[derive(Debug)]
 pub struct BmpNgError {
-    msg: Cow<'static, str>
+    msg: Cow<'static, str>,
 }
 
 impl BmpNgError {
@@ -17,13 +17,12 @@ impl fmt::Display for BmpNgError {
     }
 }
 
-impl std::error::Error for BmpNgError { }
-
+impl std::error::Error for BmpNgError {}
 
 impl<T> From<T> for BmpNgError
-where T: Into<Cow<'static, str>>
+where
+    T: Into<Cow<'static, str>>,
 {
-
     fn from(value: T) -> Self {
         Self::new(value.into())
     }

@@ -1,14 +1,14 @@
 use std::{
     fmt::Display,
     net::SocketAddr,
-    sync::{atomic::Ordering::SeqCst, Arc},
+    sync::{Arc, atomic::Ordering::SeqCst},
 };
 
 use log::{debug, error, info, trace, warn};
 
 use crate::{
     common::status_reporter::{
-        sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter,
+        AnyStatusReporter, Chainable, Named, UnitStatusReporter, sr_log,
     },
     payload::RouterId,
 };
@@ -114,7 +114,6 @@ impl BmpTcpInStatusReporter {
             .num_invalid_bmp_messages
             .fetch_add(1, SeqCst);
     }
-
 }
 
 impl UnitStatusReporter for BmpTcpInStatusReporter {}

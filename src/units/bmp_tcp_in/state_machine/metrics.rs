@@ -9,7 +9,7 @@ use chrono::{DateTime, Utc};
 use crate::{
     common::frim::FrimMap,
     metrics::{
-        self, util::append_per_router_metric, Metric, MetricType, MetricUnit,
+        self, Metric, MetricType, MetricUnit, util::append_per_router_metric,
     },
     payload::RouterId,
 };
@@ -89,8 +89,7 @@ impl ParseErrorsRingBuffer {
                 // never wrapped
                 (locked.clone(), vec![])
             } else {
-                let (start, end) =
-                    locked.split_at(self.next_idx.load(SeqCst));
+                let (start, end) = locked.split_at(self.next_idx.load(SeqCst));
                 (end.to_vec(), start.to_vec())
             }
         } else {
@@ -164,18 +163,20 @@ impl BmpStateMachineMetrics {
         MetricType::Gauge,
         MetricUnit::Total,
     );
-    const NUM_BMP_ROUTE_MONITORING_MSGS_WITH_UNKNOWN_PEER_METRIC: Metric = Metric::new(
-        "bmp_state_num_bmp_route_monitoring_msgs_with_unknown_peer",
-        "the number of BMP Route Monitoring messages for which no Peer Up notification was seen",
-        MetricType::Counter,
-        MetricUnit::Total,
-    );
-    const NUM_BGP_UPDATES_REPARSED_DUE_TO_INCORRECT_HEADER_FLAGS: Metric = Metric::new(
-        "bmp_state_num_bgp_updates_reparsed_due_to_incorrect_header_flags",
-        "the number of BGP UPDATE messages that could only be parsed by not obeying the BMP common header flags",
-        MetricType::Counter,
-        MetricUnit::Total,
-    );
+    const NUM_BMP_ROUTE_MONITORING_MSGS_WITH_UNKNOWN_PEER_METRIC: Metric =
+        Metric::new(
+            "bmp_state_num_bmp_route_monitoring_msgs_with_unknown_peer",
+            "the number of BMP Route Monitoring messages for which no Peer Up notification was seen",
+            MetricType::Counter,
+            MetricUnit::Total,
+        );
+    const NUM_BGP_UPDATES_REPARSED_DUE_TO_INCORRECT_HEADER_FLAGS: Metric =
+        Metric::new(
+            "bmp_state_num_bgp_updates_reparsed_due_to_incorrect_header_flags",
+            "the number of BGP UPDATE messages that could only be parsed by not obeying the BMP common header flags",
+            MetricType::Counter,
+            MetricUnit::Total,
+        );
     const NUM_UNPROCESSABLE_BMP_MESSAGES: Metric = Metric::new(
         "bmp_state_num_unprocessable_bmp_messages",
         "the number of BMP messages that could not be parsed, were invbmp_state_num_unprocessable_bmp_messagesalid or otherwise could not be processed",

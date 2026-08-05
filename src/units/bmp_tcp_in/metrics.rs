@@ -1,13 +1,13 @@
 use std::sync::{
-    atomic::{AtomicUsize, Ordering::SeqCst},
     Arc,
+    atomic::{AtomicUsize, Ordering::SeqCst},
 };
 
 use crate::{
     common::frim::FrimMap,
     comms::{Gate, GateMetrics, GraphStatus},
     metrics::{
-        self, util::append_per_router_metric, Metric, MetricType, MetricUnit,
+        self, Metric, MetricType, MetricUnit, util::append_per_router_metric,
     },
     payload::RouterId,
 };

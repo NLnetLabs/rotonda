@@ -15,7 +15,10 @@ use tower_http::compression::CompressionLayer;
 
 use crate::{
     ingress::{self, http_ng::IngressApi},
-    units::{bgp_tcp_in::unit::LiveSessions, bmp_tcp_in_ng::unit::StatsStore, rib_unit::rib::Rib},
+    units::{
+        bgp_tcp_in::unit::LiveSessions, bmp_tcp_in_ng::unit::StatsStore,
+        rib_unit::rib::Rib,
+    },
     webui::WebUI,
 };
 
@@ -147,7 +150,7 @@ impl Api {
     }
 
     pub fn get_stats_store(&self) -> StatsStore {
-        self.stats_store.clone() 
+        self.stats_store.clone()
     }
 
     /// Clone an `ApiState` based on the references to the store an ingress registry

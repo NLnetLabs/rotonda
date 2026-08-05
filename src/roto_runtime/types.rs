@@ -6,8 +6,8 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use chrono::serde::ts_microseconds;
 use chrono::Utc;
+use chrono::serde::ts_microseconds;
 use inetnum::{addr::Prefix, asn::Asn};
 use log::debug;
 use routecore::bgp::{
@@ -472,11 +472,7 @@ impl OutputStreamMessage {
             ingress_id,
         }
     }
-    pub fn custom(
-        id: u32,
-        value: u32,
-        ingress_id: Option<IngressId>,
-    ) -> Self {
+    pub fn custom(id: u32, value: u32, ingress_id: Option<IngressId>) -> Self {
         Self {
             name: MQTT_NAME.into(),
             topic: "custom".into(),

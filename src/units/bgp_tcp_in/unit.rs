@@ -9,7 +9,7 @@ use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use bytes::{Bytes, BytesMut};
 use futures::future::select;
-use futures::{pin_mut, Future};
+use futures::{Future, pin_mut};
 use log::{debug, error, warn};
 use non_empty_vec::NonEmpty;
 //use roto::types::{builtin::BuiltinTypeValue, typevalue::TypeValue};
@@ -17,7 +17,7 @@ use inetnum::asn::Asn;
 use routecore::bgp::fsm::session::{Command, DisconnectReason};
 use routecore::bgp::message::UpdateMessage;
 use routecore::bgp::message::{
-    update_builder::UpdateBuilder, Message as BgpMsg, SessionConfig,
+    Message as BgpMsg, SessionConfig, update_builder::UpdateBuilder,
 };
 
 use serde::Deserialize;
@@ -30,7 +30,7 @@ use crate::common::net::{
 };
 use crate::roto_runtime::metrics::RotoMetricsWrapper;
 use crate::roto_runtime::types::{
-    RotoPackage, FilterName, RotoOutputStream, RotoScripts
+    FilterName, RotoOutputStream, RotoPackage, RotoScripts,
 };
 //use crate::common::roto::{FilterName, RotoScripts};
 use crate::common::status_reporter::{Chainable, UnitStatusReporter};
@@ -41,7 +41,7 @@ use crate::comms::{
 use crate::ingress;
 use crate::manager::{Component, WaitPoint};
 use crate::payload::Update;
-use crate::roto_runtime::{RotondaCtx, MutIngressInfoCache};
+use crate::roto_runtime::{MutIngressInfoCache, RotondaCtx};
 use crate::units::rib_unit::rpki::RtrCache;
 use crate::units::{Gate, Unit};
 
@@ -58,8 +58,7 @@ pub(crate) type RotoFunc = roto::TypedFunc<
     fn(
         roto::Val<UpdateMessage<Bytes>>,
         roto::Val<MutIngressInfoCache>,
-    ) ->
-    roto::Verdict<(), ()>
+    ) -> roto::Verdict<(), ()>,
 >;
 
 pub const ROTO_FUNC_FILTER_NAME: &str = "bgp_in";
@@ -121,10 +120,8 @@ impl BgpTcpIn {
         let roto_metrics = component.roto_metrics().clone();
 
         // Setup status reporting
-        let status_reporter = Arc::new(BgpTcpInStatusReporter::new(
-            &unit_name,
-            metrics.clone(),
-        ));
+        let status_reporter =
+            Arc::new(BgpTcpInStatusReporter::new(&unit_name, metrics.clone()));
 
         let roto_compiled = component.roto_package().clone();
 
@@ -232,8 +229,6 @@ impl BgpTcpInRunner {
         global_live_sessions: Arc<Mutex<LiveSessions>>,
         ingresses: Arc<ingress::Register>,
     ) -> Self {
-        
-
         if let Ok(mut api) = component.http_ng_api_arc().lock() {
             super::http_ng::register_routes(&mut api);
         } else {
@@ -297,10 +292,10 @@ impl BgpTcpInRunner {
             arc_self.roto_compiled.clone().and_then(|c| {
                 let mut c = c.lock().unwrap();
                 c.get_function(ROTO_FUNC_FILTER_NAME)
-                .inspect_err(|_|
-                    warn!("Loaded Roto script has no filter for bgp-in")
-                )
-                .ok()
+                    .inspect_err(|_| {
+                        warn!("Loaded Roto script has no filter for bgp-in")
+                    })
+                    .ok()
             });
 
         let mut roto_context = RotondaCtx::empty();
@@ -441,9 +436,7 @@ impl BgpTcpInRunner {
                             if rebind {
                                 // Trigger re-binding to the new listen port.
                                 let err = std::io::ErrorKind::Other;
-                                return ControlFlow::Continue(
-                                    Err(err.into()),
-                                );
+                                return ControlFlow::Continue(Err(err.into()));
                             }
                         }
 
@@ -605,7 +598,7 @@ impl ConfigAcceptor for BgpTcpInRunner {
         connector_ingress_id: ingress::IngressId,
     ) {
         let (cmds_tx, cmds_rx) = mpsc::channel(10 * 10); //XXX this is limiting and
-                                                         //causes loss
+        //causes loss
         let tcp_stream = tcp_stream.into_inner().unwrap(); // SAFETY: StandardTcpStream::into_inner() always returns Ok(...)
         crate::tokio::spawn(
             &child_name,
@@ -633,8 +626,8 @@ mod tests {
     use std::{
         net::SocketAddr,
         sync::{
-            atomic::{AtomicUsize, Ordering},
             Arc,
+            atomic::{AtomicUsize, Ordering},
         },
     };
 
@@ -642,19 +635,21 @@ mod tests {
     use inetnum::asn::Asn;
 
     use crate::{
-        common::{
-            net::TcpStreamWrapper,
-            status_reporter::AnyStatusReporter,
-        }, comms::{Gate, GateAgent, Terminated}, ingress, roto_runtime::types::RotoScripts, tests::util::{
+        common::{net::TcpStreamWrapper, status_reporter::AnyStatusReporter},
+        comms::{Gate, GateAgent, Terminated},
+        ingress,
+        roto_runtime::types::RotoScripts,
+        tests::util::{
             internal::get_testable_metrics_snapshot,
             net::{
                 MockTcpListener, MockTcpListenerFactory, MockTcpStreamWrapper,
             },
-        }, units::bgp_tcp_in::{
+        },
+        units::bgp_tcp_in::{
             peer_config::{PeerConfig, PrefixOrExact},
             status_reporter::BgpTcpInStatusReporter,
             unit::{BgpTcpIn, BgpTcpInRunner, ConfigAcceptor, LiveSessions},
-        }
+        },
     };
 
     use super::RotoFunc;
@@ -816,7 +811,9 @@ mod tests {
         fn accept_config(
             _child_name: String,
             _roto_function: Option<RotoFunc>,
-            _roto_context: Arc<std::sync::Mutex<crate::roto_runtime::RotondaCtx>>,
+            _roto_context: Arc<
+                std::sync::Mutex<crate::roto_runtime::RotondaCtx>,
+            >,
             _gate: &Gate,
             _bgp: &BgpTcpIn,
             _tcp_stream: impl TcpStreamWrapper,

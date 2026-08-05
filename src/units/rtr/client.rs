@@ -4,11 +4,12 @@
 //! different transport protocols: [`Tcp`] uses plain, unencrypted TCP while
 //! [`Tls`] uses TLS.
 
+use chrono::{TimeZone, Utc};
 use std::error::Error;
 use std::fmt::Display;
-use std::io;
 use std::fs::File;
 use std::future::Future;
+use std::io;
 use std::ops::ControlFlow;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -16,10 +17,10 @@ use std::sync::atomic;
 use std::sync::atomic::{AtomicI64, AtomicU32, AtomicU64};
 use std::task::{Context, Poll};
 use std::time::Duration;
-use chrono::{TimeZone, Utc};
 //use daemonbase::config::ConfigPath;
+use crate::manager::WaitPoint;
+use futures_util::future::{Either, select};
 use futures_util::pin_mut;
-use futures_util::future::{select, Either};
 use log::info;
 use log::{debug, error, warn};
 use pin_project_lite::pin_project;
@@ -30,15 +31,14 @@ use rpki::rtr::state::State;
 use serde::Deserialize;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tokio::net::TcpStream;
-use tokio::time::{timeout_at, Instant};
-use crate::manager::WaitPoint;
+use tokio::time::{Instant, timeout_at};
 //use tokio_rustls::TlsConnector;
 //use tokio_rustls::client::TlsStream;
 //use tokio_rustls::rustls::{ClientConfig, RootCertStore};
 //use tokio_rustls::rustls::pki_types::ServerName;
-use crate::metrics;
 use crate::comms::{Gate, GateMetrics, GateStatus, Terminated};
 use crate::manager::Component;
+use crate::metrics;
 use crate::metrics::{Metric, MetricType, MetricUnit};
 use crate::payload;
 use crate::payload::Update;
@@ -57,7 +57,7 @@ pub struct Tcp {
 
     /// Start the RTR version negotiation with this version.
     #[serde(default = "Tcp::default_version")]
-    initial_version: u8
+    initial_version: u8,
 }
 
 impl Tcp {
@@ -76,21 +76,22 @@ impl Tcp {
     /// This method will only ever return if the RTR client encounters a fatal
     /// error.
     pub async fn run(
-        self, component: Component, gate: Gate, mut waitpoint: WaitPoint,
+        self,
+        component: Component,
+        gate: Gate,
+        mut waitpoint: WaitPoint,
     ) -> Result<(), Terminated> {
         let metrics = Arc::new(RtrMetrics::new(&gate));
 
         gate.process_until(waitpoint.ready()).await?;
-        tokio::spawn(async  {
+        tokio::spawn(async {
             debug!("waiting 5 secs to give rtr-in a headstart");
             tokio::time::sleep(Duration::from_secs(5)).await;
             debug!("waiting done, calling waitpoint.running()");
             waitpoint.running().await;
         });
 
-        RtrRunner::new(
-            component, gate, self, metrics
-        ).run().await?;
+        RtrRunner::new(component, gate, self, metrics).run().await?;
         Ok(())
     }
 }
@@ -107,47 +108,52 @@ impl RtrRunner {
         component: Component,
         gate: Gate,
         tcp: Tcp,
-        metrics: Arc<RtrMetrics>
+        metrics: Arc<RtrMetrics>,
     ) -> Self {
         Self {
-            component, gate, tcp, metrics
+            component,
+            gate,
+            tcp,
+            metrics,
         }
     }
 
-    pub async fn run(mut self) -> Result<(), Terminated>{
+    pub async fn run(mut self) -> Result<(), Terminated> {
         self.component.register_metrics(self.metrics.clone());
         let remote = self.tcp.remote.clone();
         let metrics = self.metrics.clone();
         let fut = RtrClient::run(
-            self.component.name().clone(), self.gate.clone(), self.tcp.initial_version, self.tcp.retry, self.metrics.clone(),
+            self.component.name().clone(),
+            self.gate.clone(),
+            self.tcp.initial_version,
+            self.tcp.retry,
+            self.metrics.clone(),
             || async {
                 Ok(RtrTcpStream {
                     sock: TcpStream::connect(remote.clone()).await?,
                     metrics: metrics.clone(),
                 })
-            }
+            },
         );
 
         // We don't have to loop like in other (ingress) units, as the RtrClient itself loops and
         // only returns in case of a terminal failure.
         match self.process_until(fut).await {
             ControlFlow::Continue(Ok(res)) => res,
-            ControlFlow::Continue(Err(_)) | 
-                ControlFlow::Break(Terminated) => {
-                    error!("Terminated");
-                    return Err(Terminated)
-                }
+            ControlFlow::Continue(Err(_)) | ControlFlow::Break(Terminated) => {
+                error!("Terminated");
+                return Err(Terminated);
+            }
         };
         Ok(())
     }
 
-
     async fn process_until<T, U>(
         &mut self,
         until_fut: T,
-        ) -> ControlFlow<Terminated, Result<U, Terminated>> 
+    ) -> ControlFlow<Terminated, Result<U, Terminated>>
     where
-        T: Future<Output = Result<U, Terminated>>
+        T: Future<Output = Result<U, Terminated>>,
     {
         let mut until_fut = Box::pin(until_fut);
 
@@ -160,38 +166,38 @@ impl RtrRunner {
             match res {
                 Either::Left((Ok(process_fut), next_fut)) => {
                     match process_fut {
-                        GateStatus::Active => { },
-                        GateStatus::Dormant => { },
+                        GateStatus::Active => {}
+                        GateStatus::Dormant => {}
                         GateStatus::Reconfiguring { new_config: _ } => {
-                            warn!("Reconfiguration for RTR ingress not yet supported, \
-                                old config remains active");
+                            warn!(
+                                "Reconfiguration for RTR ingress not yet supported, \
+                                old config remains active"
+                            );
                         }
                         GateStatus::ReportLinks { report } => {
                             report.declare_source();
                         }
 
                         GateStatus::Triggered { data: _ } => {
-                            warn!("GateStatus::Triggered in RTR ingress not supported");
+                            warn!(
+                                "GateStatus::Triggered in RTR ingress not supported"
+                            );
                         }
                     }
                     until_fut = next_fut;
                 }
                 Either::Left((Err(_r), _other_fut)) => {
-                    return ControlFlow::Break(Terminated)
+                    return ControlFlow::Break(Terminated);
                 }
                 Either::Right((Result::Ok(r), _other_fut)) => {
-                    return ControlFlow::Continue(Result::Ok(r))
+                    return ControlFlow::Continue(Result::Ok(r));
                 }
                 Either::Right((Result::Err(_r), _other_fut)) => {
-                    return ControlFlow::Break(Terminated)
+                    return ControlFlow::Break(Terminated);
                 }
-
             }
-
         }
     }
-
-
 }
 
 /*
@@ -242,7 +248,7 @@ impl Tls {
         let retry = self.retry;
         let metrics = Arc::new(RtrMetrics::new(&gate));
         let state = Arc::new(TlsState {
-            tls: self, domain, connector, metrics: metrics.clone(), 
+            tls: self, domain, connector, metrics: metrics.clone(),
         });
         RtrClient::run(
             component, gate, retry, metrics,
@@ -339,7 +345,6 @@ impl Tls {
 }
 */
 
-
 //------------ RtrClient -----------------------------------------------------
 
 /// The transport-agnostic parts of a running RTR client.
@@ -375,200 +380,204 @@ where
     Connect: FnMut() -> ConnectFut,
     ConnectFut: Future<Output = Result<Socket, io::Error>>,
     Socket: AsyncRead + AsyncWrite + Unpin,
-    {
-        /// Runs the client.
-        ///
-        /// This method will only ever return if the RTR client encounters a fatal
-        /// error.
-        async fn run(
-            name: Arc<str>,
-            mut gate: Gate,
-            initial_version: u8, 
-            retry: u64,
-            metrics: Arc<RtrMetrics>,
-            connect: Connect,
-        ) -> Result<(), Terminated> {
-            let mut rtr_target = RtrTarget::new(name.clone());
-            let mut this = Self::new(connect, retry, metrics);
+{
+    /// Runs the client.
+    ///
+    /// This method will only ever return if the RTR client encounters a fatal
+    /// error.
+    async fn run(
+        name: Arc<str>,
+        mut gate: Gate,
+        initial_version: u8,
+        retry: u64,
+        metrics: Arc<RtrMetrics>,
+        connect: Connect,
+    ) -> Result<(), Terminated> {
+        let mut rtr_target = RtrTarget::new(name.clone());
+        let mut this = Self::new(connect, retry, metrics);
 
-            // If the rtr-in connector is configured, we want to give it a
-            // couple of seconds to retrieve RPKI data from the connected RP
-            // software. Ideally we signal the other components immediatly
-            // after a RTR Reset (i.e., the initial sync), but that requires
-            // some refactoring to not stall Rotonda entirely when the
-            // connection to the RP software is never successful. For now,
-            // simply wait 5 seconds.
+        // If the rtr-in connector is configured, we want to give it a
+        // couple of seconds to retrieve RPKI data from the connected RP
+        // software. Ideally we signal the other components immediatly
+        // after a RTR Reset (i.e., the initial sync), but that requires
+        // some refactoring to not stall Rotonda entirely when the
+        // connection to the RP software is never successful. For now,
+        // simply wait 5 seconds.
+
+        loop {
+            let mut client = match this
+                .connect(rtr_target, initial_version, &mut gate)
+                .await
+            {
+                Ok(client) => client,
+                Err(res) => {
+                    info!(
+                        "Unit {}: Connection failed, retrying in {retry}s",
+                        res.name
+                    );
+                    this.retry_wait(&mut gate).await?;
+                    rtr_target = res;
+                    continue;
+                }
+            };
 
             loop {
-                let mut client = match this.connect(rtr_target, initial_version, &mut gate).await {
-                    Ok(client) => client,
-                    Err(res) => {
-                        info!(
-                            "Unit {}: Connection failed, retrying in {retry}s",
-                            res.name
+                let update = match this.update(&mut client, &mut gate).await {
+                    Ok(Ok(update)) => update,
+                    Ok(Err(err)) => {
+                        warn!(
+                            "Unit {}: RTR client disconnected: {}",
+                            client.target().name,
+                            err,
                         );
-                        this.retry_wait(&mut gate).await?;
-                        rtr_target = res;
-                        continue;
+                        debug!(
+                            "Unit {}: awaiting reconnect.",
+                            client.target().name,
+                        );
+                        break;
+                    }
+                    Err(_) => {
+                        debug!(
+                            "Unit {}: RTR client terminated.",
+                            client.target().name
+                        );
+                        return Err(Terminated);
                     }
                 };
-
-                loop {
-                    let update = match this.update(&mut client, &mut gate).await {
-                        Ok(Ok(update)) => {
-                            update
-                        }
-                        Ok(Err(err)) => {
-                            warn!(
-                                "Unit {}: RTR client disconnected: {}",
-                                client.target().name, err,
-                            );
-                            debug!(
-                                "Unit {}: awaiting reconnect.",
-                                client.target().name,
-                            );
-                            break;
-                        }
-                        Err(_) => {
-                            debug!(
-                                "Unit {}: RTR client terminated.",
-                                client.target().name
-                            );
-                           return Err(Terminated);
-                        }
-                    };
-                    if let Some(update) = update {
-                        gate.update_data(update).await;
-                    }
+                if let Some(update) = update {
+                    gate.update_data(update).await;
                 }
-
-                rtr_target = client.into_target();
-                this.retry_wait(&mut gate).await?;
             }
+
+            rtr_target = client.into_target();
+            this.retry_wait(&mut gate).await?;
         }
+    }
 
-        /// Connects to the server.
-        ///
-        /// Upon succes, returns an RTR client that wraps the provided target.
-        /// Upon failure to connect, logs the reason and returns the target for
-        /// later retry.
-        async fn connect(
-            &mut self, target: RtrTarget, initial_version: u8, gate: &mut Gate,
-        ) -> Result<Client<Socket, RtrTarget>, RtrTarget> {
-            let sock = {
-                let connect = (self.connect)();
-                pin_mut!(connect);
-
-                loop {
-                    let process = gate.process();
-                    pin_mut!(process);
-                    match select(process, connect).await {
-                        Either::Left((Err(_), _)) => {
-                            return Err(target)
-                        }
-                        Either::Left((Ok(status), next_fut)) => {
-                            self.status = status;
-                            connect = next_fut;
-                        }
-                        Either::Right((res, _)) => break res
-                    }
-                }
-            };
-
-            let sock = match sock {
-                Ok(sock) => sock,
-                Err(err) => {
-                    warn!(
-                        "Unit {}: failed to connect to server: {}",
-                        target.name, err
-                    );
-                    return Err(target)
-                }
-            };
-
-            //let state = target.state;
-            Ok(Client::with_initial_version(initial_version, sock, target, None))
-        }
-
-        /// Updates the data set from upstream.
-        ///
-        /// Waits until it is time to ask for an update or the server sends a
-        /// notification and then asks for an update.
-        ///
-        /// This can fail fatally, in which case `Err(Terminated)` is returned and
-        /// the client should shut down. This can also fail normally, i.e., the
-        /// connections with the server fails or the server misbehaves. In this
-        /// case, `Ok(Err(_))` is returned and the client should wait and try
-        /// again.
-        ///
-        /// A successful update results in a (slightly passive-agressive)
-        /// `Ok(Ok(_))`. If the client’s data set has changed, this change is
-        /// returned, otherwise the fact that there are no changes is indicated
-        /// via `None`.
-        #[allow(clippy::needless_pass_by_ref_mut)] // false positive
-        async fn update(
-            &mut self, client: &mut Client<Socket, RtrTarget>, gate: &mut Gate
-        ) -> Result<Result<Option<payload::Update>, io::Error>, Terminated> {
-            let update_fut = async {
-                let update = client.update().await?;
-                let state = client.state();
-                //if update.is_definitely_empty() {
-                //    return Ok((state, None))
-                //}
-                Ok((state, Some(update)))
-            };
-            pin_mut!(update_fut);
+    /// Connects to the server.
+    ///
+    /// Upon succes, returns an RTR client that wraps the provided target.
+    /// Upon failure to connect, logs the reason and returns the target for
+    /// later retry.
+    async fn connect(
+        &mut self,
+        target: RtrTarget,
+        initial_version: u8,
+        gate: &mut Gate,
+    ) -> Result<Client<Socket, RtrTarget>, RtrTarget> {
+        let sock = {
+            let connect = (self.connect)();
+            pin_mut!(connect);
 
             loop {
                 let process = gate.process();
                 pin_mut!(process);
-                match select(process, update_fut).await {
-                    Either::Left((Err(_), _)) => {
-                        return Err(Terminated)
-                    }
+                match select(process, connect).await {
+                    Either::Left((Err(_), _)) => return Err(target),
                     Either::Left((Ok(status), next_fut)) => {
                         self.status = status;
-                        update_fut = next_fut;
+                        connect = next_fut;
                     }
-                    Either::Right((res, _)) => {
-                        let res = match res {
-                            Ok((state, res)) => {
-                                if let Some(state) = state {
-                                    self.metrics.session.store(
-                                        state.session().into(),
-                                        atomic::Ordering::Relaxed
-                                    );
-                                    self.metrics.serial.store(
-                                        state.serial().into(),
-                                        atomic::Ordering::Relaxed
-                                    );
-                                    self.metrics.updated.store(
-                                        Utc::now().timestamp(),
-                                        atomic::Ordering::Relaxed
-                                    );
-                                }
-                                Ok(res.map(payload::Update::Rtr))
+                    Either::Right((res, _)) => break res,
+                }
+            }
+        };
+
+        let sock = match sock {
+            Ok(sock) => sock,
+            Err(err) => {
+                warn!(
+                    "Unit {}: failed to connect to server: {}",
+                    target.name, err
+                );
+                return Err(target);
+            }
+        };
+
+        //let state = target.state;
+        Ok(Client::with_initial_version(
+            initial_version,
+            sock,
+            target,
+            None,
+        ))
+    }
+
+    /// Updates the data set from upstream.
+    ///
+    /// Waits until it is time to ask for an update or the server sends a
+    /// notification and then asks for an update.
+    ///
+    /// This can fail fatally, in which case `Err(Terminated)` is returned and
+    /// the client should shut down. This can also fail normally, i.e., the
+    /// connections with the server fails or the server misbehaves. In this
+    /// case, `Ok(Err(_))` is returned and the client should wait and try
+    /// again.
+    ///
+    /// A successful update results in a (slightly passive-agressive)
+    /// `Ok(Ok(_))`. If the client’s data set has changed, this change is
+    /// returned, otherwise the fact that there are no changes is indicated
+    /// via `None`.
+    #[allow(clippy::needless_pass_by_ref_mut)] // false positive
+    async fn update(
+        &mut self,
+        client: &mut Client<Socket, RtrTarget>,
+        gate: &mut Gate,
+    ) -> Result<Result<Option<payload::Update>, io::Error>, Terminated> {
+        let update_fut = async {
+            let update = client.update().await?;
+            let state = client.state();
+            //if update.is_definitely_empty() {
+            //    return Ok((state, None))
+            //}
+            Ok((state, Some(update)))
+        };
+        pin_mut!(update_fut);
+
+        loop {
+            let process = gate.process();
+            pin_mut!(process);
+            match select(process, update_fut).await {
+                Either::Left((Err(_), _)) => return Err(Terminated),
+                Either::Left((Ok(status), next_fut)) => {
+                    self.status = status;
+                    update_fut = next_fut;
+                }
+                Either::Right((res, _)) => {
+                    let res = match res {
+                        Ok((state, res)) => {
+                            if let Some(state) = state {
+                                self.metrics.session.store(
+                                    state.session().into(),
+                                    atomic::Ordering::Relaxed,
+                                );
+                                self.metrics.serial.store(
+                                    state.serial().into(),
+                                    atomic::Ordering::Relaxed,
+                                );
+                                self.metrics.updated.store(
+                                    Utc::now().timestamp(),
+                                    atomic::Ordering::Relaxed,
+                                );
                             }
-                            Err(err) => Err(err)
-                        };
-                        return Ok(res)
-                    }
+                            Ok(res.map(payload::Update::Rtr))
+                        }
+                        Err(err) => Err(err),
+                    };
+                    return Ok(res);
                 }
             }
         }
+    }
 
     /// Waits until we should retry connecting to the server.
-    async fn retry_wait(
-        &mut self, gate: &mut Gate
-    ) -> Result<(), Terminated> {
+    async fn retry_wait(&mut self, gate: &mut Gate) -> Result<(), Terminated> {
         debug!("in retry_wait");
         let end = Instant::now() + Duration::from_secs(self.retry);
 
         while end > Instant::now() {
             match timeout_at(end, gate.process()).await {
-                Ok(Ok(status)) => {
-                    self.status = status
-                }
+                Ok(Ok(status)) => self.status = status,
                 Ok(Err(_)) => return Err(Terminated),
                 Err(_) => return Ok(()),
             }
@@ -578,7 +587,6 @@ where
     }
 }
 
-
 struct RtrTarget {
     cache: RtrVerbs,
     pub name: Arc<str>,
@@ -587,14 +595,14 @@ struct RtrTarget {
 #[derive(Clone, Debug, PartialEq)]
 pub struct VrpUpdate {
     pub action: Action,
-    pub vrp: RouteOrigin
+    pub vrp: RouteOrigin,
 }
 
 impl Display for VrpUpdate {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.action {
-            Action::Announce => { write!(f, "announce ")? }
-            Action::Withdraw =>  { write!(f, "withdraw ")? }
+            Action::Announce => write!(f, "announce ")?,
+            Action::Withdraw => write!(f, "withdraw ")?,
         }
         write!(f, "VRP {} from {}", self.vrp.prefix, self.vrp.asn)
     }
@@ -620,7 +628,7 @@ impl Display for VrpUpdate {
 //                )
 //            }
 //        }
-//        
+//
 //    }
 //}
 
@@ -651,7 +659,6 @@ impl RtrTarget {
             name,
         }
     }
-
 }
 
 impl PayloadTarget for RtrTarget {
@@ -671,7 +678,9 @@ impl PayloadTarget for RtrTarget {
     }
 
     fn apply(
-        &mut self, _update: Self::Update, _timing: Timing
+        &mut self,
+        _update: Self::Update,
+        _timing: Timing,
     ) -> Result<(), PayloadError> {
         todo!()
     }
@@ -679,7 +688,9 @@ impl PayloadTarget for RtrTarget {
 
 impl PayloadUpdate for RtrUpdate {
     fn push_update(
-        &mut self, action: Action, payload: Payload
+        &mut self,
+        action: Action,
+        payload: Payload,
     ) -> Result<(), PayloadError> {
         match self {
             RtrUpdate::Full(rtr_cache) => {
@@ -866,81 +877,99 @@ impl RtrMetrics {
     }
 
     fn inc_bytes_written(&self, count: u64) {
-        self.bytes_written.fetch_add(count, atomic::Ordering::Relaxed);
+        self.bytes_written
+            .fetch_add(count, atomic::Ordering::Relaxed);
     }
 }
 
 impl RtrMetrics {
     const SESSION_METRIC: Metric = Metric::new(
-        "session_id", "the session ID of the last successful update",
-        MetricType::Text, MetricUnit::Info
+        "session_id",
+        "the session ID of the last successful update",
+        MetricType::Text,
+        MetricUnit::Info,
     );
     const SERIAL_METRIC: Metric = Metric::new(
-        "serial", "the serial number of the last successful update",
-        MetricType::Counter, MetricUnit::Total
+        "serial",
+        "the serial number of the last successful update",
+        MetricType::Counter,
+        MetricUnit::Total,
     );
     const UPDATED_AGO_METRIC: Metric = Metric::new(
         "since_last_rtr_update",
         "the number of seconds since last successful update",
-        MetricType::Counter, MetricUnit::Total
+        MetricType::Counter,
+        MetricUnit::Total,
     );
     const UPDATED_METRIC: Metric = Metric::new(
-        "rtr_updated", "the time of the last successful update",
-        MetricType::Text, MetricUnit::Info
+        "rtr_updated",
+        "the time of the last successful update",
+        MetricType::Text,
+        MetricUnit::Info,
     );
     const BYTES_READ_METRIC: Metric = Metric::new(
-        "bytes_read", "the number of bytes read",
-        MetricType::Counter, MetricUnit::Total,
+        "bytes_read",
+        "the number of bytes read",
+        MetricType::Counter,
+        MetricUnit::Total,
     );
     const BYTES_WRITTEN_METRIC: Metric = Metric::new(
-        "bytes_written", "the number of bytes written",
-        MetricType::Counter, MetricUnit::Total,
+        "bytes_written",
+        "the number of bytes written",
+        MetricType::Counter,
+        MetricUnit::Total,
     );
 
     const ISO_DATE: &'static [chrono::format::Item<'static>] = &[
         chrono::format::Item::Numeric(
-            chrono::format::Numeric::Year, chrono::format::Pad::Zero
+            chrono::format::Numeric::Year,
+            chrono::format::Pad::Zero,
         ),
         chrono::format::Item::Literal("-"),
         chrono::format::Item::Numeric(
-            chrono::format::Numeric::Month, chrono::format::Pad::Zero
+            chrono::format::Numeric::Month,
+            chrono::format::Pad::Zero,
         ),
         chrono::format::Item::Literal("-"),
         chrono::format::Item::Numeric(
-            chrono::format::Numeric::Day, chrono::format::Pad::Zero
+            chrono::format::Numeric::Day,
+            chrono::format::Pad::Zero,
         ),
         chrono::format::Item::Literal("T"),
         chrono::format::Item::Numeric(
-            chrono::format::Numeric::Hour, chrono::format::Pad::Zero
+            chrono::format::Numeric::Hour,
+            chrono::format::Pad::Zero,
         ),
         chrono::format::Item::Literal(":"),
         chrono::format::Item::Numeric(
-            chrono::format::Numeric::Minute, chrono::format::Pad::Zero
+            chrono::format::Numeric::Minute,
+            chrono::format::Pad::Zero,
         ),
         chrono::format::Item::Literal(":"),
         chrono::format::Item::Numeric(
-            chrono::format::Numeric::Second, chrono::format::Pad::Zero
+            chrono::format::Numeric::Second,
+            chrono::format::Pad::Zero,
         ),
         chrono::format::Item::Literal("Z"),
     ];
 }
 
 impl metrics::Source for RtrMetrics {
-    fn append(&self, unit_name: &str, target: &mut metrics::Target)  {
+    fn append(&self, unit_name: &str, target: &mut metrics::Target) {
         self.gate.append(unit_name, target);
 
         let session = self.session.load(atomic::Ordering::Relaxed);
         if session != u32::MAX {
             target.append_simple(
-                &Self::SESSION_METRIC, Some(unit_name), session
+                &Self::SESSION_METRIC,
+                Some(unit_name),
+                session,
             );
         }
 
         let serial = self.serial.load(atomic::Ordering::Relaxed);
         if serial != u32::MAX {
-            target.append_simple(
-                &Self::SERIAL_METRIC, Some(unit_name), serial
-            )
+            target.append_simple(&Self::SERIAL_METRIC, Some(unit_name), serial)
         }
 
         let updated = self.updated.load(atomic::Ordering::Relaxed);
@@ -948,27 +977,30 @@ impl metrics::Source for RtrMetrics {
             if let Some(updated) = Utc.timestamp_opt(updated, 0).single() {
                 let ago = Utc::now().signed_duration_since(updated);
                 target.append_simple(
-                    &Self::UPDATED_AGO_METRIC, Some(unit_name),
-                    ago.num_seconds()
+                    &Self::UPDATED_AGO_METRIC,
+                    Some(unit_name),
+                    ago.num_seconds(),
                 );
                 target.append_simple(
-                    &Self::UPDATED_METRIC, Some(unit_name),
-                    updated.format_with_items(Self::ISO_DATE.iter())
+                    &Self::UPDATED_METRIC,
+                    Some(unit_name),
+                    updated.format_with_items(Self::ISO_DATE.iter()),
                 );
             }
         }
 
         target.append_simple(
-            &Self::BYTES_READ_METRIC, Some(unit_name),
-            self.bytes_read.load(atomic::Ordering::Relaxed)
+            &Self::BYTES_READ_METRIC,
+            Some(unit_name),
+            self.bytes_read.load(atomic::Ordering::Relaxed),
         );
         target.append_simple(
-            &Self::BYTES_WRITTEN_METRIC, Some(unit_name),
-            self.bytes_written.load(atomic::Ordering::Relaxed)
+            &Self::BYTES_WRITTEN_METRIC,
+            Some(unit_name),
+            self.bytes_written.load(atomic::Ordering::Relaxed),
         );
     }
 }
-
 
 //------------ RtrTcpStream --------------------------------------------------
 
@@ -985,14 +1017,14 @@ impl AsyncRead for RtrTcpStream {
     fn poll_read(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &mut ReadBuf<'_>
+        buf: &mut ReadBuf<'_>,
     ) -> Poll<Result<(), io::Error>> {
         let len = buf.filled().len();
         let res = self.as_mut().project().sock.poll_read(cx, buf);
         if let Poll::Ready(Ok(())) = res {
             self.metrics.inc_bytes_read(
-                (buf.filled().len().saturating_sub(len)) as u64
-            )    
+                (buf.filled().len().saturating_sub(len)) as u64,
+            )
         }
         res
     }
@@ -1002,7 +1034,7 @@ impl AsyncWrite for RtrTcpStream {
     fn poll_write(
         mut self: Pin<&mut Self>,
         cx: &mut Context<'_>,
-        buf: &[u8]
+        buf: &[u8],
     ) -> Poll<Result<usize, io::Error>> {
         let res = self.as_mut().project().sock.poll_write(cx, buf);
         if let Poll::Ready(Ok(n)) = res {
@@ -1013,16 +1045,15 @@ impl AsyncWrite for RtrTcpStream {
 
     fn poll_flush(
         mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>
+        cx: &mut Context<'_>,
     ) -> Poll<Result<(), io::Error>> {
         self.as_mut().project().sock.poll_flush(cx)
     }
 
     fn poll_shutdown(
         mut self: Pin<&mut Self>,
-        cx: &mut Context<'_>
+        cx: &mut Context<'_>,
     ) -> Poll<Result<(), io::Error>> {
         self.as_mut().project().sock.poll_shutdown(cx)
     }
 }
-

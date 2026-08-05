@@ -207,8 +207,7 @@ impl BgpConfig for CombinedConfig {
     }
 
     fn is_exact(&self) -> bool {
-        self.remote_prefix_or_exact.is_exact()
-            && self.peer_config.single_asn()
+        self.remote_prefix_or_exact.is_exact() && self.peer_config.single_asn()
     }
 
     fn protocols(&self) -> Vec<AfiSafiType> {
@@ -274,8 +273,7 @@ protocols = ["Ipv4Unicast", "L2VpnEvpn"]
 addpath = ["Ipv4Unicast", "Ipv6Unicast"]
 "#;
 
-        let Unit::BgpTcpIn(cfg) = toml::from_str::<Unit>(toml).unwrap()
-        else {
+        let Unit::BgpTcpIn(cfg) = toml::from_str::<Unit>(toml).unwrap() else {
             unreachable!()
         };
 

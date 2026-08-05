@@ -17,9 +17,9 @@ use routecore::bgp::aspath::{Hop, HopPath};
 use routecore::bgp::communities::{
     LargeCommunity, StandardCommunity, Wellknown,
 };
-use routecore::bgp::message::update_builder::StandardCommunitiesList;
 use routecore::bgp::message::SessionConfig;
 use routecore::bgp::message::UpdateMessage as BgpUpdateMessage;
+use routecore::bgp::message::update_builder::StandardCommunitiesList;
 use routecore::bgp::nlri::afisafi::IsPrefix;
 use routecore::bgp::path_attributes::{
     LargeCommunitiesList, OwnedPathAttributes,
@@ -1235,19 +1235,18 @@ mod tests {
     #[test]
     fn packaged_roto_script() {
         use crate::units::bgp_tcp_in::unit::{
-            RotoFunc as BgpInFunc,
             ROTO_FUNC_FILTER_NAME as ROTO_FUNC_BGP_IN_NAME,
+            RotoFunc as BgpInFunc,
         };
         use crate::units::bmp_tcp_in::unit::{
-            RotoFunc as BmpInFunc,
             ROTO_FUNC_FILTER_NAME as ROTO_FUNC_BMP_IN_NAME,
+            RotoFunc as BmpInFunc,
         };
         use crate::units::rib_unit::unit::{
-            RotoFuncPre as RibInPreFunc, RotoFuncRovStatusUpdate,
-            RotoFuncVrpUpdate,
             ROTO_FUNC_PRE_FILTER_NAME as ROTO_FUNC_RIB_IN_PRE_NAME,
             ROTO_FUNC_ROV_STATUS_UPDATE_NAME,
-            ROTO_FUNC_VRP_UPDATE_FILTER_NAME,
+            ROTO_FUNC_VRP_UPDATE_FILTER_NAME, RotoFuncPre as RibInPreFunc,
+            RotoFuncRovStatusUpdate, RotoFuncVrpUpdate,
         };
 
         let roto_script = "etc/examples/filters.roto.example";

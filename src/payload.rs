@@ -1,19 +1,21 @@
 use rotonda_store::prefix_record::{Meta, RouteStatus};
 use routecore::bgp::message::PduParseInfo;
-use routecore::bgp::message_ng::path_attributes::common::{PathAttributeHints, PreppedAttributesBuilder, UncheckedPathAttributes};
+use routecore::bgp::message_ng::path_attributes::common::{
+    PathAttributeHints, PreppedAttributesBuilder, UncheckedPathAttributes,
+};
 use routecore::bgp::message_ng::update::CheckedParts;
 use routecore::bgp::path_attributes::OwnedPathAttributes;
 use routecore::bgp::path_selection::TiebreakerInfo;
 use routecore::bgp::types::AfiSafiType;
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
-use smallvec::{smallvec, SmallVec};
+use smallvec::{SmallVec, smallvec};
 use std::fmt;
 
 use crate::ingress::{self, IngressId};
 use crate::roto_runtime::types::OutputStreamMessage;
-use crate::units::rib_unit::rpki::RpkiInfo;
 use crate::units::rib_unit::QueryFilter;
+use crate::units::rib_unit::rpki::RpkiInfo;
 
 // TODO: make this a reference
 pub type RouterId = String;
@@ -148,7 +150,7 @@ impl AsRef<[u8]> for RotondaPaMap {
 }
 
 #[derive(Debug, Default, Clone, Eq, PartialEq)]
-pub struct RotondaPaMap{
+pub struct RotondaPaMap {
     // raw[0] is RpkiInfo
     // raw[1] is PduParseInfo
     // raw[2..] contains the path attributes blob
@@ -173,13 +175,12 @@ fn byte_to_ppi(byte: u8) -> PduParseInfo {
     }
 }
 
-
 impl RotondaPaMap {
     pub fn new(path_attributes: OwnedPathAttributes) -> Self {
         let ppi = path_attributes.pdu_parse_info();
         let mut pas = path_attributes.into_vec();
         let mut raw = Vec::with_capacity(2 + pas.len());
-        
+
         let rpki_info = RpkiInfo::default();
         raw.push(rpki_info.into());
         raw.push(ppi_to_byte(ppi));
@@ -220,10 +221,17 @@ impl Serialize for RotondaPaMap {
     {
         let mut s = serializer.serialize_struct("route", 2)?;
         s.serialize_field("rpki", &self.rpki_info())?;
-        
-        s.serialize_field("pathAttributes", &self.path_attributes().iter().flatten()
-            .filter(|pa| pa.type_code() != 15)
-            .flat_map(|pa| pa.to_owned()).collect::<Vec<_>>())?;
+
+        s.serialize_field(
+            "pathAttributes",
+            &self
+                .path_attributes()
+                .iter()
+                .flatten()
+                .filter(|pa| pa.type_code() != 15)
+                .flat_map(|pa| pa.to_owned())
+                .collect::<Vec<_>>(),
+        )?;
 
         //s.serialize_field("pathAttributesNg", &PreppedAttributesBuilder::from(self.path_attributes()).as_prepped())?;
 
@@ -231,7 +239,10 @@ impl Serialize for RotondaPaMap {
     }
 }
 
-pub struct RotondaPaMapWithQueryFilter<'a, 'b>(pub &'a RotondaPaMap, pub &'b QueryFilter);
+pub struct RotondaPaMapWithQueryFilter<'a, 'b>(
+    pub &'a RotondaPaMap,
+    pub &'b QueryFilter,
+);
 impl<'a, 'b> Serialize for RotondaPaMapWithQueryFilter<'a, 'b> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -239,12 +250,25 @@ impl<'a, 'b> Serialize for RotondaPaMapWithQueryFilter<'a, 'b> {
     {
         let mut s = serializer.serialize_struct("route", 2)?;
         s.serialize_field("rpki", &self.0.rpki_info())?;
-        s.serialize_field("pathAttributes", &self.0.path_attributes().iter().flatten()
-            .filter(|pa|
-                (self.1.fields_path_attributes.as_ref().map(|fpa| fpa.contains(&pa.type_code())).unwrap_or(true))
-                && pa.type_code() != 15
-                )
-            .flat_map(|pa| pa.to_owned()).collect::<Vec<_>>())?;
+        s.serialize_field(
+            "pathAttributes",
+            &self
+                .0
+                .path_attributes()
+                .iter()
+                .flatten()
+                .filter(|pa| {
+                    (self
+                        .1
+                        .fields_path_attributes
+                        .as_ref()
+                        .map(|fpa| fpa.contains(&pa.type_code()))
+                        .unwrap_or(true))
+                        && pa.type_code() != 15
+                })
+                .flat_map(|pa| pa.to_owned())
+                .collect::<Vec<_>>(),
+        )?;
         s.end()
     }
 }
@@ -337,7 +361,11 @@ pub enum Update {
     // improving this. As we might get rid of the entire RTRTR style
     // communication anyway, let's not optimize to workaround any of it.
     // This might also need an IngressId and some additional stuff.
-    NgBulk(Vec<u8>, IngressId, routecore::bgp::message_ng::common::SessionConfig),
+    NgBulk(
+        Vec<u8>,
+        IngressId,
+        routecore::bgp::message_ng::common::SessionConfig,
+    ),
 }
 
 impl Update {

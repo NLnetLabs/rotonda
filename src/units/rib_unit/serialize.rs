@@ -4,13 +4,13 @@ use crate::representation;
 use crate::representation::GenOutput;
 use crate::representation::Json;
 use routecore::bgp::message_ng::nlri::Nlri;
+use routedb::TableId;
 use routedb::index_set::routing_tables::Route;
 use routedb::index_set::routing_tables::RoutingTable;
 use routedb::route_db::RouteDb;
-use routedb::TableId;
+use serde::Serialize;
 use serde::ser::SerializeSeq;
 use serde::ser::SerializeStruct;
-use serde::Serialize;
 
 crate::genoutput_json!(RouteDbRoute<'_>);
 crate::genoutput_json!(RouteDbRoutingTables);

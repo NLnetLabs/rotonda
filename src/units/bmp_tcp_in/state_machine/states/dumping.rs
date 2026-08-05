@@ -12,7 +12,7 @@ use routecore::bgp::{
     types::AfiSafiType,
 };
 use routecore::bmp::message::{
-    InformationTlvIter, Message as BmpMsg, PerPeerHeader, TerminationMessage
+    InformationTlvIter, Message as BmpMsg, PerPeerHeader, TerminationMessage,
 };
 use smallvec::SmallVec;
 
@@ -213,9 +213,7 @@ impl BmpStateDetails<Dumping> {
                 msg,
                 //NlriStatus::InConvergence,
                 trace_id,
-                |s, pph, update| {
-                    s.route_monitoring_preprocessing(pph, update)
-                },
+                |s, pph, update| s.route_monitoring_preprocessing(pph, update),
             ),
 
             BmpMsg::TerminationMessage(msg) => self.terminate(Some(msg)),
@@ -235,10 +233,7 @@ impl BmpStateDetails<Dumping> {
         update: &UpdateMessage<Bytes>,
     ) -> ControlFlow<ProcessingResult, Self> {
         if let Ok(Some(afi_safi)) = update.is_eor() {
-            if self
-                .details
-                .remove_pending_eor(pph, afi_safi)
-            {
+            if self.details.remove_pending_eor(pph, afi_safi) {
                 // The last pending EOR has been removed and so this signifies
                 // the end of the initial table dump, if we're in the Dumping
                 // state, otherwise in the Updating state it signifies only
@@ -367,7 +362,6 @@ impl Initiable for Dumping {
         self.sys_desc = sys_desc;
         self.sys_extra = sys_extra;
     }
-
 }
 
 impl PeerAware for Dumping {
@@ -400,7 +394,8 @@ impl PeerAware for Dumping {
         dst_pph: &PerPeerHeader<Bytes>,
         ingress_id: IngressId,
     ) -> bool {
-        self.peer_states.add_cloned_peer_config(source_pph, dst_pph, ingress_id)
+        self.peer_states
+            .add_cloned_peer_config(source_pph, dst_pph, ingress_id)
     }
 
     fn get_peers(&self) -> Keys<'_, PerPeerHeader<Bytes>, PeerState> {
@@ -436,10 +431,7 @@ impl PeerAware for Dumping {
         self.peer_states.remove_peer(pph)
     }
 
-    fn is_peer_eor_capable(
-        &self,
-        pph: &PerPeerHeader<Bytes>,
-    ) -> Option<bool> {
+    fn is_peer_eor_capable(&self, pph: &PerPeerHeader<Bytes>) -> Option<bool> {
         self.peer_states.is_peer_eor_capable(pph)
     }
 
@@ -462,5 +454,4 @@ impl PeerAware for Dumping {
     fn num_pending_eors(&self) -> usize {
         self.peer_states.num_pending_eors()
     }
-
 }

@@ -2,11 +2,12 @@ use core::sync::atomic::AtomicU32;
 use std::net::IpAddr;
 use std::{collections::HashMap, path::PathBuf, sync::atomic::Ordering};
 
-use std::sync::RwLock;
-use std::fmt;
 use inetnum::asn::Asn;
-use routecore::bmp::message::{PeerType, RibType};
+use log::debug;
 use paste::paste;
+use routecore::bmp::message::{PeerType, RibType};
+use std::fmt;
+use std::sync::RwLock;
 
 use crate::genoutput_json;
 use crate::ingress::http_ng::QueryFilter;
@@ -48,17 +49,16 @@ impl<'a> From<(IngressId, &'a IngressInfo)> for IdAndInfo<'a> {
     fn from(value: (IngressId, &'a IngressInfo)) -> Self {
         IdAndInfo {
             ingress_id: value.0,
-            ingress_info: value.1
+            ingress_info: value.1,
         }
     }
 }
-
 
 impl From<(IngressId, IngressInfo)> for OwnedIdAndInfo {
     fn from(value: (IngressId, IngressInfo)) -> Self {
         OwnedIdAndInfo {
             ingress_id: value.0,
-            ingress_info: value.1
+            ingress_info: value.1,
         }
     }
 }
@@ -68,12 +68,20 @@ pub struct BgpIdAndInfo<'a>(pub IdAndInfo<'a>);
 
 impl<W: std::io::Write> GenOutput<Cli<W>> for BgpIdAndInfo<'_> {
     fn write(&self, target: &mut Cli<W>) -> Result<(), OutputError> {
-
-        let _ = writeln!(&mut target.0,
+        let _ = writeln!(
+            &mut target.0,
             "{:>}\t{:>10}\t{:>40}",
             self.0.ingress_id,
-            self.0.ingress_info.remote_asn.map(|asn| asn.to_string()).unwrap_or("no-asn???".into()),
-            self.0.ingress_info.remote_addr.map(|ip| ip.to_string()).unwrap_or("no-ip".into()),
+            self.0
+                .ingress_info
+                .remote_asn
+                .map(|asn| asn.to_string())
+                .unwrap_or("no-asn???".into()),
+            self.0
+                .ingress_info
+                .remote_addr
+                .map(|ip| ip.to_string())
+                .unwrap_or("no-ip".into()),
         );
         let _ = target.0.flush();
         Ok(())
@@ -82,12 +90,20 @@ impl<W: std::io::Write> GenOutput<Cli<W>> for BgpIdAndInfo<'_> {
 
 impl<W: std::io::Write> GenOutput<Cli<W>> for BmpIdAndInfo<'_> {
     fn write(&self, target: &mut Cli<W>) -> Result<(), OutputError> {
-
-        let _ = writeln!(&mut target.0,
+        let _ = writeln!(
+            &mut target.0,
             "{:>}\t{:>40}\t{}",
             self.0.ingress_id,
-            self.0.ingress_info.remote_addr.map(|ip| ip.to_string()).unwrap_or("no-ip".into()),
-            self.0.ingress_info.name.as_ref().unwrap_or(&"no-name".into())
+            self.0
+                .ingress_info
+                .remote_addr
+                .map(|ip| ip.to_string())
+                .unwrap_or("no-ip".into()),
+            self.0
+                .ingress_info
+                .name
+                .as_ref()
+                .unwrap_or(&"no-name".into())
         );
         let _ = target.0.flush();
         Ok(())
@@ -109,7 +125,7 @@ macro_rules! update_field {
         if $new.$field.is_some() {
             $old.$field = $new.$field;
         }
-    }
+    };
 }
 
 // Used to create the builder pattern methods, called in info_for_field!
@@ -121,7 +137,7 @@ macro_rules! with_field {
                     $name: Some($name.into()), ..self }
             }
         }
-    }
+    };
 }
 
 // Creates the IngressInfo (== $name) struct and adds fn Register::update_info
@@ -230,8 +246,12 @@ impl Register {
         for (id, info) in lock.iter() {
             res.push_str(&format!(
                 "{id:02} {}\t\t{}\n",
-                info.remote_asn.map(|a|a.to_string()).unwrap_or("".to_string()),
-                info.remote_addr.map(|a|a.to_string()).unwrap_or("".to_string()),
+                info.remote_asn
+                    .map(|a| a.to_string())
+                    .unwrap_or("".to_string()),
+                info.remote_addr
+                    .map(|a| a.to_string())
+                    .unwrap_or("".to_string()),
             ));
         }
         res
@@ -241,24 +261,29 @@ impl Register {
         self.info.read().unwrap().clone()
     }
 
-
     pub fn bgp_neighbors<T>(&self, mut target: T) -> fmt::Result
-        where for <'a> BgpIdAndInfo<'a>: GenOutput<T>
+    where
+        for<'a> BgpIdAndInfo<'a>: GenOutput<T>,
     {
         for t in [IngressType::BgpViaBmp, IngressType::Bgp, IngressType::Mrt] {
-            let res = self.search(QueryFilter { ingress_type: Some(t), ..Default::default() });
+            let res = self.search(QueryFilter {
+                ingress_type: Some(t),
+                ..Default::default()
+            });
             for r in res {
-                let _ = BgpIdAndInfo (
-                        IdAndInfo { ingress_id: r.ingress_id, ingress_info: &r.ingress_info}
-                    ).write(&mut target);
-
+                let _ = BgpIdAndInfo(IdAndInfo {
+                    ingress_id: r.ingress_id,
+                    ingress_info: &r.ingress_info,
+                })
+                .write(&mut target);
             }
         }
         Ok(())
     }
 
     pub fn real_bgp_peers<T>(&self, mut target: T) -> fmt::Result
-        where for <'a> BgpIdAndInfo<'a>: GenOutput<T>
+    where
+        for<'a> BgpIdAndInfo<'a>: GenOutput<T>,
     {
         let res = self.search(QueryFilter {
             ingress_type: Some(IngressType::Bgp),
@@ -266,30 +291,30 @@ impl Register {
             ..Default::default()
         });
         for r in res {
-            let _ = BgpIdAndInfo (
-                IdAndInfo { ingress_id: r.ingress_id, ingress_info: &r.ingress_info}
-            ).write(&mut target);
-
+            let _ = BgpIdAndInfo(IdAndInfo {
+                ingress_id: r.ingress_id,
+                ingress_info: &r.ingress_info,
+            })
+            .write(&mut target);
         }
         Ok(())
     }
 
     pub fn bmp_routers<T>(&self, mut target: T) -> fmt::Result
-        where for <'a> BmpIdAndInfo<'a>: GenOutput<T>
+    where
+        for<'a> BmpIdAndInfo<'a>: GenOutput<T>,
     {
-        let res = self.search(
-            QueryFilter {
-                ingress_type: Some(IngressType::Bmp),
-                ingress_state: Some(IngressState::Connected),
-                ..Default::default()
-            }
-        );
+        let res = self.search(QueryFilter {
+            ingress_type: Some(IngressType::Bmp),
+            ingress_state: Some(IngressState::Connected),
+            ..Default::default()
+        });
         for r in res {
-
-            let _ = BmpIdAndInfo (
-                    IdAndInfo { ingress_id: r.ingress_id, ingress_info: &r.ingress_info}
-                ).write(&mut target);
-
+            let _ = BmpIdAndInfo(IdAndInfo {
+                ingress_id: r.ingress_id,
+                ingress_info: &r.ingress_info,
+            })
+            .write(&mut target);
         }
         Ok(())
     }
@@ -301,41 +326,55 @@ impl Register {
 
     /// Retrieve the information for the given [`IngressId`]
     pub fn get(&self, id: IngressId) -> Option<IngressInfo> {
+        if id == 0 {
+            debug!("IngressId is zero, which is illegal.");
+        }
         self.info.read().unwrap().get(&id).cloned()
     }
 
     /// Retrieve the information for the given [`IngressId`]
     pub fn get_tuple(&self, id: IngressId) -> Option<OwnedIdAndInfo> {
-        self.info.read().unwrap().get(&id).map(|info|
-            (id, info.clone()).into()
-        )
+        self.info
+            .read()
+            .unwrap()
+            .get(&id)
+            .map(|info| (id, info.clone()).into())
     }
 
     /// Filter all ingresses based on a passed filter and return them
-    pub fn search(&self, filter: QueryFilter,) -> Vec<OwnedIdAndInfo> {
+    pub fn search(&self, filter: QueryFilter) -> Vec<OwnedIdAndInfo> {
         // ALternatively, simply clone the entire thing and release the read-lock asap.
         //let mut reg = self.info.read().unwrap().clone();
 
-        self.info.read().unwrap().iter()
+        self.info
+            .read()
+            .unwrap()
+            .iter()
             .filter(|(_, info)| filter.filter(info))
-            .map(|(&ingress_id, info)| OwnedIdAndInfo{ingress_id, ingress_info: info.clone()} )
+            .map(|(&ingress_id, info)| OwnedIdAndInfo {
+                ingress_id,
+                ingress_info: info.clone(),
+            })
             .collect::<Vec<_>>()
-
     }
 
     /// Filter all ingresses based on a passed filter and write it out
-    pub fn search_and_output<T>(&self, filter: QueryFilter, mut target: T) -> Result<(), OutputError> 
-        where for <'a> IdAndInfo<'a>: GenOutput<T>
+    pub fn search_and_output<T>(
+        &self,
+        filter: QueryFilter,
+        mut target: T,
+    ) -> Result<(), OutputError>
+    where
+        for<'a> IdAndInfo<'a>: GenOutput<T>,
     {
         IdAndInfo::write_seq_start(&mut target)?;
         let lock = self.info.read().unwrap();
 
-        let mut iter = lock.iter().filter(|(_, info)| {
-            filter.filter(info)
-        });
+        let mut iter = lock.iter().filter(|(_, info)| filter.filter(info));
 
         if let Some((&ingress_id, ingress_info)) = iter.next() {
-            let _ = IdAndInfo::from((ingress_id, ingress_info)).write(&mut target);
+            let _ =
+                IdAndInfo::from((ingress_id, ingress_info)).write(&mut target);
         }
 
         for (&ingress_id, ingress_info) in iter {
@@ -388,7 +427,7 @@ impl Register {
     /// might be unset, i.e. None.
     pub fn find_existing_peer(
         &self,
-        query: &IngressInfo
+        query: &IngressInfo,
     ) -> Option<(IngressId, IngressInfo)> {
         let lock = self.info.read().unwrap();
         for (id, info) in lock.iter() {
@@ -396,8 +435,8 @@ impl Register {
                 {parent_ingress, remote_addr, remote_asn},
                 {rib_type, peer_type, distinguisher, vrf_name}
             ) {
-                    //log::debug!("found existing peer, id {id}");
-                    return Some((*id, info.clone()))
+                //log::debug!("found existing peer, id {id}");
+                return Some((*id, info.clone()));
             }
         }
         None
@@ -416,7 +455,7 @@ impl Register {
     /// the same IP address is presumably unlikely, we keep the check as-is for now.
     pub fn find_existing_bmp_router(
         &self,
-        query: &IngressInfo
+        query: &IngressInfo,
     ) -> Option<(IngressId, IngressInfo)> {
         let lock = self.info.read().unwrap();
         log::debug!("query: {query:?}");
@@ -425,8 +464,8 @@ impl Register {
                 {parent_ingress, remote_addr, ingress_type},
                 //{name} // to include the sysName in this check, we first need to refactor the BMP unit
             ) {
-                    log::debug!("found matching bmp router, id {id}");
-                    return Some((*id, info.clone()))
+                log::debug!("found matching bmp router, id {id}");
+                return Some((*id, info.clone()));
             }
         }
         log::debug!("no match in find_existing_bmp_router");
@@ -441,7 +480,7 @@ impl Register {
     /// using the 'parent_ingress' field in IngressInfo.
     pub fn find_rib_out_for_ingress(
         &self,
-        ingress_id: IngressId
+        ingress_id: IngressId,
     ) -> Option<(IngressId, IngressInfo)> {
         let query = IngressInfo {
             ingress_type: Some(IngressType::BgpOut),
@@ -454,11 +493,10 @@ impl Register {
             if find_existing_for!(info, query,
                 {ingress_type, parent_ingress}
             ) {
-                return Some((*id, info.clone()))
+                return Some((*id, info.clone()));
             }
         }
         None
-
     }
 }
 
@@ -468,7 +506,17 @@ impl IngressInfo {
     }
 }
 
-#[derive(Copy, Clone, Debug, Eq, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Copy,
+    Clone,
+    Debug,
+    Eq,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 #[serde(rename_all = "camelCase")]
 pub enum IngressType {
     Bmp,
@@ -484,8 +532,16 @@ pub enum IngressType {
     BgpOut,
 }
 
-
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Clone,
+    Debug,
+    Eq,
+    PartialEq,
+    Ord,
+    PartialOrd,
+    serde::Serialize,
+    serde::Deserialize,
+)]
 pub enum IngressState {
     Connected,
     Disconnected,
@@ -502,7 +558,7 @@ info_for_field!(IngressInfo{
    remote_addr: IpAddr,
    remote_asn: Asn,
    rib_type: RibType,
-   peer_rib_type: PeerRibType, // RibType + pre/post policy 
+   peer_rib_type: PeerRibType, // RibType + pre/post policy
    filename: PathBuf,
    name: String,
    desc: String,
@@ -525,42 +581,24 @@ mod tests {
     fn builder_and_update() {
         let res = Register::new();
         let id = res.register();
-        let info = IngressInfo::new()
-            .with_local_asn(Asn::from_u32(65536));
+        let info = IngressInfo::new().with_local_asn(Asn::from_u32(65536));
         assert_eq!(info.local_asn, Some(Asn::from_u32(65536)));
 
         res.update_info(id, info.clone());
-        assert_eq!(
-            res.get(id), 
-            Some(info)
-        );
+        assert_eq!(res.get(id), Some(info));
 
-        let newinfo = IngressInfo::new()
-            .with_local_asn(Asn::from_u32(65537));
+        let newinfo = IngressInfo::new().with_local_asn(Asn::from_u32(65537));
         res.update_info(id, newinfo.clone());
-        assert_eq!(
-            res.get(id), 
-            Some(newinfo)
-        );
+        assert_eq!(res.get(id), Some(newinfo));
 
-        let newinfo_2 = IngressInfo::new()
-            .with_rib_type(RibType::LocRib)
-        ;
+        let newinfo_2 = IngressInfo::new().with_rib_type(RibType::LocRib);
         res.update_info(id, newinfo_2.clone());
 
         // We still expect the ASN, untouched:
-        assert_eq!(
-            res.get(id).unwrap().local_asn,
-            Some(Asn::from_u32(65537))
-        );
+        assert_eq!(res.get(id).unwrap().local_asn, Some(Asn::from_u32(65537)));
 
         // And the newly set RibType
-        assert_eq!(
-            res.get(id).unwrap().rib_type,
-            Some(RibType::LocRib)
-        );
-
-
+        assert_eq!(res.get(id).unwrap().rib_type, Some(RibType::LocRib));
     }
 
     #[test]
@@ -572,22 +610,18 @@ mod tests {
         let info1_a = IngressInfo::new()
             .with_parent_ingress(parent_id1)
             .with_remote_addr("1.2.3.4".parse::<IpAddr>().unwrap())
-            .with_remote_asn(Asn::from_u32(65000))
-            ;
+            .with_remote_asn(Asn::from_u32(65000));
 
         res.update_info(session_id1_a, info1_a.clone());
 
         let query1 = IngressInfo::new()
             .with_parent_ingress(parent_id1)
             .with_remote_addr("1.2.3.4".parse::<IpAddr>().unwrap())
-            .with_remote_asn(Asn::from_u32(65000))
-            ;
+            .with_remote_asn(Asn::from_u32(65000));
         assert_eq!(
             res.find_existing_peer(&query1),
             Some((session_id1_a, info1_a))
         );
-
-
     }
 
     #[test]
@@ -600,8 +634,7 @@ mod tests {
             .with_parent_ingress(parent_id1)
             .with_peer_type(PeerType::GlobalInstance)
             .with_remote_addr("1.2.3.4".parse::<IpAddr>().unwrap())
-            .with_remote_asn(Asn::from_u32(65000))
-            ;
+            .with_remote_asn(Asn::from_u32(65000));
 
         res.update_info(session_id1_a, info1_a.clone());
 
@@ -609,8 +642,7 @@ mod tests {
             .with_parent_ingress(parent_id1)
             .with_peer_type(PeerType::GlobalInstance)
             .with_remote_addr("1.2.3.4".parse::<IpAddr>().unwrap())
-            .with_remote_asn(Asn::from_u32(65000))
-            ;
+            .with_remote_asn(Asn::from_u32(65000));
         assert_eq!(
             res.find_existing_peer(&query1),
             Some((session_id1_a, info1_a))
@@ -627,20 +659,15 @@ mod tests {
             .with_parent_ingress(parent_id1)
             .with_peer_type(PeerType::GlobalInstance)
             .with_remote_addr("1.2.3.4".parse::<IpAddr>().unwrap())
-            .with_remote_asn(Asn::from_u32(65000))
-            ;
+            .with_remote_asn(Asn::from_u32(65000));
 
         res.update_info(session_id1_a, info1_a.clone());
 
         let query1 = IngressInfo::new()
             .with_parent_ingress(parent_id1)
             .with_remote_addr("1.2.3.4".parse::<IpAddr>().unwrap())
-            .with_remote_asn(Asn::from_u32(65000))
-            ;
-        assert_eq!(
-            res.find_existing_peer(&query1),
-            None,
-        );
+            .with_remote_asn(Asn::from_u32(65000));
+        assert_eq!(res.find_existing_peer(&query1), None,);
     }
 
     #[test]
@@ -653,8 +680,7 @@ mod tests {
             .with_parent_ingress(parent_id1)
             .with_remote_addr("1.2.3.4".parse::<IpAddr>().unwrap())
             .with_remote_asn(Asn::from_u32(65000))
-            .with_distinguisher([1,2,3,4,9,9,9,9])
-            ;
+            .with_distinguisher([1, 2, 3, 4, 9, 9, 9, 9]);
 
         res.update_info(session_id1_a, info1_a.clone());
 
@@ -662,11 +688,7 @@ mod tests {
             .with_parent_ingress(parent_id1)
             .with_remote_addr("1.2.3.4".parse::<IpAddr>().unwrap())
             .with_remote_asn(Asn::from_u32(65000))
-            .with_distinguisher([9,9,9,9,8,8,8,8])
-            ;
-        assert_eq!(
-            res.find_existing_peer(&query1),
-            None,
-        );
+            .with_distinguisher([9, 9, 9, 9, 8, 8, 8, 8]);
+        assert_eq!(res.find_existing_peer(&query1), None,);
     }
 }

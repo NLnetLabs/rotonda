@@ -1,13 +1,13 @@
 use std::sync::{
-    atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering::SeqCst},
     Arc,
+    atomic::{AtomicBool, AtomicU16, AtomicUsize, Ordering::SeqCst},
 };
 
 use crate::{
     common::frim::FrimMap,
     comms::GraphStatus,
     metrics::{
-        self, util::append_labelled_metric, Metric, MetricType, MetricUnit,
+        self, Metric, MetricType, MetricUnit, util::append_labelled_metric,
     },
 };
 

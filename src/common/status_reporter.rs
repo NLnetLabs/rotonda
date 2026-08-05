@@ -1,8 +1,4 @@
-use std::{
-    fmt::Display,
-    num::NonZeroUsize,
-    sync::Arc,
-};
+use std::{fmt::Display, num::NonZeroUsize, sync::Arc};
 
 use log::{debug, trace};
 

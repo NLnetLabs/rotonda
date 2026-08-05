@@ -1,23 +1,23 @@
 //! Controlling the entire operation.
 
 use crate::common::file_io::TheFileIo;
+use crate::comms::{
+    DEF_UPDATE_QUEUE_LEN, DirectLink, Gate, GateAgent, GraphStatus, Link,
+};
+use crate::config::{Config, ConfigFile, Marked};
 use crate::http_ng;
+use crate::log::Terminate;
+use crate::roto_runtime::create_runtime;
 use crate::roto_runtime::metrics::RotoMetricsWrapper;
 use crate::roto_runtime::types::FilterName;
 use crate::roto_runtime::types::RotoPackage;
-use crate::roto_runtime::create_runtime;
-use crate::comms::{
-    DirectLink, Gate, GateAgent, GraphStatus, Link, DEF_UPDATE_QUEUE_LEN,
-};
-use crate::config::{Config, ConfigFile, Marked};
-use crate::log::Terminate;
 use crate::targets::Target;
 use crate::tracing::Tracer;
 use crate::units::Unit;
 use crate::units::bgp_tcp_in::unit::LiveSessions;
 use crate::{ingress, metrics};
 use arc_swap::ArcSwap;
-use futures::future::{join_all, select, Either};
+use futures::future::{Either, join_all, select};
 use log::{debug, error, info, log_enabled, trace, warn};
 use non_empty_vec::NonEmpty;
 use serde::Deserialize;
@@ -27,8 +27,8 @@ use std::sync::{Arc, Mutex, RwLock, Weak};
 use std::time::{Duration, Instant};
 use std::{cell::RefCell, fmt::Display};
 use std::{collections::HashMap, mem::Discriminant};
-use tokio::sync::mpsc::{self, Receiver, Sender};
 use tokio::sync::Barrier;
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use uuid::Uuid;
 
 //------------ Component -----------------------------------------------------
@@ -118,13 +118,10 @@ impl Component {
         self.type_name
     }
 
-
-    pub fn roto_package(
-        &self,
-    ) -> &Option<Arc<RotoPackage>> {
+    pub fn roto_package(&self) -> &Option<Arc<RotoPackage>> {
         &self.roto_package
     }
-    
+
     pub fn roto_metrics(&self) -> &Option<Arc<RotoMetricsWrapper>> {
         &self.roto_metrics
     }
@@ -232,7 +229,6 @@ impl LinkReport {
     fn get_gate_id(&self, name: &str) -> Option<Uuid> {
         self.gates.get(name).copied()
     }
-
 }
 
 #[derive(Clone, Default)]
@@ -391,12 +387,16 @@ impl Manager {
         let global_bgp_sessions = Arc::new(Mutex::new(LiveSessions::new()));
         let metrics: metrics::Collection = Default::default();
         let roto_metrics = Some(Arc::new(RotoMetricsWrapper::default()));
-        metrics.register("roto_metrics".into(), Arc::downgrade(roto_metrics.as_ref().unwrap()) as Weak<dyn metrics::Source>);
+        metrics.register(
+            "roto_metrics".into(),
+            Arc::downgrade(roto_metrics.as_ref().unwrap())
+                as Weak<dyn metrics::Source>,
+        );
         let http_ng_api = Arc::new(Mutex::new(http_ng::Api::new(
             Vec::with_capacity(1), // interfaces come from config, later on
             ingresses.clone(),
             global_bgp_sessions.clone(),
-            metrics.clone()
+            metrics.clone(),
         )));
 
         #[allow(
@@ -823,8 +823,7 @@ impl Manager {
         terminate_target: TermTarget,
     ) where
         SpawnUnit: Fn(Component, Unit, Gate, WaitPoint),
-        SpawnTarget:
-            Fn(Component, Target, Receiver<TargetCommand>, WaitPoint),
+        SpawnTarget: Fn(Component, Target, Receiver<TargetCommand>, WaitPoint),
         ReconfUnit: Fn(&str, GateAgent, Unit, Gate),
         ReconfTarget: Fn(&str, Sender<TargetCommand>, Target),
         TermUnit: Fn(&str, Arc<GateAgent>),
@@ -909,9 +908,9 @@ impl Manager {
                             terminate_unit(&name, running_unit_agent.into());
                         } else {
                             error!(
-                            "Unit '{}' is unused and will not be started.",
-                            name
-                        );
+                                "Unit '{}' is unused and will not be started.",
+                                name
+                            );
                         }
                         continue;
                     }
@@ -941,8 +940,7 @@ impl Manager {
                         new_unit,
                         new_gate,
                     );
-                    new_running_units
-                        .insert(name, (new_unit_type, new_agent));
+                    new_running_units.insert(name, (new_unit_type, new_agent));
                     continue;
                 }
             }
@@ -988,10 +986,7 @@ impl Manager {
         self.coordinate_and_track_startup(coordinator);
     }
 
-    fn coordinate_and_track_startup(
-        &mut self,
-        coordinator: Arc<Coordinator>,
-    ) {
+    fn coordinate_and_track_startup(&mut self, coordinator: Arc<Coordinator>) {
         let mut reports = LinkReport::new();
         let mut agent_cmd_futures = vec![];
         let mut target_cmd_futures = vec![];
@@ -1088,7 +1083,7 @@ impl Manager {
             // to listen on, which does not happen here currently.
             // By doing that in the signal handler in main.rs, we effectively reload the http
             // servers twice, which is not nice.
-            
+
             arc_api.lock().unwrap().restart();
         });
     }
@@ -1204,19 +1199,22 @@ impl Manager {
 
     /// Reload the HTTP configuration (listening interfaces)
     pub fn reload_http_ng_config(&mut self, config: &Config) {
-        if let Ok(mut lock) = self.http_ng_api.lock(){
-           lock.set_interfaces(config.http_ng_listen.clone().into_iter().flatten());
+        if let Ok(mut lock) = self.http_ng_api.lock() {
+            lock.set_interfaces(
+                config.http_ng_listen.clone().into_iter().flatten(),
+            );
         }
     }
 
     /// Restart the HTTP API based on the passed Rotonda `Config`
     pub fn restart_http_ng_with_config(&mut self, config: &Config) {
-        if let Ok(mut lock) = self.http_ng_api.lock(){
-           lock.set_interfaces(config.http_ng_listen.clone().into_iter().flatten());
-           lock.restart();
+        if let Ok(mut lock) = self.http_ng_api.lock() {
+            lock.set_interfaces(
+                config.http_ng_listen.clone().into_iter().flatten(),
+            );
+            lock.restart();
         }
     }
-
 }
 
 //------------ Checkpoint ----------------------------------------------------
@@ -1276,9 +1274,7 @@ impl Coordinator {
     pub fn track(self: Arc<Self>, name: String) -> WaitPoint {
         if self.pending.write().unwrap().insert(name.clone()) {
             if self.pending.read().unwrap().len() > self.max_components {
-                panic!(
-                    "Coordinator::track() called more times than expected"
-                );
+                panic!("Coordinator::track() called more times than expected");
             }
             WaitPoint::new(self, name)
         } else {
@@ -1317,11 +1313,8 @@ impl Coordinator {
         self.wait_internal(&mut alarm, "running").await;
     }
 
-    pub async fn wait_internal<T>(
-        self: Arc<Self>,
-        alarm: &mut T,
-        status: &str,
-    ) where
+    pub async fn wait_internal<T>(self: Arc<Self>, alarm: &mut T, status: &str)
+    where
         T: FnMut(Vec<String>, &str),
     {
         debug!("Waiting for all components to become {}...", status);
@@ -1480,10 +1473,10 @@ fn get_queue_size_for_link(link_id: String) -> (String, usize) {
         if let Some((name, options)) = link_id.split_once(':') {
             let queue_len = options.parse::<usize>().unwrap_or_else(|err| {
                 warn!(
-                "Invalid queue length '{}' for '{}', falling back to the \
+                    "Invalid queue length '{}' for '{}', falling back to the \
                 default ({}): {}",
-                options, name, DEF_UPDATE_QUEUE_LEN, err
-            );
+                    options, name, DEF_UPDATE_QUEUE_LEN, err
+                );
                 DEF_UPDATE_QUEUE_LEN
             });
             (name.to_string(), queue_len)
@@ -2412,8 +2405,8 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn modified_settings_are_correctly_announced(
-    ) -> Result<(), Terminate> {
+    async fn modified_settings_are_correctly_announced()
+    -> Result<(), Terminate> {
         // given a config with only a single target with a link to a missing unit
         let toml = r#"
          #http_listen = []
@@ -2512,8 +2505,7 @@ mod tests {
     async fn coordinator_with_one_ready_component_should_not_raise_alarm() {
         let coordinator = Coordinator::new(1);
         let mut alarm_fired = false;
-        let wait_point =
-            coordinator.clone().track(SOME_COMPONENT.to_string());
+        let wait_point = coordinator.clone().track(SOME_COMPONENT.to_string());
         let join_handle = tokio::task::spawn(wait_point.running());
         assert!(!join_handle.is_finished());
         coordinator.wait(|_, _| alarm_fired = true).await;
@@ -2540,12 +2532,11 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn coordinator_with_component_with_slow_ready_phase_should_raise_alarm(
-    ) {
+    async fn coordinator_with_component_with_slow_ready_phase_should_raise_alarm()
+     {
         let coordinator = Coordinator::new(1);
         let alarm_fired_count = Arc::new(AtomicU8::new(0));
-        let wait_point =
-            coordinator.clone().track(SOME_COMPONENT.to_string());
+        let wait_point = coordinator.clone().track(SOME_COMPONENT.to_string());
 
         // Deliberately don't call wait_point.ready() or wait_point.running()
         let join_handle = {
@@ -2572,8 +2563,8 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn coordinator_with_component_with_slow_running_phase_should_raise_alarm(
-    ) {
+    async fn coordinator_with_component_with_slow_running_phase_should_raise_alarm()
+     {
         let coordinator = Coordinator::new(1);
         let alarm_fired_count = Arc::new(AtomicU8::new(0));
         let mut wait_point =
@@ -2638,16 +2629,12 @@ mod tests {
             match self {
                 SpawnAction::SpawnUnit => f.write_str("SpawnUnit"),
                 SpawnAction::SpawnTarget => f.write_str("SpawnTarget"),
-                SpawnAction::ReconfigureUnit => {
-                    f.write_str("ReconfigureUnit")
-                }
+                SpawnAction::ReconfigureUnit => f.write_str("ReconfigureUnit"),
                 SpawnAction::ReconfigureTarget => {
                     f.write_str("ReconfigureTarget")
                 }
                 SpawnAction::TerminateUnit => f.write_str("TerminateUnit"),
-                SpawnAction::TerminateTarget => {
-                    f.write_str("TerminateTarget")
-                }
+                SpawnAction::TerminateTarget => f.write_str("TerminateTarget"),
             }
         }
     }

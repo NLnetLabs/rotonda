@@ -1,21 +1,32 @@
 use std::{
-    collections::{HashMap, HashSet}, future::Future, net::{IpAddr, SocketAddr}, ops::ControlFlow, path::PathBuf, sync::{Arc, Mutex}, time::Duration
+    collections::{HashMap, HashSet},
+    future::Future,
+    net::{IpAddr, SocketAddr},
+    ops::ControlFlow,
+    path::PathBuf,
+    sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use axum::extract::State;
 use futures::{
-    future::{select, Either},
+    future::{Either, select},
     pin_mut,
 };
 use log::{debug, error, info, warn};
 use routecore::bmp::message_ng::statistics_report::{StatType, StatValue};
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use tokio::fs::File;
 use tokio::net::{TcpListener, TcpStream};
 
 use crate::{
-    comms::{Gate, GateStatus, Terminated}, http_ng::ApiState, ingress::{self, IngressId, IngressInfo}, manager::{Component, WaitPoint}, roto_runtime::{MutIngressInfoCache, RotondaCtx}, units::bmp_tcp_in_ng::{error::BmpNgError, router_handler::RouterHandler}
+    comms::{Gate, GateStatus, Terminated},
+    http_ng::ApiState,
+    ingress::{self, IngressId, IngressInfo},
+    manager::{Component, WaitPoint},
+    roto_runtime::{MutIngressInfoCache, RotondaCtx},
+    units::bmp_tcp_in_ng::{error::BmpNgError, router_handler::RouterHandler},
 };
 
 use super::router_handler;
@@ -128,15 +139,20 @@ impl BmpTcpIn {
         if let Ok(mut api) = component.http_ng_api_arc().lock() {
             api.add_get("/bmp_stats_reports_metrics", serve_stats_as_metrics);
             stats_db = api.get_stats_store();
-
         } else {
             debug!("could not get lock on HTTP API");
             stats_db = StatsStore::default();
         }
 
-        let _ = Runner::new(self.clone(), gate, roto_filter, ingress_register, stats_db)
-            .run()
-            .await;
+        let _ = Runner::new(
+            self.clone(),
+            gate,
+            roto_filter,
+            ingress_register,
+            stats_db,
+        )
+        .run()
+        .await;
 
         Ok(())
     }
@@ -150,15 +166,20 @@ type RotoFilter = roto::TypedFunc<
     ) -> roto::Verdict<(), ()>,
 >;
 
-
-async fn serve_stats_as_metrics(state: State<ApiState> ) -> Result<String, crate::http_ng::ApiError> {
-    use routecore::bmp::message_ng::statistics_report::Stat::{CounterStat, GaugeStat, AfiSafiGaugeStat};
+async fn serve_stats_as_metrics(
+    state: State<ApiState>,
+) -> Result<String, crate::http_ng::ApiError> {
+    use routecore::bmp::message_ng::statistics_report::Stat::{
+        AfiSafiGaugeStat, CounterStat, GaugeStat,
+    };
     use std::fmt::Write;
 
     const METRIC_PREFIX: &str = "bmp_stats_report_";
 
     let mut res = String::new();
-    let mut type_lines_printed = HashSet::<routecore::bmp::message_ng::statistics_report::StatType>::new();
+    let mut type_lines_printed = HashSet::<
+        routecore::bmp::message_ng::statistics_report::StatType,
+    >::new();
 
     macro_rules! write_type_help_once(
         (&mut $res:ident, $stat_type:expr, $metric_type:literal) => {
@@ -177,15 +198,26 @@ async fn serve_stats_as_metrics(state: State<ApiState> ) -> Result<String, crate
     );
 
     let db = state.stats_db.lock().unwrap();
-    for (session, StatsValue { timestamp, raw_stats: blob}) in &*db {
-        let timestamp = timestamp.duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_millis();
+    for (
+        session,
+        StatsValue {
+            timestamp,
+            raw_stats: blob,
+        },
+    ) in &*db
+    {
+        let timestamp = timestamp
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap()
+            .as_millis();
         let iter = routecore::bmp::message_ng::statistics_report::StatIterator::for_slice(blob);
 
         // labels lacks the closing curly brace
         // we add this at 'print' time, so we can still add afisafi= for
         // the AfiSafiGaugeStat.
         // TODO include bmp-ingress-unit-name
-        let labels = format_args!("{{\
+        let labels = format_args!(
+            "{{\
                 bmp_router_name=\"{}\",\
                 bmp_router_addr=\"{}\",\
                 asn=\"{}\",\
@@ -193,40 +225,67 @@ async fn serve_stats_as_metrics(state: State<ApiState> ) -> Result<String, crate
                 ribview=\"{}\",\
                 distinguisher=\"{:?}\"\
                 ", // no closing curly brace!
-                session.bmp_router_name,
-                session.bmp_router_addr,
-                session.asn,
-                session.address,
-                session.rib_view,
-                session.distinguisher,
+            session.bmp_router_name,
+            session.bmp_router_addr,
+            session.asn,
+            session.address,
+            session.rib_view,
+            session.distinguisher,
         );
 
         for stat in iter {
             let Ok(stat) = stat.into_specific() else {
                 warn!("unknown stat type");
-                continue
+                continue;
             };
             match stat {
                 CounterStat(counter_stat) => {
-                    write_type_help_once!(&mut res, counter_stat.stat_type, "counter");
-                    let _ = writeln!(&mut res, "{METRIC_PREFIX}{}{labels}}} {} {}", counter_stat.stat_type, StatValue::value(counter_stat), timestamp);
+                    write_type_help_once!(
+                        &mut res,
+                        counter_stat.stat_type,
+                        "counter"
+                    );
+                    let _ = writeln!(
+                        &mut res,
+                        "{METRIC_PREFIX}{}{labels}}} {} {}",
+                        counter_stat.stat_type,
+                        StatValue::value(counter_stat),
+                        timestamp
+                    );
                 }
                 GaugeStat(gauge_stat) => {
-                    write_type_help_once!(&mut res, gauge_stat.stat_type, "gauge");
-                    let _ = writeln!(&mut res, "{METRIC_PREFIX}{}{labels}}} {} {}", gauge_stat.stat_type, StatValue::value(gauge_stat), timestamp);
+                    write_type_help_once!(
+                        &mut res,
+                        gauge_stat.stat_type,
+                        "gauge"
+                    );
+                    let _ = writeln!(
+                        &mut res,
+                        "{METRIC_PREFIX}{}{labels}}} {} {}",
+                        gauge_stat.stat_type,
+                        StatValue::value(gauge_stat),
+                        timestamp
+                    );
                 }
                 AfiSafiGaugeStat(afi_safi_gauge_stat) => {
-                    write_type_help_once!(&mut res, afi_safi_gauge_stat.stat_type, "gauge");
-                    let (afisafi, gauge) = StatValue::value(afi_safi_gauge_stat);
-                    let _ = writeln!(&mut res, "{METRIC_PREFIX}{}{labels},afisafi=\"{afisafi}\"}} {} {}", afi_safi_gauge_stat.stat_type, gauge, timestamp);
+                    write_type_help_once!(
+                        &mut res,
+                        afi_safi_gauge_stat.stat_type,
+                        "gauge"
+                    );
+                    let (afisafi, gauge) =
+                        StatValue::value(afi_safi_gauge_stat);
+                    let _ = writeln!(
+                        &mut res,
+                        "{METRIC_PREFIX}{}{labels},afisafi=\"{afisafi}\"}} {} {}",
+                        afi_safi_gauge_stat.stat_type, gauge, timestamp
+                    );
                 }
             }
         }
     }
 
-
     Ok(res)
-
 }
 
 // Types to store BMP Stats Reports.
@@ -247,8 +306,7 @@ pub struct StatsValue {
     pub raw_stats: Vec<u8>,
 }
 
-pub(crate) type StatsStore = Arc<Mutex<HashMap::<StatsKey, StatsValue>>>;
-
+pub(crate) type StatsStore = Arc<Mutex<HashMap<StatsKey, StatsValue>>>;
 
 struct Runner {
     config: BmpTcpIn,
@@ -321,7 +379,7 @@ impl Runner {
             IngressInfo::new().with_remote_addr(socket.ip());
 
         let stats_db = self.stats_db.clone();
-        
+
         tokio::spawn(async move {
             info!(
                 "spawning handler for tcp stream from {:?}",
@@ -414,7 +472,7 @@ impl Runner {
                             self.process_gate_status(gate_status);
                         }
                         Err(Terminated) => {
-                            return ControlFlow::Break(Terminated)
+                            return ControlFlow::Break(Terminated);
                         }
                     }
                     until_fut = next_fut;

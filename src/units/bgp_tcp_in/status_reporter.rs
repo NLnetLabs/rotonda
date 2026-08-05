@@ -1,12 +1,12 @@
 use std::fmt::Display;
 use std::net::{IpAddr, SocketAddr};
-use std::sync::atomic::Ordering::SeqCst;
 use std::sync::Arc;
+use std::sync::atomic::Ordering::SeqCst;
 
 use log::{debug, info, warn};
 
 use crate::common::status_reporter::{
-    sr_log, AnyStatusReporter, Chainable, Named, UnitStatusReporter,
+    AnyStatusReporter, Chainable, Named, UnitStatusReporter, sr_log,
 };
 
 use super::metrics::BgpTcpInMetrics;

@@ -3,7 +3,9 @@ use std::{collections::BTreeMap, sync::Arc};
 use log::{debug, warn};
 use routecore::{
     bgp::message_ng::common::SessionConfig,
-    bmp::message_ng::common::{PerPeerHeader, PerPeerHeaderV3, PerPeerHeaderV4, PphFlags},
+    bmp::message_ng::common::{
+        PerPeerHeader, PerPeerHeaderV3, PerPeerHeaderV4, PphFlags,
+    },
 };
 
 use crate::ingress::{self, IngressId};
@@ -18,7 +20,6 @@ pub struct PphRegister {
     ingress_register: Arc<ingress::Register>,
 }
 
-
 #[derive(Debug, Default)]
 pub struct RibViewRegister {
     // based on peer flags byte
@@ -30,19 +31,19 @@ pub struct RibViewRegister {
     // FIXME make 256 as well?
     per_rib_view: [BTreeMap<
         [u8; std::mem::size_of::<PerPeerHeaderV3>() - 2 - 8], // NB: we
-                                                              // need to key
-                                                              // on an array
-                                                              // that is the
-                                                              // same size for
-                                                              // both V3 and
-                                                              // V4. Maybe
-                                                              // define a type
-                                                              // for that, and
-                                                              // add methods
-                                                              // to the
-                                                              // PerPeerHeader
-                                                              // trait to
-                                                              // return that.
+        // need to key
+        // on an array
+        // that is the
+        // same size for
+        // both V3 and
+        // V4. Maybe
+        // define a type
+        // for that, and
+        // add methods
+        // to the
+        // PerPeerHeader
+        // trait to
+        // return that.
         (IngressId, SessionConfig),
     >; 5],
 }
@@ -128,14 +129,17 @@ impl PphRegister {
         //    HexFormatted(pph.without_type_and_flags())
         //);
 
-        if let Some((mui, _sc)) = self.per_peer_type[u8::from(pph.peer_type()) as usize].per_rib_view
-            [pph.flags().reverse_bits() as usize]
+        if let Some((mui, _sc)) = self.per_peer_type
+            [u8::from(pph.peer_type()) as usize]
+            .per_rib_view[pph.flags().reverse_bits() as usize]
             .insert(
                 pph.without_type_and_flags().try_into().unwrap(),
                 (mui, session_config),
             )
         {
-            warn!("inserting already existing PPH into PphRegister, mui {mui}");
+            warn!(
+                "inserting already existing PPH into PphRegister, mui {mui}"
+            );
         }
         mui
     }

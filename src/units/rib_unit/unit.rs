@@ -13,7 +13,7 @@ use arc_swap::ArcSwap;
 use async_trait::async_trait;
 use roto::Verdict;
 use routedb::{TableGroupKey, index_set::table_props_partitions::TableProperties};
-use std::{collections::{HashMap, HashSet}, io::prelude::*, num::NonZeroU32, sync::{Mutex, RwLock, Weak}};
+use std::{collections::{HashMap, HashSet}, io::prelude::*, num::NonZeroU16, sync::{Mutex, RwLock, Weak}};
 use rotonda_store::{errors::PrefixStoreError, match_options::{IncludeHistory, MatchOptions, MatchType, QueryResult}, prefix_record::{Record, RecordSet, RouteStatus}, rib::{config::MemoryOnlyConfig, StarCastRib}, stats::UpsertReport};
 use std::io::prelude::*;
 
@@ -1126,7 +1126,7 @@ impl RibUnitRunner {
         let tgrp = rib.routedb.table_groups().get_or_create_group(
             // TODO use proper IDs, perhaps the ingress_id for the unit/stream
             // (i.e. the parent from `ingress_id` here?);
-            TableGroupKey::new(routedb::Source::BMP, NonZeroU32::new(1).unwrap())
+            TableGroupKey::new(routedb::Source::BMP, NonZeroU16::new(1).unwrap())
         ).unwrap();
 
         let Ok(update) = routecore::bgp::message_ng::Update::try_from_raw(raw_update)

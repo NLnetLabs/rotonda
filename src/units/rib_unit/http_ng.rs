@@ -374,7 +374,7 @@ async fn routedb_ipv4unicast_all(
 
     // attempt based on iter_grouped_by_table_id
     let ids = rib.routedb.routes().iter_grouped_by_table_id().filter_map(|(rt_props,_)|
-        (rt_props.afi_safi() == Ok(AfiSafiTypeNg::IPV4UNICAST)).then(|| rt_props.table_id())
+        (rt_props.afi_safi() == Ok(AfiSafiTypeNg::IPV4UNICAST)).then(|| rt_props.table_id().unwrap())
     ).collect::<Vec<_>>();
 
 
@@ -382,7 +382,7 @@ async fn routedb_ipv4unicast_all(
         stream_routedb_routing_tables(
             super::serialize::RouteDbRoutingTables {
                 routedb: rib.routedb.clone(),
-                ids
+                ids,
             }
         )
     )

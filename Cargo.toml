@@ -18,6 +18,10 @@ default-run = "rotonda"
 name = "print_rotonda_std_doc"
 path = "doc/bin/print_rotonda_std_doc.rs"
 
+[[bin]]
+name = "generate_grafana_dashboard"
+path = "src/generate_grafana.rs"
+
 [workspace.package]
 version = "0.7.0-dev"
 edition = "2024"

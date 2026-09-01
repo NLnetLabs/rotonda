@@ -22,12 +22,12 @@ fn main() {
         let expr = match metric_type {
             MetricType::CounterStat | MetricType::GaugeStat => {
                 format!(
-                    "sum by(asn, bmp_router_addr) (bmp_stats_report_{desc})"
+                    "sum by(asn, bmp_router_addr) (bmp_stats_report_{desc}{{job=~\"$prom_job\", asn=~\"$peer_asn\"}})"
                 )
             }
             MetricType::AfiSafiGaugeStat => {
                 format!(
-                    "sum by(asn, bmp_router_addr, afisafi) (bmp_stats_report_{desc})"
+                    "sum by(asn, bmp_router_addr, afisafi) (bmp_stats_report_{desc}{{job=~\"$prom_job\", asn=~\"$peer_asn\", afisafi=~\"$afisafi\"}})"
                 )
             }
         };
@@ -47,6 +47,8 @@ struct Dashboard {
     panels: Vec<Panel>,
     time: Time,
     title: String,
+    //variables: Vec<Variable>, // V2 thing, or something
+    templating: List,
 }
 
 impl Default for Dashboard {
@@ -57,6 +59,16 @@ impl Default for Dashboard {
             panels: vec![],
             time: Time::default(),
             title: "Rotonda BMP Stats Reports (generated dashboard)".into(),
+            templating: List { list: vec![
+                TemplateVar::new("prom_job", "Prometheus job", "label_values(bmp_stats_report_num_routes_adj_ribs_in,job)"),
+                TemplateVar::new("peer_asn", "Peer ASN", "label_values({job=~\"$prom_job\"},asn)"),
+                TemplateVar::new("afisafi", "afi/safi", "label_values({job=~\"$prom_job\"},afisafi)"),
+
+            ] },
+            //variables: vec![
+            //    Variable::new("prom_job", "Prometheus job", "label_values(bmp_stats_report_num_routes_adj_ribs_in,job)"),
+            //    Variable::new("peer_asn", "Peer ASN", "label_values({job=~\"$prom_job\"},asn)"),
+            //],
         }
     }
 }
@@ -65,6 +77,149 @@ impl Dashboard {
     fn add_panel(&mut self, panel: Panel) {
         self.panels.push(panel);
     }
+}
+
+#[derive(Serialize)]
+struct List {
+    list: Vec<TemplateVar>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TemplateVar {
+    datasource: DataSource,
+    definition: String,
+    include_all: bool,
+    label: String,
+    multi: bool,
+    name: String,
+    options: Vec<()>,
+    query: QuerySpec,
+    r#type: String,
+}
+
+impl TemplateVar {
+    fn new(
+        name: impl AsRef<str>,
+        label: impl AsRef<str>,
+        query: impl AsRef<str>,
+    ) -> Self {
+        Self {
+            datasource: DataSource::default(),
+            definition: query.as_ref().into(),
+            include_all: true,
+            label: label.as_ref().into(),
+            multi: true,
+            name: name.as_ref().into(),
+            options: vec![],
+            query: QuerySpec {
+                qry_type: 1,
+                query: query.as_ref().into(),
+                ref_id: "PrometheusVariableQueryEditor-VariableQuery".into(),
+            },
+            r#type: "query".into(),
+        }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Variable {
+    kind: VariableType,
+    spec: VariableSpec,
+}
+
+impl Variable {
+    fn new(
+        name: impl AsRef<str>,
+        label: impl AsRef<str>,
+        query: impl AsRef<str>,
+    ) -> Self {
+        Self {
+            kind: VariableType::QueryVariable,
+            spec: VariableSpec {
+                name: name.as_ref().into(),
+                current: Current::default(),
+                label: label.as_ref().into(),
+                hide: "dontHide".into(),
+                refresh: "onDashboardLoad".into(),
+                skip_url_sync: false,
+                query: Query {
+                    kind: QueryKind::DataQuery,
+                    //group: "${DS_PROMETHEUS}".into(), /XXX
+                    group: "prometheus".into(),
+                    version: "v0".into(),
+                    spec: QuerySpec {
+                        qry_type: 1,
+                        query: query.as_ref().into(),
+                        ref_id: "PrometheusVariableQueryEditor-VariableQuery"
+                            .into(),
+                    },
+                },
+                regex: "".into(),
+                sort: "disabled".into(),
+                definition: query.as_ref().into(),
+                options: vec![],
+                multi: true,
+                include_all: true,
+                all_value: "".into(),
+                allow_custom_value: false,
+            },
+        }
+    }
+}
+
+#[derive(Serialize)]
+enum VariableType {
+    QueryVariable,
+}
+
+#[derive(Default, Serialize)]
+struct Current {
+    text: String,
+    value: String,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct VariableSpec {
+    name: String,
+    current: Current,
+    label: String,
+    hide: String,
+    refresh: String,
+    skip_url_sync: bool,
+    query: Query,
+    regex: String,
+    sort: String,
+    definition: String,
+    options: Vec<String>,
+    multi: bool,
+    include_all: bool,
+    all_value: String,
+    allow_custom_value: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct Query {
+    kind: QueryKind,
+    group: String, // XXX "${DS_PROMETHEUS}" ?
+    version: String,
+    spec: QuerySpec,
+}
+
+#[derive(Serialize)]
+enum QueryKind {
+    DataQuery,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct QuerySpec {
+    qry_type: usize,
+    query: String,
+    ref_id: String,
 }
 
 #[derive(Serialize)]
@@ -213,20 +368,20 @@ mod tests {
     use routecore::bmp::message_ng::statistics_report::StatType;
 
     use super::*;
-    #[test]
-    fn testme() {
-        let mut d = Dashboard::default();
+    //#[test]
+    //fn testme() {
+    //    let mut d = Dashboard::default();
 
-        let mut grid_iter = GridPosIter::new();
+    //    let mut grid_iter = GridPosIter::new();
 
-        for (id, desc) in (1..).zip(StatType::desc_iter()) {
-            let expr = format!(
-                "sum by(asn, bmp_router_addr) (bmp_stats_report_{desc})"
-            );
-            let p = Panel::new(grid_iter.next().unwrap(), id, expr);
-            d.add_panel(p);
-        }
+    //    for (id, desc) in (1..).zip(StatType::desc_iter()) {
+    //        let expr = format!(
+    //            "sum by(asn, bmp_router_addr) (bmp_stats_report_{desc})"
+    //        );
+    //        let p = Panel::new(grid_iter.next().unwrap(), id, expr);
+    //        d.add_panel(p);
+    //    }
 
-        println!("{}", serde_json::to_string(&d).unwrap());
-    }
+    //    println!("{}", serde_json::to_string(&d).unwrap());
+    //}
 }

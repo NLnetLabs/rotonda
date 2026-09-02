@@ -168,7 +168,7 @@ async fn serve_stats_as_metrics(state: State<ApiState> ) -> Result<String, crate
                 } else {
                     ""
                 };
-                let _ = writeln!(&mut $res, "# HELP {METRIC_PREFIX}{} BMP Statistics Report type {}", $stat_type, u16::from($stat_type));
+                let _ = writeln!(&mut $res, "# HELP {METRIC_PREFIX}{}{suffix} BMP Statistics Report type {}", $stat_type, u16::from($stat_type));
                 let _ = writeln!(&mut $res, "# TYPE {METRIC_PREFIX}{}{suffix} {}", $stat_type, $metric_type);
                 type_lines_printed.insert($stat_type);
             }
@@ -209,7 +209,7 @@ async fn serve_stats_as_metrics(state: State<ApiState> ) -> Result<String, crate
             match stat {
                 CounterStat(counter_stat) => {
                     write_type_help_once!(&mut res, counter_stat.stat_type, "counter");
-                    let _ = writeln!(&mut res, "{METRIC_PREFIX}{}{labels}}} {} {}", counter_stat.stat_type, StatValue::value(counter_stat), timestamp);
+                    let _ = writeln!(&mut res, "{METRIC_PREFIX}{}_total{labels}}} {} {}", counter_stat.stat_type, StatValue::value(counter_stat), timestamp);
                 }
                 GaugeStat(gauge_stat) => {
                     write_type_help_once!(&mut res, gauge_stat.stat_type, "gauge");

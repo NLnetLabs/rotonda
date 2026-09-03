@@ -203,7 +203,7 @@ async fn serve_stats_as_metrics(state: State<ApiState> ) -> Result<String, crate
 
         for stat in iter {
             let Ok(stat) = stat.into_specific() else {
-                warn!("unknown stat type");
+                debug!("unknown stat type");
                 continue
             };
             match stat {

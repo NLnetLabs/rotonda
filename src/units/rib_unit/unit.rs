@@ -1174,7 +1174,7 @@ impl RibUnitRunner {
 
         if let Some(conv_unreach_iter) = update.conv_unreach_iter_wireformat() {
             for nlri in conv_unreach_iter {
-                eprint!("-");
+                //eprint!("-");
                 // TODO use routing_table.withdraw_single() once implemented
                 // in routedb
                 conv_routing_table.upsert_single(
@@ -1309,7 +1309,7 @@ impl RibUnitRunner {
         }
 
         if u64::from(crate::read_ltime()).is_multiple_of(100_000) {
-            eprintln!("{:?}", rib.routedb.counters());
+            debug!("{:?}", rib.routedb.counters());
         }
 
     }

@@ -1161,6 +1161,7 @@ impl RibUnitRunner {
         if update.conv_nlri_hints.addpath() {
             //debug!("enabling ADDPATH for conv unreach in this RoutingTable");
             conv_tbl_props = conv_tbl_props.with_add_path_cap();
+            debug!("UPDATE with ADDPATH:\n{:?}", routecore::bgp::message_ng::common::PcapHex(raw_update));
         }
 
         let conv_tbl = tgrp.get_or_create_table(conv_tbl_props).unwrap();

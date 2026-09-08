@@ -1177,13 +1177,26 @@ impl RibUnitRunner {
                 //eprint!("-");
                 // TODO use routing_table.withdraw_single() once implemented
                 // in routedb
-                conv_routing_table.upsert_single(
+
+
+
+                if nlri.is_empty() {
+                    warn!("trying to upsert_single empty slice (conv_reach_iter_wireformat)");
+                }
+
+                match conv_routing_table.upsert_single(
                     nlri,
                     routedb::prefix_record::RouteStatus::Withdrawn,
                     ltime,
                     None, // no pa_hints
                     &[],  // no path_attrs
-                ).unwrap();
+                ) {
+                    Ok(_new_or_updated) => { /* */ }
+
+                    Err(e) => {
+                        error!("upsert_single error for nlri {nlri:?}: {e}");
+                    }
+                }
             }
 
         }

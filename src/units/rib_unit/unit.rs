@@ -1180,11 +1180,6 @@ impl RibUnitRunner {
                 // in routedb
 
 
-
-                if nlri.is_empty() {
-                    warn!("trying to upsert_single empty slice (conv_reach_iter_wireformat)");
-                }
-
                 match conv_routing_table.upsert_single(
                     nlri,
                     routedb::prefix_record::RouteStatus::Withdrawn,
@@ -1193,9 +1188,8 @@ impl RibUnitRunner {
                     &[],  // no path_attrs
                 ) {
                     Ok(_new_or_updated) => { /* */ }
-
                     Err(e) => {
-                        error!("upsert_single error for nlri {nlri:?}: {e}");
+                        error!("upsert_single error for nlri {nlri:?} in conv_unreach_iter_wireformat: {e}");
                     }
                 }
             }
@@ -1233,14 +1227,18 @@ impl RibUnitRunner {
             for nlri in update.conv_reach_iter_wireformat() {
                 // nlri s a &[u8] might contain addpath path ids!
 
-                //eprint!("+");
-                routing_table.upsert_single(
+                match routing_table.upsert_single(
                     nlri,
                     routedb::prefix_record::RouteStatus::Active,
                     ltime,
                     Some(pa_hints), //: Option<[u8; {const}]>,
                     path_attrs,
-                ).unwrap();
+                ) {
+                    Ok(_new_or_updated) => { /* */ }
+                    Err(e) => {
+                        error!("upsert_single error for nlri {nlri:?} in conv_reach_iter_wireformat: {e}");
+                    }
+                }
             }
         }
 
@@ -1271,6 +1269,9 @@ impl RibUnitRunner {
             //for nlri in update.mp_unreach_iter_wireformat() {
             //    mp_unreach_routing_table.withdraw_single(nlri, ltime).unwrap();
             //}
+
+            // TODO add iteration based on (yet to implement) routecore's
+            // mp_unreach_iter_wireformat()
 
         }
 
@@ -1308,16 +1309,20 @@ impl RibUnitRunner {
 
             let path_attrs = attr.without_header();
 
-            // XXX needs:
-            // - routecore wireformat iter on mp reach
             for nlri in update.mp_reach_iter_wireformat() {
-                mp_reach_routing_table.upsert_single(
+                debug!("inserting route with afisafi {}", mp_reach_afisafi);
+                match mp_reach_routing_table.upsert_single(
                     nlri,
                     routedb::prefix_record::RouteStatus::Active,
                     ltime,
                     Some(pa_hints), //: Option<[u8; {const}]>,
                     path_attrs,
-                ).unwrap();
+                ) {
+                    Ok(_new_or_updated) => { /* */ }
+                    Err(e) => {
+                        error!("upsert_single error for nlri {nlri:?} in mp_reach_iter_wireformat: {e}");
+                    }
+                }
             }
 
         }

@@ -261,7 +261,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
         macro_rules! write_bin(
             ($msg:ident) => {
                 if let Some(output) = output.as_mut() {
-                    let _ = output.write($msg.as_ref());
+                    let _ = output.write(Parseable::as_ref($msg));
                 }
             }
         );
@@ -277,7 +277,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
             // Without timestamp
             ($msg:ident) => {
                 if let Some(output_mrt) = output_mrt.as_mut() {
-                    let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(output_mrt, None, $msg.as_ref());
+                    let _ = routecore::mrt_ng::common::CommonHeader::write_bmp_et_message(output_mrt, None, Parseable::as_ref($msg));
                 }
             };
         );
@@ -799,9 +799,14 @@ impl RouterState {
 
         // sanity check: do we have ingress info for this ingress_id?
         if self.ingress_register.get(*ingress_id).is_none() {
-            warn!("missing ingress info for id {ingress_id} on {} ({}, {}),
-            pph: {:?}", self.bmp_router_name, self.bmp_router_addr,
-            self.bmp_stream_ingress_id, msg.per_peer_header());
+            error!(
+                "missing ingress info for id {ingress_id} on {} ({}, {}), \
+                pph: {:?}\
+                \n{:?}",
+                self.bmp_router_name, self.bmp_router_addr,
+                self.bmp_stream_ingress_id, msg.per_peer_header(),
+                routecore::bgp::message_ng::common::PcapHex(msg.as_ref())
+            );
         }
 
         // dbg snippet:

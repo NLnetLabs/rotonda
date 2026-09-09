@@ -1147,7 +1147,10 @@ impl RibUnitRunner {
             .get(ingress_id)
             //.inspect(|iinfo| {dbg!(&iinfo);})
             .and_then(|ii| ii.peer_rib_type) else {
-                error!("no ingress info found for {ingress_id}, aborting");
+                error!(
+                    "no ingress info found for {ingress_id}, aborting and not processing UPDATE:\n{:?}",
+                    routecore::bgp::message_ng::common::PcapHex(raw_update)
+                );
                 return
             }
         ;

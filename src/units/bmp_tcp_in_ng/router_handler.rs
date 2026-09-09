@@ -563,7 +563,6 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
             };
         );
 
-
         while let Ok(Some(_)) = bmp_handler.msg_iter.read_into_buf().await {
             while let Ok(msg) = bmp_handler.msg_iter.get_message() {
                 //cnt += 1;
@@ -765,16 +764,26 @@ impl RouterState {
 
                 &(new_ingress_id, sc)
             } else {
-                warn!("RouteMonitoring message for which no PeerUp was found");
-                &(
-                    self.pph_register.insert(
-                        msg.per_peer_header(),
-                        SessionConfig::default(),
-                    ),
-                    SessionConfig::default(),
-                )
-                // TODO insert ingress_info and mark as 'missing_peer_up' or
-                // something
+                let new_id = self.pph_register.insert(msg.per_peer_header(), SessionConfig::default());
+
+                // TODO  mark as 'missing_peer_up' or something
+                let info = IngressInfo::new()
+                    .with_parent_ingress(self.bmp_stream_ingress_id)
+                    .with_ingress_type(IngressType::BgpViaBmp)
+                    .with_remote_addr(pph.address())
+                    // convert ng Asn into old (inetnum) Asn, TODO remove
+                    .with_remote_asn(Asn::from_u32(pph.asn().to_u32()))
+                    .with_peer_type(u8::from(pph.peer_type()))
+                    .with_rib_type(pph.rib_type())
+                    .with_peer_rib_type((
+                        pph.is_post_policy(),
+                        pph.rib_type(),
+                    ));
+                self.ingress_register.update_info(new_id, info);
+
+                warn!("RouteMonitoring message for which no PeerUp was found, registered as ingress {new_id}");
+                &(new_id, SessionConfig::default())
+
             }
         };
 

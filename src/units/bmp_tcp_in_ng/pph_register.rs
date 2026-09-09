@@ -79,7 +79,6 @@ impl PphRegister {
         //pph: &PerPeerHeaderV3,
         pph: &impl PerPeerHeader,
     ) -> Option<&(IngressId, SessionConfig)> {
-        //eprintln!("in find_other_ribviews to find\n{:?}", HexFormatted(pph.without_type_and_flags()));
         for peer_type in &self.per_peer_type {
             for rib_view in &peer_type.per_rib_view {
                 //eprintln!("looking ribview with {} entries", rib_view.len());

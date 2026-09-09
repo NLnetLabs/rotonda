@@ -1310,7 +1310,7 @@ impl RibUnitRunner {
             let path_attrs = attr.without_header();
 
             for nlri in update.mp_reach_iter_wireformat() {
-                debug!("inserting route with afisafi {}", mp_reach_afisafi);
+                trace!("inserting route with afisafi {}", mp_reach_afisafi);
                 match mp_reach_routing_table.upsert_single(
                     nlri,
                     routedb::prefix_record::RouteStatus::Active,

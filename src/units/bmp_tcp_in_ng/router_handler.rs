@@ -782,7 +782,14 @@ impl RouterState {
                 let msg = e.to_string();
                 return Err(BmpNgError::new(msg.into()));
             }
-    };
+        };
+
+        // sanity check: do we have ingress info for this ingress_id?
+        if self.ingress_register.get(*ingress_id).is_none() {
+            warn!("missing ingress info for id {ingress_id} on {} ({}, {}),
+            pph: {:?}", self.bmp_router_name, self.bmp_router_addr,
+            self.bmp_stream_ingress_id, msg.per_peer_header());
+        }
 
         // dbg snippet:
         //match update.into_checked_parts(sc) {

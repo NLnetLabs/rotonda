@@ -112,14 +112,14 @@ impl PphRegister {
         // XXX shortcut for now, until we settle on what
         // peer_id/ingress_id/mui actually looks like, and update the
         // ingress::Register code accordingly
-        let peer_id = self.ingress_register.register();
+        let new_peer_id = self.ingress_register.register();
 
         // TODO move this into the ingress::Register, that is responsible and authoritative for
         // this kind of logic
         //let mui = u32::from(peer_id) << 16
         //    | u32::from(u8::from(pph.peer_type)) << 8
         //    | u32::from(pph.flags);
-        let mui = peer_id;
+        let mui = new_peer_id;
 
         //eprintln!(
         //    "inserting into partition 0x{:x} , 0x{:x}\n{:?}",
@@ -128,6 +128,11 @@ impl PphRegister {
         //    HexFormatted(pph.without_type_and_flags())
         //);
 
+        
+
+        // If, for some reason, we are inserting an already existing PPH, do
+        // not return the newly generated mui/peer_id but return the existing
+        // one instead.
         if let Some((mui, _sc)) = self.per_peer_type[u8::from(pph.peer_type()) as usize].per_rib_view
             [pph.flags().reverse_bits() as usize]
             .insert(
@@ -136,7 +141,9 @@ impl PphRegister {
             )
         {
             warn!("inserting already existing PPH into PphRegister, mui {mui}");
+            mui
+        } else {
+            new_peer_id
         }
-        mui
     }
 }

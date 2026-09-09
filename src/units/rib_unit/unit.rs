@@ -1123,11 +1123,19 @@ impl RibUnitRunner {
 
     fn handle_bulk_ng(&self, raw_update: &[u8], ingress_id: IngressId, sc: SessionConfig) {
         let rib = self.rib.load();
-        let tgrp = rib.routedb.table_groups().get_or_create_group(
+        let tgrp = match rib.routedb.table_groups().get_or_create_group(
             // TODO use proper IDs, perhaps the ingress_id for the unit/stream
             // (i.e. the parent from `ingress_id` here?);
             TableGroupKey::new(routedb::Source::BMP, NonZeroU16::new(1).unwrap())
-        ).unwrap();
+        ) {
+            Ok(tgrp) => tgrp,
+            Err(e) => {
+                error!("failed to get TableGroup for BMP: {e}");
+                return
+            }
+        };
+
+
 
         let Ok(update) = routecore::bgp::message_ng::Update::try_from_raw(raw_update)
             .unwrap().into_checked_parts(&sc) else {
@@ -1152,7 +1160,7 @@ impl RibUnitRunner {
 
         // Pick or create the conventional table, possibly with ADDPATH:
 
-        let mut conv_tbl_props = TableProperties::new(
+        let mut tbl_props = TableProperties::new(
             ingress_id,
             routecore::bgp::message_ng::common::AfiSafiType::IPV4UNICAST,
             peer_rib_type.into()
@@ -1160,11 +1168,19 @@ impl RibUnitRunner {
 
         if update.conv_nlri_hints.addpath() {
             //debug!("enabling ADDPATH for conv unreach in this RoutingTable");
-            conv_tbl_props = conv_tbl_props.with_add_path_cap();
+            tbl_props = tbl_props.with_add_path_cap();
             debug!("UPDATE with ADDPATH:\n{:?}", routecore::bgp::message_ng::common::PcapHex(raw_update));
         }
 
-        let conv_tbl = tgrp.get_or_create_table(conv_tbl_props).unwrap();
+        // TODO convert to by_properties once this does the creation
+        // rib.routedb.routing_tables().by_properties(conv_tbl_props).map(..)
+        let conv_tbl = match tgrp.get_or_create_table(tbl_props) {
+            Ok(tbl) => tbl,
+            Err(e) => {
+                error!("failed to get Table for {tbl_props:?} : {e}");
+                return
+            }
+        };
 
         let Some(conv_routing_table) = tgrp.by_id(conv_tbl) else {
             error!("no table for TableId {conv_tbl:?}");
@@ -1201,6 +1217,8 @@ impl RibUnitRunner {
 
         if let Some(attr) = update.prepped_conv_attributes() {
             
+            // XXX isn't this actually the exact same as conv_tbl_props
+            // defined above?
             let mut tbl_props = TableProperties::new(
                     ingress_id,
                     routecore::bgp::message_ng::common::AfiSafiType::IPV4UNICAST,
@@ -1212,7 +1230,13 @@ impl RibUnitRunner {
                 tbl_props = tbl_props.with_add_path_cap();
             }
 
-            let tbl = tgrp.get_or_create_table(tbl_props).unwrap();
+            let tbl = match tgrp.get_or_create_table(tbl_props) {
+                Ok(tbl) => tbl,
+                Err(e) => {
+                    error!("failed to get Table for {tbl_props:?} : {e}");
+                    return
+                }
+            };
 
             let Some(routing_table) = tgrp.by_id(tbl) else {
                 error!("no table for TableId {tbl:?}");
@@ -1256,7 +1280,13 @@ impl RibUnitRunner {
                 mp_tbl_props = mp_tbl_props.with_add_path_cap();
             }
 
-            let mp_unreach_tbl = tgrp.get_or_create_table(mp_tbl_props).unwrap();
+            let mp_unreach_tbl = match tgrp.get_or_create_table(mp_tbl_props) {
+                Ok(tbl) => tbl,
+                Err(e) => {
+                    error!("failed to get Table for {tbl_props:?} : {e}");
+                    return
+                }
+            };
 
             let Some(mp_unreach_routing_table) = tgrp.by_id(mp_unreach_tbl) else {
                 error!("no table for TableId {mp_unreach_tbl:?}");
@@ -1291,7 +1321,13 @@ impl RibUnitRunner {
                 mp_tbl_props = mp_tbl_props.with_add_path_cap();
             }
 
-            let mp_reach_tbl = tgrp.get_or_create_table(mp_tbl_props).unwrap();
+            let mp_reach_tbl = match tgrp.get_or_create_table(mp_tbl_props) {
+                Ok(tbl) => tbl,
+                Err(e) => {
+                    error!("failed to get Table for {tbl_props:?} : {e}");
+                    return
+                }
+            };
 
             let Some(mp_reach_routing_table) = tgrp.by_id(mp_reach_tbl) else {
                 error!("no table for TableId {mp_reach_tbl:?}");

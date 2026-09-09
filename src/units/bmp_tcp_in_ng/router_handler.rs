@@ -756,8 +756,12 @@ impl RouterState {
                 let new_ingress_id = self
                     .pph_register
                     .insert(msg.per_peer_header(), sc.clone());
+
+                debug!("registered {new_ingress_id} based on existing {existing_ingress_id} with info {existing_info:?}. PPH was {pph:?}");
+
                 self.ingress_register
                     .update_info(new_ingress_id, existing_info);
+
 
                 &(new_ingress_id, sc)
             } else {

@@ -711,6 +711,34 @@ impl RouterState {
 
         let sc = msg.session_config()?;
 
+        // Check whether we already have ingress info for this PPH. That would
+        // hint at a mid-stream PeerUp (which technically is allowed).
+        if let Some((id, _sc)) = self.pph_register.get(pph) {
+            warn!(
+                "PeerUp with PPH that is already seen for ingress_id {id}, \
+                PDU:\n{:?}",
+                routecore::bgp::message_ng::common::PcapHex(msg.as_ref())
+            );
+            debug!("existing ingress_info vs a possible new one: {:#?}{:#?}",
+                self.ingress_register.get(*id),
+                IngressInfo::new()
+                .with_parent_ingress(self.bmp_stream_ingress_id)
+                .with_ingress_type(IngressType::BgpViaBmp)
+                .with_remote_addr(pph.address())
+                // convert ng Asn into old (inetnum) Asn, TODO remove
+                .with_remote_asn(Asn::from_u32(pph.asn().to_u32()))
+                .with_peer_type(u8::from(pph.peer_type()))
+                .with_rib_type(pph.rib_type())
+                .with_peer_rib_type((pph.is_post_policy(), pph.rib_type()))
+            );
+
+            // TODO act based on comparison of existing vs new ingress info
+            // for now, just ignore the new PeerUp and use the existing info.
+            // We do not register a new ingress_id.
+            return Ok(())
+        }
+
+
         let ingress_id = self.pph_register.insert(msg.per_peer_header(), sc);
         debug!("ingress_id registered {ingress_id}");
         let ingress_info = IngressInfo::new()
@@ -894,6 +922,31 @@ impl RouterState {
         &mut self,
         msg: &M,
     ) -> Result<(), BmpNgError> {
+
+        let pph = msg.per_peer_header();
+
+        if let Some((id, _sc)) = self.pph_register.get(pph) {
+            debug!("PeerDown on {} ({}), registered ingress_info for id {id}: \
+                {:#?}", self.bmp_router_addr, self.bmp_router_name, 
+                self.ingress_register.get(*id)
+            );
+        } else {
+            debug!(
+                "PeerDown on {} ({}), would-be ingress_info: {:#?}",
+                self.bmp_router_addr,
+                self.bmp_router_name, 
+                IngressInfo::new()
+                    .with_parent_ingress(self.bmp_stream_ingress_id)
+                    .with_ingress_type(IngressType::BgpViaBmp)
+                    .with_remote_addr(pph.address())
+                    // convert ng Asn into old (inetnum) Asn, TODO remove
+                    .with_remote_asn(Asn::from_u32(pph.asn().to_u32()))
+                    .with_peer_type(u8::from(pph.peer_type()))
+                    .with_rib_type(pph.rib_type())
+                    .with_peer_rib_type((pph.is_post_policy(), pph.rib_type()))
+            );
+        }
+
         Ok(())
     }
 

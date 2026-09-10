@@ -118,7 +118,6 @@ impl PphRegister {
         //let mui = u32::from(peer_id) << 16
         //    | u32::from(u8::from(pph.peer_type)) << 8
         //    | u32::from(pph.flags);
-        let mui = new_peer_id;
 
         //eprintln!(
         //    "inserting into partition 0x{:x} , 0x{:x}\n{:?}",
@@ -132,15 +131,18 @@ impl PphRegister {
         // If, for some reason, we are inserting an already existing PPH, do
         // not return the newly generated mui/peer_id but return the existing
         // one instead.
-        if let Some((mui, _sc)) = self.per_peer_type[u8::from(pph.peer_type()) as usize].per_rib_view
+        if let Some((existing_mui, _sc)) = self.per_peer_type[u8::from(pph.peer_type()) as usize].per_rib_view
             [pph.flags().reverse_bits() as usize]
             .insert(
                 pph.without_type_and_flags().try_into().unwrap(),
-                (mui, session_config),
+                (new_peer_id, session_config),
             )
         {
-            warn!("inserting already existing PPH into PphRegister, mui {mui}");
-            mui
+            warn!(
+                "inserting already existing PPH into PphRegister, \
+                returning existing id {existing_mui} instead of {new_peer_id}
+            ");
+            existing_mui
         } else {
             new_peer_id
         }

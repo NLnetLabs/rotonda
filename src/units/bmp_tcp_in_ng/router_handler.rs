@@ -52,6 +52,12 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
     ) -> Result<(), BmpNgError> {
         let (version, msg) = self.bmp_handler.process_initiation().await;
 
+        if let Err(&[]) = msg && version == BmpVersion(0) {
+            // Error case, abort
+            error!("something wrong while trying to read first message, disconnecting {:?}", &partial_ingress_info);
+            return Err("failed to get a valid first message".into());
+        }
+
         debug!("version: {version:?}");
 
         let mut output_pcapng = None;
@@ -828,9 +834,6 @@ impl RouterState {
                         pph.rib_type(),
                 ));
             self.ingress_register.update_info(*ingress_id, info);
-
-
-
         }
 
         // dbg snippet:

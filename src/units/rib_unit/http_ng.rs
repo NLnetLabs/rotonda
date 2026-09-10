@@ -33,6 +33,8 @@ pub fn register_routes(router: &mut Api) {
     router.add_get("/ng/ribs/ipv6unicast/routes", routedb_ipv6unicast_all);
     router.add_get("/ng/ribs/ipv6unicast/routes/{prefix}/{prefix_len}", routedb_ipv6unicast_search);
 
+    router.add_get("/ng/ribs/l2vpnevpn/routes", routedb_l2vpnevpn_all);
+
     //router.add_get("/ng/ribs/{afisafi}/routes", routedb_generic_all);
 
 
@@ -206,9 +208,10 @@ fn stream_search_result(
     ([("content-type", "application/json")], Body::from_stream(stream))
 }
 
-fn stream_routedb_routing_tables(
-    tables: super::serialize::RouteDbRoutingTables,
-) -> impl IntoResponse {
+fn stream_routedb_routing_tables(tables: super::serialize::RouteDbRoutingTables,
+) -> impl IntoResponse
+      
+{
     let (tx, rx) = mpsc::channel::<Result<Bytes, io::Error>>(64);
     let stream = ReceiverStream::new(rx);
 
@@ -441,23 +444,53 @@ async fn routedb_ipv4unicast_search(
     let mut res = String::new();
     for rt in rib.routedb.routing_tables().iter().filter(|rt| rt.props().unwrap().afi_safi == AfiSafiTypeNg::IPV4UNICAST) {
 
-        dbg!(&rt.props());
+        //dbg!(&rt.props());
 
         if let Some(r) = rt.get(nlri.as_ref().as_ref())  {
-            debug!("got a route");
+            debug!("got a route in table {}", rt.table_id());
 
             assert_eq!(nlri.as_ref().as_ref(), r.nlri());
 
-            res.push_str(&format!("nlri: {}\n", nlri.as_ref()));
-
-            let pa_header = routecore::bgp::message_ng::path_attributes::common::PreppedAttributesHeader::from(r.pa_hints());
-            let attrs = r.path_attrs();
-            let prepped_attrs = routecore::bgp::message_ng::path_attributes::common::PreppedAttributes {
-                header: &pa_header,
-                path_attributes: routecore::bgp::message_ng::path_attributes::common::UncheckedPathAttributes::from_slice_unchecked(attrs),
+            let Ok(props) = rt.props() else {
+                warn!("no properties for table");
+                continue;
             };
 
-            res.push_str(&format!("pathAttributes: {}\n", serde_json::to_string(&prepped_attrs).unwrap()));
+            match (props.afi_safi, props.add_path_cap) {
+                    (AfiSafiTypeNg::IPV4UNICAST, false) => {
+                        res.push_str(&serde_json::to_string(&super::serialize::RouteDbRouteIpv4Unicast(r)).unwrap());
+                    }
+                    // XXX Looks like routedb does not return addpath routes
+                    // when looking them up via .get()
+                    (AfiSafiTypeNg::IPV4UNICAST, true) => {
+                        debug!("here");
+                        res.push_str(&serde_json::to_string(&super::serialize::RouteDbRouteIpv4UnicastAddPath(r)).unwrap());
+                    }
+                    //(AfiSafiType::IPV4UNICAST, true) => {
+                    //    for r in tbl.iter() {
+                    //        seq.serialize_element(
+                    //            &RouteDbRouteIpv4UnicastAddPath(r),
+                    //        )?;
+                    //    }
+                    //}
+                    //(AfiSafiType::IPV6UNICAST, false) => {}
+                    //(AfiSafiType::IPV6UNICAST, true) => {}
+                    //(_, false) => {}
+                    //(_, true) => {}
+                    (a, ap) => debug!("TODO {a} addpath: {ap}")
+            }
+
+
+            //res.push_str(&format!("nlri: {}\n", nlri.as_ref()));
+
+            //let pa_header = routecore::bgp::message_ng::path_attributes::common::PreppedAttributesHeader::from(r.pa_hints());
+            //let attrs = r.path_attrs();
+            //let prepped_attrs = routecore::bgp::message_ng::path_attributes::common::PreppedAttributes {
+            //    header: &pa_header,
+            //    path_attributes: routecore::bgp::message_ng::path_attributes::common::UncheckedPathAttributes::from_slice_unchecked(attrs),
+            //};
+
+            //res.push_str(&format!("pathAttributes: {}\n", serde_json::to_string(&prepped_attrs).unwrap()));
         }
 
     }
@@ -508,4 +541,44 @@ async fn routedb_ipv6unicast_search(
 
 
     Ok(res)
+}
+
+async fn routedb_l2vpnevpn_all(
+
+    state: State<ApiState>
+) -> Result<impl IntoResponse, ApiError> {
+
+    let s = state.store.load();
+    let Some(rib) = (*s).clone() else {
+        return Err(ApiError::InternalServerError("routedb unavailable".into()))
+    };
+
+
+    //TODO next up: count number of results, compare with old endpoint
+
+    //let ids = rib.routedb.routing_tables().iter().filter(|rt| {
+    //    if let Ok(props) = rt.props() {
+    //        props.afi_safi_type == routecore::bgp::message_ng::common::AfiSafiType::IPV4UNICAST
+    //    } else {
+    //        false
+    //    }
+    //})
+    //.map(|rt| rt.table_id()).collect::<Vec<_>>();
+
+
+    // attempt based on iter_grouped_by_table_id
+    let ids = rib.routedb.routes().iter_grouped_by_table_id().filter_map(|(rt_props,_)|
+        (rt_props.afi_safi() == Ok(AfiSafiTypeNg::EVPN)).then(|| rt_props.table_id().unwrap())
+    ).collect::<Vec<_>>();
+
+
+    Ok(
+        stream_routedb_routing_tables(
+            super::serialize::RouteDbRoutingTables {
+                routedb: rib.routedb.clone(),
+                ids,
+            }
+        )
+    )
+    
 }

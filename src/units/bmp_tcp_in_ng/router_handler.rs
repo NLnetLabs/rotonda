@@ -596,7 +596,7 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                         if let Some(ingress_info) = router_state.pph_register.get(
                             route_mon.per_peer_header()).and_then(|(id,_session_config)| ingress_register.get(*id)) {
                             write_bgp_as_mrt_in_pcapng!(route_mon, ingress_info);
-                        } else {
+                        } else if output_bgp_mrt_pcapng.is_some() {
                             warn!("not writing mrt to pcapng: missing PPH/ingressinfo");
                         }
                         
@@ -732,6 +732,10 @@ impl RouterState {
         let (ingress_id, sc) = if let Some(t) =
             self.pph_register.get(msg.per_peer_header())
         {
+            if self.ingress_register.get(t.0).is_none() {
+                error!("found ingress_id {} without info", t.0);
+            }
+
             t
         } else {
             // XXX pph_register should actually use find_other_ribviews
@@ -781,7 +785,10 @@ impl RouterState {
                     ));
                 self.ingress_register.update_info(new_id, info);
 
-                warn!("RouteMonitoring message for which no PeerUp was found, registered as ingress {new_id}");
+                warn!(
+                    "RouteMonitoring message for which no PeerUp was found, registered as ingress {new_id}. \
+                    BMP PDU was:\n{:?}",
+                    routecore::bgp::message_ng::common::PcapHex(msg.as_ref()));
                 &(new_id, SessionConfig::default())
 
             }
@@ -800,13 +807,30 @@ impl RouterState {
         // sanity check: do we have ingress info for this ingress_id?
         if self.ingress_register.get(*ingress_id).is_none() {
             error!(
-                "missing ingress info for id {ingress_id} on {} ({}, {}), \
-                pph: {:?}\
-                \n{:?}",
-                self.bmp_router_name, self.bmp_router_addr,
-                self.bmp_stream_ingress_id, msg.per_peer_header(),
+                "unexpected missing ingress info for id {ingress_id} on {} ({}, {}), adding now based on this PDU:\n{:?}",
+                self.bmp_router_name,
+                self.bmp_router_addr,
+                self.bmp_stream_ingress_id,
                 routecore::bgp::message_ng::common::PcapHex(msg.as_ref())
             );
+
+            let pph = msg.per_peer_header();
+            let info = IngressInfo::new()
+                .with_parent_ingress(self.bmp_stream_ingress_id)
+                .with_ingress_type(IngressType::BgpViaBmp)
+                .with_remote_addr(pph.address())
+                // convert ng Asn into old (inetnum) Asn, TODO remove
+                .with_remote_asn(Asn::from_u32(pph.asn().to_u32()))
+                .with_peer_type(u8::from(pph.peer_type()))
+                .with_rib_type(pph.rib_type())
+                .with_peer_rib_type((
+                        pph.is_post_policy(),
+                        pph.rib_type(),
+                ));
+            self.ingress_register.update_info(*ingress_id, info);
+
+
+
         }
 
         // dbg snippet:

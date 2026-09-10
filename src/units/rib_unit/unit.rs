@@ -586,7 +586,11 @@ impl RibUnitRunner {
                     }
                 };
 
+                // Use the new routedb:
                 self.handle_bulk_ng(&raw_update, ingress_id, sc.clone());
+
+
+                // Everything below is for the old rotonda-store:
 
                 let received = std::time::Instant::now();
 
@@ -675,7 +679,7 @@ impl RibUnitRunner {
 
                         self.filter_payload(payloads /* insert_fn*/).await?
                     } else {
-                        warn!("MP_REACH but not IPV6/IPV4 TODO: {:?}", update.mp_reach_afisafi());
+                        warn!("[old RIB/store] MP_REACH but not IPV6/IPV4 TODO: {:?}", update.mp_reach_afisafi());
                     }
                 }
             }

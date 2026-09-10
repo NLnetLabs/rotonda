@@ -634,8 +634,11 @@ impl<R: AsyncRead + Unpin> RouterHandler<R> {
                             stats_report
                         );
                     }
+                    MessageType::ROUTE_MIRRORING => { 
+                        debug!("ROUTE_MIRRORING ignored for now");
+                    }
                     _ => {
-                        panic!("TODO {}", msg.common.msg_type)
+                        error!("unrecognized BMP message type {}", msg.common.msg_type);
                     }
                 }
             }
